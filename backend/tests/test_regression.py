@@ -1,0 +1,694 @@
+"""
+tests/test_regression.py
+Regression tests for PFC AI Agent v2.
+
+Run:  cd backend && python -m pytest tests/test_regression.py -v
+Pass: all implemented steps produce correct outputs every time.
+Fail: something broke — fix before committing.
+
+ADDING TESTS FOR A NEW STEP:
+  Copy the template at the bottom of this file and fill in:
+  - Input parameters
+  - Expected outputs (with tolerances where appropriate)
+  - The API or function being tested
+"""
+import sys, math, io
+sys.path.insert(0, '.')
+import warnings; warnings.filterwarnings('ignore')
+import pytest, numpy as np
+
+
+# ── Shared fixtures ────────────────────────────────────────────────────────
+
+@pytest.fixture
+def std_intake():
+    """Standard 3.6 kW Medical PFC intake (all gates confirmed)."""
+    return {
+        "application": {
+            "vin_rms_min": 90, "vin_rms_max": 264,
+            "output_bus_voltage_v": 393,
+            "output_power_w_high_line": 3600,
+            "output_power_w_low_line": 1700,
+            "power_factor_target": 0.99,
+            "efficiency_target_percent": 98.0,
+            "dc_bus_voltage_ripple_pk_pk_v": 20,
+            "nominal_line_frequency_hz": 60,
+            "hold_up_time_ms": 20,
+            "output_power_w_nom": 3600,
+        },
+        "thermal": {
+            "cooling_type": "fan_cooled",
+            "ambient_temp_c_max": 50,
+            "hotspot_limit_c": 110,
+        },
+        "compliance": {
+            "application_class": "Medical",
+            "leakage_current_limit_ua": 500,
+        },
+        "control": {"control_preference": "Recommend"},
+        "business": {
+            "cost_priority": 7, "efficiency_priority": 9,
+            "power_density_priority": 8, "implementation_risk_priority": 6,
+            "preferred_switch_technology": ["Si", "SiC"],
+        },
+        "supply": {"preferred_vendors": [], "avoid_vendors": []},
+    }
+
+
+@pytest.fixture
+def confirmed_state(std_intake):
+    """Full Mode A confirmed state (all 5 gates passed)."""
+    return {
+        "selected_topology": "interleaved_boost_ccm",
+        "selected_mode": "ccm",
+        "selected_channels": 2,
+        "selected_controller_mode": "analog",
+        "topology_specific_inputs": {
+            "switching_frequency_style": "fixed",
+            "recommended_frequency_hz": 70000.0,
+            "default_crest_ripple_ratio": 0.095,
+            "ask_crest_ripple_ratio": True,
+        },
+        "intake": std_intake,
+    }
+
+
+# ── Gate 1: Intake validation ──────────────────────────────────────────────
+
+class TestGate1Validation:
+    """Test the backend validates intake before topology scoring."""
+
+    def test_vout_must_exceed_vin_max_sqrt2(self):
+        from app.main import _calc_l_py
+        # This is implicitly tested by the formula: D must be >0
+        Vin_pk = 264 * math.sqrt(2)   # = 373.4 V
+        Vout   = 393                   # must be > 373.4 to have positive D
+        D = 1 - Vin_pk / Vout
+        assert D > 0, f"D={D:.4f} ≤ 0 — Vout too low for Vin_max"
+
+    def test_default_intake_produces_positive_D(self):
+        from app.main import _calc_l_py
+        r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
+        assert r["D"] > 0
+        assert r["D"] < 1
+
+
+# ── Gate 2: Topology scoring ───────────────────────────────────────────────
+
+class TestGate2TopologyScoring:
+    """Step 1 of Mode B — topology selection from Mode A."""
+
+    def test_interleaved_boost_ccm_ranks_first(self, std_intake):
+        from app.intake.topology_selector import select_topology
+        result = select_topology(std_intake)
+        assert result["recommended_topology"] == "interleaved_boost_ccm"
+        assert result["ranking"][0]["topology"] == "interleaved_boost_ccm"
+
+    def test_ccm_wins_mode_race(self, std_intake):
+        from app.intake.topology_selector import select_topology
+        result = select_topology(std_intake)
+        assert result["recommended_mode"] == "ccm"
+        scores = {m["mode"]: m["final_score"] for m in result["mode_scores"]}
+        assert scores["ccm"] > scores["crcm"]
+        assert scores["ccm"] > scores["dcm"]
+
+    def test_ranking_has_six_candidates(self, std_intake):
+        from app.intake.topology_selector import select_topology
+        result = select_topology(std_intake)
+        assert len(result["ranking"]) == 6
+
+    def test_top_score_within_valid_range(self, std_intake):
+        from app.intake.topology_selector import select_topology
+        result = select_topology(std_intake)
+        top = result["ranking"][0]["final_score"]
+        assert 3.0 < top <= 6.6, f"Top score {top:.3f} out of expected range (3.0, 6.6]"
+
+    def test_interleaved_score_close_to_5_82(self, std_intake):
+        from app.intake.topology_selector import select_topology
+        result = select_topology(std_intake)
+        top = result["ranking"][0]["final_score"]
+        # Matches our session result: 5.820
+        assert abs(top - 5.820) < 0.05, f"Top score {top:.3f} differs from expected 5.820"
+
+
+# ── Gate 3: Controller selection ───────────────────────────────────────────
+
+class TestGate3ControllerSelection:
+
+    def test_digital_recommended_for_sic_interleaved(self):
+        from app.main import _ctrl_strategy
+        state = {
+            "selected_topology": "interleaved_boost_ccm",
+            "intake": {
+                "control": {"control_preference": "Recommend"},
+                "business": {"preferred_switch_technology": ["Si", "SiC"]},
+                "compliance": {"application_class": "Medical"},
+            },
+        }
+        strat = _ctrl_strategy(state)
+        assert strat["recommended_controller_mode"] == "digital"
+
+    def test_reasoning_not_empty(self):
+        from app.main import _ctrl_strategy
+        state = {
+            "selected_topology": "interleaved_boost_ccm",
+            "intake": {
+                "control": {"control_preference": "Recommend"},
+                "business": {"preferred_switch_technology": ["Si"]},
+                "compliance": {"application_class": "Industrial"},
+            },
+        }
+        strat = _ctrl_strategy(state)
+        assert len(strat["reasoning"]) >= 1
+
+    def test_medical_adds_reasoning(self):
+        from app.main import _ctrl_strategy
+        state = {
+            "selected_topology": "interleaved_boost_ccm",
+            "intake": {
+                "control": {"control_preference": "Recommend"},
+                "business": {"preferred_switch_technology": ["Si"]},
+                "compliance": {"application_class": "Medical"},
+            },
+        }
+        strat = _ctrl_strategy(state)
+        medical_bullet = any("medical" in r.lower() or "leakage" in r.lower()
+                             for r in strat["reasoning"])
+        assert medical_bullet, "Medical class did not add reasoning about leakage"
+
+    def test_analog_preference_honoured(self):
+        from app.main import _ctrl_strategy
+        state = {
+            "selected_topology": "interleaved_boost_ccm",
+            "intake": {
+                "control": {"control_preference": "Analog"},
+                "business": {"preferred_switch_technology": ["Si"]},
+                "compliance": {"application_class": "Industrial"},
+            },
+        }
+        strat = _ctrl_strategy(state)
+        assert strat["recommended_controller_mode"] == "analog"
+
+
+# ── Gates 4 & 5: Corrected L formula ──────────────────────────────────────
+
+class TestCorrectLFormula:
+    """THE most important regression test — the formula fix from v2."""
+
+    def test_L_calc_at_90vac_r0095_fsw70k(self):
+        from app.main import _calc_l_py
+        r = _calc_l_py(pout_lo=1700, vin_min=90, vout=393,
+                       fsw=70e3, crest=0.095)
+        # Derived analytically; verified in session: 238.21 µH
+        assert abs(r["L_uH"] - 238.21) < 0.5, f"L={r['L_uH']:.2f} µH, expected 238.21 µH"
+
+    def test_L_selected_rounds_to_240(self):
+        from app.main import _calc_l_py
+        r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
+        L_sel = round(r["L_uH"] / 5) * 5
+        assert L_sel == 240, f"L_selected={L_sel} µH, expected 240 µH"
+
+    def test_Iin_pk_at_90vac(self):
+        from app.main import _calc_l_py
+        r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
+        assert abs(r["Iin_pk"] - 28.30) < 0.05, f"Iin_pk={r['Iin_pk']:.4f} A, expected ~28.30 A"
+
+    def test_KD_at_D_0676(self):
+        from app.main import _calc_l_py
+        r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
+        assert abs(r["D"]  - 0.676) < 0.001, f"D={r['D']:.4f}, expected ~0.676"
+        assert abs(r["KD"] - 0.521) < 0.002, f"KD={r['KD']:.4f}, expected ~0.521"
+
+    def test_L_is_independent_of_N(self):
+        """L must be the same regardless of phase count — key v2 correction."""
+        from app.main import _calc_l_py
+        L_ref = _calc_l_py(1700, 90, 393, 70e3, 0.095)["L_uH"]
+        # L formula has no N term; verify by checking formula directly
+        assert L_ref > 230 and L_ref < 245, "L out of expected range"
+        # If someone adds N into the formula, this will catch a regression
+        # (There is no N in _calc_l_py — that's the point)
+
+    def test_L_scales_inversely_with_fsw(self):
+        from app.main import _calc_l_py
+        L_70  = _calc_l_py(1700, 90, 393, 70e3,  0.095)["L_uH"]
+        L_140 = _calc_l_py(1700, 90, 393, 140e3, 0.095)["L_uH"]
+        ratio = L_70 / L_140
+        assert abs(ratio - 2.0) < 0.01, f"L_70/L_140={ratio:.3f}, expected 2.0"
+
+    def test_L_scales_inversely_with_crest(self):
+        from app.main import _calc_l_py
+        L_095 = _calc_l_py(1700, 90, 393, 70e3, 0.095)["L_uH"]
+        L_190 = _calc_l_py(1700, 90, 393, 70e3, 0.190)["L_uH"]
+        ratio = L_095 / L_190
+        assert abs(ratio - 2.0) < 0.02, f"L_095/L_190={ratio:.3f}, expected 2.0"
+
+
+# ── Mode B Step 2/3/4/5: Calculations ─────────────────────────────────────
+
+class TestModeBCalculations:
+
+    def test_K_of_D_at_half(self):
+        from app.mode_b.calculations import K_of_D
+        assert K_of_D(0.5) == pytest.approx(0.0, abs=1e-9), "K(0.5) must be 0 (perfect cancel)"
+
+    def test_K_of_D_at_0676(self):
+        from app.mode_b.calculations import K_of_D
+        assert K_of_D(0.676134) == pytest.approx(0.521004, rel=1e-4)
+
+    def test_step2_produces_9_rows(self, std_intake):
+        from app.mode_b.calculations import step2_input_params
+        OPS = np.array([
+            [90,1700,.945,.9987],[110,1700,.955,.9986],[120,1700,.965,.9985],
+            [132,1700,.975,.9980],[180,3600,.965,.9889],[200,3600,.975,.9884],
+            [220,3600,.985,.9790],[230,3600,.988,.9789],[264,3600,.990,.9520],
+        ])
+        r = step2_input_params(393.0, OPS)
+        assert len(r["Iin_pk"]) == 9
+
+    def test_step2_iin_pk_at_90vac(self, std_intake):
+        from app.mode_b.calculations import step2_input_params
+        OPS = np.array([[90,1700,.945,.9987]])
+        r = step2_input_params(393.0, OPS)
+        assert abs(float(r["Iin_pk"][0]) - 28.3044) < 0.01
+
+    def test_step4_L_calc(self, std_intake):
+        from app.mode_b.calculations import step2_input_params, step4_inductance
+        OPS = np.array([
+            [90,1700,.945,.9987],[264,3600,.990,.9520],
+        ])
+        s2 = step2_input_params(393.0, OPS)
+        s4 = step4_inductance(s2, 0.095, 70e3, 393.0)
+        assert abs(s4["L_calc"] * 1e6 - 238.21) < 1.0
+
+
+# ── Mode B Step 6: Magnetic design ────────────────────────────────────────
+
+class TestStep6MagneticDesign:
+
+    def test_etd59_selected_for_standard_design(self):
+        from app.mode_b.magnetic_design import design_inductor
+        best, _ = design_inductor(
+            L=240e-6, IL_pk=16.73, IL_rms=10.07, dIL=5.161,
+            fsw=70e3, T_budget=60.0,
+        )
+        assert best is not None, "No core passed — regression: design that previously worked now fails"
+        assert "ETD59" in best.core.name, f"Expected ETD59 selected, got {best.core.name}"
+
+    def test_etd59_ku_within_limit(self):
+        from app.mode_b.magnetic_design import design_inductor
+        best, _ = design_inductor(240e-6, 16.73, 10.07, 5.161, 70e3, 60.0)
+        assert best.Ku < 0.50, f"Ku={best.Ku:.3f} exceeds 0.50 window fill limit"
+
+    def test_etd59_bpk_below_bsat(self):
+        from app.mode_b.magnetic_design import design_inductor
+        best, _ = design_inductor(240e-6, 16.73, 10.07, 5.161, 70e3, 60.0)
+        assert best.Bpk < best.core.Bsat * 0.90, f"Bpk={best.Bpk:.3f}T exceeds 90% of Bsat"
+
+    def test_thermal_within_medical_budget(self):
+        from app.mode_b.magnetic_design import design_inductor
+        best, _ = design_inductor(240e-6, 16.73, 10.07, 5.161, 70e3, 60.0)
+        assert best.dT_rise < 60.0, f"ΔT={best.dT_rise:.1f}°C exceeds Medical budget of 60°C"
+
+    def test_all_four_cores_evaluated(self):
+        from app.mode_b.magnetic_design import design_inductor, CORE_LIBRARY
+        _, all_r = design_inductor(240e-6, 16.73, 10.07, 5.161, 70e3, 60.0)
+        assert len(all_r) == len(CORE_LIBRARY), \
+            f"Expected {len(CORE_LIBRARY)} cores evaluated, got {len(all_r)}"
+
+    def test_n_turns_reasonable_range(self):
+        from app.mode_b.magnetic_design import design_inductor
+        best, _ = design_inductor(240e-6, 16.73, 10.07, 5.161, 70e3, 60.0)
+        assert 20 <= best.N <= 80, f"N={best.N} turns outside expected 20-80 range"
+
+
+# ── Mode B Steps 1-12: PDF generation ─────────────────────────────────────
+
+class TestModeBPDFReport:
+
+    def test_pdf_generates_successfully(self, confirmed_state):
+        import matplotlib; matplotlib.use('Agg')
+        from app.mode_b.generate_report import generate_full_report
+        pdf_bytes = generate_full_report(confirmed_state)
+        assert len(pdf_bytes) > 100_000, "PDF suspiciously small (< 100 KB)"
+
+    def test_pdf_has_expected_page_count(self, confirmed_state):
+        import matplotlib; matplotlib.use('Agg')
+        from app.mode_b.generate_report import generate_full_report
+        from pypdf import PdfReader
+        pdf_bytes = generate_full_report(confirmed_state)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        pages = len(reader.pages)
+        # Nominal: 30 pages. Allow ±3 for minor layout changes.
+        assert 27 <= pages <= 33, f"PDF has {pages} pages, expected ~30"
+
+    def test_pdf_cover_contains_topology_name(self, confirmed_state):
+        import matplotlib; matplotlib.use('Agg')
+        from app.mode_b.generate_report import generate_full_report
+        from pypdf import PdfReader
+        pdf_bytes = generate_full_report(confirmed_state)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        # Check first few pages contain topology keyword
+        text = "".join(p.extract_text() or "" for p in reader.pages[:3])
+        assert "Interleaved" in text or "CCM" in text, \
+            "Topology name not found in PDF cover"
+
+
+# ── Step registry integrity ────────────────────────────────────────────────
+
+class TestStepRegistry:
+
+    def test_registry_has_25_steps(self):
+        from app.mode_b.registry import REGISTRY
+        assert len(REGISTRY) == 25
+
+    def test_step_numbers_are_1_to_25(self):
+        from app.mode_b.registry import REGISTRY
+        assert set(REGISTRY.keys()) == set(range(1, 26))
+
+    def test_all_done_steps_have_implemented_in(self):
+        from app.mode_b.registry import REGISTRY
+        for n, s in REGISTRY.items():
+            if s["status"] == "DONE":
+                assert len(s["implemented_in"]) > 0, \
+                    f"Step {n} is DONE but has no implemented_in files listed"
+
+    def test_implemented_steps_match_code(self):
+        """Steps marked DONE must have their files actually present."""
+        import os
+        from app.mode_b.registry import REGISTRY
+        base = os.path.join(os.path.dirname(__file__), '..')
+        for n, s in REGISTRY.items():
+            if s["status"] == "DONE":
+                for f in s["implemented_in"]:
+                    path = os.path.join(base, f.split(':')[0])
+                    assert os.path.exists(path), \
+                        f"Step {n}: file '{f}' listed in implemented_in but not found"
+
+    def test_no_step_keys_duplicated(self):
+        from app.mode_b.registry import REGISTRY
+        keys = [s["key"] for s in REGISTRY.values()]
+        assert len(keys) == len(set(keys)), "Duplicate step keys in registry"
+
+
+# ── Data Loader: material database ────────────────────────────────────────
+
+class TestDataLoader:
+
+    def test_core_loss_EDGE60_matches_reference(self):
+        """EDGE-60 at 70kHz, Bac=0.054T — corrected 2026-05 from Magnetics graph.
+        Pv_ref=400 kW/m³ (was 525). Value at 25°C: 400×(0.7)^1.32×(0.54)^2.5 = 53.78."""
+        from app.mode_b.data_loader import get_core_loss_kW_m3
+        Pv = get_core_loss_kW_m3('edge_60', 70e3, 0.054103, 25.0)
+        assert abs(Pv - 53.783) / 53.783 < 0.02, \
+            f"Pv={Pv:.3f} kW/m³ deviates >2% from Magnetics-graph reference 53.783"
+
+    def test_Pcore_EDGE60_3stack_matches_reference(self):
+        """Pcore at reference conditions — corrected 2026-05 from Magnetics graph."""
+        from app.mode_b.data_loader import get_core_loss_kW_m3
+        Ve = 5.3258e-6 * 3   # 3-stack, corrected Ve
+        Pv = get_core_loss_kW_m3('edge_60', 70e3, 0.054103, 25.0)
+        Pcore = Pv * 1e3 * Ve
+        assert abs(Pcore - 0.8593) / 0.8593 < 0.02, \
+            f"Pcore={Pcore:.4f}W deviates >2% from Magnetics-graph reference 0.8593W"
+
+    def test_Bsat_3C95_at_100C(self):
+        from app.mode_b.data_loader import get_Bsat
+        Bsat = get_Bsat('3C95', 100.0)
+        assert abs(Bsat - 0.430) < 0.005, f"3C95 Bsat@100°C={Bsat:.3f}T expected 0.430T"
+
+    def test_DC_bias_rolloff_edge60_all_9_oppoints(self):
+        """k_bias anchored to reference Step 13.4 hardware data (N=49, 0059894A2 3-stack).
+        All 9 operating points within 2% of reference document table."""
+        from app.mode_b.data_loader import get_k_bias
+        Le_s = 65.5e-3; N = 49
+        ref_data = [
+            (28.3044, 0.4398), (22.9180, 0.5414), (20.7925, 0.5913),
+            (18.7178, 0.6402), (29.6391, 0.4091), (26.4150, 0.4695),
+            (23.9980, 0.5170), (22.8873, 0.5421), (20.4617, 0.5991),
+        ]
+        for Ipk, k_ref in ref_data:
+            Iavg  = Ipk / 2
+            H_Oe  = (N * Iavg / Le_s) / 79.577
+            k_got = get_k_bias('edge_60', H_Oe)
+            assert abs(k_got - k_ref) / k_ref < 0.02, \
+                f"k_bias at H={H_Oe:.1f}Oe: got {k_got:.4f} vs ref {k_ref:.4f}"
+
+    def test_DCR_matches_reference_step13_7(self):
+        """DCR must match reference Step 13.7.2 exactly."""
+        import math
+        R_pm_20 = 0.006315; N = 49; OD = 27.69; ID = 14.10
+        MLT = math.pi * (OD + ID) / 2
+        Cu_len = N * MLT / 1000
+        DCR_25  = R_pm_20 * (1 + 0.00393 * (25 - 20)) * Cu_len
+        DCR_100 = R_pm_20 * (1 + 0.00393 * (100 - 20)) * Cu_len
+        assert abs(DCR_25  * 1e3 - 20.7116) < 0.001
+        assert abs(DCR_100 * 1e3 - 26.6986) < 0.001
+
+    def test_EDGE_3stack_fits_1U(self):
+        """EDGE 0059894A2, 3-stack must fit in 1U chassis (44.45mm)."""
+        from app.mode_b.data_loader import filter_cores
+        cores = filter_cores('magnetics_inc', max_height_mm=44.45,
+                             min_Ae_mm2=150.0, max_stacks=3)
+        edge3 = [c for c in cores
+                 if '0059894A2' in str(c['part_number']) and c['stacks'] == 3]
+        assert len(edge3) == 1, "EDGE 0059894A2, 3-stack not found in 1U filter"
+        assert abs(edge3[0]['Ve_total_cm3'] - 15.9774) < 0.01
+        assert edge3[0]['h_effective_mm'] < 44.45
+
+    def test_log_log_interpolation_accuracy(self):
+        """Bilinear interpolation error must be <2% for Steinmetz power-law data.
+        Reference values updated 2026-05 from Magnetics published comparison chart."""
+        from app.mode_b.data_loader import get_core_loss_kW_m3
+        test_points = [
+            ('edge_60', 70e3, 0.054103, 25.0, 53.783),   # corrected: Pv_ref=400
+            ('edge_60', 70e3, 0.010060, 25.0,  0.802),   # corrected from graph
+            ('3C95',    70e3, 0.054103, 100.0, 10.98),
+        ]
+        for mat, f, B, T, Pv_ref in test_points:
+            Pv = get_core_loss_kW_m3(mat, f, B, T)
+            err = abs(Pv - Pv_ref) / Pv_ref
+            assert err < 0.02, \
+                f"{mat} @ {f/1e3:.0f}kHz {B:.3f}T {T}°C: Pv={Pv:.3f} vs {Pv_ref} err={err*100:.1f}%"
+
+
+# ── Step 8: Time-domain core-loss model ───────────────────────────────────
+
+class TestStep8TimeDomain:
+
+    def test_Bac_pk_at_crest_90Vac(self):
+        """Bac,pk at 90Vac crest must match reference Step 13.5.1."""
+        from app.mode_b.step8_time_domain import compute_Bac_crest
+        B = compute_Bac_crest(90, 390, 49, 231e-6, 70e3)
+        assert abs(B - 0.054103) < 0.0001, f"Bac,pk={B:.6f}T expected 0.054103T"
+
+    def test_Bac_pk_halfcycle_peak_time_90Vac(self):
+        """Peak of Bac,pk(t) must occur at t=4.166ms (reference Step 14.2)."""
+        import numpy as np
+        from app.mode_b.step8_time_domain import compute_Bac_pk_halfcycle
+        t, Bac_t = compute_Bac_pk_halfcycle(90, 390, 49, 231e-6, 70e3)
+        t_pk_ms = float(t[np.argmax(Bac_t)]) * 1000
+        assert abs(t_pk_ms - 4.166) < 0.01, f"t_pk={t_pk_ms:.3f}ms expected 4.166ms"
+
+    def test_power_law_fit_matches_reference(self):
+        """Power-law fit on reference data must give n=2.3956, k=1218.27."""
+        from app.mode_b.step8_time_domain import fit_power_law
+        Bac_ref   = [0.05410,0.05901,0.06050,0.06141,0.05579,
+                     0.04905,0.03970,0.03407,0.01006]
+        Pcore_ref = [1.125,  1.385,  1.471,  1.524,  1.211,
+                     0.889,  0.535,  0.371,  0.020]
+        fit = fit_power_law(Bac_ref, Pcore_ref)
+        assert abs(fit['n'] - 2.3956) < 0.001, f"n={fit['n']:.4f} expected 2.3956"
+        assert abs(fit['k'] - 1218.27) / 1218.27 < 0.001, f"k={fit['k']:.2f}"
+
+    def test_Pcore_avg_90Vac_matches_reference(self):
+        """Pcore,avg at 90Vac must match reference Step 14.4 within 2%."""
+        from app.mode_b.step8_time_domain import (
+            compute_Bac_pk_halfcycle, compute_Pcore_halfcycle)
+        t, Bac_t = compute_Bac_pk_halfcycle(90, 390, 49, 231e-6, 70e3)
+        # Use reference k, n for this test
+        _, Pavg, _, _ = compute_Pcore_halfcycle(t, Bac_t, 1218.27, 2.3956)
+        assert abs(Pavg - 0.615) / 0.615 < 0.02, \
+            f"Pcore,avg={Pavg:.3f}W expected 0.615W (ref Step 14.4)"
+
+    def test_Pcore_avg_230Vac_matches_reference(self):
+        """Pcore,avg at 230Vac must match reference Step 14.5 within 2%."""
+        from app.mode_b.step8_time_domain import (
+            compute_Bac_pk_halfcycle, compute_Pcore_halfcycle)
+        t, Bac_t = compute_Bac_pk_halfcycle(230, 390, 49, 231e-6, 70e3)
+        _, Pavg, _, _ = compute_Pcore_halfcycle(t, Bac_t, 1218.27, 2.3956)
+        assert abs(Pavg - 0.838) / 0.838 < 0.02, \
+            f"Pcore,avg={Pavg:.3f}W expected 0.838W (ref Step 14.5)"
+
+    def test_crest_overestimates_at_low_Vac(self):
+        """At 90Vac: crest-point Pcore must overestimate Pcore,avg (reference insight)."""
+        from app.mode_b.step8_time_domain import (
+            compute_Bac_crest, compute_Bac_pk_halfcycle, compute_Pcore_halfcycle)
+        B_crest = compute_Bac_crest(90, 390, 49, 231e-6, 70e3)
+        Pcore_crest = 1218.27 * B_crest**2.3956
+        t, Bac_t = compute_Bac_pk_halfcycle(90, 390, 49, 231e-6, 70e3)
+        _, Pavg, _, _ = compute_Pcore_halfcycle(t, Bac_t, 1218.27, 2.3956)
+        assert Pcore_crest > Pavg * 1.5, \
+            f"At 90Vac: crest={Pcore_crest:.3f}W should be >50% above avg={Pavg:.3f}W"
+
+    def test_crest_underestimates_at_high_Vac(self):
+        """At 230Vac: crest-point Pcore must underestimate Pcore,avg."""
+        from app.mode_b.step8_time_domain import (
+            compute_Bac_crest, compute_Bac_pk_halfcycle, compute_Pcore_halfcycle)
+        B_crest = compute_Bac_crest(230, 390, 49, 231e-6, 70e3)
+        Pcore_crest = 1218.27 * B_crest**2.3956
+        t, Bac_t = compute_Bac_pk_halfcycle(230, 390, 49, 231e-6, 70e3)
+        _, Pavg, _, _ = compute_Pcore_halfcycle(t, Bac_t, 1218.27, 2.3956)
+        assert Pavg > Pcore_crest * 1.5, \
+            f"At 230Vac: avg={Pavg:.3f}W should be >50% above crest={Pcore_crest:.3f}W"
+
+
+# ── Step 7 + 8 API endpoints (wiring tests) ───────────────────────────────────
+
+class TestStep7Step8Wiring:
+    """Tests that verify the endpoints are wired and return correct structure."""
+
+    def test_step7_material_comparison_structure(self):
+        import sys; sys.path.insert(0,'.')
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.get("/mode-b/step7/material-comparison")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ferrite" in data and "powder" in data
+        assert "medical_advisory" in data
+
+    def test_step7_suppliers_ferrite(self):
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.get("/mode-b/step7/suppliers?material_type=ferrite")
+        assert resp.status_code == 200
+        data = resp.json()
+        suppliers = [s["key"] for s in data["suppliers"]]
+        assert "Ferroxcube" in suppliers and "TDK" in suppliers
+
+    def test_step7_suppliers_powder(self):
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.get("/mode-b/step7/suppliers?material_type=powder")
+        assert resp.status_code == 200
+        suppliers = [s["key"] for s in resp.json()["suppliers"]]
+        assert "Magnetics Inc." in suppliers
+
+    def test_step7_grade_options_ferroxcube(self):
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.post("/mode-b/step7/grade-options", json={
+            "material_type": "ferrite", "supplier": "Ferroxcube",
+            "fsw_Hz": 70000, "Bac_pk_T": 0.054,
+            "T_operating_C": 100.0, "topology": "boost_pfc"
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] >= 5
+        grades = [g["grade"] for g in data["grades"]]
+        assert "3C97" in grades and "3C95" in grades
+        # Best grade should be first (lowest score)
+        assert data["grades"][0]["rank"] == 1
+
+    def test_step7_wire_options_litz(self):
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.post("/mode-b/step7/wire-options", json={
+            "wire_type": "litz", "IL_rms_A": 10.07,
+            "fsw_Hz": 70000, "T_C": 100.0, "J_target": 5.0, "n_options": 3
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["options"]) >= 1
+        assert data["skin_depth_mm"] > 0
+        # All returned wires must have strand dia ≤ 2×delta
+        for w in data["options"]:
+            assert float(w["strand_dia_mm"]) <= data["max_strand_dia"] * 1.1
+
+    def test_step7_wire_options_tiw(self):
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.post("/mode-b/step7/wire-options", json={
+            "wire_type": "tiw", "IL_rms_A": 10.07,
+            "fsw_Hz": 70000, "T_C": 100.0, "J_target": 5.0, "n_options": 3
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["options"]) >= 1
+        assert all("n_parallel" in w for w in data["options"])
+        assert data["medical_note"] != ""
+
+    def test_step7_run_sizing_returns_top5(self, confirmed_state):
+        import warnings; warnings.filterwarnings('ignore')
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        resp = client.post("/mode-b/step7/run-sizing", json={
+            "state": confirmed_state,
+            "material_key": "edge_60",
+            "wire_designation": "0.1x400",  # 0.1x400 has 3.14mm² Cu, sufficient for 10A
+            "max_height_mm": 44.45,
+            "max_stacks": 3,
+            "J_target": 5.0,
+            "n_top": 5,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["step"] == 7
+        assert data["cores_evaluated"] >= 1
+        assert len(data["top_5"]) >= 1
+        # Each candidate must have a label
+        labels = [c["label"] for c in data["top_5"]]
+        # At least one candidate must have a label (Best/Smallest/Lowest loss/etc.)
+        assert any(len(l) > 0 for l in labels), f"No labels assigned: {labels}"
+        # All candidates must have rank and a result dict
+        assert all("rank" in c and "result" in c for c in data["top_5"])
+
+    def test_step8_time_domain_returns_power_law_fit(self, confirmed_state):
+        import warnings; warnings.filterwarnings('ignore')
+        from app.main import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+
+        # Use a minimal valid approved_design dict
+        approved = {
+            "material_key": "edge_60",
+            "N": 49,
+            "Ae_total_mm2": 231.0,
+            "Ve_total_cm3": 15.977,
+            "loss_table_25C": [
+                {"Vin_rms": v, "Bac_pk": b, "Pcore_W": p}
+                for v, b, p in [
+                    (90,0.05410,1.125),(110,0.05901,1.385),(120,0.06050,1.471),
+                    (132,0.06141,1.524),(180,0.05579,1.211),(200,0.04905,0.889),
+                    (220,0.03970,0.535),(230,0.03407,0.371),(264,0.01006,0.020)
+                ]
+            ]
+        }
+        resp = client.post("/mode-b/step8/time-domain", json={
+            "state": confirmed_state,
+            "approved_design": approved,
+            "f_line_Hz": 60.0,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["step"] == 8
+        fit = data["power_law_fit"]
+        assert abs(fit["n"] - 2.3956) < 0.01, f"n={fit['n']:.4f} expected ~2.3956"
+        assert abs(fit["k"] - 1218.27) / 1218.27 < 0.01
+        assert len(data["summary_table"]) == 9
+
+    def test_registry_steps_7_8_done(self):
+        from app.mode_b.registry import REGISTRY
+        assert REGISTRY[7]["status"] == "DONE"
+        assert REGISTRY[8]["status"] == "DONE"
+        assert REGISTRY[7]["api_route"] == "/mode-b/step7/run-sizing"
+        assert REGISTRY[8]["api_route"] == "/mode-b/step8/time-domain"

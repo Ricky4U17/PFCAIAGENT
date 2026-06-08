@@ -1,0 +1,857 @@
+"""
+app/magnetics/db.py
+MagneticsDB — single guardian of all magnetic material data.
+
+RULES FOR FUTURE DEVELOPERS:
+  1. Step 7, Step 8, and any future step MUST call this class only.
+     Never import data_loader.py directly from calculation steps.
+  2. To add a new material:
+       python3 -m app.magnetics.tools.add_material
+     or call db.add_custom_material() from the API.
+  3. To add a new supplier catalog:
+       - Create data/magnetic_materials/<supplier>/ directory
+       - Add JSON files following the schema in schema.py
+       - Call db.reload()
+  4. After any data change: call db.reload() or POST /admin/reload-magnetics-db
+  5. Never modify this file to add material data — that goes in JSON/CSV files only.
+"""
+from __future__ import annotations
+import json, math, csv, math, logging, time
+from pathlib import Path
+from typing import Optional
+import numpy as np
+
+log = logging.getLogger(__name__)
+
+DATA_ROOT = Path(__file__).parent.parent.parent / "data"
+PENDING_DIR = DATA_ROOT / "magnetics_pending"
+PENDING_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Global singleton ──────────────────────────────────────────────────────────
+_instance: Optional["MagneticsDB"] = None
+
+def get_db() -> "MagneticsDB":
+    """Return the singleton MagneticsDB instance. Creates it on first call."""
+    global _instance
+    if _instance is None:
+        _instance = MagneticsDB()
+    return _instance
+
+
+class MagneticsDB:
+    # Canonical wire-type aliases: UI name -> catalog "type" field
+    # litz_catalog.csv types: "litz", "tiw", "solid-enamel"
+    # awg_table.csv types:    "solid"
+    WIRE_TYPE_ALIAS = {
+        "magnet":       "solid-enamel",
+        "solid-enamel": "solid-enamel",
+        "litz":         "litz",
+        "tiw":          "tiw",
+        "solid":        "solid",
+    }
+
+    @staticmethod
+    def _rac_rdc_solid(d_mm: float, delta_mm: float) -> float:
+        """Exact Rac/Rdc for solid round conductor (skin effect, no proximity).
+        Uses complex modified Bessel functions. Returns 1.0 for d->0 or litz strands.
+        Formula: Rac/Rdc = Re[(1+j)*q * I0((1+j)*q) / (2 * I1((1+j)*q))]
+        where q = (d/2) / delta (radius over skin depth).
+        """
+        if delta_mm <= 0 or d_mm <= 0:
+            return 1.0
+        q = (d_mm / 2.0) / delta_mm          # radius / skin_depth
+        if q < 0.05:
+            return 1.0                         # negligible skin effect
+        try:
+            import numpy as _np
+            from scipy.special import iv as _iv
+            z = complex(1.0, 1.0) * q         # (1+j)*q
+            I0 = _iv(0, z); I1 = _iv(1, z)
+            if abs(I1) < 1e-30:
+                return 1.0
+            return max(1.0, float(_np.real(z * I0 / (2.0 * I1))))
+        except ImportError:
+            # Polynomial fallback (accurate to ~3% for q < 4)
+            if q < 0.5:
+                return 1.0 + q**4 / 48.0
+            elif q < 2.5:
+                # Fitted polynomial from Kelvin function tables
+                return 1.0 + 0.0615*q**2 + 0.0028*q**4
+            else:
+                # Large-q: Rac/Rdc → q/2 (thin-shell approximation)
+                return max(1.0, q / 2.0)
+
+    """
+    Single guardian of all magnetic material data.
+    Owns: materials (JSON), core catalogs (CSV), wire catalog (CSV).
+    Provides: query, rank, filter, validate, add, and PDF-extract APIs.
+    """
+
+    def __init__(self):
+        self._materials:    dict[str, dict] = {}    # key → material dict
+        self._cores_fc:     list[dict]      = []
+        self._cores_tdk:    list[dict]      = []
+        self._cores_mag:    list[dict]      = []
+        self._wire:         list[dict]      = []
+        self._awg:          list[dict]      = []
+        self._load_time:    float           = 0.0
+        self._load_errors:  list[str]       = []
+        self.reload()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LOAD / RELOAD
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def reload(self) -> dict:
+        """
+        Reload all material JSON and catalog CSV files from disk.
+        Call this after adding or editing any data file.
+        Returns: {loaded: N, errors: [...]}
+        """
+        t0 = time.time()
+        self._materials.clear()
+        self._load_errors.clear()
+
+        mat_root = DATA_ROOT / "magnetic_materials"
+        for supplier_dir in sorted(mat_root.iterdir()):
+            if not supplier_dir.is_dir(): continue
+            for jf in sorted(supplier_dir.glob("*.json")):
+                key = jf.stem
+                try:
+                    with open(jf) as f:
+                        d = json.load(f)
+                    errs = self.validate_material_dict(d)
+                    if errs:
+                        for e in errs:
+                            log.warning(f"[DB] {key}: {e}")
+                            self._load_errors.append(f"{key}: {e}")
+                    d["_key"]  = key
+                    d["_path"] = str(jf)
+                    self._materials[key] = d
+                except Exception as ex:
+                    msg = f"{key}: failed to load — {ex}"
+                    log.error(f"[DB] {msg}")
+                    self._load_errors.append(msg)
+
+        # Load pending (reviewed but not committed) — for display only
+        for jf in sorted(PENDING_DIR.glob("*.json")):
+            try:
+                with open(jf) as f:
+                    d = json.load(f)
+                d["_key"]    = f"pending:{jf.stem}"
+                d["_path"]   = str(jf)
+                d["_pending"] = True
+                self._materials[d["_key"]] = d
+            except Exception as ex:
+                self._load_errors.append(f"pending/{jf.stem}: {ex}")
+
+        # Core catalogs
+        self._cores_fc  = self._load_csv(mat_root/"ferroxcube/etd_catalog.csv")
+        self._cores_tdk = self._load_csv(mat_root/"tdk/etd_catalog.csv")
+        self._cores_mag = self._load_csv(mat_root/"magnetics_inc/toroid_catalog.csv")
+        self._wire      = self._load_csv(DATA_ROOT/"wire/litz_catalog.csv")
+        self._awg       = self._load_csv(DATA_ROOT/"wire/awg_table.csv")
+
+        self._load_time = time.time() - t0
+        n = len([k for k in self._materials if not k.startswith("pending:")])
+        n_pend = len([k for k in self._materials if k.startswith("pending:")])
+        log.info(f"[MagneticsDB] Loaded {n} materials + {n_pend} pending in {self._load_time*1000:.0f}ms")
+        return {"loaded": n, "pending": n_pend, "errors": self._load_errors}
+
+    def _load_csv(self, path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        try:
+            with open(path) as f:
+                return [{k: self._cast(v) for k, v in row.items()}
+                        for row in csv.DictReader(f)]
+        except Exception as ex:
+            log.warning(f"[DB] CSV load failed: {path} — {ex}")
+            return []
+
+    @staticmethod
+    def _cast(v: str):
+        try: return float(v)
+        except: return v
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # QUERY — used by Step 7 and Step 8
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def get_material(self, key: str) -> dict:
+        """Return full material dict. Raises KeyError if not found."""
+        if key not in self._materials:
+            raise KeyError(f"Material '{key}' not in MagneticsDB. "
+                           f"Available: {sorted(self._materials.keys())}")
+        return self._materials[key]
+
+    def get_materials(self,
+                      supplier: Optional[str] = None,
+                      mat_type: Optional[str] = None,
+                      topology: Optional[str] = None,
+                      fsw_kHz: Optional[float] = None,
+                      exclude_pending: bool = True) -> list[dict]:
+        """
+        Filter materials by supplier, type, topology suitability, and fsw range.
+        Returns list of matching material dicts.
+        """
+        results = []
+        for key, d in self._materials.items():
+            if exclude_pending and key.startswith("pending:"): continue
+            if supplier and d.get("supplier","").lower() != supplier.lower(): continue
+            if mat_type and d.get("type","")   != mat_type: continue
+            if topology:
+                topo = d.get("topology_applicability", {})
+                if topo.get(topology, "ok") == "poor": continue
+            if fsw_kHz:
+                r = d.get("fsw_range_kHz", {})
+                if r and not (r.get("min",0) <= fsw_kHz <= r.get("max",1e6)): continue
+            results.append(d)
+        return results
+
+    def rank_grades(self, fsw_Hz: float, Bac_pk_T: float,
+                    T_C: float = 100.0, topology: str = "boost_pfc",
+                    Ipk_A: float = 16.73, dIL_pp_A: float = 5.161,
+                    Le_single_m: float = 0.0655, L_target_uH: float = 240.0,
+                    min_k_bias: float = 0.35) -> list[dict]:
+        """
+        Rank all materials by suitability for the given operating point.
+
+        Improved composite scoring (v2):
+          40% DC bias stability  — k_bias at estimated worst-case H (two-pass)
+          25% Core loss          — Pv at operating point (lower is better)
+          15% Cost tier          — MPP premium penalised vs standard KoolMu/EDGE
+          10% Bsat margin        — headroom above Bpk (higher is better)
+          10% Data quality       — digitized/anchored data preferred over estimated
+
+        Materials with k_bias < min_k_bias at design H are flagged as marginal.
+        Two-pass algorithm: estimate N from AL_nom → estimate H_Oe → get k_bias.
+
+        Returns list sorted best-first.
+        """
+        candidates = self.get_materials(fsw_kHz=fsw_Hz/1e3)
+
+        # Reference core geometry for H estimation (typical toroid 27.69mm OD)
+        I_dc = max(0.001, Ipk_A - dIL_pp_A / 2.0)
+
+        # Cost tier penalty (relative, not absolute cost)
+        COST_PENALTY = {
+            "MPP":           5.0,   # 2.5-3× premium over KoolMu (adjusted — bias advantage justifies premium)
+            "XFlux Ultra":   4.0,
+            "Kool Mu Ultra": 3.0,
+            "Kool Mu MAX":   3.0,
+            "Kool Mu HF":    3.0,
+            "High Flux":     3.0,
+            "XFlux":         1.0,
+            "EDGE":          1.0,
+            "Kool Mu":       0.0,   # baseline cost
+        }
+
+        # Data quality score (higher = more reliable)
+        DQ_SCORE = {
+            "anchored_to_reference_step13":    10,
+            "published_anchor_points":          8,
+            "steinmetz_fitted_to_datasheet":    7,
+            "digitized":                        7,
+            "magnetics_application_note":       5,
+            "estimated":                        2,
+            "custom_entered":                   5,
+            "pdf_extracted":                    6,
+        }
+
+        ranked = []
+        for d in candidates:
+            key  = d["_key"]
+            if d.get("_pending"): continue
+            try:
+                # ── Core loss ─────────────────────────────────────────────
+                Pv = self.get_core_loss(key, fsw_Hz, Bac_pk_T, T_C)
+                Bs = self.get_Bsat(key, T_C)
+
+                # ── DC bias: two-pass k_bias estimate ─────────────────────
+                k_bias_est = 1.0
+                H_Oe_est   = 0.0
+                if d.get("type") == "powder" and "dc_bias_rolloff" in d:
+                    # Two-pass H estimation using typical toroid geometry (27.69mm OD)
+                    # AL_single = µ0 × µr × Ae / Le  (Ae=77mm², Le=65.5mm typical)
+                    mu_i   = float(d.get("mu_initial", 60))
+                    Ae_m2  = 77e-6     # m²  — typical EDGE/KoolMu/MPP toroid Ae
+                    # Use 2-stack assumption — validated: gives H≈136 Oe for EDGE 60µ
+                    # (reference design: N=49-50, H_actual=133 Oe, 3-stack)
+                    # 2-stack: AL_2s = 2 × AL_single, N closer to actual design
+                    AL_single = 4 * math.pi * 1e-7 * mu_i * Ae_m2 / Le_single_m
+                    AL_est = 2.0 * AL_single   # 2-stack assumption
+                    L_H    = L_target_uH * 1e-6
+                    N_est  = max(1, math.ceil(math.sqrt(L_H / max(1e-18, AL_est))))
+                    N_est  = min(N_est, 150)
+                    # Iterate once to account for DC bias rolloff (worst-case Idc)
+                    for _ in range(3):
+                        H_Am     = N_est * I_dc / Le_single_m
+                        H_Oe_est = H_Am / 79.577
+                        k_b      = self.get_k_bias(key, H_Oe_est)
+                        L_full   = N_est**2 * AL_est * k_b
+                        if L_full >= L_H * 0.85:
+                            break
+                        N_est += max(1, int(N_est * 0.10))  # bump 10%
+                    k_bias_est = k_b
+
+                # ── Composite score (lower = better) ──────────────────────
+                topo = d.get("topology_applicability", {}).get(topology, "ok")
+                topo_pen = {"best": -3, "good": 0, "ok": 5, "poor": 30}.get(topo, 5)
+
+                # Temperature stability (ppm/°C from basic section)
+                # EDGE ~0 ppm/°C (best) — critical for Medical where L must hold over temp
+                tc = float(d.get("basic", {}).get("temp_coeff_ppm_per_C", 100.0))
+
+                # Normalised component scores (all in same units = penalty points)
+                # Weights: bias 35% | loss 25% | temp_stab 15% | cost 15% | Bsat+DQ 10%
+                s_loss  = (Pv / 30.0) * 0.25           # 25%: core loss
+                s_bias  = (1.0 - k_bias_est) * 40 * 0.35  # 35%: DC bias stability
+                s_temp  = (tc / 20.0) * 0.15           # 15%: temp stability (0 ppm/°C = 0 penalty)
+                s_cost  = COST_PENALTY.get(
+                    d.get("material_line", d.get("grade", "")), 0) * 0.15  # 15%
+                s_bsat  = max(0, (1.5 - Bs) / 1.5) * 6 * 0.05   # 5%: Bsat headroom
+                dq      = DQ_SCORE.get(d.get("data_quality", "estimated"), 2)
+                s_dq    = (10 - dq) * 0.05             # 5%: data quality
+
+                score = s_loss + s_bias + s_temp + s_cost + s_bsat + s_dq + topo_pen
+
+                # Marginal flag
+                is_marginal = (d.get("type") == "powder" and k_bias_est < min_k_bias)
+
+                line = d.get("material_line", d.get("grade", ""))
+                ranked.append({
+                    "material_key":    key,
+                    "supplier":        d.get("supplier", ""),
+                    "grade":           line,
+                    "mu":              d.get("mu_initial", ""),
+                    "type":            d.get("type", ""),
+                    "Pv_kW_m3":        round(Pv, 2),
+                    "Bsat_T":          round(Bs, 3),
+                    "k_bias_est":      round(k_bias_est, 3),
+                    "H_Oe_est":        round(H_Oe_est, 1),
+                    "is_marginal":     is_marginal,
+                    "score":           round(score, 3),
+                    "topology_fit":    topo,
+                    "cost_tier":       COST_PENALTY.get(line, 0),
+                    "data_quality":    d.get("data_quality", ""),
+                    "temp_coeff_ppm_C":  tc,
+                    "score_breakdown": {
+                        "loss_25pct":  round(s_loss, 3),
+                        "bias_35pct":  round(s_bias, 3),
+                        "temp_15pct":  round(s_temp, 3),
+                        "cost_15pct":  round(s_cost, 3),
+                        "bsat_5pct":   round(s_bsat, 3),
+                        "dataqual_5":  round(s_dq,   3),
+                    },
+                    "fsw_range_kHz":   d.get("fsw_range_kHz", {}),
+                    "note":            "⚠ marginal k_bias" if is_marginal else "",
+                })
+            except Exception as ex:
+                log.debug(f"rank_grades skip {key}: {ex}")
+
+        ranked.sort(key=lambda r: r["score"])
+        for i, r in enumerate(ranked): r["rank"] = i + 1
+        return ranked
+
+    def filter_cores(self, supplier: str, shape: Optional[str] = None,
+                     max_height_mm: float = 9999, min_Ae_mm2: float = 0,
+                     max_stacks: int = 3, coated_only: bool = True,
+                     material_line: str = None, mu: int = None,
+                     mounting: str = 'horizontal') -> list[dict]:
+        """
+        Filter cores by supplier, shape, height, minimum Ae, and coating.
+        For toroids, automatically tries 1–max_stacks.
+        coated_only=True (default): only returns cores where coated=true in catalog.
+        For Medical applications always use coated_only=True.
+        """
+        sup = supplier.lower().replace(" ", "_")
+        if "ferroxcube" in sup:
+            catalog = self._cores_fc
+        elif "tdk" in sup:
+            catalog = self._cores_tdk
+        else:
+            catalog = self._cores_mag
+
+        results = []
+        for row in catalog:
+            sh = str(row.get("shape", row.get("material_line", "toroid")))
+            if shape and sh.upper() != shape.upper(): continue
+            Ae = float(row.get("Ae_mm2", 0))
+            HT = float(row.get("HT_mm", 0))
+
+            if sup in ("magnetics_inc",):
+                # Wound height at 40% fill for a single core (from catalog).
+                # Used instead of bare HT so the height filter reflects the
+                # actual installed height of the inductor, not the bare core.
+                wound_h_single = float(row.get("wound_HT_40wf_mm") or HT + 5.0)
+                wound_OD       = float(row.get("wound_OD_40wf_mm")
+                                       or (float(row.get("OD_mm", 0)) + 8.0))
+                for S in range(1, max_stacks + 1):
+                    Ae_stack = Ae * S
+                    # Installed height depends on mounting orientation:
+                    #   horizontal → cores flat, stacked on top of each other
+                    #                height = wound HT of the full stack
+                    #   vertical   → cores upright, side by side (no stacking in height)
+                    #                height = wound OD of one core (same for any S)
+                    if mounting == 'vertical':
+                        h_eff = wound_OD
+                    else:
+                        h_eff = wound_h_single + (S - 1) * (HT + 1.5)
+                    if h_eff <= max_height_mm and Ae_stack >= min_Ae_mm2:
+                        if coated_only and str(row.get("coated","true")).lower() != "true":
+                            continue
+                        if material_line and str(row.get("material_line","")).strip() != str(material_line).strip():
+                            continue
+                        if mu is not None and int(float(row.get("mu", mu))) != int(mu):
+                            continue
+                        AL_n = float(row.get("AL_nom_nH", 75))
+                        AL_i = float(row.get("AL_min_nH", 69))
+                        AL_x = float(row.get("AL_max_nH", 81))
+                        results.append({
+                            **row, "stacks": S,
+                            "h_effective_mm":  round(h_eff, 2),   # wound height
+                            "wound_OD_mm":     round(wound_OD, 2),
+                            "Ae_total_mm2":    round(Ae_stack, 2),
+                            "Wa_total_mm2":    round(float(row.get("Wa_mm2",0)) * S, 2),
+                            "Ve_total_cm3":    round(float(row.get("Ve_cm3",0)) * S, 4),
+                            "AL_nom_total":    round(AL_n * S),
+                            "AL_min_total":    round(AL_i * S),
+                            "AL_max_total":    round(AL_x * S),
+                            "Le_single_mm":    float(row.get("Le_mm",0)),
+                            "supplier_tag":    sup,
+                        })
+            else:
+                h_eff = float(row.get("max_height_mm", HT))
+                if h_eff <= max_height_mm and Ae >= min_Ae_mm2:
+                    results.append({
+                        **row, "stacks": 1,
+                        "h_effective_mm": h_eff,
+                        "Ae_total_mm2":   Ae,
+                        "Wa_total_mm2":   float(row.get("Wa_mm2", 0)),
+                        "Ve_total_cm3":   float(row.get("Ve_cm3", row.get("Ve_mm3",0)/1000)),
+                        "Le_single_mm":   float(row.get("Le_mm", 0)),
+                        "bobbin_type":    str(row.get("bobbin_type","standard")),
+                        "bobbin_creepage_mm": float(row.get("bobbin_creepage_mm",0) or 0),
+                        "supplier_tag":   sup,
+                    })
+        return results
+
+    def get_wire_options(self, wire_type: str, IL_rms: float, fsw_Hz: float,
+                         T_C: float = 100.0, J_target: float = 5.0,
+                         n_options: int = 50, min_cu_fraction: float = 0.30,
+                         IL_HF_rms_A: float = 0.0) -> list[dict]:
+        """Return wire options for the given type.
+
+        Type alias: "magnet" -> "solid-enamel" (Rubadue enamel wire in litz_catalog.csv)
+                    "solid"  -> searches awg_table.csv
+                    "litz"/"tiw" -> litz_catalog.csv
+
+        min_cu_fraction: fraction of A_min below which wires are excluded.
+          Use 0.0 for the display table (show all); 0.30 for the sizing engine sweep.
+
+        IL_HF_rms_A: RMS of HF ripple component (at fsw). Computed as dIL_pp/(2*sqrt(3)).
+          Used to compute effective Rac/Rdc for PFC:
+            Rac_Rdc_eff = 1 + (IL_HF_rms/IL_rms)^2 * (F_skin - 1)
+          where F_skin is the wire's intrinsic AC/DC ratio at fsw.
+          Litz strands (d < 2*delta) have F_skin = 1.0 by design.
+
+        Results sorted by J_at_Irms ascending (least-stressed / largest wire first).
+        Each result includes F_skin, Rac_Rdc_eff, and current_ok for frontend display.
+        """
+        resolved  = self.WIRE_TYPE_ALIAS.get(wire_type.lower(), wire_type.lower())
+        rho_T     = 1.72e-8 * (1 + 0.00393 * (T_C - 20))
+        delta     = math.sqrt(rho_T / (math.pi * fsw_Hz * 4*math.pi*1e-7)) * 1e3   # mm
+        fsw_kHz   = fsw_Hz / 1000.0
+        A_min     = IL_rms / J_target if J_target > 0 else 0.0
+        # PFC ripple fraction squared: only HF component sees skin effect
+        _frac_sq  = (IL_HF_rms_A / IL_rms)**2 if IL_rms > 0 and IL_HF_rms_A > 0 else 0.0
+
+        catalogs = [self._awg] if resolved == "solid" else [self._wire]
+
+        results = []
+        for catalog in catalogs:
+            for row in catalog:
+                if row.get("type","").lower() != resolved:
+                    continue
+                Cu       = float(row.get("Cu_area_mm2", 0))
+                d_s      = float(row.get("strand_dia_mm", row.get("diameter_mm", 0)))
+                R20      = float(row.get("R_per_m_20C_ohm", 0))
+                R_T      = R20 * (1 + 0.00393 * (T_C - 20))
+                skin_kHz = float(row.get("skin_limited_to_kHz", 9999) or 9999)
+
+                # Skin depth: hard filter for litz/TIW (physics constraint on strands)
+                skin_ok_strand = (d_s == 0) or (d_s <= 2 * delta * 1.05)
+                skin_ok_freq   = fsw_kHz <= skin_kHz * 1.10
+                skin_ok        = skin_ok_strand and skin_ok_freq
+                current_ok     = (Cu >= A_min * 0.90) if A_min > 0 else True
+
+                if resolved in ("litz", "tiw") and not skin_ok_strand:
+                    continue   # hard exclude: strand too thick for frequency
+
+                # Exclude only if wildly under-spec relative to min_cu_fraction
+                if A_min > 0 and Cu < A_min * min_cu_fraction:
+                    continue
+
+                # F_skin: wire's intrinsic Rac/Rdc at fsw (litz strands ≤2δ → 1.0)
+                if resolved in ("litz", "tiw"):
+                    _F_skin = 1.0   # strands within skin depth by design
+                else:
+                    _d_cond = float(row.get("strand_dia_mm", row.get("diameter_mm", 0)))
+                    _F_skin = self._rac_rdc_solid(_d_cond, delta)
+                # Effective Rac/Rdc for PFC: only IL_HF fraction sees skin effect
+                _Rac_eff = 1.0 + _frac_sq * (_F_skin - 1.0)
+
+                common = {
+                    **{k: v for k, v in row.items()},
+                    "skin_depth_mm":     round(delta, 4),
+                    "max_strand_dia_mm": round(2 * delta, 4),
+                    "R_per_m_at_T":      round(R_T, 6),
+                    "skin_ok":           skin_ok,
+                    "current_ok":        current_ok,
+                    "skin_limited_kHz":  round(skin_kHz, 0),
+                    "F_skin":            round(_F_skin, 4),   # wire's own Rac/Rdc at fsw
+                    "Rac_Rdc_eff":       round(_Rac_eff, 4), # effective for this design's ripple
+                }
+
+                if resolved == "tiw":
+                    n_par = max(1, math.ceil(A_min / Cu)) if Cu > 0 else 1
+                    results.append({
+                        **common,
+                        "n_parallel":       n_par,
+                        "Cu_total_mm2":     round(Cu * n_par, 4),
+                        "R_parallel_ohm_m": round(R_T / n_par, 6),
+                        "J_at_Irms":        round(IL_rms / (Cu * n_par), 2) if Cu > 0 else 0,
+                        "note_parallel":    f"{n_par}x TIW for {IL_rms:.1f}A @ J={J_target:.0f}A/mm2",
+                    })
+                else:
+                    results.append({
+                        **common,
+                        "J_at_Irms": round(IL_rms / Cu, 2) if Cu > 0 else 0,
+                    })
+
+        # Sort: feasible first, then by J ascending (lowest J = least stressed = largest wire)
+        results.sort(key=lambda r: (
+            0 if r.get("current_ok") and r.get("skin_ok") else
+            1 if r.get("current_ok") else 2,
+            float(r.get("J_at_Irms", 999))
+        ))
+        return results[:n_options]
+
+    # ── Loss / material property queries ─────────────────────────────────────
+
+    def get_core_loss(self, material_key: str, f_Hz: float,
+                      Bac_pk_T: float, T_C: float = 25.0) -> float:
+        """Returns Pv (kW/m³) using log-log bilinear interpolation."""
+        d = self.get_material(material_key)
+        f_kHz = f_Hz / 1e3
+        if "core_loss_surface_100C" in d:
+            Pv25  = self._bilinear_loglog(d["core_loss_surface_25C"],  f_kHz, Bac_pk_T)
+            Pv100 = self._bilinear_loglog(d["core_loss_surface_100C"], f_kHz, Bac_pk_T)
+            frac  = max(0.0, min(1.0, (T_C-25)/(100-25)))
+            return Pv25 + frac*(Pv100 - Pv25)
+        return self._bilinear_loglog(d["core_loss_surface_25C"], f_kHz, Bac_pk_T)
+
+    def get_Bsat(self, material_key: str, T_C: float) -> float:
+        """Returns Bsat (T) at temperature T_C."""
+        d = self.get_material(material_key)
+        if d["type"] == "powder":
+            return float(d.get("basic", {}).get("Bsat_T", 1.0))
+        bv = d["Bsat_vs_T"]
+        return float(np.interp(T_C, bv["T_C"], bv["Bsat"]))
+
+    def get_mu_r(self, material_key: str, T_C: float) -> float:
+        """Returns µr at temperature T_C (ferrite). Powder: returns mu_initial."""
+        d = self.get_material(material_key)
+        if d["type"] == "powder":
+            return float(d.get("mu_initial", 60))
+        mv = d["mu_r_vs_T"]
+        return float(np.interp(T_C, mv["T_C"], mv["mu_r"]))
+
+    def get_k_bias(self, material_key: str, H_Oe: float) -> float:
+        """
+        Returns µ_eff/µ_initial (0-1) at DC bias field H (Oersteds).
+        Powder cores only.
+        H_Oe = (N × Idc) / (Le_single_m × 79.577)
+        For stacked toroids: Le_single = Le of ONE core, not S×Le.
+        """
+        d = self.get_material(material_key)
+        if d["type"] != "powder":
+            raise TypeError(f"k_bias only valid for powder cores. '{material_key}' is {d['type']}.")
+        bias = d["dc_bias_rolloff"]
+        mu_pct = float(np.interp(H_Oe, bias["H_Oe"], bias["mu_pct"],
+                                  left=100.0, right=float(bias["mu_pct"][-1])))
+        return mu_pct / 100.0
+
+    def _bilinear_loglog(self, surf: dict, f_kHz: float, B_T: float) -> float:
+        """Log-log bilinear interpolation — exact for Steinmetz power-law data."""
+        f_arr = np.array(surf["f_kHz"],   dtype=float)
+        B_arr = np.array(surf["B_pk_T"],  dtype=float)
+        Pv    = np.array(surf["Pv_kW_m3"],dtype=float)
+        lPv   = np.log(np.maximum(Pv, 1e-30))
+
+        f_c   = float(np.clip(f_kHz, f_arr[0], f_arr[-1]))
+        B_c   = float(np.clip(B_T,   B_arr[0], B_arr[-1]))
+
+        fi = max(0, min(len(f_arr)-2, int(np.searchsorted(f_arr, f_c))-1))
+        bi = max(0, min(len(B_arr)-2, int(np.searchsorted(B_arr, B_c))-1))
+
+        lf_lo = math.log(f_arr[fi]);   lf_hi = math.log(f_arr[fi+1])
+        lB_lo = math.log(B_arr[bi]);   lB_hi = math.log(B_arr[bi+1])
+        tf = (math.log(f_c)-lf_lo)/(lf_hi-lf_lo) if lf_hi!=lf_lo else 0.0
+        tb = (math.log(B_c)-lB_lo)/(lB_hi-lB_lo) if lB_hi!=lB_lo else 0.0
+
+        lv = ((1-tb)*(1-tf)*lPv[bi][fi]   + (1-tb)*tf*lPv[bi][fi+1] +
+                  tb*(1-tf)*lPv[bi+1][fi] +     tb*tf*lPv[bi+1][fi+1])
+        return float(math.exp(lv))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # VALIDATION
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def validate_all(self) -> list[str]:
+        """Validate every loaded material. Returns list of error strings."""
+        all_errors = []
+        for key, d in self._materials.items():
+            if key.startswith("pending:"): continue
+            for e in self.validate_material_dict(d):
+                all_errors.append(f"{key}: {e}")
+        return all_errors
+
+    def validate_material_dict(self, d: dict) -> list[str]:
+        """Validate a single material dict. Returns [] if valid."""
+        from app.magnetics.schema import FERRITE_REQUIRED_FIELDS, POWDER_REQUIRED_FIELDS, BUSINESS_RULES
+        errors = []
+        mat_type = d.get("type", "unknown")
+
+        required = FERRITE_REQUIRED_FIELDS if mat_type=="ferrite" else (
+                   POWDER_REQUIRED_FIELDS  if mat_type=="powder"  else [])
+
+        for path, typ, req, valid_range, desc in required:
+            val = self._get_nested(d, path)
+            if val is None:
+                if req: errors.append(f"Missing required field: {path}")
+                continue
+            if valid_range and isinstance(val, (int, float)):
+                lo, hi = valid_range
+                if not (lo <= val <= hi):
+                    errors.append(f"Field {path}={val} out of range [{lo}, {hi}]")
+
+        for rule_desc, rule_fn in BUSINESS_RULES.get(mat_type, []):
+            try:
+                if not rule_fn(d):
+                    errors.append(f"Business rule failed: {rule_desc}")
+            except Exception as ex:
+                errors.append(f"Business rule error ({rule_desc}): {ex}")
+
+        return errors
+
+    @staticmethod
+    def _get_nested(d: dict, path: str):
+        """Get nested dict value by dot-separated path."""
+        parts = path.split(".")
+        cur = d
+        for p in parts:
+            if not isinstance(cur, dict) or p not in cur:
+                return None
+            cur = cur[p]
+        return cur
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # DATA ADDITION — custom entry, JSON upload, PDF extraction
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def add_custom_material(self, data: dict, commit: bool = False) -> dict:
+        """
+        Add a custom material entered by the designer.
+        If commit=False: saves to pending/ for review (default).
+        If commit=True:  saves to the appropriate supplier directory immediately.
+
+        Returns: {status, errors, key, path, warnings}
+        """
+        errors = self.validate_material_dict(data)
+        if errors and commit:
+            return {"status": "rejected", "errors": errors}
+
+        mat_type = data.get("type", "ferrite")
+        supplier = data.get("supplier", "custom").lower().replace(" ","_")
+        grade    = data.get("grade", data.get("material_line","unknown")).replace("/","_")
+        mu       = data.get("mu_initial","")
+        key      = f"{supplier}_{grade}{'_'+str(mu) if mu else ''}".lower()
+
+        # Fill Pv table from Steinmetz if not provided
+        if mat_type == "ferrite" and "core_loss_surface_25C" in data:
+            if isinstance(data["core_loss_surface_25C"].get("Pv_kW_m3"), str):
+                data = self._fill_loss_table_ferrite(data)
+        if mat_type == "powder" and "core_loss_surface_25C" in data:
+            if isinstance(data["core_loss_surface_25C"].get("Pv_kW_m3"), str):
+                data = self._fill_loss_table_powder(data)
+
+        data["data_quality"] = "custom_entered"
+        data["_added_via"]   = "custom_entry"
+
+        if commit:
+            # Save to supplier directory
+            sup_dir = DATA_ROOT / "magnetic_materials" / supplier
+            sup_dir.mkdir(parents=True, exist_ok=True)
+            path = sup_dir / f"{key}.json"
+        else:
+            # Save to pending for review
+            path = PENDING_DIR / f"{key}.json"
+            data["_pending"] = True
+            data["_pending_errors"] = errors
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        self.reload()
+        pend_key = f"pending:{key}" if not commit else key
+        return {
+            "status":   "pending_review" if not commit else "committed",
+            "key":      pend_key,
+            "path":     str(path),
+            "errors":   errors,
+            "warnings": [f"Field '{e}' has low confidence — please review" for e in errors] if errors else [],
+        }
+
+    def commit_pending(self, pending_key: str, corrections: dict = None) -> dict:
+        """
+        Commit a pending material to the live database after designer review.
+        corrections: dict of {field_path: corrected_value} for flagged fields.
+        """
+        if not pending_key.startswith("pending:"):
+            return {"status": "error", "message": "Not a pending material key"}
+        base_key = pending_key.replace("pending:", "")
+        pending_path = PENDING_DIR / f"{base_key}.json"
+        if not pending_path.exists():
+            return {"status": "error", "message": f"Pending file not found: {base_key}"}
+
+        with open(pending_path) as f:
+            data = json.load(f)
+
+        # Apply corrections from designer review
+        if corrections:
+            for path, val in corrections.items():
+                self._set_nested(data, path, val)
+
+        data.pop("_pending", None)
+        data.pop("_pending_errors", None)
+        data["data_quality"] = "custom_entered"
+
+        errors = self.validate_material_dict(data)
+        if errors:
+            return {"status": "rejected", "errors": errors,
+                    "message": "Validation failed after corrections — please fix these fields"}
+
+        supplier = data.get("supplier","custom").lower().replace(" ","_")
+        grade    = data.get("grade", data.get("material_line","unknown")).replace("/","_")
+        mu       = data.get("mu_initial","")
+        key      = f"{supplier}_{grade}{'_'+str(mu) if mu else ''}".lower()
+
+        sup_dir  = DATA_ROOT / "magnetic_materials" / supplier
+        sup_dir.mkdir(parents=True, exist_ok=True)
+        out_path = sup_dir / f"{key}.json"
+        with open(out_path, "w") as f:
+            json.dump(data, f, indent=2)
+        pending_path.unlink()
+        self.reload()
+        return {"status": "committed", "key": key, "path": str(out_path)}
+
+    def delete_pending(self, pending_key: str) -> dict:
+        """Discard a pending material (after review: rejected)."""
+        base_key = pending_key.replace("pending:", "")
+        path = PENDING_DIR / f"{base_key}.json"
+        if path.exists():
+            path.unlink()
+            self.reload()
+            return {"status": "deleted", "key": pending_key}
+        return {"status": "not_found"}
+
+    @staticmethod
+    def _set_nested(d: dict, path: str, val):
+        parts = path.split(".")
+        cur = d
+        for p in parts[:-1]:
+            cur = cur.setdefault(p, {})
+        cur[parts[-1]] = val
+
+    # ── Auto-fill loss table from Steinmetz ────────────────────────────────
+
+    @staticmethod
+    def _loss_table(f_ax, B_ax, Pv_ref, f_ref, B_ref, alpha, beta):
+        return [[round(Pv_ref*(f/f_ref)**alpha*(B/B_ref)**beta, 5)
+                 for f in f_ax] for B in B_ax]
+
+    def _fill_loss_table_ferrite(self, d: dict) -> dict:
+        s25  = d.get("steinmetz_25C",  {})
+        s100 = d.get("steinmetz_100C", {})
+        F = [10,25,50,70,100,200,300,500,1000]
+        B = [0.005,0.010,0.020,0.050,0.080,0.100,0.150,0.200,0.300,0.400]
+        for key_s, key_c in [("steinmetz_25C","core_loss_surface_25C"),
+                               ("steinmetz_100C","core_loss_surface_100C")]:
+            s = d.get(key_s, {})
+            if s and isinstance(d.get(key_c,{}).get("Pv_kW_m3"), str):
+                d[key_c] = {
+                    "T_C": int(key_c[-3:].replace("C","")),
+                    "f_kHz": F, "B_pk_T": B,
+                    "Pv_kW_m3": self._loss_table(
+                        F, B, s["Pv_ref_kW_m3"], s["f_ref_kHz"],
+                        s["B_ref_T"], s["alpha"], s["beta"]),
+                    "note": "kW/m³. Computed from Steinmetz parameters by MagneticsDB."
+                }
+        return d
+
+    def _fill_loss_table_powder(self, d: dict) -> dict:
+        s = d.get("steinmetz_25C", {})
+        if not s: return d
+        F = [10,25,50,70,100,200,300,500,1000]
+        B = [0.005,0.010,0.020,0.050,0.100,0.150,0.200,0.300,0.500]
+        d["core_loss_surface_25C"] = {
+            "T_C": 25, "f_kHz": F, "B_pk_T": B,
+            "Pv_kW_m3": self._loss_table(
+                F, B, s["Pv_ref_kW_m3"], s["f_ref_kHz"],
+                s["B_ref_T"], s["alpha"], s["beta"]),
+            "note": "kW/m³. Computed from Steinmetz by MagneticsDB."
+        }
+        return d
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # STATUS / SUMMARY
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def status(self) -> dict:
+        live    = [k for k in self._materials if not k.startswith("pending:")]
+        pending = [k for k in self._materials if k.startswith("pending:")]
+        ferrite = [k for k in live if self._materials[k].get("type")=="ferrite"]
+        powder  = [k for k in live if self._materials[k].get("type")=="powder"]
+        return {
+            "total_materials":   len(live),
+            "ferrite_grades":    len(ferrite),
+            "powder_grades":     len(powder),
+            "pending_review":    len(pending),
+            "ferroxcube_cores":  len(self._cores_fc),
+            "tdk_cores":         len(self._cores_tdk),
+            "magnetics_toroids": len(self._cores_mag),
+            "wire_entries":      len(self._wire),
+            "awg_gauges":        len(self._awg),
+            "load_time_ms":      round(self._load_time*1000, 1),
+            "load_errors":       self._load_errors,
+        }
+
+    def list_all(self) -> dict:
+        """Structured summary of all materials — used for HITL grade display."""
+        by_sup: dict = {}
+        for key, d in self._materials.items():
+            if key.startswith("pending:"): continue
+            sup = d.get("supplier", "unknown")
+            if sup not in by_sup: by_sup[sup] = []
+            by_sup[sup].append({
+                "key":     key,
+                "grade":   d.get("grade", d.get("material_line", "")),
+                "mu":      d.get("mu_initial",""),
+                "type":    d.get("type",""),
+                "quality": d.get("data_quality",""),
+                "fsw_range": d.get("fsw_range_kHz",{}),
+                "topo":    d.get("topology_applicability",{}),
+            })
+        return by_sup

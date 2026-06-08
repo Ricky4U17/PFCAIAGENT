@@ -1,0 +1,9 @@
+# Steinmetz coefficients — verified vs material bulletins
+"# Formula: P = a * B^b * f^c  (P mW/cm3, B Tesla, f kHz)"
+# Source: Magnetics material bulletins + 2025 catalog pp.108-109
+mu,a,b,c,Pv_100kHz_100mT_mWcm3
+26,363.07,2.015,1.236,1039.9
+40,538.04,2.015,1.19,1246.9
+60,348.97,2.015,1.236,999.5
+90,348.97,2.015,1.236,999.5
+125,348.97,2.015,1.236,999.5

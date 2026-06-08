@@ -1,0 +1,62 @@
+type,series,designation,strands,strand_dia_mm,OD_mm,Cu_area_mm2,R_per_m_20C_ohm,max_freq_kHz,skin_limited_to_kHz,note
+litz,TRW-F-L,0.05x100,100,0.05,0.59,0.1963,0.087599,6971.0,6971.0,'ultra-fine. fsw>500kHz only. Very fragile.'
+litz,TRW-F-L,0.05x200,200,0.05,0.83,0.3927,0.043799,6971.0,6971.0,''
+litz,TRW-F-L,0.05x400,400,0.05,1.18,0.7854,0.0219,6971.0,6971.0,'reasonable Cu area for 5A+ at high freq'
+litz,TRW-F-L,0.071x100,100,0.071,0.83,0.3959,0.043443,3457.0,3457.0,'fine strand. 100-500kHz range.'
+litz,TRW-F-L,0.071x200,200,0.071,1.18,0.7918,0.021722,3457.0,3457.0,''
+litz,TRW-F-L,0.071x400,400,0.071,1.67,1.5837,0.010861,3457.0,3457.0,'good for 5-8A at 200kHz'
+litz,TRW-F-L,0.1x50,50,0.1,0.83,0.3927,0.043799,1743.0,1743.0,'standard Litz. fsw=50-200kHz.'
+litz,TRW-F-L,0.1x100,100,0.1,1.18,0.7854,0.0219,1743.0,1743.0,''
+litz,TRW-F-L,0.1x150,150,0.1,1.44,1.1781,0.0146,1743.0,1743.0,''
+litz,TRW-F-L,0.1x200,200,0.1,1.66,1.5708,0.01095,1743.0,1743.0,'REFERENCE DESIGN — single bundle of 0.1x200'
+litz,TRW-F-L,0.1x400,400,0.1,2.35,3.1416,0.005475,1743.0,1743.0,'equivalent to 2x(0.1x200) in parallel'
+litz,TRW-F-L,0.1x600,600,0.1,2.88,4.7124,0.00365,1743.0,1743.0,'large bundle — toroid winding may be tight'
+litz,TRW-F-L,0.1x800,800,0.1,3.33,6.2832,0.002737,1743.0,1743.0,''
+litz,TRW-F-L,0.15x50,50,0.15,1.25,0.8836,0.019466,775.0,775.0,'moderate strand. 20-100kHz.'
+litz,TRW-F-L,0.15x100,100,0.15,1.76,1.7671,0.009733,775.0,775.0,''
+litz,TRW-F-L,0.15x200,200,0.15,2.49,3.5343,0.004867,775.0,775.0,'good 70kHz option — 3.5mm² Cu area'
+litz,TRW-F-L,0.15x300,300,0.15,3.06,5.3014,0.003244,775.0,775.0,'high current 70kHz'
+litz,TRW-F-L,0.2x50,50,0.2,1.66,1.5708,0.01095,436.0,436.0,'coarser strand. 10-100kHz.'
+litz,TRW-F-L,0.2x100,100,0.2,2.35,3.1416,0.005475,436.0,436.0,''
+litz,TRW-F-L,0.2x150,150,0.2,2.88,4.7124,0.00365,436.0,436.0,'good current density at 70kHz'
+litz,TRW-F-L,0.2x200,200,0.2,3.33,6.2832,0.002737,436.0,436.0,''
+litz,TRW-F-L,0.25x30,30,0.25,1.61,1.4726,0.01168,279.0,279.0,'max strand dia for 70kHz without AC loss penalty'
+litz,TRW-F-L,0.25x42,42,0.25,1.91,2.0617,0.008343,279.0,279.0,'auto-selected in Step 6 for this design'
+litz,TRW-F-L,0.25x60,60,0.25,2.28,2.9452,0.00584,279.0,279.0,''
+litz,TRW-F-L,0.25x100,100,0.25,2.94,4.9087,0.003504,279.0,279.0,'high current 70kHz'
+litz,Rupalit,VS0.1x100,100,0.1,1.18,0.7854,0.0219,1743.0,1743.0,'Rupalit standard Litz. Equivalent to TRW 0.1x100.'
+litz,Rupalit,VS0.1x200,200,0.1,1.66,1.5708,0.01095,1743.0,1743.0,'Rupalit 0.1x200 — alternative to TRW reference spec'
+litz,Rupalit,VS0.1x400,400,0.1,2.35,3.1416,0.005475,1743.0,1743.0,''
+litz,Rupalit,VS0.15x200,200,0.15,2.49,3.5343,0.004867,775.0,775.0,''
+litz,Pack,400x0.1,400,0.1,2.35,3.1416,0.005475,1743.0,1743.0,'Pack Wire. Equivalent to TRW 0.1x400.'
+litz,Pack,200x0.1,200,0.1,1.66,1.5708,0.01095,1743.0,1743.0,''
+litz,dual-bundle,2x(0.1x100),200,0.1,1.18 per bundle,1.5708,0.01095,1743.0,1743.0,'2 parallel bundles of 0.1x100. Easier to wind on toroid than single 0.1x200.'
+litz,dual-bundle,2x(0.1x200),400,0.1,1.66 per bundle,3.1416,0.005475,1743.0,1743.0,'REFERENCE WINDING STRATEGY — Step 13.6. R=0.006315 Ohm/m per combined bundle.'
+litz,dual-bundle,2x(0.1x400),800,0.1,2.35 per bundle,6.2832,0.002737,1743.0,1743.0,'Very high current — may exceed window fill limit on toroid'
+litz,dual-bundle,2x(0.15x100),200,0.15,1.76 per bundle,3.5342,0.004867,775.0,775.0,'Bifilar 0.15x100 — good for 70kHz moderate current'
+litz,dual-bundle,2x(0.25x30),60,0.25,1.61 per bundle,2.9452,0.00584,279.0,279.0,'Bifilar 0.25x30 — alternative to single 0.25x42'
+tiw,Furukawa-TIW,TIW-AWG30,1,0.254,0.381,0.0507,0.339446,270.1,270.1,'TIW AWG30. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=0.25A.'
+tiw,Rubadue,TIW-AWG30-R,1,0.254,0.381,0.0507,0.339446,270.1,270.1,"Rubadue equivalent of Furukawa TIW AWG30. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG28,1,0.321,0.482,0.0809,0.212534,169.1,169.1,'TIW AWG28. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=0.4A.'
+tiw,Rubadue,TIW-AWG28-R,1,0.321,0.482,0.0809,0.212534,169.1,169.1,"Rubadue equivalent of Furukawa TIW AWG28. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG26,1,0.404,0.606,0.1282,0.134176,106.8,106.8,'TIW AWG26. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=0.64A.'
+tiw,Rubadue,TIW-AWG26-R,1,0.404,0.606,0.1282,0.134176,106.8,106.8,"Rubadue equivalent of Furukawa TIW AWG26. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG24,1,0.511,0.766,0.2051,0.083868,66.7,66.7,'TIW AWG24. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=1.03A.'
+tiw,Rubadue,TIW-AWG24-R,1,0.511,0.766,0.2051,0.083868,66.7,66.7,"Rubadue equivalent of Furukawa TIW AWG24. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG22,1,0.644,0.966,0.3257,0.052804,42.0,42.0,'TIW AWG22. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=1.63A.'
+tiw,Rubadue,TIW-AWG22-R,1,0.644,0.966,0.3257,0.052804,42.0,42.0,"Rubadue equivalent of Furukawa TIW AWG22. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG20,1,0.812,1.218,0.5178,0.033214,26.4,26.4,'TIW AWG20. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=2.59A.'
+tiw,Rubadue,TIW-AWG20-R,1,0.812,1.218,0.5178,0.033214,26.4,26.4,"Rubadue equivalent of Furukawa TIW AWG20. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG18,1,1.024,1.536,0.8235,0.020885,16.6,16.6,'TIW AWG18. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=4.12A.'
+tiw,Rubadue,TIW-AWG18-R,1,1.024,1.536,0.8235,0.020885,16.6,16.6,"Rubadue equivalent of Furukawa TIW AWG18. Same electrical spec."
+tiw,Furukawa-TIW,TIW-AWG16,1,1.291,1.936,1.309,0.01314,10.5,10.5,'TIW AWG16. Triple insulated wire. Replaces Kapton tape on Medical toroids. 3000Vrms withstand. Max I@J=5A/mm²=6.54A.'
+tiw,Rubadue,TIW-AWG16-R,1,1.291,1.936,1.309,0.01314,10.5,10.5,"Rubadue equivalent of Furukawa TIW AWG16. Same electrical spec."
+solid-enamel,Standard,MEW-AWG30,1,0.254,0.264,0.0507,0.339446,270.1,270.1,"Magnet wire AWG30. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG28,1,0.321,0.334,0.0809,0.212534,169.1,169.1,"Magnet wire AWG28. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG26,1,0.404,0.42,0.1282,0.134176,106.8,106.8,"Magnet wire AWG26. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG24,1,0.511,0.531,0.2051,0.083868,66.7,66.7,"Magnet wire AWG24. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG22,1,0.644,0.67,0.3257,0.052804,42.0,42.0,"Magnet wire AWG22. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG20,1,0.812,0.844,0.5178,0.033214,26.4,26.4,"Magnet wire AWG20. Single enamel. For toroid winding when TIW not required."
+solid-enamel,Standard,MEW-AWG14,1,1.6277,1.68,2.0809,0.00827,7.0,7.0,"Magnet wire AWG14. Single enamel. High Cu area; skin-limited at 7kHz. Use for low-fsw or sub-skin PFC."
+solid-enamel,Standard,MEW-AWG16,1,1.2908,1.34,1.3087,0.01314,10.0,10.0,"Magnet wire AWG16. Single enamel. Skin-limited at 10kHz. Suitable for PFC bifilar at moderate switching."
+solid-enamel,Standard,MEW-AWG18,1,1.024,1.065,0.8235,0.020885,16.6,16.6,"Magnet wire AWG18. Single enamel. For toroid winding when TIW not required."

@@ -1,0 +1,55 @@
+MAGNETICS POWDER CORE MATERIAL BULLETINS
+=========================================
+All PDFs stored locally for offline reference and coefficient verification.
+
+CORE LOSS COEFFICIENTS EXTRACTED (P = a*B^b*f^c, mW/cm3, T, kHz):
+
+Edge-Powder-Cores-Bulletin-2023-EN.pdf
+  Toroid: 14µ(212.96,2.263,1.390) 19µ(200.53,2.263,1.369) 26µ(207.90,2.263,1.322)
+          40µ(150.40,2.263,1.369) 60µ(156.18,2.263,1.321) 75µ(121.47,2.263,1.403)
+          90µ+125µ(481.77,2.263,1.139)
+  DC Bias formula: mu/mui = 1/(a+b*H^c), coefficients per permeability (see bulletin)
+
+High-DC-Bias-Edge-Bulletin-EN.pdf
+  SEPARATE PRODUCT (part no suffix S01). 20% better DC bias than standard Edge.
+  Toroid: 26µ(83.23,2.106,1.520)  60µ(82.64,2.106,1.444)
+  DC Bias formula: mu/mui = 1/(a+b*H^c)
+    26µ: a=0.01, b=3.23E-13, c=3.887
+    60µ: a=0.01, b=9.51E-12, c=3.820
+
+High-DC-Bias-XFlux-Bulletin-EN.pdf
+  SEPARATE PRODUCT (part no suffix S01). 20% better DC bias than standard XFlux.
+  Toroid: 26µ(443.53,2.015,1.312) 40µ(442.15,2.015,1.283) 60µ(447.34,2.015,1.272)
+
+XFlux-Ultra-Bulletin.pdf
+  20% lower loss than standard XFlux.
+  Toroid: 26µ(363.07,2.015,1.236) 40µ(538.04,2.015,1.190) 60µ(348.97,2.015,1.236)
+  DC Bias: 26µ(0.01,2.699E-9,2.454) 40µ(0.01,1.843E-8,2.358) 60µ(0.01,4.483E-9,2.815)
+
+Kool-Mu-HF-Bulletin-2023-EN.pdf
+  Toroid 26µ: a=26.41, b=1.602, c=1.394 (single model)
+  Toroid 40µ,60µ: <500kHz a=10.45,b=1.602,c=1.547 | >500kHz a=58.95,b=1.602,c=1.187
+
+Kool-Mµ-Ultra-Bulletin.pdf
+  Toroid 26µ,40µ: <100kHz a=79.79,b=1.602,c=1.000 | >100kHz a=11.83,b=1.602,c=1.414
+  Toroid 60µ:     <100kHz a=67.08,b=1.602,c=1.000 | >100kHz a=9.50,b=1.602,c=1.425
+
+Kool-Mu-MAX-Bulletin.pdf
+  Toroid 14µ,19µ: a=144.49, b=2.072, c=1.379
+  Toroid 26µ-90µ: a=113.53, b=2.072, c=1.379
+
+Modeling-Maximum-Core-Utilization.pdf
+  Technical bulletin on energy density optimization (H_bar, Delta_B framework)
+  EDGE has 63% advantage in Delta_B over High Flux at 100kHz
+  EDGE can store 2.4x more energy/volume than High Flux
+
+Powder-Core-BH-Loops.pdf
+  BH loop data for powder cores (Kool Mu 125µ example)
+  Remanence ~12.5mT, Hc ~1 Oe (very narrow loop)
+  BH loop essentially DC at frequencies up to 400Hz
+
+NOTES:
+- All "High DC Bias" products are separate part numbers (suffix S01/A7)
+- XFlux Ultra available in 26µ, 40µ, 60µ only
+- Kool Mu Ultra available in 26µ, 40µ, 60µ toroids only
+- Kool Mu HF available in 26µ, 40µ, 60µ only

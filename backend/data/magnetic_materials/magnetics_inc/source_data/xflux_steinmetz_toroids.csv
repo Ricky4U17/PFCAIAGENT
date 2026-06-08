@@ -1,0 +1,12 @@
+# Steinmetz core loss coefficients for powder toroids
+"# Formula: P = a * B^b * f^c  (P mW/cm3, B Tesla, f kHz)"
+"# Source: Magnetics Inc 2025 Powder Core Catalog, pages 108-109"
+# Extracted: 2025-05-30
+mu,a,b,c,Pv_100kHz_100mT_mWcm3
+19,509.27,2.015,1.194,1202.1
+26,581.54,2.015,1.194,1372.7
+40,630.0,2.015,1.194,1487.1
+60,557.31,2.015,1.194,1315.5
+75,542.77,2.015,1.194,1281.2
+90,542.77,2.015,1.194,1281.2
+125,533.08,2.015,1.194,1258.3
