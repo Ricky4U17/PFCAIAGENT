@@ -407,6 +407,7 @@ def magnetics_template(material_type: str, supplier: str = "CustomSupplier",
 import warnings as _w; _w.filterwarnings("ignore")
 from app.mode_b.step7_magnetic_calc import (
     design_one_core, rank_candidates, DEFAULT_OPS, DesignResult)
+from app.mode_b.calculations import build_design_ops_table
 from app.mode_b.step8_time_domain import run_step8_full
 from dataclasses import asdict as _asdict
 import math as _math, numpy as _np
@@ -712,21 +713,36 @@ def step7_run_sizing(req: _SizingReq):
         fsw_Hz = float(tsi.get("recommended_frequency_hz", 70000))
         Vout   = float(intake.get("application",{}).get("output_bus_voltage_v", 393))
         Pout_lo= float(intake.get("application",{}).get("output_power_w_low_line", 1700))
+        Pout_hi= float(intake.get("application",{}).get("output_power_w_high_line", 3600))
         Vin_lo = float(intake.get("application",{}).get("vin_rms_min", 90))
+        Vin_hi = float(intake.get("application",{}).get("vin_rms_max", 264))
         N_ph   = int(state.get("selected_channels", 2))
         T_amb  = float(intake.get("thermal",{}).get("ambient_temp_c_max", 50))
         T_spot = float(intake.get("thermal",{}).get("hotspot_limit_c", 110))
         dT_bgt = T_spot - T_amb
         app_cls= intake.get("compliance",{}).get("application_class", "Industrial")
+        r_input= float(tsi.get("default_crest_ripple_ratio", 0.095)) or 0.095
+
+        # Build the design-derived 9-point OPS table — [Vin_rms, Pout, eta, PF,
+        # Iph_rms] — via the SAME canonical_ops_table -> step2_input_params ->
+        # step4_inductance -> step5_phase_rms chain the documentation chapters
+        # use for the "accurate" Table 3.2.4a/b. Replaces the stale, hardcoded
+        # DEFAULT_OPS (copied from a different reference design) so Table 3.4.1
+        # / 3.6.1 always agree with Table 3.2.4 — single source of truth.
+        try:
+            OPS, _L_phi_doc = build_design_ops_table(
+                Vin_lo, Vin_hi, Pout_lo, Pout_hi, Vout, fsw_Hz, r_input)
+        except Exception:
+            OPS = DEFAULT_OPS
 
         # Compute per-phase electrical params at worst-case (90 Vac low line)
-        eta  = float(DEFAULT_OPS[0, 2])
-        PF   = float(DEFAULT_OPS[0, 3])
+        eta  = float(OPS[0, 2])
+        PF   = float(OPS[0, 3])
         Pin  = Pout_lo / eta
         Vin_pk = Vin_lo * _math.sqrt(2)
         Ipk_line = _math.sqrt(2) * Pin / (Vin_lo * PF)
         Ipk_A    = Ipk_line / N_ph + float(tsi.get("dIL_pp_A", 5.161)) / 2
-        Irms_A   = float(tsi.get("Iph_rms_A", float(DEFAULT_OPS[0,4])))
+        Irms_A   = float(tsi.get("Iph_rms_A", float(OPS[0, 4])))
         IL_HF    = Irms_A * 0.114      # approximate HF ripple fraction
         dIL_pp   = float(tsi.get("dIL_pp_A", 5.161))
 
@@ -802,7 +818,7 @@ def step7_run_sizing(req: _SizingReq):
                     Irms_A=Irms_A, IL_HF_rms_A=IL_HF,
                     dIL_pp_A=dIL_pp, fsw_Hz=fsw_Hz,
                     wire=wire, N_phases=N_ph,
-                    OPS=DEFAULT_OPS, T_amb_C=T_amb,
+                    OPS=OPS, T_amb_C=T_amb,
                     dT_budget_C=dT_bgt, app_class=app_cls,
                     FFcu_limit=FFcu_lim,
                     mounting=getattr(req, 'mounting', 'horizontal'),

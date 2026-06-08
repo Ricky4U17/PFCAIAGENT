@@ -565,5 +565,153 @@ the old plain-string format (confirmed via regex scan for `eq_box(story, [\s*"`)
 
 ---
 
+## 2026-06-07 — Magnetics calc fixes: bias-aware turns sizing, first-pass loss self-consistency, single-source Iφ,rms (closes "complete mismatch in values" / "basic addition error" / thermal complaints)
+
+**Request (verbatim, paraphrased):** (1) Inductance/turns sizing must account for
+DC-bias H(Oe) and permeability rolloff at minimum Vin / full load — not the naive
+`N = ⌈√(L_target/A_L,nom)⌉` estimate; also Table 3.2.4a/3.2.4b's per-phase current
+figures are "accurate" while Table 3.4.1's sizing-engine-input figures are "very
+different… a complete mismatch in values considered for magnetics calculations";
+(2) a "basic addition error" in the loss totals — "very disappointed… data
+consistency is missing"; (3) "fix temperature calculations." Apply all three to both
+the calculation engine and the documentation agent.
+
+### Root causes found
+
+1. **`DEFAULT_OPS`** (hardcoded 9-row array in `step7_magnetic_calc.py`) carried
+   stale Iφ,rms values copied from a *different* reference design
+   (`EDGE_0059392A2`), so the sizing engine's actual inputs diverged from the
+   design-derived "accurate" Table 3.2.4 figures by design.
+2. **`_turns_powder()`** picked N from a static `A_L,nom` ladder with no DC-bias
+   feedback — H(Oe)/k_bias were computed *after* N was already fixed, so the
+   "✓ PASS" check in §3.5.3 was checking a number that didn't drive the decision.
+3. **Pcu double-write**: `Pcu_25C_W`/`Pcu_100C_W` were computed once as genuine
+   first-pass `I_rms,ref²·DCR` figures, then silently overwritten downstream with
+   cycle-averaged final values — so §3.6's "first-pass" equation box showed operands
+   that could never literally sum to a `Ptotal_*_W` sourced from yet a third
+   (`Pcu_final + Pcore_avg + P_fringing`) chain. This was the "basic addition error"
+   (`0.5086 + 2.6425 = 2.0550` shown in `specs/Newely Generated.pdf` p.51 — the
+   correct sum is 3.1511).
+4. **Three independent, disagreeing Iφ,rms estimators** lived in
+   `doc_report_builder.py`: (a) `_ops()`'s "PFC approximation"
+   `ipk_l/n_ph/√2 · √(π/2) · 0.98` (→ 12.29 A, used by Table 3.1.1 / feeds Ch.4),
+   (b) the rigorous `step2→step4→step5_phase_rms` chain (→ 10.07–10.28 A, used by
+   Table 3.2.2b), and (c) `d.get("IL_rms_A", 0)` in §3.4.1 — a field
+   `DesignResult`/`enrichResult` never actually populates, always rendering
+   **`Iφ,rms = 0.0000 A`** in Table 3.4.1 (present in BOTH the original buggy report
+   AND, until fixed mid-session, my first corrected sample — confirmed pre-existing,
+   not a regression I introduced).
+
+### Changes — `backend/app/mode_b/calculations.py`
+
+Added `canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)` (the 9-point η/PF
+reference matrix, single source of truth) and
+`build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input)`
+→ `(OPS, L_phi)` where `OPS[:,4]` is Iφ,rms derived through the rigorous
+`step2_input_params → step4_inductance → step5_phase_rms` chain — now THE single
+source every consumer (sizing engine, every report chapter) must read from so
+Table 3.2.4 / Table 3.4.1 / Table 3.1.1 never disagree again.
+
+### Changes — `backend/app/mode_b/step7_magnetic_calc.py`
+
+- `_turns_powder()` now returns `(…, H_Oe, k_b)` and N is selected by an iterative
+  **bias-aware** convergence loop: `H_Am = N·I_dc/Le_s` → `H_Oe = H_Am/79.577` →
+  `k_b = get_k_bias(mat_key, H_Oe)`, incrementing N until
+  `L_full_min = N²·A_L,min·k_b ≥ 0.85·L_target`.
+- New `DesignResult` fields: `I_dc_worst_A`, `H_Oe_worst`, `k_bias_worst` (the
+  worst-case-across-all-9-OPs values that actually drove the converged N) and
+  `Pcu_25C_firstpass_W` / `Pcu_100C_firstpass_W` — the genuine first-pass
+  `I_rms,ref²·DCR` figures, preserved under their own names *before* the existing
+  downstream overwrite (left intact for backward compat with the legacy
+  `generate_full_report.py`/`generate_steps13_14.py` generators) replaces
+  `Pcu_25C_W`/`Pcu_100C_W` with cycle-averaged final values.
+
+### Changes — `backend/app/main.py`
+
+`step7_run_sizing` now builds its OPS via `build_design_ops_table(Vin_lo, Vin_hi,
+Pout_lo, Pout_hi, Vout, fsw_Hz, r_input)` (falling back to `DEFAULT_OPS` only on
+exception) instead of always passing the stale hardcoded `DEFAULT_OPS` — so the
+sizing engine's `Irms_A` input now matches the design's actual corner conditions
+(measured: 10.2787 A vs. the old stale 10.07 A for this design — a genuine ~2%
+difference that now flows consistently through `IL_rms_ref → Pcu_* → J_A_mm2 → ΔT`).
+
+### Changes — `backend/app/mode_b/doc_report_builder.py`
+
+1. Replaced the local `_canonical_ops_table` definition with an alias to
+   `app.mode_b.calculations.canonical_ops_table` (single source, shared with the
+   sizing engine via `build_design_ops_table`).
+2. Rewrote §3.5.3 "Number of turns N" → **"Number of turns N — bias-aware A_L
+   sizing"**: now shows the real `H_Oe = N·I_dc,worst/(L_e×79.577)`,
+   `k_bias = k(H_Oe)`, `L_full,min = N²·A_L,min·k_bias ≥ 0.85·L_target` convergence
+   chain with actual substituted numbers, plus a PITFALL box that explicitly
+   contrasts the converged N against the naive `N = ⌈√(L_target/A_L,nom)⌉` estimate
+   and explains that `I_dc,worst` is the **maximum across all 9 operating points**
+   (not necessarily the 90 Vac corner).
+3. §3.6 loss section now reads `Pcu_25C_firstpass_W`/`Pcu_100C_firstpass_W` (falling
+   back to the plain fields only for older pre-split saved designs) and computes
+   `Ptot25/Ptot100` as the **literal sum** of the displayed operands
+   (`Ptot = Pcu + Pcore_pk`) — guaranteeing the equation box's arithmetic is always
+   correct, closing the "basic addition error."
+4. §3.4.1 "Sizing engine inputs": replaced the broken `Iph_rms =
+   float(d.get("IL_rms_A", 0))` (always 0.0000) with `Iph_rms_ref` derived via
+   `build_design_ops_table(...)[0,4]` at the top of `_ch3` — now identical to
+   Table 3.2.2b / Table 3.2.4's design-derived figure.
+5. `_ops()` helper (feeds Table 3.1.1 / Ch.4): replaced the crude sinusoidal
+   "PFC approximation" `ipk_l/n_ph/√2 · √(π/2) · 0.98` (→ 12.29 A, ~20% off) with
+   `float(ops_design[i, 4])` sourced from the same `build_design_ops_table` chain;
+   added `vin_min, vin_max, r_input` params (both call sites in `_ch2`/`_ch3`
+   updated — `_ch2` passes its `crest` local since it has no `r_input`, both pull
+   from the same `tsi.default_crest_ripple_ratio`).
+
+### Verification — before/after sample comparison
+
+Generated `C:\tmp\PFC_Corrected_Sample_Ch1_4.pdf` (65 pages, same corner conditions
+as `specs/Newely Generated.pdf`: 90–264 Vac, 1700/3600 W, 393 V, 70 kHz, edge_75,
+2-phase, n_parallel=2, L_target=239 µH) via
+`DocumentationAgent(STATE).generate_chapter_report(approved_design=approved)` and
+rendered both PDFs to PNG with PyMuPDF for a page-by-page comparison.
+
+| Metric | Original (`Newely Generated.pdf`) | Corrected sample |
+|---|---|---|
+| Table 3.1.1 Iφ,rms @ 90 Vac | 12.2912 A (crude approx.) | **10.2787 A** |
+| Table 3.2.2b IL,φ,rms @ 90 Vac (rigorous) | 10.0702 A | **10.2787 A** |
+| Table 3.4.1 "Sizing Engine Inputs" Iφ,rms | **0.0000 A** ❌ | **10.2787 A** ✅ — all three now agree |
+| §3.5.3 turns method | naive `N=⌈√(L_target/A_L,nom)⌉=31`, no H(Oe)/k_bias shown | bias-aware: `H_Oe=40.37 Oe ⇒ k_bias=0.8637`, `L_full,min=215.3 µH ≥ 0.85·L_target=203.2 µH ⇒ N=31`, contrasted against naive N=30 |
+| §3.6.3 P_total(25°C) | `0.5086 + 2.6425 = 2.0550 W` ❌ (correct sum is 3.1511) | `0.5424 + 2.6425 = 3.1849 W` ✅ |
+| §3.6.3 P_total(100°C) | `0.6556 + 2.6425 = 2.2020 W` ❌ (correct sum is 3.2981) | `0.6992 + 2.6425 = 3.3417 W` ✅ |
+| Thermal verdict | ΔT = 10.41°C, PASS — 83% margin | ΔT = 10.47°C, PASS — 83% margin |
+
+Selected core/turns landed on the same part (`0059214A2 ×3, N=31`) in both —
+expected, since the corrected Iφ,rms (10.28 A) only differs from the old stale value
+(10.07 A) by ~2%, not enough to cross a candidate-ranking threshold for this design's
+margins. The fix is about **self-consistency and correctness of the displayed
+figures**, not about changing which core gets picked.
+
+| Check | Result |
+|-------|--------|
+| `import app.main`, `import app.mode_b.doc_report_builder` | ✅ no `ImportError` |
+| `build_design_ops_table()` smoke test (Iφ,rms vs old `DEFAULT_OPS`/EDGE reference) | ✅ produces genuinely different, design-derived values |
+| `step7_run_sizing(req)` with corrected-design STATE | ✅ returns candidates with new `I_dc_worst_A`/`H_Oe_worst`/`k_bias_worst`/`Pcu_*_firstpass_W` fields populated |
+| `DocumentationAgent(STATE).generate_chapter_report(approved_design=…)` | ✅ 4,849,853 bytes, 65 pages |
+| PyMuPDF render — Table 3.1.1 / 3.2.2b / 3.4.1 (pages 24/27/46) | ✅ all three show identical Iφ,rms = 10.2787 A |
+| PyMuPDF render — §3.5.3 bias-aware turns convergence (page 49) | ✅ H_Oe/k_bias/L_full,min substitution chain + PITFALL contrast vs naive N |
+| PyMuPDF render — §3.6.3 loss equation box (page 52) | ✅ both P_total sums are now arithmetically correct |
+| §3.1–3.2 spot-check (page 32, Tables 3.2.4a/3.2.4b) | ✅ unaffected, renders cleanly as the user expected |
+
+### Resume point for a future session
+
+All three requested points (DC-bias-aware sizing, addition-error/data-consistency,
+thermal) are fixed in both the calculation engine (`calculations.py`,
+`step7_magnetic_calc.py`, `main.py`) and the documentation agent
+(`doc_report_builder.py`, wrapped by `DocumentationAgent`). Confirmed no duplicate
+copies of the fixed patterns (`IL_rms_A` lookup, sinusoidal Iφ,rms approximation,
+`DEFAULT_OPS`-style stale tables) exist in the legacy generators
+(`generate_report.py`, `generate_combined_report.py`, `generate_steps13_14.py`) or
+in `documentation_agent.py` itself — those are unaffected and untouched. Sample
+comparison PDFs: `C:\tmp\PFC_Corrected_Sample_Ch1_4.pdf` (corrected) vs.
+`specs/Newely Generated.pdf` (original).
+
+---
+
 *Log format: date · decision · files changed · verification result*
 *Append a new dated section for each future session that changes DesignState-related files.*

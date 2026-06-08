@@ -121,6 +121,9 @@ class DesignResult:
     kreq_max:       float = 0.0
     AT_design:      float = 0.0   # N × Iavg@crest at 90 Vac
     H_Oe_design:    float = 0.0   # H at design point
+    I_dc_worst_A:   float = 0.0   # worst-case per-phase DC bias current driving N convergence (powder)
+    H_Oe_worst:     float = 0.0   # H(Oe) = 0.4*pi*N*I_dc_worst/Le at the converged N — sets k_bias rolloff
+    k_bias_worst:   float = 0.0   # permeability retention k(H_Oe_worst) used in the L_full,min >= 0.85*Ltarget check
 
     # Gap (ferrite only)
     lg_mm:          float = 0.0   # total gap length
@@ -156,6 +159,9 @@ class DesignResult:
     Rac_Rdc:        float = 1.0   # Dowell factor (ferrite only)
     Pcu_25C_W:      float = 0.0
     Pcu_100C_W:     float = 0.0
+    Pcu_25C_firstpass_W:  float = 0.0   # genuine first-pass I_rms,ref^2*DCR estimate (90 Vac) —
+    Pcu_100C_firstpass_W: float = 0.0   # preserved separately so Sec 3.6 ("first-pass") can show
+                                        # operands that literally sum to its displayed P_total
     P_fringing_W:   float = 0.0   # Rogowski fringing (ferrite only)
     Pcore_W:        float = 0.0   # half-cycle averaged core loss with iGSE F(D), at T_core
     Pcore_crest_W:  float = 0.0   # crest-only core loss (legacy reference point)
@@ -438,8 +444,11 @@ def design_one_core(
             vin_op,pout_op,eta_op,pf_op = float(op_row[0]),float(op_row[1]),float(op_row[2]),float(op_row[3])
             iavg_op = (math.sqrt(2)*pout_op/eta_op)/(vin_op*pf_op) / max(N_phases,1)
             if iavg_op > I_dc_worst: I_dc_worst = iavg_op
-        N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max = \
+        N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe_worst, k_bias_worst = \
             _turns_powder(core, material_key, L_target_H, I_dc_worst, Le_s)
+        res.I_dc_worst_A = round(I_dc_worst, 4)
+        res.H_Oe_worst   = round(H_Oe_worst, 3)
+        res.k_bias_worst = round(k_bias_worst, 4)
         res.lg_mm = 0.0
     else:
         N, lg_mm, Bpk_converged = _turns_ferrite(core, material_key, L_target_H, Ipk_A)
@@ -601,6 +610,13 @@ def design_one_core(
         IL_rms_ref**2 * DCR_25  + Ihf_ref**2 * DCR_25  * Rac_Rdc, 4)
     res.Pcu_100C_W = round(
         IL_rms_ref**2 * DCR_100 + Ihf_ref**2 * DCR_100 * Rac_Rdc, 4)
+    # Preserve these genuine first-pass figures under their own names — they get
+    # overwritten below with the cycle-averaged final Pcu (used by Ptotal_*_W and
+    # the legacy report generators). Sec 3.6 of the documentation reports the
+    # "first-pass" methodology and must show operands that literally sum to its
+    # displayed P_total — it reads these *_firstpass_W fields, not the overwritten ones.
+    res.Pcu_25C_firstpass_W  = res.Pcu_25C_W
+    res.Pcu_100C_firstpass_W = res.Pcu_100C_W
 
     # iGSE F(D) correction at the 90 Vac design crest
     Fd_crest  = _Fd(Dpk90)
@@ -824,7 +840,7 @@ def _turns_powder(core: dict, mat_key: str, L_H: float,
     kreq_min = L_H / L0_min if L0_min > 0 else 0
     kreq_max = L_H / L0_max if L0_max > 0 else 0
 
-    return N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max
+    return N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe, k_b
 
 
 def _turns_ferrite(core: dict, mat_key: str, L_H: float, Ipk: float) -> tuple:

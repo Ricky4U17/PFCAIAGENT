@@ -97,3 +97,48 @@ def gen_waveforms(Vin_pk_v: float, Iin_pk_v: float,
 
     rA = rip(phA, Dt); rB = rip(phB, Dt)
     return t * 1000, iavg + rA, iavg + rB, rA, rB, rA + rB, dIL, iavg
+
+
+def canonical_ops_table(vin_min: float, vin_max: float,
+                        pout_lo: float, pout_hi: float) -> np.ndarray:
+    """Nine-point eta/PF reference matrix scaled to this design's Vin/Pout
+    corners. Single source of truth for the operating-point grid — both the
+    sizing engine and every report chapter must build their OPS arrays from
+    this same table (directly or via build_design_ops_table) so that derived
+    figures such as Iph_rms never diverge between Table 3.2.4 and Table 3.4.1."""
+    return np.array([
+        [vin_min,  pout_lo,  0.945, 0.9987],
+        [110,      pout_lo,  0.955, 0.9986],
+        [120,      pout_lo,  0.965, 0.9985],
+        [132,      pout_lo,  0.975, 0.9980],
+        [180,      pout_hi,  0.965, 0.9889],
+        [200,      pout_hi,  0.975, 0.9884],
+        [220,      pout_hi,  0.985, 0.9790],
+        [230,      pout_hi,  0.988, 0.9789],
+        [vin_max,  pout_hi,  0.990, 0.9520],
+    ], dtype=float)
+
+
+def build_design_ops_table(vin_min: float, vin_max: float, pout_lo: float, pout_hi: float,
+                           vout: float, fsw: float, r_input: float):
+    """Nine-point [Vin_rms, Pout, eta, PF, Iph_rms] operating matrix derived
+    from THIS design's actual corner conditions, via the same rigorous
+    step2_input_params -> step4_inductance -> step5_phase_rms chain that
+    produces the 'accurate' per-phase RMS figures in Table 3.2.4. The sizing
+    engine (design_one_core, via step7_run_sizing) and the documentation
+    chapters must both source their OPS array from this function so that
+    turns/loss/thermal results and the report tables always agree.
+
+    Returns (OPS, L_phi) where OPS columns are [Vin_rms, Pout, eta, PF, Iph_rms]
+    and L_phi is the low-line target inductance (H) used to derive Iph_rms.
+    """
+    ops_ref = canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    s2 = step2_input_params(vout, ops_ref)
+    s4 = step4_inductance(s2, r_input, fsw, vout)
+    L_phi = round(s4["L_calc"] * 1e6 / 5) * 5 * 1e-6
+    n9 = len(s2["Vin_rms"])
+    iph_rms = np.zeros(n9)
+    for i in range(n9):
+        iph_rms[i], _, _, _ = step5_phase_rms(s2["Vin_pk"][i], s2["Iin_pk"][i], L_phi, fsw, vout)
+    OPS = np.column_stack([s2["Vin_rms"], s2["Pout"], s2["eta"], s2["PF"], iph_rms])
+    return OPS, L_phi

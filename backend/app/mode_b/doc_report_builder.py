@@ -37,7 +37,8 @@ from reportlab.platypus import (
 )
 
 from app.mode_b.calculations import (K_of_D, step2_input_params, step4_inductance,
-                                      step5_phase_rms, step7_8_worst_case, gen_waveforms)
+                                      step5_phase_rms, step7_8_worst_case, gen_waveforms,
+                                      canonical_ops_table, build_design_ops_table)
 
 PAGE_W, PAGE_H = A4
 LM = RM = 20 * mm
@@ -370,8 +371,13 @@ def _mpl_img(fig, width_mm=165):
 # (see _canonical_ops_table / Section 1.2.4, Table 1.2.2) — NOT from a single
 # fixed value — so every Pin/Ipk/Iph figure in the sweep matches the η/PF
 # estimated for that operating point.
-def _ops(vout, pout_lo, pout_hi, n_ph, fsw):
-    ops_ref = _canonical_ops_table(VAC_LIST[0], VAC_LIST[-1], pout_lo, pout_hi)
+def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIST[-1], r_input=0.095):
+    ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    # Per-phase RMS through the SAME step2 -> step4 -> step5 chain that produces
+    # Table 3.2.2b / Table 3.4.1's "accurate" Iφ,rms — replaces the old sinusoidal
+    # "PFC approximation" (ipk_l/nph/√2 · √(π/2) · 0.98) that diverged from the
+    # rigorous figures by ~20% and was the root of the Table 3.1.1 vs 3.2.x mismatch.
+    ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input)
     rows = []
     for i, vin in enumerate(VAC_LIST):
         pout   = pout_hi if vin >= 180 else pout_lo
@@ -382,8 +388,7 @@ def _ops(vout, pout_lo, pout_hi, n_ph, fsw):
         D      = max(0.001, 1 - vin_pk / vout)
         KD     = (2*D-1)/D if D >= 0.5 else (1-2*D)/(1-D)
         ipk_l  = math.sqrt(2) * pin / (vin * PF)
-        # per-phase RMS — PFC approximation
-        iph_rms = ipk_l / n_ph / math.sqrt(2) * math.sqrt(math.pi/2) * 0.98
+        iph_rms = float(ops_design[i, 4])
         iph_pk  = ipk_l / n_ph
         dIL     = vin_pk * D / (fsw * pout / eta / (vin * PF) / n_ph * math.sqrt(2) * 0.001)
         rows.append({"Vin": vin, "Vout": vout, "Pout": pout, "Vin_pk": vin_pk,
@@ -393,23 +398,13 @@ def _ops(vout, pout_lo, pout_hi, n_ph, fsw):
 
 
 # ── Canonical efficiency / power-factor table ────────────────────────────────
-# Estimated based on available design data — nine-point operating matrix
-# interpolated from the specified low-line/high-line corner conditions.
-# This is the SINGLE source of η/PF values for the whole report; Chapter 1 §1.2
-# reproduces it for reference and every later chapter (2, 3, …) derives its
-# per-point η/PF figures from this same table — never from a re-typed literal.
-def _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi):
-    return np.array([
-        [vin_min,  pout_lo,  0.945, 0.9987],
-        [110,      pout_lo,  0.955, 0.9986],
-        [120,      pout_lo,  0.965, 0.9985],
-        [132,      pout_lo,  0.975, 0.9980],
-        [180,      pout_hi,  0.965, 0.9889],
-        [200,      pout_hi,  0.975, 0.9884],
-        [220,      pout_hi,  0.985, 0.9790],
-        [230,      pout_hi,  0.988, 0.9789],
-        [vin_max,  pout_hi,  0.990, 0.9520],
-    ], dtype=float)
+# Moved to app.mode_b.calculations.canonical_ops_table — it is now the SINGLE
+# source of η/PF values for the whole report AND for the sizing engine
+# (step7_run_sizing builds its OPS via build_design_ops_table, which wraps this
+# same table). Chapter 1 §1.2 reproduces it for reference and every later
+# chapter (2, 3, …) derives its per-point η/PF figures from it — never from a
+# re-typed literal. Local alias kept so existing call sites below need no churn.
+_canonical_ops_table = canonical_ops_table
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHAPTER 1 — SPECIFICATIONS   (per PFC_Report_Structure_Agreement §3.1, Ch.1)
@@ -1065,7 +1060,7 @@ def _ch2(story, state):
         "K(D) = 1 means no cancellation (same as single-phase). "
         "For 2-phase interleaving: K(D) = |2D−1|/max(D,1−D).", 2)
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw)
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest)
     kd_rows = []
     for op in ops_all:
         kd_rows.append([
@@ -1155,6 +1150,15 @@ def _ch3(story, state, d):
     # table is always the vin_min low-line corner.
     _ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
     eta      = float(_ops_ref[0, 2]); PF = float(_ops_ref[0, 3])
+    # Per-phase RMS current at the 90 Vac reference corner — derived through the
+    # SAME step2 -> step4 -> step5 chain as Table 3.2.4 and the sizing engine
+    # (build_design_ops_table; step7_run_sizing builds its OPS the same way), so
+    # Table 3.4.1's "Sizing Engine Inputs" always agrees with Table 3.2.4's
+    # "accurate" per-phase RMS figures instead of reading a field
+    # (IL_rms_A / Iph_rms_A) that DesignResult never actually populates.
+    _ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi,
+                                             vout, fsw, r_input)
+    Iph_rms_ref = float(_ops_design[0, 4])
 
     # DesignResult fields
     N        = int(d.get("N", 0))
@@ -1189,11 +1193,21 @@ def _ch3(story, state, d):
     DCR25    = float(d.get("DCR_25C_mOhm", 0)) or (
                Rppm * Cu_len / n_par * 1000 if Rppm else 0)
     DCR100   = float(d.get("DCR_100C_mOhm", 0)) or DCR25*(1+ALPHA_CU*80)
-    Pcu25    = float(d.get("Pcu_25C_W",  0))
-    Pcu100   = float(d.get("Pcu_100C_W", 0))
+    # Sec 3.6 documents the FIRST-PASS methodology (I_rms,ref^2*DCR copper loss +
+    # peak-point Steinmetz core loss) — it must read the preserved first-pass Pcu
+    # figures, not Pcu_25C_W/Pcu_100C_W (which the engine overwrites downstream
+    # with cycle-averaged final values for Ptotal_*_W / the legacy generators).
+    # Falling back to the (possibly overwritten) plain fields only covers older
+    # saved designs that pre-date the *_firstpass_W split.
+    Pcu25    = float(d.get("Pcu_25C_firstpass_W",  0)) or float(d.get("Pcu_25C_W",  0))
+    Pcu100   = float(d.get("Pcu_100C_firstpass_W", 0)) or float(d.get("Pcu_100C_W", 0))
     Pcore_pk = float(d.get("Pcore_crest_W", 0)) or float(d.get("Pcore_W", 0))
-    Ptot25   = float(d.get("Ptotal_25C_W",  0)) or Pcu25  + Pcore_pk
-    Ptot100  = float(d.get("Ptotal_100C_W", 0)) or Pcu100 + Pcore_pk
+    # P_total is the LITERAL sum of the operands shown in the Sec 3.6.3 equation
+    # box — guarantees the displayed arithmetic is always correct (no more
+    # "0.5086 + 2.6425 = 2.0550" mismatches against a Ptotal_*_W sourced from a
+    # different cycle-averaged computation chain).
+    Ptot25   = Pcu25  + Pcore_pk
+    Ptot100  = Pcu100 + Pcore_pk
     dT       = float(d.get("dT_rise_C", 0))
     dT_bgt   = float(d.get("dT_budget_C", t_hot-t_amb))
     Bac_pk   = float(d.get("Bac_pk_T", 0))
@@ -1203,7 +1217,7 @@ def _ch3(story, state, d):
     L0_nom   = float(d.get("L0_nom_uH", 0)) or round(N**2*AL_nom*1e-9*1e6,1)
     L0_min   = float(d.get("L0_min_uH", 0)) or round(N**2*AL_min*1e-9*1e6,1)
     L0_max   = float(d.get("L0_max_uH", 0)) or round(N**2*AL_max*1e-9*1e6,1)
-    Iph_rms  = float(d.get("IL_rms_A", 0))
+    Iph_rms  = Iph_rms_ref
     J_Amm2   = float(d.get("J_A_mm2", 0))
     wound_OD = float(d.get("wound_OD_actual_mm", OD_mm))
     wound_HT = float(d.get("wound_HT_actual_mm", HT_mm*stacks))
@@ -1229,7 +1243,7 @@ def _ch3(story, state, d):
     rho_100     = 1.72e-8 * (1 + ALPHA_CU*80)
     skin_mm     = math.sqrt(rho_100/(math.pi*fsw*4*math.pi*1e-7))*1e3
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw)
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input)
 
     chapter_splash(story, 3, "PFC Inductor Sizing",
         "What inductance and winding do we need?",
@@ -2092,18 +2106,38 @@ def _ch3(story, state, d):
         f"Strands: {n_str}  |  Bundle OD: {wire_OD:.3f} mm  |  "
         f"n<sub>par</sub> = {n_par} conductors per turn.", 3)
 
-    sub_h(story, "3.5.3", "Number of turns N — from A_L sizing", 3)
+    sub_h(story, "3.5.3", "Number of turns N — bias-aware A_L sizing", 3)
+    I_dc_worst   = float(d.get("I_dc_worst_A", 0)) or iavg_90
+    Le_s         = Le_mm / 1000.0
+    H_Oe_worst   = float(d.get("H_Oe_worst", 0)) or (
+        round((N * I_dc_worst / Le_s) / 79.577, 3) if N and Le_s else 0)
+    k_bias_worst = float(d.get("k_bias_worst", 0))
+    L_full_min_uH = N**2 * AL_min * k_bias_worst * 1e-3 if k_bias_worst else 0
+    N_naive = math.ceil(math.sqrt(L_tgt*1e-6/(AL_nom*1e-9))) if AL_nom else 0
     eq_box(story, [
-        r"N = \left\lceil \sqrt{\dfrac{L_{target}}{A_{L,total,nom}}} \right\rceil",
-        rf"N = \left\lceil \sqrt{{\dfrac{{{L_tgt*1e-6:.6f}}}{{{AL_nom:.1f}\times10^{{-9}}}}}} \right\rceil = {N}\ \mathrm{{turns}}",
-    ], heading="Turns count from A_L sizing", ch=3)
+        r"H_{Oe} = \dfrac{N \, I_{dc,worst}}{L_e \times 79.577}\ ,\quad"
+        r"k_{bias} = k(H_{Oe})\ ,\quad"
+        r"L_{full,min} = N^2 A_{L,min}\, k_{bias}",
+        rf"H_{{Oe}} = \dfrac{{{N} \times {I_dc_worst:.3f}}}{{{Le_s:.4f} \times 79.577}} = {H_Oe_worst:.2f}\ \mathrm{{Oe}}"
+        rf"\ \Rightarrow\ k_{{bias}} = {k_bias_worst:.4f}",
+        rf"L_{{full,min}} = {N}^2 \times {AL_min:.1f}\times10^{{-9}} \times {k_bias_worst:.4f} = {L_full_min_uH:.1f}\ \mu\mathrm{{H}}"
+        rf"\ \geq\ 0.85\, L_{{target}} = {0.85*L_tgt:.1f}\ \mu\mathrm{{H}}\ \Rightarrow\ N = {N}\ \mathrm{{turns}}",
+    ], heading="Bias-aware turns convergence — N increments until the AL,min-derated "
+               "inductance clears 85% of target under worst-case DC bias", ch=3)
 
     annotation(story, "PITFALL",
-        "N is calculated from A<sub>L,nom</sub>. At A<sub>L,min</sub>, "
-        f"L<sub>0,min</sub> = {L0_min:.1f} µH — verify this still exceeds "
-        f"L<sub>target</sub> = {L_tgt:.0f} µH. "
-        f"L<sub>0,min</sub> = {L0_min:.1f} µH "
-        + ("✓ PASS" if L0_min >= L_tgt else "✗ FAIL — increase N by 1"), 3)
+        f"N is selected by the iterative <b>bias-aware</b> convergence loop, not "
+        f"by the naive estimate N = ⌈√(L<sub>target</sub>/A<sub>L,nom</sub>)⌉ = {N_naive} "
+        f"(which ignores DC-bias permeability rolloff). The worst-case per-phase DC "
+        f"bias I<sub>dc,worst</sub> = {I_dc_worst:.3f} A is the <b>maximum across all "
+        f"9 operating points</b> — the highest line/load corner sets the largest "
+        f"ampere-turn product, not necessarily the 90 V<sub>ac</sub> low line. This "
+        f"drives H<sub>Oe</sub> = {H_Oe_worst:.2f} Oe and permeability retention "
+        f"k<sub>bias</sub> = {k_bias_worst:.4f}; N is incremented until the "
+        f"A<sub>L,min</sub>-derated retained inductance "
+        f"L<sub>full,min</sub> = {L_full_min_uH:.1f} µH clears "
+        f"0.85 × L<sub>target</sub> = {0.85*L_tgt:.1f} µH. "
+        + ("✓ PASS" if (L_full_min_uH >= 0.85*L_tgt and k_bias_worst) else "— see Section 3.4 (bias retention)"), 3)
 
     sub_h(story, "3.5.4", "No-load inductance L0 — A_L tolerance band", 3)
     eq_box(story, [
