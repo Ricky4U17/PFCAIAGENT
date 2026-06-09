@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { api, docReportStatus } from './api/client'
+import { api, docReportStatus, docGenerateReport } from './api/client'
 import type { Candidate, ModeScore, ControllerStrategy, MiniDefaults, DocReportStatus } from './api/client'
 import { TopBar, ErrBanner, Spinner, C } from './components/ui'
 import { Stepper } from './components/Stepper'
@@ -155,7 +155,8 @@ export default function App() {
   const handleGenerateReport = async () => {
     setS(p=>({...p,reportLoading:true,reportReady:false,reportBytes:null})); setError(null)
     try {
-      const bytes = await api.generateReport(s.graphState)
+      const blob  = await docGenerateReport({ state: s.graphState as Record<string, unknown> })
+      const bytes = await blob.arrayBuffer()
       setS(p=>({...p,reportLoading:false,reportReady:true,reportBytes:bytes}))
     } catch(e) {
       setS(p=>({...p,reportLoading:false})); setError(`Report generation failed: ${(e as Error).message}`)

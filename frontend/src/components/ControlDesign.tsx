@@ -16,7 +16,7 @@
 import React, { useRef, useCallback, useState } from 'react'
 import { C, Btn } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { step15GenerateReport } from '../api/client'
+import { docGenerateReport } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -111,7 +111,7 @@ export const ControlDesign: React.FC<Props> = ({
     setRptLoad(true); setRptError(null)
     try {
       const jsState = await getJsDesignState()
-      const blob = await step15GenerateReport({
+      const blob = await docGenerateReport({
         state:           confirmedState as Record<string, unknown>,
         approved_design: approvedInductorDesign as Record<string, unknown>,
         step15_result:   approvedCapacitorDesign

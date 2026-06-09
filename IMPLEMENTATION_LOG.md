@@ -1131,5 +1131,90 @@ it would only matter for a project configured at a non-393 V bus.
 
 ---
 
+## Session 2026-06-08 (cont'd #3) — Fix 5: Review page KPI / canvas / audit discrepancy
+
+### Root Cause
+
+The Review page (`ReviewMagnetics.tsx` → `review_magnetics.html` iframe) was computing L0,
+Lfull, Pcore, Ptotal, H, k, Bac,pk, DCR, ΔT, Bmax using the JS studio's **analytical
+Steinmetz model with sinusoidal-current assumption**. The Magnetic Material Result screen
+shows **Python-rigorous iGSE half-cycle integration** values. Natural divergence, especially
+for Pcore/Ptotal (iGSE vs single-point Steinmetz) and Lfull (kbias from DB table vs single
+empirical formula calibrated to EDGE 75µ only).
+
+### Fix
+
+Added step 13 to the inject script in `ReviewMagnetics.tsx`. New approach:
+
+1. **TS variable declarations** (after `ffcu`, before currentMap computation):
+   - `pyL0_uH`, `pyLfull_uH`, `pyH_Oe`, `pyK`, `pyBacPk_T`, `pyDCR_100_mOhm`,
+     `pyPcore_W`, `pyPtot_100_W`, `pyDT_C`, `pyBmax_T` — all read from `result`
+     with `?? 0` fallbacks.
+
+2. **Inject step 13** IIFE (inserted between step 12's `renderAll()` call and `})();`):
+   - Declares same values as JS variables (embedded via TS template substitution at
+     page-render time)
+   - `applyPyOverrides()`: overrides all 8 KPI card textContents; repaints the 3D model
+     canvas info box (erases draw3D's box, redraws with Python Lfull/Ptotal/Bmax/DCR/ΔT);
+     patches audit table rows 5 (Lfull), 6 (Bmax), 7 (Ptotal), 10 (dT)
+   - Calls `applyPyOverrides()` immediately after renderAll() for first paint
+   - Registers `setTimeout(applyPyOverrides, 0)` listeners on all input elements
+     (N, stacks, tempC, explode, vin, Icrest, Vout, fsw, lossAnchor, boreID, bundleOD,
+     woundOD, holeID, htBuild, preset, genReview, refreshSummary, frontBtn, isoBtn,
+     topBtn, resetBtn) so Python values persist after any user interaction that triggers
+     the original IIFE's renderAll()
+
+### Files changed
+
+- `frontend/src/components/ReviewMagnetics.tsx` — added pyXxx TS variable block +
+  inject step 13 IIFE
+
+### Verification
+
+- TypeScript: `npx tsc --noEmit` — no errors ✅
+
+---
+
+## Session 2026-06-08 (cont'd #4) — Fix 5 extended: remaining review page discrepancies
+
+Expanded `applyPyOverrides()` in inject step 13 to cover every remaining surface that
+still showed JS-approximated values after Fix 5's initial scope.
+
+### Added overrides (D–G)
+
+**D. Overview table `overviewTbl` row 7** — "Estimated ΔT" cell replaced with `pyDT`.
+
+**E. Overview status banners** — The three health-check `<div>` elements (Inductance target
+met/missed, Flux level, Estimated temperature rise) were rebuilt with Python Lfull, Bmax,
+and ΔT. SA re-computed from live DOM input values (same formula as JS `compute()`). Also
+uses `window.cfg.satT` for saturation margin.
+
+**F. Waveform metrics table `waveTbl`** — "Peak H(t)" and "Peak Bmax(t)" rows replaced with
+Python H and Bmax. Peak Pcore/Pcu/Ptotal rows left as JS instantaneous peaks (Python only
+provides cycle-averaged values — no mapping possible).
+
+**G. Summary textarea `summaryOut`**:
+- Inductance line → pyL0, pyLfull, pyH, pyK
+- Flux line → pyBac, pyBmax, saturation margin from `window.cfg.satT`
+- Loss line → pyPcore, pyPcu (pyPtot − pyPcore), pyPtot, uncertainty band (±5–20% of pyPcore)
+- Build line → ΔT value replaced in-place; copper length / fill / current density left as JS
+  (those are geometric calculations, no discrepancy)
+- Recommended talking points → re-evaluated with Python thresholds (okL: Lfull≥235 µH,
+  pyBHigh: Bmax>0.45 T, pyTHigh: ΔT>35 °C)
+
+### Not changed (intentionally JS-analytical)
+- Sweep plots and sweep table Pcore/Ptotal columns — `a_effective` is already calibrated
+  from Python loss data; remaining model difference (Steinmetz vs iGSE) is documented in
+  the sidebar as an analytical approximation. Python has no multi-Vin sweep data.
+- Waveform canvases (H(t), B(t), Pcore(t) waveform shapes) — visualization/exploration only.
+
+### Files changed
+- `frontend/src/components/ReviewMagnetics.tsx` — step 13 IIFE expanded
+
+### Verification
+- TypeScript: `npx tsc --noEmit` — no errors ✅
+
+---
+
 *Log format: date · decision · files changed · verification result*
 *Append a new dated section for each future session that changes DesignState-related files.*

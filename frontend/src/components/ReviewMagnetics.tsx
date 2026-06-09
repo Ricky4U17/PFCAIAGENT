@@ -25,7 +25,7 @@
 import React, { useMemo, useState } from 'react'
 import rawHtml from '../assets/review_magnetics.html?raw'
 import { C, Btn } from './ui'
-import { step7GenerateReport } from '../api/client'
+import { docGenerateReport } from '../api/client'
 
 // OPS table: [Vin_rms, eta, PF] — standard 9-point operating matrix
 // Low-line rows use Pout_low; high-line rows use Pout_high
@@ -107,6 +107,21 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const partNumber  = result.part_number    ?? '—'
     const wireLabel   = result.wire_designation ?? '—'
     const ffcu        = Math.round((result.FFcu ?? 0) * 100)
+
+    // ── Python-authoritative values for KPI / canvas / audit overrides ─────
+    // The JS studio computes L, Pcore, Ptotal, dT with analytical approximations
+    // (single-point Steinmetz, sinusoidal I). These are the rigorous values from
+    // the Python sizing engine — always shown instead of JS-computed numbers.
+    const pyL0_uH       = result.L0_nom_uH         ?? 0
+    const pyLfull_uH    = result.L_full_load_uH     ?? 0   // enrichResult: L_vs_Vin @ 90V
+    const pyH_Oe        = result.H_Oe_design        ?? 0
+    const pyK           = result.kbias ?? (result.kreq_nom ?? 1.0)
+    const pyBacPk_T     = result.Bac_pk_T           ?? 0
+    const pyDCR_100_mOhm = result.DCR_100C_mOhm     ?? 0
+    const pyPcore_W     = result.Pcore_W             ?? 0
+    const pyPtot_100_W  = result.Ptotal_100C_W       ?? 0
+    const pyDT_C        = result.dT_rise_C           ?? 0
+    const pyBmax_T      = result.Bmax_FL_T           ?? 0
 
     // ── Compute currentMap from actual OPS table ───────────────────────────
     // Icrest_phase = √2 × (Pout/eta) / (Vin × PF) / n_phases
@@ -356,6 +371,188 @@ export const ReviewMagnetics: React.FC<Props> = ({
 
   /* 12 ── Re-render with all corrected values ───────────────────────── */
   renderAll();
+
+  /* 13 ── Override ALL JS-computed values with Python-authoritative ones ──
+     Covers: KPI cards, canvas overlay, audit table, overview table ΔT,
+     overview status health-check banners, waveform-metrics table H/Bmax,
+     and the review-summary textarea (Inductance/Flux/Loss/Build lines +
+     recommended talking points re-evaluated with Python thresholds).      */
+  (function () {
+    var pyL0    = ${pyL0_uH.toFixed(4)};
+    var pyLfull = ${pyLfull_uH.toFixed(4)};
+    var pyH     = ${pyH_Oe.toFixed(4)};
+    var pyK     = ${pyK.toFixed(6)};
+    var pyBac   = ${pyBacPk_T.toFixed(6)};
+    var pyDCR   = ${pyDCR_100_mOhm.toFixed(4)};
+    var pyPcore = ${pyPcore_W.toFixed(6)};
+    var pyPtot  = ${pyPtot_100_W.toFixed(6)};
+    var pyDT    = ${pyDT_C.toFixed(4)};
+    var pyBmax  = ${pyBmax_T.toFixed(6)};
+
+    function applyPyOverrides() {
+      var d = document;
+      function setEl(id, txt) { var e = d.getElementById(id); if (e) e.textContent = txt; }
+
+      /* A ── KPI cards ──────────────────────────────────────────────────── */
+      setEl('kpiL0',    pyL0.toFixed(1)    + ' µH');
+      setEl('kpiLfull', pyLfull.toFixed(1) + ' µH');
+      setEl('kpiH',     pyH.toFixed(1)     + ' Oe');
+      setEl('kpiK',     pyK.toFixed(3));
+      setEl('kpiBpk',   pyBac.toFixed(3)   + ' T');
+      setEl('kpiDCR',   pyDCR.toFixed(1)   + ' mΩ');
+      setEl('kpiPcore', pyPcore.toFixed(2) + ' W');
+      setEl('kpiPtot',  pyPtot.toFixed(2)  + ' W');
+
+      /* B ── Canvas info overlay ────────────────────────────────────────── */
+      var cvs = d.getElementById('model');
+      if (cvs) {
+        var ctx = cvs.getContext('2d');
+        var curN   = +(d.getElementById('N')      || {value: ${N}}).value;
+        var curStk = +(d.getElementById('stacks') || {value: ${stacks}}).value;
+        var curT   = +(d.getElementById('tempC')  || {value: 100}).value;
+        ctx.fillStyle = 'rgba(15,23,42,.78)';
+        ctx.fillRect(14, 14, 392, 112);
+        ctx.strokeStyle = 'rgba(148,163,184,.18)';
+        ctx.strokeRect(14, 14, 392, 112);
+        ctx.fillStyle = '#e5e7eb'; ctx.font = '14px Segoe UI';
+        ctx.fillText('N = ' + curN + '   stacks = ' + curStk + '   temp = ' + curT + '°C', 26, 38);
+        ctx.fillText('Lfull = ' + pyLfull.toFixed(1) + ' µH   Ptotal = ' + pyPtot.toFixed(2) + ' W', 26, 62);
+        ctx.fillText('Bmax ≈ ' + pyBmax.toFixed(3) + ' T   DCR = ' + pyDCR.toFixed(1) + ' mΩ   ΔT ≈ ' + pyDT.toFixed(1) + '°C', 26, 86);
+        ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI';
+        var cg = window.cfg || {};
+        var cOD = (cg.coreOD_mm || 40.9).toFixed(1), cID = (cg.coreID_mm || 21.3).toFixed(1);
+        var cH  = (curStk * (cg.coreHeight_mm || 0)).toFixed(1), cLbl = cg.coreLabel || '';
+        ctx.fillText('OD ' + cOD + ' · ID ' + cID + ' · stack height ' + cH + ' mm' +
+          (cLbl ? ' · ' + cLbl : '') + ' · winding fades when exploded', 26, 108);
+      }
+
+      /* C ── Audit table (Design Review Summary tab) ────────────────────── */
+      var auTbl = d.getElementById('auditTbl');
+      if (auTbl) {
+        var auRows = auTbl.querySelectorAll('tr');
+        var auPatch = {5: pyLfull.toFixed(1) + ' µH', 6: pyBmax.toFixed(3) + ' T',
+                       7: pyPtot.toFixed(2)  + ' W', 10: pyDT.toFixed(1)   + ' °C'};
+        Object.keys(auPatch).forEach(function (idx) {
+          var r = auRows[+idx]; if (!r) return;
+          var tds = r.querySelectorAll('td'); if (tds[1]) tds[1].textContent = auPatch[idx];
+        });
+      }
+
+      /* D ── Overview table — Estimated ΔT row (index 7) ──────────────── */
+      var ovTbl = d.getElementById('overviewTbl');
+      if (ovTbl) {
+        var ovR = ovTbl.querySelectorAll('tr')[7];
+        if (ovR) { var tds7 = ovR.querySelectorAll('td'); if (tds7[1]) tds7[1].textContent = pyDT.toFixed(1) + ' °C'; }
+      }
+
+      /* E ── Overview status — Lfull / Bmax / ΔT health-check banners ──── */
+      var osi = d.getElementById('overviewStatus');
+      if (osi) {
+        var cg2 = window.cfg || {};
+        var satT2 = cg2.satT || 1.0;
+        var okL2 = pyLfull >= 235, okB2 = pyBmax < 0.5, okT2 = pyDT < 40;
+        var sm2  = (satT2 / Math.max(pyBmax, 1e-9)).toFixed(2);
+        var cStk2 = +(d.getElementById('stacks') || {value: ${stacks}}).value;
+        var htBEl = d.getElementById('htBuild'), wODEl = d.getElementById('woundOD'), hlEl = d.getElementById('holeID');
+        var htB2  = +(htBEl ? htBEl.value  : ${htBuild.toFixed(1)});
+        var odW2  = +(wODEl ? wODEl.value  : ${woundOD.toFixed(1)});
+        var hlID2 = +(hlEl  ? hlEl.value   : ${holeID.toFixed(1)});
+        var oh2   = cStk2 * (cg2.coreHeight_mm || 17.89) + htB2;
+        var sa2   = (Math.PI*odW2*oh2 + 2*(Math.PI/4)*(odW2*odW2 - hlID2*hlID2) + Math.PI*hlID2*oh2) / 100;
+        osi.querySelectorAll('div').forEach(function (dv) {
+          var t = dv.textContent;
+          if (t.indexOf('Inductance target') >= 0) {
+            dv.innerHTML = '<span class="' + (okL2?'ok':'warn') + '">' +
+              (okL2?'Inductance target met':'Inductance target missed') +
+              '</span> — Lfull = ' + pyLfull.toFixed(1) + ' µH versus 235 µH target.';
+          } else if (t.indexOf('Flux level') >= 0) {
+            dv.innerHTML = '<span class="' + (okB2?'ok':'warn') + '">' +
+              (okB2?'Flux level looks comfortable':'Flux level is getting high') +
+              '</span> — Bmax ≈ ' + pyBmax.toFixed(3) + ' T (≈' + sm2 + '× to ' + satT2.toFixed(2) + ' T).';
+          } else if (t.indexOf('temperature rise') >= 0) {
+            dv.innerHTML = '<span class="' + (okT2?'ok':'warn') + '">' +
+              (okT2?'Estimated temperature rise looks manageable':'Estimated temperature rise is getting high') +
+              '</span> — ΔT ≈ ' + pyDT.toFixed(1) + ' °C (SA ' + sa2.toFixed(0) + ' cm², ' + cStk2 + '-stack).';
+          }
+        });
+      }
+
+      /* F ── Waveform metrics table — Peak H and Peak Bmax rows ─────────── */
+      var wvTbl = d.getElementById('waveTbl');
+      if (wvTbl) {
+        wvTbl.querySelectorAll('tr').forEach(function (r) {
+          var tds = r.querySelectorAll('td'); if (!tds[0]) return;
+          var lbl = tds[0].textContent.trim();
+          if (lbl === 'Peak H(t)'    && tds[1]) tds[1].textContent = pyH.toFixed(1)    + ' Oe';
+          if (lbl === 'Peak Bmax(t)' && tds[1]) tds[1].textContent = pyBmax.toFixed(3) + ' T';
+        });
+      }
+
+      /* G ── Summary textarea — replace Python-authoritative lines ──────── */
+      var su = d.getElementById('summaryOut');
+      if (su && su.value) {
+        var pyPcu2  = pyPtot - pyPcore;
+        var pyUncLo = (pyPcu2 + 1.05*pyPcore).toFixed(2);
+        var pyUncHi = (pyPcu2 + 1.20*pyPcore).toFixed(2);
+        var satT3   = (window.cfg && window.cfg.satT) ? window.cfg.satT : 1.0;
+        var sm3     = (satT3 / Math.max(pyBmax, 1e-9)).toFixed(2);
+        var okL3 = pyLfull >= 235, pyBHigh = pyBmax > 0.45, pyTHigh = pyDT > 35;
+        var lines = su.value.split('\n'), recIdx = -1;
+        for (var si = 0; si < lines.length; si++) {
+          var ln = lines[si];
+          if (ln.indexOf('Inductance:') >= 0) {
+            lines[si] = 'Inductance: L0 = ' + pyL0.toFixed(1) + ' µH, Lfull = ' + pyLfull.toFixed(1) +
+              ' µH, Hcrest = ' + pyH.toFixed(1) + ' Oe, retention = ' + pyK.toFixed(3) + '.';
+          } else if (ln.indexOf('Flux:') >= 0) {
+            lines[si] = 'Flux: Bac,pk@crest = ' + pyBac.toFixed(3) + ' T, Bmax ≈ ' + pyBmax.toFixed(3) +
+              ' T, estimated saturation margin ≈ ' + sm3 + '× to ' + satT3.toFixed(2) + ' T reference.';
+          } else if (ln.indexOf('Loss:') >= 0) {
+            lines[si] = 'Loss: Pcore = ' + pyPcore.toFixed(2) + ' W, Pcu ≈ ' + pyPcu2.toFixed(2) +
+              ' W, Ptotal = ' + pyPtot.toFixed(2) + ' W, total-loss uncertainty range = ' +
+              pyUncLo + ' to ' + pyUncHi + ' W (analytical uncertainty, not simulation-backed).';
+          } else if (ln.indexOf('Build:') >= 0) {
+            // Keep copper length, fill, current density (geometric, accurate);
+            // replace only estimated ΔT which needs Python value
+            var dtTag = 'estimated ΔT = ';
+            var di = ln.indexOf(dtTag);
+            if (di >= 0) {
+              var di2 = ln.indexOf('°C', di + dtTag.length);
+              if (di2 >= 0) lines[si] = ln.substring(0, di) + dtTag + pyDT.toFixed(1) + ln.substring(di2 - 1);
+            }
+          } else if (ln.trim() === 'Recommended talking points:') {
+            recIdx = si;
+          }
+        }
+        // Re-evaluate recommended talking points with Python thresholds
+        if (recIdx >= 0) {
+          var recs = [];
+          if (!okL3)   recs.push('Increase turns or stack count to recover inductance margin.');
+          if (pyBHigh) recs.push('Review flux margin; consider more turns or more core area.');
+          if (pyTHigh) recs.push('Review copper loss or airflow; DCR dominates temperature rise.');
+          if (recs.length === 0) recs.push('Current point looks healthy within the analytical model.');
+          lines = lines.slice(0, recIdx + 1).concat(
+            recs.map(function (t, ix) { return '  ' + (ix + 1) + '. ' + t; })
+          );
+        }
+        su.value = lines.join('\n');
+      }
+    }
+
+    applyPyOverrides();
+
+    // Re-apply after any input change that triggers renderAll via the original IIFE listeners.
+    // setTimeout 0 ensures we run after renderAll() has already updated the JS-computed values.
+    var _reApply = function () { setTimeout(applyPyOverrides, 0); };
+    ['N','stacks','tempC','explode','vin','Icrest','Vout','fsw',
+     'lossAnchor','boreID','bundleOD','woundOD','holeID','htBuild'].forEach(function (id) {
+      var el = document.getElementById(id); if (el) el.addEventListener('input', _reApply);
+    });
+    var presetEl2 = document.getElementById('preset');
+    if (presetEl2) presetEl2.addEventListener('change', _reApply);
+    ['genReview','refreshSummary','frontBtn','isoBtn','topBtn','resetBtn'].forEach(function (id) {
+      var el = document.getElementById(id); if (el) el.addEventListener('click', _reApply);
+    });
+  })();
 })();
 </script>
 `
@@ -380,7 +577,7 @@ export const ReviewMagnetics: React.FC<Props> = ({
     if (!result || !confirmedState) return
     setRptLoad(true); setRptError(null)
     try {
-      const blob = await step7GenerateReport({
+      const blob = await docGenerateReport({
         state:           confirmedState as Record<string, unknown>,
         approved_design: {
           ...result,

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, SecHead, Btn, ErrBanner, Spinner, C } from './ui'
 import {
   step15CapacitorDesign,
-  step15GenerateReport,
+  docGenerateReport,
   step15HvcapFilterOptions, step15HvcapFilterCaps, step15HvcapCapTable,
   step15CapLifetime,
 } from '../api/client'
@@ -236,7 +236,7 @@ export const Step15Capacitor: React.FC<Props> = ({
         temp_rating_C:    chosenPart.temp_rating_C  ?? 85,
       } : null
 
-      const blob = await step15GenerateReport({
+      const blob = await docGenerateReport({
         state: confirmedState, approved_design: approvedDesign,
         step15_result: {
           ...design,

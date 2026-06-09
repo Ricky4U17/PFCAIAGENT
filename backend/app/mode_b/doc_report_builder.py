@@ -625,7 +625,12 @@ def _ch2(story, state):
     vin_max = float(raw_ap.get("vin_rms_max", 264))
     fsw     = float(tsi.recommended_frequency_hz  if tsi else 70000) or 70000
     crest   = float(tsi.default_crest_ripple_ratio if tsi else 0.20) or 0.20
-    L_tgt   = float(tsi.confirmed_L_uH if tsi else 240) or 240
+    # Use the ROUNDED selected inductance (confirmed_L_uH_sel) — the value the
+    # sizing engine actually consumed (main.py: step7_run_sizing reads
+    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what §3.2's
+    # rigorous chain independently rounds L_phi_calc to, so ΔI_L,pp computed
+    # here now matches Table 3.2.4a's dIL_crest[0] instead of drifting off it.
+    L_tgt   = float((tsi.confirmed_L_uH_sel or tsi.confirmed_L_uH) if tsi else 240) or 240
 
     vripple = float(raw_ap.get("bus_voltage_ripple_pk_pk_v", 20))
     f_line  = float(raw_ap.get("nominal_line_frequency_hz", 60))
@@ -1143,7 +1148,12 @@ def _ch3(story, state, d):
     t_hot   = float(raw_th.get("hotspot_limit_c", 110))
     n_ph    = int(ds.selected_channels or 2)
     fsw     = float(tsi.recommended_frequency_hz  if tsi else 70000) or 70000
-    L_tgt   = float(tsi.confirmed_L_uH if tsi else 240) or 240
+    # Use the ROUNDED selected inductance (confirmed_L_uH_sel) — the value the
+    # sizing engine actually consumed (main.py: step7_run_sizing reads
+    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what §3.2's
+    # rigorous chain independently rounds L_phi_calc to, so ΔI_L,pp computed
+    # here now matches Table 3.2.4a's dIL_crest[0] instead of drifting off it.
+    L_tgt   = float((tsi.confirmed_L_uH_sel or tsi.confirmed_L_uH) if tsi else 240) or 240
     crest   = float(tsi.default_crest_ripple_ratio if tsi else 0.20) or 0.20
     # η/PF at the worst-case 90 Vac corner — taken from the canonical estimated
     # reference table (Section 1.2.4 / Table 1.2.2), not re-typed: row 0 of that
