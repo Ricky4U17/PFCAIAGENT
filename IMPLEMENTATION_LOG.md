@@ -713,5 +713,423 @@ comparison PDFs: `C:\tmp\PFC_Corrected_Sample_Ch1_4.pdf` (corrected) vs.
 
 ---
 
+## Session 2026-06-08
+
+### Discussion Summary
+
+Follow-up to 2026-06-07's "single source of truth" cleanup — user spotted two more
+places where the *same physical quantity* was rendered from two different
+calculation chains and didn't match exactly:
+
+1. Report Table 3.2.4a's `ΔI_L,pp (A)` (90 V row) vs. Table 3.4.1's
+   "Ripple current pk-pk@crest `ΔI_L,pp`" — close but not identical.
+2. GUI Step7Wizard "Result" page: the "Losses at operating temperature" panel's
+   `Pcore iron` vs. the "Time domain core loss" table's `Pcore avg W` (90 Vac row)
+   — both labelled as the half-cycle-averaged core loss at the reference corner,
+   but numerically different.
+
+### Fix 1 — §3.4.1 ΔI_L,pp now matches §3.2.4a exactly (`doc_report_builder.py`)
+
+**Root cause**: `L_tgt = float(tsi.confirmed_L_uH if tsi else 240) or 240`
+(both definitions, `_ch2`/`_ch3` — lines ~628 and ~1146) read the **raw, unrounded**
+`confirmed_L_uH` field. But the actual sizing engine
+(`main.py:712`, `step7_run_sizing`) consumes `confirmed_L_uH_sel` — the value
+**rounded to the nearest 5 µH** (`main.py:177`,
+`tsi["confirmed_L_uH_sel"] = round(lpy["L_uH"]/5)*5`). Table 3.2.4a's
+`dIL_crest[0]` is computed independently in §3.2's rigorous chain using `L_phi`
+(`doc_report_builder.py:1380`, `round(L_phi_calc*1e6/5)*5*1e-6` — also rounded to
+the nearest 5 µH from essentially the same raw `L_calc`). So §3.4.1's
+`ΔI_L,pp = Vin,pk·D / (L_tgt·fsw)` used a slightly different (unrounded) L than
+§3.2.4a's `dIL_crest[0] = step5_phase_rms(..., L_phi, ...)` — hence "close but not
+exact."
+
+**Fix**: changed `L_tgt` (both occurrences, single `replace_all` edit) to prefer
+the rounded selected value:
+`L_tgt = float((tsi.confirmed_L_uH_sel or tsi.confirmed_L_uH) if tsi else 240) or 240`
+— now `L_tgt` reflects what the sizing engine actually used, and (since both
+roundings start from the same raw `L_calc`/`lpy["L_uH"]`) numerically equals
+`L_phi`, so §3.4.1's ΔI_L,pp formula reduces to the same expression as
+`dIL_crest[0]`.
+
+**Verified** with a realistic `confirmed_L_uH`/`confirmed_L_uH_sel` pair
+(113.15 / 115 µH — recomputed via `_calc_l_py` for the 90–264 Vac / 1700–3600 W /
+393 V / 70 kHz / 70% crest-ripple scenario; the prior session's test fixture had
+hand-set both fields to a stale placeholder `239.0`, masking this bug):
+
+| Table | ΔI_L,pp (90 V) — before | ΔI_L,pp (90 V) — after |
+|-------|------------------------|------------------------|
+| 3.2.4a `dIL_crest[0]` | 10.6904 A | 10.6904 A (unchanged — already correct) |
+| 3.4.1 "Ripple current pk-pk@crest" | 5.1439 A (computed with stale `confirmed_L_uH=239`) | **10.6904 A** ✅ exact match |
+
+Regenerated `C:\tmp\PFC_Verify_3_4_1_fix.pdf` (4,849,357 bytes) and confirmed via
+PyMuPDF text extraction: page 33 (Table 3.2.4a, 90 V row) and page 47 (Table 3.4.1)
+both now read `ΔI_L,pp = 10.6904 A`, and §3.4.1's "Target inductance" row now shows
+`L_φ,target = 115 µH` (matching `L_phi` used throughout §3.2), not the stale 239 µH.
+
+### Fix 2 — GUI "Pcore" now matches "Pcore avg W" at the reference operating point (`step8_time_domain.py`, `main.py`)
+
+**Root cause**: two independent calculation chains both claim to produce the
+"half-cycle-averaged core loss at 90 Vac":
+- `result.Pcore_W` (shown as `Pcore iron` in "Losses at operating temperature") —
+  computed once, at the design's reference 90 Vac corner, by
+  `_half_cycle_averages()` (`step7_magnetic_calc.py:678-704`): a rigorous 360-point
+  per-line-angle magnetics-DB lookup with iGSE `F(D)` correction, explicitly
+  commented "authoritative"/"primary".
+- `step8.summary_table[i].Pcore_avg_W` (shown as `Pcore avg W` in "Time domain
+  core loss", one row per of the 9 canonical Vac points) — computed by
+  `run_step8_full()` (`step8_time_domain.py`): fits a power-law model
+  `Pcore = k·B^n` to the 9 **crest-point** values from `loss_table_25C`, then
+  integrates the *fitted curve* (not DB lookups) over the half cycle via the
+  trapezoid rule. This is a fast approximation meant for the full 9-point sweep
+  (the endpoint's own docstring even flags "at 90 Vac crest-point overestimates
+  Pcore,avg by ~83%" as its key insight) — it was never anchored to the
+  already-known-good `Pcore_W` value at the one point where Step 7 had already
+  done the rigorous calculation.
+
+**Initial fix (superseded same session — see "Final fix" below)**: first tried
+anchoring just the matching row — `run_step8_full()` gained optional
+`Pcore_avg_ref`/`Vin_ref` params, and when the loop reached `Vin_ref` it
+overwrote the power-law-fit estimate with the authoritative value and tagged the
+row `"anchored to Step 7 Pcore_W (authoritative)"`. This made the one row match,
+but the user then asked which method (rigorous 360-point DB+iGSE integration vs.
+fast power-law-fit integration) is more accurate, and on hearing it's the
+rigorous one, replied: **"If report generation takes time then it is okay.
+Accuracy is very important at each stage."** — i.e. don't just patch the one row,
+make every row rigorous.
+
+**Final fix — replaced the entire power-law-fit integration with rigorous
+per-point `_half_cycle_averages` calls**: `run_step8_full()` was rewritten to run
+the SAME 360-point per-line-angle DB+iGSE half-cycle integration that produces
+`DesignResult.Pcore_W` (Step 7's `_half_cycle_averages`, `step7_magnetic_calc.py:266`)
+independently at all 9 canonical operating points — instead of fitting
+`Pcore = k·B^n` to 9 crest values and integrating the fitted curve. Key pieces:
+
+- `_half_cycle_averages` gained an additive, backward-compatible
+  `return_series: bool = False` flag that also returns per-angle
+  `theta_rad`/`Bac_pk_T_series`/`Pcore_W_series` arrays — letting `run_step8_full`
+  build its `waveforms` plot data from genuine per-angle DB lookups too (not the
+  fitted curve).
+- Derived `Icrest_A[i] = max(Iin_pk[i]/n_ph, Iph_rms[i]·0.9)` — algebraically
+  identical to the reference-corner formula
+  `max(Ipk_A − dIL_pp_A/2, Irms_A·0.9)` used inside Step 7, since
+  `Ipk_A − dIL_pp_A/2 = Ipk_line/n_ph = Iin_pk/n_ph` (the `dIL_pp_A/2` terms
+  cancel). This lets all 9 points' crest currents be derived purely from the
+  canonical `OPS`/`Iin_pk` arrays (`canonical_ops_table` → `step2_input_params` →
+  `build_design_ops_table`, the same chain Table 3.2.4/3.4.1 use) — no extra
+  `step5_phase_rms` calls needed.
+- `Rdc_Tc`/`Rac_Tc` at the converged `T_core_C` are now derived in `main.py` via
+  **exact linear interpolation** between the stored `DCR_25C_mOhm`/`DCR_100C_mOhm`
+  values (`Rdc_Tc = DCR_25 + (DCR_100−DCR_25)·(T_core−25)/75`) — exact because
+  `DCR(T) = R_pm_20·(1+ALPHA_CU·(T−20))·Cu_len` is linear in `T`, and
+  `R_pm_20`/`Cu_len` aren't themselves persisted on `DesignResult`.
+- The now-redundant `Pcore_avg_ref`/`Vin_ref` anchor params/override/note were
+  removed — every row is independently rigorous, so the anchor adds nothing
+  (verified below: the reference row matches `Pcore_W` to full precision without it).
+- `power_law_fit` (the GUI's informational "P = k·B^n" panel) is still computed
+  from the Step 7 crest-point data and returned unchanged.
+- `main.py`'s endpoint now extracts and passes the additional design constants:
+  `core_type`, `n_ph` (`selected_channels`), `Le_single_m`, `L0_nom_H` (=
+  `AL_nom_nH·stacks·1e-9·N²`), `Rdc_Tc`/`Rac_Tc`, `T_core_C`, and the
+  `vin_min/vin_max/pout_lo/pout_hi/r_input` OPS-building inputs (same fields the
+  `step7/run-sizing` endpoint already reads at `main.py:712-724`).
+
+| Check | Result |
+|-------|--------|
+| `import app.mode_b.step8_time_domain`, `app.mode_b.doc_report_builder`, `app.main` | ✅ no `ImportError` |
+| `_calc_l_py(1700,90,393,70000,0.20)` vs. independently-derived `step4_inductance` `L_calc` | ✅ both = 113.15 µH raw → both round to 115 µH (`L_phi` ≡ `confirmed_L_uH_sel`) |
+| PyMuPDF render — Table 3.2.4a / Table 3.4.1 (pages 33/47, `PFC_Verify_3_4_1_fix.pdf`) | ✅ ΔI_L,pp = 10.6904 A in both |
+| Reference corner (90 Vac) `summary_table[0].Pcore_avg_W` (rigorous, unrounded) vs. `DesignResult.Pcore_W` | ✅ `1.5464082...` → rounds to `1.5464`, **exact** match — no anchor needed |
+| Full 9-point sweep (`edge_75` powder design, EDGE 3-stack) | ✅ runs end-to-end; `Pcore_avg` now correctly brackets `Pcore_crest` per point (e.g. 90 V: avg 1.546 W vs crest 2.643 W, ratio 0.585 — "crest overestimates avg"; 230 V: avg 2.060 W vs crest 1.154 W, ratio 1.786 — "crest underestimates avg"), matching the physical pattern the module's docstring describes |
+
+### Verification — full report regenerated through the actual GUI pipeline (both fixes confirmed end-to-end, 2026-06-08)
+
+Traced the GUI "Generate Report" buttons all the way to the PDF builder to confirm
+which code path actually runs in production, then regenerated a full report through
+that exact path and re-checked both issues against it:
+
+**GUI → endpoint → builder trace** (`frontend/src/api/client.ts:220` `docGenerateReport`
+is the only report-download call wired into `ControlDesign.tsx`, `ReviewMagnetics.tsx`,
+`Step15Capacitor.tsx`, `App.tsx`):
+`docGenerateReport` → `POST /mode-b/documentation/generate-report`
+(`main.py:1461 doc_generate_report`) → `DocumentationAgent.generate()`
+(`documentation_agent.py:121`) → tries `generate_chapter_report()` first
+(`:94`) → `doc_report_builder.build_full_report` (`:113-119`). The
+`_generate_legacy()` fallback (`generate_report.py` + `generate_combined_report.py`
++ `generate_steps13_14.py`, with its own independent power-law-fit `Pcore_avg`
+chain in `_sec_14_3`/Table 14.1) only fires if the chapter builder *raises* —
+it does not, so it never runs in normal operation. **This means the chapter-based
+builder verified below — the one carrying both Fix 1 and Fix 2's data — is the
+literal PDF the user receives when clicking "Generate Report" in the GUI.**
+
+**Regeneration**: called `DocumentationAgent(state).generate_chapter_report(approved_design=...)`
+on `corrected_state.json`/`corrected_approved_design.json`, after first patching
+`tsi.confirmed_L_uH`/`confirmed_L_uH_sel` from the fixture's stale synthetic
+placeholder `239.0` (a leftover from a prior session's `gen_corrected_sample.py`
+that pre-dates this design's actual corner conditions and doesn't match what
+`_calc_l_py`/`step4_inductance` derive for them) to the internally-consistent
+pair this state's real parameters (`90 Vrms`/`1700 W`/`393 Vdc`/`70 kHz`/`20%`
+crest) actually produce: raw `113.15 µH` → rounded `115 µH`. **This patch is a
+test-fixture correction only — `main.py:176-177` already writes exactly this
+consistent pair into real wizard-generated states at intake**, so no production
+code needed to change for this. → `C:\tmp\PFC_Verify_Step8Rewrite_ChapterReport.pdf`
+(65 pages).
+
+| Check | Result |
+|-------|--------|
+| Table 3.2.4a (page 33, 90 V row) `∆IL,pp` | `10.6904 A` |
+| Table 3.4.1 (page 47) `Lφ,target` / `∆IL,pp` | `115 µH` / `10.6904 A` — **exact match with 3.2.4a** ✅ |
+| Raw (unrounded) `Pcore_avg_W` at the 90 Vac reference corner, recomputed via the identical `_half_cycle_averages(..., return_series=True)` call `run_step8_full` makes for `i=0` | `1.5464082095029652` |
+| → rounds to `1.546` (3 dp — `step8.summary_table[0].Pcore_avg_W`, "Pcore avg W" in Time-domain panel) and `1.5464` (4 dp) | both are display-precision roundings of the **same** raw float |
+| `DesignResult.Pcore_W` ("Pcore iron", Losses-at-operating-temperature panel) | `1.5464` — **exact match** to the raw value's 4-dp rounding ✅ |
+| Chapter 4 §4.5 "Core Loss — Cycle-Averaged iGSE" (`doc_report_builder.py:2386` `Pcore_cavg = d.get("Pcore_W")`) | reads the same `Pcore_W` and correctly labels it "P_core,avg (iGSE)", consistent with it now *being* the cycle-averaged value — no separate/independent Pcore-avg computation exists in the chapter builder |
+
+**Conclusion — no further changes needed in `calculations.py`, `documentation_agent.py`,
+or `doc_report_builder.py`.** Both fixes (Fix 1's `confirmed_L_uH_sel` read in
+`_ch2`/`_ch3`, and Fix 2's rigorous `_half_cycle_averages`-everywhere rewrite of
+`run_step8_full`) sit on the exact code path the GUI's "Generate Report" buttons
+invoke. **The next report generated through the GUI from a real (non-synthetic)
+design will show `Lφ,target`/`∆IL,pp` matching across Tables 3.2.4a/3.4.1 and
+`Pcore_W`/`Pcore_avg_W` matching across the Losses and Time-domain panels,
+automatically — both panels were already reading from the single corrected
+calculation chain; this session only added end-to-end proof of it.**
+
+### Resume point for a future session
+
+Both fixes follow the same "single source of truth" pattern established
+2026-06-07 (Iφ,rms via `build_design_ops_table`): when two displayed values claim
+to be the same physical quantity, derive both from the same authoritative
+calculation chain rather than letting them drift via independent recomputation —
+literal anchoring of one row is a stopgap; deriving every row the same rigorous
+way is the real fix (and the user explicitly authorized the extra ~9× DB-lookup
+cost: "accuracy is very important at each stage"). `confirmed_L_uH_sel`
+(rounded-to-5µH) is now the canonical "target inductance" read throughout
+`doc_report_builder.py`'s `_ch2`/`_ch3`; `_half_cycle_averages` (360-point
+per-angle DB+iGSE integration) is now the SOLE core-loss-vs-Vin calculation
+chain — used both for `DesignResult.Pcore_W` (Step 7, single reference point) and
+`step8.summary_table[].Pcore_avg_W`/`waveforms` (Step 8, all 9 points) — so they
+can never again diverge. No other latent duplicates of either pattern were found
+in `generate_report.py`, `generate_combined_report.py`, `generate_steps13_14.py`,
+or `documentation_agent.py`.
+
+End-to-end verification (above) confirms this chain is exactly what the GUI's
+"Generate Report" buttons exercise via `docGenerateReport` →
+`generate_chapter_report` → `build_full_report` — so **both fixes are correctly
+wired through the report-generation chain with no further changes required there**.
+The one remaining latent issue — `generate_steps13_14.py`'s Table 14.1 still
+computing `Pcore_avg` via its own independent power-law-fit chain (`_sec_14_3`,
+lines ~826-980) — lives only in `_generate_legacy()`'s exception-fallback path and
+is never exercised while the chapter builder succeeds; flagged for awareness, not
+fixed (out of the two reported issues' scope, and removing/rewriting a fallback
+pipeline the user hasn't asked to touch would be unrequested scope creep).
+
+> **Update — see "Fix 3" immediately below**: this verification proved the
+> *backend* calculation chain was already single-sourced and consistent — but the
+> user then reran the live GUI and found the two "Pcore" panels **still**
+> disagreed. The actual remaining bug was in the *frontend*: `Step7Wizard.tsx` was
+> overwriting the winning candidate's correct `material_key` with a stale Gate-2
+> selection before calling Step 8, feeding the two calculations different
+> materials. See Fix 3 for the root cause, the one-line fix, and updated
+> resume-point guidance.
+
+---
+
+## 2026-06-08 (cont'd) — Fix 3: GUI "Pcore iron" vs "Pcore avg W" STILL mismatched live — found and fixed the real cause (`Step7Wizard.tsx`)
+
+After the verification above (which proved the *backend* calculation chain is
+already single-sourced and correct), the user reran the actual GUI and reported
+the two panels were **still showing different numbers** — e.g. `Pcore iron =
+0.805 W` vs. `Pcore avg W @ 90 V = 1.072 W` (screenshot:
+`specs/Pcore discripenses.jpg`, candidate `0059716A2`, "Edge · µ=60", bifilar
+winding). This proved the backend chain alone wasn't sufficient — something in
+the GUI's request wiring was feeding the two calculations *different inputs* for
+the same design.
+
+**Root cause — `material_key` clobbered in the `step8TimeDomain` payload**
+(`Step7Wizard.tsx:279-280`, the auto-run-Step-8 call right after sizing
+completes):
+```ts
+step8TimeDomain({ state: confirmedState,
+  approved_design: { ...top, material_key: matKey }, f_line_Hz: 60.0 })
+```
+- `top` is the literal winning `DesignResult` from `step7RunSizing` — its
+  `material_key` field is `core_mat_key` (`main.py:814`:
+  `f"{material_line}_{mu}"`, e.g. `"edge_60"`), i.e. **the exact permeability
+  grade the sizing engine actually used and that `design_one_core` passed to
+  `_half_cycle_averages` when it computed `res.Pcore_W`** (`step7_magnetic_calc.py:690,715`).
+- `matKey` (= `matType==='powder' ? selMaterial : selGrade`, `Step7Wizard.tsx:240`)
+  is the Gate-2 **family selection** the user picked *before* sizing ran — e.g.
+  `"edge_75"`. `main.py:782-794` deliberately "sweeps ALL permeabilities of the
+  selected material family" (`mu=None` in `filter_cores`) so the engine can land
+  on a *different* µ than the user's Gate-2 pick if that's globally optimal —
+  which is exactly what produced candidate `0059716A2` at µ=60 while the
+  Gate-2 pick was a different grade.
+- The spread `{ ...top, material_key: matKey }` then **overwrites** the correct,
+  candidate-specific `"edge_60"` with the stale Gate-2 `"edge_75"` (or whatever
+  grade was originally selected) right before sending `approved_design` to
+  `/mode-b/step8/time-domain`. `run_step8_full` reads `material_key = d.get(...)`
+  (`step8_time_domain.py`) and passes *that* — the wrong grade — into every
+  `_half_cycle_averages`/`get_core_loss` DB lookup for all 9 points.
+
+**Why this produces exactly this symptom**: `get_core_loss` returns a
+*materially different* loss-density curve per permeability grade — verified
+numerically (`_half_cycle_averages` with identical Bac/fsw/T, only `material_key`
+varied): `edge_60 → 0.2018 W`, `edge_75 → 0.2224 W` (+10%), `edge_90 → 0.2874 W`
+(+42%), `edge_40 → 0.2383 W` (+18%). A Gate-2-vs-winner grade mismatch of even one
+step in the family easily produces the ~10–40% divergence the screenshot shows
+(`0.805` vs `1.072` ⇒ +33%) — while `Pcore_W` (computed once, correctly, inside
+`design_one_core` with the *true* `core_mat_key`) stays right. Sensitivity-checked
+and *ruled out* as the cause: `Vout_V` (✅ also found hardcoded to `393.0` in
+`design_one_core` — see "Other latent issue" below — but ±50 V only moves
+`Pcore_avg` by single digits %, can't produce +33%); `Icrest_A`/`Rdc`/`Rac`
+(`_half_cycle_averages` shows `Pcore` depends only on `Vin_pk`, `Vout`, `N`, `Ae`,
+`Ve`, `fsw`, `T_core`, `material_key` — current/resistance terms feed only `Pcu`).
+
+**Fix**: removed the `material_key: matKey` override —
+`approved_design: { ...top }` now passes the winning candidate's own
+(correct, sizing-engine-derived) `material_key` straight through, so Step 8's
+DB lookups use the *same* material grade `design_one_core` used to produce
+`Pcore_W`. Single line changed, `Step7Wizard.tsx:280`:
+```ts
+step8TimeDomain({ state: confirmedState,
+  approved_design: { ...top }, f_line_Hz: 60.0 })
+```
+
+**Other latent issue found while investigating (not fixed — separate, smaller-impact bug)**:
+`design_one_core` (`step7_magnetic_calc.py:443,492,698`) hardcodes
+`Vout_V = 393.0` for `Dpk90`/`Bac_pk`/the `_half_cycle_averages` call that
+produces `Pcore_W`, instead of reading the design's actual
+`intake.application.output_bus_voltage_v` (which `run_step8_full` correctly
+does). For the project's reference 393 V bus this is a no-op, but for any design
+configured with a different DC-bus target it would silently skew `Pcore_W`,
+`Bac_pk_T`, `Bdc_T` etc. away from the design's true operating point — a smaller
+(~single-digit-%, per the sensitivity sweep above) but real divergence from the
+"single source of truth" pattern. Flagged for a future session; not fixed now
+because (a) it wasn't the cause of the reported symptom (ruled out numerically),
+(b) `design_one_core` has no `Vout_V`/`Vbus` parameter today — plumbing it through
+means changing its signature and all 3 internal call sites plus the
+`step7_run_sizing` caller, a larger change than the user's "both panels mismatch"
+report calls for.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Confirmed only one `step8TimeDomain(` call site exists in `Step7Wizard.tsx` (`grep -n`) | line 279 — the auto-run-after-sizing call; no other site needed the same fix |
+| `_half_cycle_averages` sensitivity sweep — `material_key` (edge family, µ=40/60/75/90) vs. fixed Bac/fsw/T | `Pcore_avg_W` varies 0.2018 → 0.2874 W (a ~42% spread) — confirms a one-grade Gate-2-vs-winner mismatch fully explains a ~33% "Pcore iron" vs "Pcore avg W" gap |
+| `_half_cycle_averages` sensitivity sweep — `Vout_V` 350→460 V (±17% bus-voltage swing, unrealistically wide) | `Pcore_avg_W` only moves 0.1777 → 0.2353 W (≈ ±15%, monotonic, gentle) — ruled out as sole cause of the observed +33% |
+| `enrichResult()` (`Step7Wizard.tsx:208`) audited for any field it could mutate that feeds `_half_cycle_averages` (`N`, `Ae_total_mm2`, `Ve_total_cm3`, `Le_single_mm`, `AL_nom_nH`, `stacks`, `T_core_C`, `fsw`) | none touched — `enrichResult` only adds display-derived fields (`L_full_load_uH`, `kbias`, `Rth`, …); `material_key` was the *only* field in the `approved_design` spread being deliberately overwritten |
+
+### Resume point for a future session
+
+The `material_key` clobber was a **third instance** of the same "two panels, two
+independently-sourced inputs" anti-pattern this whole 2026-06-08 session has been
+chasing — except this time the divergence was injected *in the frontend request
+payload*, not in a backend calculation chain (which is why the backend-side
+verification two sections up showed everything matching: it tested the chain with
+internally-consistent inputs, and the chain *is* internally consistent — the bug
+was that the GUI wasn't feeding it consistent inputs). **Lesson for future
+"both panels disagree" reports**: always check what `approved_design`/`state`
+payload the GUI actually POSTs (browser devtools / the exact spread expression in
+the calling component) before assuming the backend math is at fault — a single
+clobbered field in a `{ ...spread, field: override }` is invisible from the
+backend side and will pass every backend-only regression check. If the
+`Vout_V = 393.0` hardcode in `design_one_core` is ever revisited, thread the
+design's actual `output_bus_voltage_v` through its signature (and the
+`step7_run_sizing` call site, `main.py:815-826`) the same way `run_step8_full`
+already reads it from `intake.application`.
+
+---
+
+## 2026-06-08 (cont'd #2) — Fix 4: the REAL remaining cause — Step 8 never re-ran when the user picked a different candidate (`Step7Wizard.tsx`)
+
+User retested and reported the gap was *still* there (`Pcore iron = 1.069 W` vs.
+`Pcore avg W @ 90 V = 1.135 W`, candidate `#5 0059553A2 µ=75` highlighted —
+screenshot `specs/Pcore discripenses issue not fixed.jpg`), **and** a second,
+clarifying symptom: *"when I select a different core option from the left side
+menu, Pcore avg W value does not change in the table."* That second symptom is
+the key — it says the Time-Domain table is not reactive to candidate selection at
+all, which immediately reframes the first symptom: the displayed "Pcore avg W"
+values were never *for* the highlighted candidate in the first place.
+
+**Root cause**: `runSizing()` (`Step7Wizard.tsx`) auto-runs Step 8 exactly **once**,
+for the initially-auto-selected "best" candidate, right after sizing completes
+(`runStep8For(top)`, formerly an inline `step8TimeDomain(...)` call — see Fix 3).
+But the candidate-list `onClick` handler (the "click to select" left-side menu,
+`Step7Wizard.tsx:868`) only ever called:
+```ts
+onClick={() => { const _np = ...; enrichResult(r, i, _np, winding) }}
+```
+`enrichResult` updates `result`/`selectedCandIdx` (so "Pcore iron" *does* update
+correctly — it reads `result.Pcore_W`, freshly enriched per candidate, confirmed
+at `Step7Wizard.tsx:1081`) but **never touched `step8` state** — so the
+"Time Domain Core Loss" table kept showing the stale `step8` object computed for
+whichever candidate happened to be the sizing engine's initial pick (e.g. µ=60),
+while "Pcore iron" now correctly reflected the newly-clicked candidate (e.g.
+µ=75). Two panels, reading two *different candidates'* data — not (this time) two
+different calculation chains or a clobbered field, but a missing re-fetch on
+selection change. Exactly the same family of "stale cross-panel state" bug as
+Fix 3, one click-handler over.
+
+**Fix** — refactored the Step-8 invocation into one reusable helper,
+`runStep8For(raw)` (`Step7Wizard.tsx`, added directly after `enrichResult`):
+```ts
+const runStep8For = (raw: any) => {
+  setS8Load(true); setStep8(null)
+  step8TimeDomain({ state: confirmedState,
+    approved_design: { ...raw }, f_line_Hz: 60.0 })
+  .then((s8:any) => { setStep8(s8); setS8Load(false) })
+  .catch(() => setS8Load(false))
+}
+```
+and now call it from **both** places a candidate becomes selected:
+- `runSizing()`: `enrichResult(top, 0, nPar, winding); ...; runStep8For(top)` —
+  unchanged behavior, just routed through the shared helper (replaces the inline
+  call introduced in Fix 3).
+- the candidate-list `onClick` (`Step7Wizard.tsx:868`):
+  ```ts
+  onClick={() => { const _np = ...; enrichResult(r, i, _np, winding); runStep8For(r) }}
+  ```
+  — now re-runs Step 8 for the clicked candidate's own raw `DesignResult` (`r`,
+  i.e. `c.result`, the same un-enriched shape as `top`/`best.result`, carrying its
+  own correct `material_key`/`N`/`Ae_total_mm2`/etc.), so "Pcore avg W" is always
+  computed for the *currently displayed* core — never a leftover from a previous
+  selection. `setStep8(null)` also clears the stale table immediately on click so
+  the loading spinner (`s8Loading`, already wired into the UI at lines 916/923) is
+  visibly accurate rather than showing old numbers while the new request is in
+  flight.
+
+This single helper is now the **sole** call site for `step8TimeDomain` in the
+component (verified: `grep -n "step8TimeDomain(" Step7Wizard.tsx` → only the one
+definition inside `runStep8For`), so any future selection-changing UI (e.g. a
+future "compare candidates" feature) automatically stays correct by construction —
+there is no second code path that could again drift out of sync.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `grep -n "step8TimeDomain("` — confirm single call site post-refactor | exactly one — inside `runStep8For`; both `runSizing` and the candidate-list `onClick` now route through it |
+| `grep -n "setSelectedCandIdx\|enrichResult("` — every place selection changes also now triggers Step 8 | both sites (`runSizing:288`, candidate `onClick:868`) call `enrichResult(...)` immediately followed by `runStep8For(...)` with the SAME raw candidate object, so `result.Pcore_W` ("Pcore iron") and `step8.summary_table[].Pcore_avg_W` ("Pcore avg W") are now guaranteed to originate from one `_half_cycle_averages` run over one `material_key`/`N`/`Ae`/`Ve`/`Le` set |
+| Confirmed `design_one_core` computes `Pcore_W` at the `Vin_pk90` (90 Vac) corner (`step7_magnetic_calc.py:491,699`) — the SAME corner as the Time-Domain table's first/reference row (`OPS[0]`, `Vin_rms=90`) | the two figures being compared ARE the same physical quantity at the same operating point — confirms an exact match is the correct expectation once both are sourced from the same candidate+material, not just "close" |
+
+### Resume point for a future session
+
+This was the actual remaining bug — Fix 3's `material_key`-override fix was
+necessary (it was a real, independent latent bug) but not sufficient, because the
+GUI's Step-8 table was *also* simply not wired to refresh on candidate-selection
+at all. **Both fixes are required together**: Fix 3 ensures the payload carries
+the right material for whichever candidate is selected; Fix 4 ensures Step 8
+actually re-runs when that selection changes. With both in place, clicking any
+candidate in the left-side list now: (1) updates "Pcore iron" via `enrichResult`
+→ `setResult`, (2) clears and re-fetches "Pcore avg W" via `runStep8For` →
+`setStep8(null)` + `step8TimeDomain(...)`. User should re-test by clicking through
+several candidates of *different* µ and stack counts and confirming "Pcore iron"
+and "Pcore avg W @ 90 V" track together (exact match) for each one, with a brief
+spinner between clicks. The still-unfixed `Vout_V = 393.0` hardcode in
+`design_one_core` (flagged in Fix 3) remains the only known latent divergence —
+it would only matter for a project configured at a non-393 V bus.
+
+---
+
 *Log format: date · decision · files changed · verification result*
 *Append a new dated section for each future session that changes DesignState-related files.*

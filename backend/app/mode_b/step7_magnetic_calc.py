@@ -280,6 +280,7 @@ def _half_cycle_averages(
     T_core_C: float = 100.0,
     f_line_Hz: float = 60.0,
     M: int = 360,
+    return_series: bool = False,   # also return per-angle θ/Bac_pk/Pcore arrays
 ) -> dict:
     """360-point half-cycle waveform integration matching JS V5.1 `compute()` loop.
 
@@ -304,6 +305,9 @@ def _half_cycle_averages(
     pCorePk  = 0.0
     pCuPk    = 0.0
     pTotPk   = 0.0
+    series_theta = [] if return_series else None
+    series_Bac   = [] if return_series else None
+    series_Pcore = [] if return_series else None
 
     for n in range(M):
         theta = (n + 0.5) * math.pi / M
@@ -349,6 +353,11 @@ def _half_cycle_averages(
         pCuPk     = max(pCuPk,   Pcu_i)
         pTotPk    = max(pTotPk,  Ptot_i)
 
+        if return_series:
+            series_theta.append(theta)
+            series_Bac.append(BacPk)
+            series_Pcore.append(Pcore_i)
+
     Pcore_avg = pCoreAcc / M
     Irms      = math.sqrt(i2 / M)
     IhfRms    = math.sqrt(r2 / M)
@@ -367,6 +376,8 @@ def _half_cycle_averages(
         "Pcore_pk_W":   pCorePk,
         "Pcu_pk_W":     pCuPk,
         "Ptot_pk_W":    pTotPk,
+        **({"theta_rad": series_theta, "Bac_pk_T_series": series_Bac,
+            "Pcore_W_series": series_Pcore} if return_series else {}),
     }
 
 
@@ -956,17 +967,22 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
     return result
 
 
-def rank_candidates(results: list[DesignResult], n_top: int = 5) -> list[dict]:
+def rank_candidates(results: list[DesignResult], n_top: int = 5,
+                    optimization_goal: str = 'best_performance') -> list[dict]:
     """
     Return the top n_top candidates PER stack count so the designer can compare
     size, cost, and performance across all stack tiers side-by-side.
 
     With max_stacks=3 and n_top=5 the output contains up to 15 candidates:
-      5 best 1-stack  |  5 best 2-stack  |  5 best 3-stack
+      5 best 3-stack  |  5 best 2-stack  |  5 best 1-stack  (descending stack order)
 
-    Within each stack group candidates are ordered by composite score (lower = better).
-    Each candidate is labelled with the dimension it leads in within its group.
-    The globally best candidate across all groups is also marked "★ Best overall".
+    optimization_goal:
+      'best_performance' — sort by composite score (loss 35% + volume 25% + ΔT 25%
+                           + cost 10% + fill penalty 5%).  Default.
+      'max_ffu'          — sort by FFcu descending so the highest window-utilisation
+                           (densest/most-compact) cores come first within each group.
+                           Useful for finding the physically smallest core that
+                           still satisfies all pass/fail gates for the chosen wire.
     """
     passed = [r for r in results if r.passed]
     if not passed:
@@ -980,8 +996,13 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5) -> list[dict]:
     for r in passed:
         groups.setdefault(r.stacks, []).append(r)
 
-    # Global best for the "★ Best overall" label
-    global_best_key = _key(min(passed, key=lambda r: r.score))
+    # Global best and its badge depend on the optimisation goal
+    if optimization_goal == 'max_ffu':
+        global_best_key = _key(max(passed, key=lambda r: r.FFcu))
+        global_label    = "★ Most compact"
+    else:
+        global_best_key = _key(min(passed, key=lambda r: r.score))
+        global_label    = "★ Best overall"
 
     # Build per-group labels: assign each dimension winner its label (first match wins)
     labels: dict[str, str] = {}
@@ -991,28 +1012,34 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5) -> list[dict]:
         by_loss = sorted(grp, key=lambda r: r.Ptotal_100C_W)
         by_temp = sorted(grp, key=lambda r: r.dT_rise_C)
         by_econ = sorted(grp, key=lambda r: r.score * (1.2 if r.core_type == "powder" else 1.0))
+        by_ffu  = sorted(grp, key=lambda r: -r.FFcu)
+
+        top_in_group = by_ffu[0] if optimization_goal == 'max_ffu' else by_sc[0]
+        top_lbl      = f"★ Densest fill {s}-stack" if optimization_goal == 'max_ffu' else f"★ Best {s}-stack"
 
         for r, lbl in [
-            (by_sc[0],   f"★ Best {s}-stack"),
-            (by_vol[0],  f"Smallest {s}-stack"),
-            (by_loss[0], f"Lowest loss {s}-stack"),
-            (by_temp[0], f"Lowest ΔT {s}-stack"),
-            (by_econ[0], f"Most economical {s}-stack"),
+            (top_in_group, top_lbl),
+            (by_vol[0],    f"Smallest {s}-stack"),
+            (by_loss[0],   f"Lowest loss {s}-stack"),
+            (by_temp[0],   f"Lowest ΔT {s}-stack"),
+            (by_econ[0],   f"Most economical {s}-stack"),
         ]:
             k = _key(r)
             if k not in labels:
                 labels[k] = lbl
 
     # Override with global badge (takes priority over per-group label)
-    labels[global_best_key] = "★ Best overall"
+    labels[global_best_key] = global_label
 
     # Collect top n_top per stack group, descending stack order (3→2→1)
-    # so the designer sees the most capable options first.
     output: list[dict] = []
     rank = 1
     for s in sorted(groups.keys(), reverse=True):
         seen_in_group: set[str] = set()
-        group_sorted = sorted(groups[s], key=lambda r: r.score)
+        if optimization_goal == 'max_ffu':
+            group_sorted = sorted(groups[s], key=lambda r: (-r.FFcu, r.score))
+        else:
+            group_sorted = sorted(groups[s], key=lambda r: r.score)
         count = 0
         for r in group_sorted:
             k = _key(r)

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, SecHead, Btn, Badge, ErrBanner, ActionBar, Spinner, C } from './ui'
 import {
   step7PowderRanking, step7MaterialComparison, step7Suppliers,
-  step7GradeOptions, step7WireOptions, step7RunSizing, step8TimeDomain, step7GenerateReport,
+  step7GradeOptions, step7WireOptions, step7RunSizing, step8TimeDomain,
 } from '../api/client'
 import { ReviewMagnetics } from './ReviewMagnetics'
 
@@ -110,6 +110,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   const [mountDir,    setMountDir]    = useState<'horizontal'|'vertical'>('horizontal')
   const [jTarget,     setJTarget]     = useState(5.0)
   const [FFcuLimit,   setFFcuLimit]   = useState(0.35)    // designer-selectable fill factor
+  const [optGoal,     setOptGoal]     = useState<'best_performance'|'max_ffu'>('best_performance')
   const [coatedOnly,  setCoatedOnly]  = useState(true)    // Medical default
   const [showCustom,  setShowCustom]  = useState(false)   // custom core entry panel
   const [customCore,  setCustomCore]  = useState({        // custom core fields
@@ -234,6 +235,19 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
     return t
   }
 
+  // Single source of truth for Step 8 (time-domain core loss): re-run it for
+  // whichever candidate is currently selected, so "Pcore avg W" always reflects
+  // the same core/material the "Pcore iron" figure was computed for. Pass the
+  // RAW candidate result (its own material_key/N/Ae/etc.) — never the enriched
+  // display object or a Gate-2 selection — so both panels agree exactly.
+  const runStep8For = (raw: any) => {
+    setS8Load(true); setStep8(null)
+    step8TimeDomain({ state: confirmedState,
+      approved_design: { ...raw }, f_line_Hz: 60.0 })
+    .then((s8:any) => { setStep8(s8); setS8Load(false) })
+    .catch(() => setS8Load(false))
+  }
+
   const runSizing = async () => {
     setLoad(true); setErr([])
     const nPar = winding==='bifilar'?2:winding==='trifilar'?3:1
@@ -263,7 +277,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
         wire_designation: selWire, wire_type: wireType, n_parallel: nPar,
         max_height_mm: maxH, max_stacks: maxStacks, J_target: jTarget, n_top:5,
         FFcu_limit: FFcuLimit, coated_only: coatedOnly,
-        custom_core: cc ?? {}, mounting: mountDir,
+        custom_core: cc ?? {}, mounting: mountDir, optimization_goal: optGoal,
       }) as any
       const candidates = d.top_5 ?? []
       const passing = candidates.filter((c:any) => c.result?.passed)
@@ -274,12 +288,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
       setAllCandidates(candidates)
       enrichResult(top, 0, nPar, winding)   // enrich best candidate
       setSub('result'); setLoad(false)
-      // Auto-run Step 8
-      setS8Load(true)
-      step8TimeDomain({ state: confirmedState,
-        approved_design: { ...top, material_key: matKey }, f_line_Hz: 60.0 })
-      .then((s8:any) => { setStep8(s8); setS8Load(false) })
-      .catch(() => setS8Load(false))
+      runStep8For(top)   // auto-run Step 8 for the initially-selected candidate
     } catch(e) { setErr([String(e)||'Sizing failed']); setLoad(false) }
   }
 
@@ -740,6 +749,35 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
             </div>
           </div>
 
+          {/* ── Shortlist priority (optimisation goal) ── */}
+          <div style={{background:C.bg3,border:`0.5px solid ${C.border}`,borderRadius:10,
+            padding:'14px 16px',marginBottom:12}}>
+            <div style={{fontSize:10,color:C.hint,fontFamily:'IBM Plex Mono,monospace',
+              textTransform:'uppercase',letterSpacing:'.06em',marginBottom:10}}>Shortlist priority</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {([
+                {k:'best_performance', l:'Best Performance',
+                  d:'Lowest total loss + best DC bias headroom. Highest efficiency design.'},
+                {k:'max_ffu',          l:'Max FFcu — Smallest Core',
+                  d:'Highest window utilisation first. Shows most compact option for the chosen wire.'},
+              ] as {k:'best_performance'|'max_ffu', l:string, d:string}[]).map(o=>(
+                <div key={o.k} onClick={()=>setOptGoal(o.k)}
+                  style={{border:`1.5px solid ${optGoal===o.k?C.accent:C.border}`,borderRadius:8,
+                    padding:'10px 12px',cursor:'pointer',
+                    background:optGoal===o.k?C.accentL:C.bg2}}>
+                  <div style={{fontWeight:600,color:optGoal===o.k?C.accent:C.text,fontSize:12,marginBottom:3}}>
+                    {optGoal===o.k?'● ':'○ '}{o.l}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,lineHeight:1.45}}>{o.d}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:10,color:C.hint,marginTop:8,lineHeight:1.5}}>
+              Both modes apply the same pass/fail gates (FFcu limit, saturation, ΔT). Only the
+              ordering within each stack tier changes. Run sizing once per mode to compare.
+            </div>
+          </div>
+
           {/* ── Coated core toggle ── */}
           {wireType==='tiw'&&(
             <div style={{background:C.tealL,border:`0.5px solid ${C.teal}44`,
@@ -857,7 +895,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   const r = c.result ?? {}
                   const isSelected = selectedCandIdx === i
                   return (
-                    <div key={i} onClick={() => { const _np = winding==='bifilar'?2:winding==='trifilar'?3:1; enrichResult(r, i, _np, winding) }} style={{
+                    <div key={i} onClick={() => { const _np = winding==='bifilar'?2:winding==='trifilar'?3:1; enrichResult(r, i, _np, winding); runStep8For(r) }} style={{
                       display:'flex',alignItems:'flex-start',gap:8,padding:'8px 12px',
                       borderRadius:8,marginBottom:4,cursor:'pointer',
                       border:`1.5px solid ${isSelected?C.accent:r.passed?C.green+'44':C.border}`,

@@ -449,6 +449,7 @@ class _SizingReq(BaseModel):
     custom_core: dict = {}
     n_parallel: int = 1
     mounting: str = 'horizontal'           # 'horizontal' | 'vertical'
+    optimization_goal: str = 'best_performance'  # 'best_performance' | 'max_ffu'
 
 class _Step8Req(BaseModel):
     state: dict                     # confirmed Mode A state
@@ -827,7 +828,8 @@ def step7_run_sizing(req: _SizingReq):
             except Exception:
                 pass
 
-        top5 = rank_candidates(all_results, n_top=req.n_top)
+        top5 = rank_candidates(all_results, n_top=req.n_top,
+                               optimization_goal=getattr(req, 'optimization_goal', 'best_performance'))
         passed = sum(1 for r in all_results if r.passed)
 
         def _serialize(r: DesignResult) -> dict:
@@ -878,13 +880,42 @@ def step8_time_domain(req: _Step8Req):
         state = req.state
         intake= state.get("intake",{})
 
+        tsi          = state.get("topology_specific_inputs", {})
+        application  = intake.get("application", {})
+
         material_key = d.get("material_key")
+        core_type    = d.get("core_type", "ferrite")
         N            = int(d.get("N", 49))
+        n_ph         = int(state.get("selected_channels", 2))
         Ae_mm2       = float(d.get("Ae_total_mm2", 231))
         Ve_cm3       = float(d.get("Ve_total_cm3", 15.977))
+        Le_single_m  = float(d.get("Le_single_mm", 0)) * 1e-3
         loss_25C     = d.get("loss_table_25C", [])
-        fsw_Hz       = float(state.get("topology_specific_inputs",{}).get("recommended_frequency_hz", 70000))
-        Vbus         = float(intake.get("application",{}).get("output_bus_voltage_v", 393))
+        fsw_Hz       = float(tsi.get("recommended_frequency_hz", 70000))
+        Vbus         = float(application.get("output_bus_voltage_v", 393))
+
+        # Total zero-bias inductance L0 = AL_nom_total × N² (single-stack AL ×
+        # stack count), matching the chain Step 7 uses for _half_cycle_averages.
+        L0_nom_H = float(d.get("AL_nom_nH", 0)) * int(d.get("stacks", 1)) * 1e-9 * N**2
+
+        # Rdc/Rac at the converged operating temperature — exact linear
+        # interpolation between the stored 25 °C / 100 °C DCR values, since
+        # DCR(T) = R_pm_20 × (1 + ALPHA_CU×(T−20)) × Cu_len is linear in T
+        # (same chain Step 7 uses to derive Rdc_Tc/Rac_Tc for _half_cycle_averages).
+        T_core_C  = float(d.get("T_core_C", 100.0))
+        DCR_25_Ω  = float(d.get("DCR_25C_mOhm", 0)) * 1e-3
+        DCR_100_Ω = float(d.get("DCR_100C_mOhm", 0)) * 1e-3
+        Rdc_Tc    = DCR_25_Ω + (DCR_100_Ω - DCR_25_Ω) * (T_core_C - 25.0) / 75.0
+        Rac_Tc    = Rdc_Tc * float(d.get("Rac_Rdc", 1.0))
+
+        # Canonical 9-point operating-matrix inputs — same corner conditions
+        # (vin_min/max, pout_lo/hi, r_input) used to build Table 3.2.4/3.4.1's
+        # OPS array, so Step 8's per-point Vin_pk/Iin_pk/Iph_rms agree exactly.
+        vin_min  = float(application.get("vin_rms_min", 90))
+        vin_max  = float(application.get("vin_rms_max", 264))
+        pout_lo  = float(application.get("output_power_w_low_line", 1700))
+        pout_hi  = float(application.get("output_power_w_high_line", 3600))
+        r_input  = float(tsi.get("default_crest_ripple_ratio", 0.095)) or 0.095
 
         if not material_key:
             raise HTTPException(400, "approved_design must contain material_key")
@@ -892,11 +923,15 @@ def step8_time_domain(req: _Step8Req):
             raise HTTPException(400, "approved_design must contain loss_table_25C (from step7/run-sizing)")
 
         result = run_step8_full(
-            material_key=material_key, N=N,
+            material_key=material_key, core_type=core_type, N=N, n_ph=n_ph,
             Ae_total_m2=Ae_mm2 * 1e-6,
             Ve_total_m3=Ve_cm3 * 1e-6,
+            Le_single_m=Le_single_m, L0_nom_H=L0_nom_H,
             fsw_Hz=fsw_Hz, Vbus=Vbus,
+            Rdc_Tc=Rdc_Tc, Rac_Tc=Rac_Tc, T_core_C=T_core_C,
             loss_table_25C=loss_25C,
+            vin_min=vin_min, vin_max=vin_max, pout_lo=pout_lo, pout_hi=pout_hi,
+            r_input=r_input,
             f_line=req.f_line_Hz,
         )
         return {"status": "ok", "step": 8, **result}
