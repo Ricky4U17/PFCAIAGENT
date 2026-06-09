@@ -194,7 +194,7 @@
   const $ = id => document.getElementById(id);
   const $$ = q => Array.from(document.querySelectorAll(q));
   const currentMap = {90:14.1522,110:11.4590,120:10.3963,132:9.3589,180:14.8195,200:13.2075,220:11.9990,230:11.4436,264:10.2309}; // report Table-A, Iφ,avg@crest per phase
-  const cfg = {Vout:390, fsw:70000, lineHz:60, AL_single_nH:122, Ae_single_mm2:153, Le_mm:94, Ve_single_mm3:14600, Wa_mm2:355, aTyp:67.4, aMax:86.7, b:2.106, c:1.444, coreHeight_mm:17.89, coreW_mm:9.835, Rprime20:0.006315, alphaCu:0.00394, RacRatio:1.15, satT:1.0};
+  const cfg = {Vout:390, fsw:70000, lineHz:60, AL_single_nH:122, Ae_single_mm2:153, Le_mm:94, Ve_single_mm3:14600, Wa_mm2:355, aTyp:67.4, aMax:86.7, b:2.106, c:1.444, coreHeight_mm:17.89, coreW_mm:9.835, Rprime20:0.006315, alphaCu:0.00394, RacRatio:1.15, satT:1.0, leadMm:150, CuArea_mm2:3.14, nParallel:1};
   const state = {yaw:-0.62,pitch:0.55,zoom:1,drag:false,lx:0,ly:0,last:null};
   function clamp(x,a,b){return Math.max(a,Math.min(b,x));} function fmt(x,d=2){return Number(x).toFixed(d);}
   // retention() is assigned to window so ReviewMagnetics.tsx can override it with the
@@ -216,8 +216,8 @@
     const L0=AL_total*1e-9*i.N*i.N; const Hcrest=0.4*Math.PI*i.N*Icrest/Le_cm; const k=retention(Hcrest); const Lfull=L0*k;
     const Vpk=vin*Math.sqrt(2), Dcrest=clamp(1-Vpk/i.Vout,0,.98);
     const BacPk_crest=(Vpk*Dcrest)/(2*i.N*(Ae*1e-6)*i.fsw);
-    // Toroid MLT: 2·(radial width + stack height) + build allowance (calibrated 95 mm at 2-stack)
-    const MLT=(2*(cfg.coreW_mm+cfg.coreHeight_mm*i.stacks)+3.8)/1000; const len=i.N*MLT;
+    // Toroid MLT (v10): 2·(radial width + stack height) + 2·bundleOD (actual routing, not fixed 3.8 mm)
+    const MLT=(2*(cfg.coreW_mm+cfg.coreHeight_mm*i.stacks)+2*i.bundleOD)/1000; const len=i.N*MLT+(cfg.leadMm||0)/1000;
     const R20=cfg.Rprime20*len; const Rdc=R20*(1+cfg.alphaCu*(temp-20)); const Rac=Rdc*cfg.RacRatio;
     const M=720, halfMs=1000/(2*cfg.lineHz); let pCoreAcc=0,i2=0,r2=0,BdcMax=0,Bmax=0,pCorePk=0,pCuPk=0,pTotPk=0; const wave=[];
     for(let n=0;n<M;n++){ const theta=(n+.5)*Math.PI/M, t_ms=(theta/Math.PI)*halfMs, s=Math.sin(theta), Vin=Vpk*s, D=clamp(1-Vin/i.Vout,0,.98), Iavg=Icrest*s;
@@ -232,7 +232,7 @@
     const Pcu=Irms*Irms*Rdc+Pac, Ptotal=Pcore+Pcu, PuncLo=Pcu+1.05*Pcore, PuncHi=Pcu+1.20*Pcore;
     const fillBare=(3.14*i.N)/cfg.Wa_mm2;
     const fillIns=(i.N*2*(Math.PI/4)*i.bundleOD*i.bundleOD)/cfg.Wa_mm2;   // tracks the bundle-OD input (2 bundles/turn)
-    const J=Irms/3.14;
+    const J=Irms/Math.max(cfg.CuArea_mm2||3.14, 0.01);
     // Wound-envelope surface area scales with stack count (matches report 101.5 cm² at 2-stack)
     const oh=i.stacks*cfg.coreHeight_mm+i.htBuild, od=i.woundOD, hole=i.holeID;
     const SA=(Math.PI*od*oh + 2*(Math.PI/4)*(od*od-hole*hole) + Math.PI*hole*oh)/100;
@@ -294,8 +294,9 @@
     ctx.fillStyle='#9ca3af'; ctx.font='12px Segoe UI'; ctx.fillText('Screening estimate — first-order packing, not a geometric winding solver', 16, 42);
     ctx.strokeStyle='rgba(148,163,184,.28)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cx,cy,boreR,0,Math.PI*2); ctx.stroke();
     // per-layer capacity from each layer's SHRINKING circumference (stricter than constant-capacity)
-    const passes=2*i.N; let remain=passes, lays=[], rC=i.boreID/2 - i.bundleOD/2;
-    while(remain>0 && rC>=i.bundleOD/2){ const cap=Math.max(1,Math.floor(2*Math.PI*rC/i.bundleOD)); const n=Math.min(remain,cap); lays.push({rC,n,cap}); remain-=n; rC-=i.bundleOD; }
+    // v10 layer count: passes = N × nParallel; tpl uses max(rC, bundleOD/2) to match Python _compute_layers
+    const passes=i.N*(cfg.nParallel||1); let remain=passes, lays=[], rC=i.boreID/2 - i.bundleOD/2;
+    while(remain>0 && rC>=i.bundleOD/2){ const cap=Math.max(1,Math.floor(2*Math.PI*Math.max(rC,i.bundleOD/2)/i.bundleOD)); const n=Math.min(remain,cap); lays.push({rC,n,cap}); remain-=n; rC-=i.bundleOD; }
     const fits=remain<=0, holeDia=fits?Math.max(0,(rC+i.bundleOD/2)*2):0;
     let placed=[]; lays.forEach((L,li)=>{ for(let k2=0;k2<L.n;k2++){ const ang=(k2/L.n)*Math.PI*2 - Math.PI/2; placed.push({layer:li, x:cx+L.rC*pxPerMm*Math.cos(ang), y:cy+L.rC*pxPerMm*Math.sin(ang)}); } });
     placed.forEach(p=>{ ctx.beginPath(); ctx.fillStyle=['rgba(56,189,248,.90)','rgba(245,158,11,.90)','rgba(34,197,94,.88)','rgba(167,139,250,.88)'][p.layer%4]; ctx.arc(p.x,p.y,bundleRpx,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.stroke(); });

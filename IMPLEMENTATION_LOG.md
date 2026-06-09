@@ -1216,5 +1216,121 @@ provides cycle-averaged values — no mapping possible).
 
 ---
 
+## Session 2026-06-08 — Phase 1: v10 Accuracy Improvements (step7_magnetic_calc.py)
+
+### Goal
+Adopt `pfc_sim_agent_v10.html` physics model in the Python backend so every result
+derives from the designer's actual selections (material, core, wire) rather than
+hardcoded approximations. This is Phase 1 of a 4-phase plan (Phases 2–4: JS review
+page alignment, documentation agent, v10 simulation endpoint).
+
+### Changes
+
+**New module-level constants**
+- `_PROX_kSkin=0.50`, `_PROX_kProx=0.40`, `_PROX_kCrowd=0.25` — v10 Dowell-proximity calibration
+- `_THERM_sC=1.00`, `_THERM_sW=0.90`, `_THERM_couple=0.50`, `_THERM_hotspot=1.12` — 2-node thermal split
+- `_LEAD_MM_DEFAULT=150.0` — lead wire length (mm) added to Cu_len
+
+**New helper functions**
+- `_bundle_OD_mm(d_strand_mm, n_strands, n_parallel, OD_catalog_mm)` — catalog OD primary, computed fallback
+- `_compute_layers(N, n_parallel, ID_mm, bundle_OD_mm)` — v10 tpl/layer formula; returns (layers, tpl, bore_r)
+- `_rac_rdc_litz(d_strand_mm, layers, OD_core_mm, ID_core_mm, fsw_Hz, T_C)` — v10 Fskin×Fprox proximity
+- `_two_node_thermal(wound_OD_mm, wound_HT_mm, hole_ID_mm, Pcore_W, Pcu_W, T_amb_C)` — 2-node KCL solve
+
+**Updated `_compute_MLT(core, stacks, wire_OD_mm=0.0)`**
+- When `wire_OD_mm > 0`: uses `2×wire_OD_mm` routing build (v10)
+- When `wire_OD_mm = 0`: legacy `3.8mm` fixed (backward compat)
+
+**New `DesignResult` fields (17 total)**
+- Winding geometry: `bundle_OD_computed_mm`, `layers_needed`, `turns_per_layer`,
+  `bore_hole_r_mm`, `lead_length_mm`
+- Rac/proximity: `Rac_Rdc_litz`, `crowd_axial`
+- B(r) crowding: `Bmax_inner_FL_T`, `sat_margin_inner_pct`
+- 2-node thermal: `dT_core_C`, `dT_wdg_C`, `dT_hotspot_C`, `T_hotspot_C`,
+  `Rca_KperW`, `Rwa_KperW`, `Rcw_KperW`
+- MLT: `MLT_v10_mm` (new v10), `MLT_mm` preserved (legacy 3.8mm for report compat)
+
+**`design_one_core()` restructured**
+1. Wire params extracted BEFORE MLT (d_strand_mm, OD_mm needed for v10 MLT)
+2. Bundle OD and layer count computed from actual wire catalog geometry
+3. v10 MLT used for Cu_length_m; legacy MLT stored separately for PDF compat
+4. Lead wire (150mm default) added to Cu_len
+5. Litz/TIW: Rac/Rdc from `_rac_rdc_litz()` replacing hardcoded `1.0`
+6. Solid/enamel: existing Bessel skin-effect formula via `_db()._rac_rdc_solid()`
+7. `_two_node_thermal()` called for toroid cores; ETD fallback to scaled SA value
+8. Inner-bore saturation check added: fail if `Bmax_inner_FL_T >= Bsat_at_Tcore`
+
+### Files Changed
+| File | Change |
+|------|--------|
+| `backend/app/mode_b/step7_magnetic_calc.py` | Complete rewrite with Phase 1 v10 accuracy model |
+
+### Verification
+- `python -c "import app.mode_b.step7_magnetic_calc"` → OK ✅
+- All 17 new DesignResult fields present ✅
+- All DB methods (`get_Bsat`, `get_k_bias`, `get_core_loss`, `get_mu_r`, `_rac_rdc_solid`) confirmed ✅
+- `compute_dowell_factor`, `compute_rogowski_fringing` import paths confirmed ✅
+
+### Not changed (intentionally)
+- `dT_rise_C` remains SA single-node surface ΔT — used for pass/fail score and backward compat
+- `MLT_mm` (legacy 3.8mm) preserved — PDF report generator still reads it
+- ReviewMagnetics.tsx and review_magnetics.html JS — Phase 2 (separate session)
+
+---
+
+## Session 2026-06-09 — Phase 2: Review Page v10 Alignment
+
+### Goal
+Make the Review Magnetics page fully consistent with the Phase 1 v10 Python backend.
+Every value, graph, and status banner on the review page now derives from the same
+physics model as the sizing engine result page.
+
+### JS Physics Fixes (review_magnetics.html)
+
+| Location | Before | After |
+|----------|--------|-------|
+| `compute()` MLT | Fixed `3.8mm` routing build | `2 × bundleOD` (v10 geometry) |
+| `compute()` Cu length | `N × MLT` | `N × MLT + leadMm/1000` (lead wire added) |
+| `compute()` current density J | `Irms / 3.14` (hardcoded) | `Irms / cfg.CuArea_mm2` (actual wire) |
+| `drawWindowBuild()` passes | `2 × N` (hardcoded bifilar) | `N × cfg.nParallel` |
+| `drawWindowBuild()` tpl | `floor(2π×rC / od)` | `floor(2π×max(rC, od/2) / od)` (v10) |
+| `cfg` defaults | missing leadMm, CuArea_mm2, nParallel | Added with safe defaults |
+
+### Geometry Injection Fixes (ReviewMagnetics.tsx)
+
+| Variable | Before | After |
+|----------|--------|-------|
+| `bundleOD` | `result.wire_OD_mm` | `result.bundle_OD_computed_mm` (catalog primary) |
+| `layersUsed` | Own JS formula | `result.layers_needed` from Python |
+| `holeID` | Own JS formula | `result.bore_hole_r_mm × 2` from Python |
+| `passesTotal` | `N × 2` | `N × pyNpar` (matches Python n_parallel) |
+| New `cfg` injections | — | `cfg.leadMm`, `cfg.CuArea_mm2`, `cfg.nParallel` |
+
+### New v10 Fields Displayed
+
+17 new `DesignResult` fields from Phase 1 are now surfaced on the review page:
+
+| Location | New content |
+|----------|-------------|
+| 3D canvas overlay | Purple line: `T_hotspot / ΔT_core / ΔT_wdg / Bmax_inner` |
+| Overview table | 6 new rows: T_hotspot, ΔT_core, ΔT_wdg, Bmax_inner, sat_margin_inner, MLT_v10 |
+| Overview status banners | Flux banner: shows both mean and inner-bore Bmax + crowding factor; ΔT banner: shows hotspot; New banner: inner-bore saturation margin |
+| Waveform metrics table | 3 new rows: Bmax_inner, T_hotspot, ΔT_core/wdg |
+| Summary textarea Flux line | Adds Bmax_inner, crowding factor, inner saturation % |
+| Summary textarea Build line | Replaces bare ΔT with surface ΔT + T_hotspot + 2-node breakdown |
+
+### Files Changed
+| File | Change |
+|------|--------|
+| `frontend/src/assets/review_magnetics.html` | 4 targeted physics fixes in JS compute() and drawWindowBuild() |
+| `frontend/src/components/ReviewMagnetics.tsx` | New TS extractions; cfg injection; expanded overlay; new table rows; updated status banners and summary |
+
+### Verification
+- `npx tsc --noEmit` — no errors ✅
+- All 4 HTML edits confirmed applied ✅
+- All 8 TSX edits confirmed applied ✅
+
+---
+
 *Log format: date · decision · files changed · verification result*
 *Append a new dated section for each future session that changes DesignState-related files.*

@@ -6,6 +6,17 @@ Matches reference document Steps 13.1 through 13.10 exactly.
 Adds Dowell AC factor (ferrite), Rogowski fringing (ferrite),
 Rth thermal network, 9-op-point stability, and Medical checks.
 
+Phase 1 v10 accuracy improvements (2026-06-08):
+  - MLT uses actual bundle OD (2×OD) instead of fixed 3.8mm allowance
+  - Litz/TIW Rac/Rdc: physics-based Dowell-proximity (kSkin, kProx, kCrowd)
+    replaces hardcoded 1.0 for powder toroid winding
+  - Layer count computed from bore geometry; feeds proximity model
+  - Two-node thermal network (core + winding) gives separate temperatures
+    and hotspot estimate (×1.12 factor)
+  - B(r) radial crowding: inner-bore peak = Bmax_mean × (rmean/rin)
+  - Lead wire length added to total Cu length (default 150mm)
+  - Inner-bore saturation check added to pass/fail
+
 All calculations use physical H (A/m, Oe) — never bare A·T.
 For stacked toroids: H = N × Idc / Le_single (Le of ONE core, NOT S×Le).
 """
@@ -34,38 +45,37 @@ def rho_cu(T_C: float) -> float:
 
 # ── iGSE (improved Generalised Steinmetz Equation) constants ─────────────
 # Triangular-ripple duty-cycle correction F(D) — from JS V5.1 (cfg.c = 1.444).
-# F(D) normalises the core-loss prediction for triangular (non-sinusoidal) excitation.
-#   At D = 0.5:   F ≈ 0.727  →  triangular waveform gives ~27 % LESS loss than sinusoidal
-#   At D ≈ 0.05:  F ≈ 1.28   →  triangular gives 28 % MORE loss (high-line PFC corner)
-#   At D ≈ 0.68:  F ≈ 0.735  →  low-line PFC crest — slight reduction
-IGSE_C  = 1.444    # Steinmetz frequency exponent (matches JS cfg.c)
-IGSE_B  = 2.106    # Steinmetz flux exponent (matches JS cfg.b)
-IGSE_IC = 3.5435   # ∫₀^π |cos θ|^IGSE_C dθ (numerical)
+IGSE_C  = 1.444
+IGSE_B  = 2.106
+IGSE_IC = 3.5435
 IGSE_K  = (2 ** IGSE_C) / ((2 * math.pi) ** (IGSE_C - 1) * IGSE_IC)
 
 
+# ── v10 proximity model constants (Dowell-like, calibrated) ──────────────
+# Source: pfc_sim_agent_v10.html model.copper.prox
+_PROX_kSkin  = 0.50   # skin-effect coefficient (small-x Dowell approximation)
+_PROX_kProx  = 0.40   # inter-layer proximity coefficient
+_PROX_kCrowd = 0.25   # radial crowding amplification for inner-bore layers
+
+# ── v10 thermal 2-node split parameters (calibrated for wound toroid) ────
+# Source: pfc_sim_agent_v10.html model.cooling defaults
+_THERM_sC      = 1.00   # splitCoreAmbient — relative Rca weight
+_THERM_sW      = 0.90   # splitWdgAmbient  — relative Rwa weight
+_THERM_couple  = 0.50   # coupleCoreWdg    — Rcw = theta_total × couple
+_THERM_hotspot = 1.12   # hotspot factor over node average (interior vs surface)
+
+# ── Default lead wire length per inductor ────────────────────────────────
+_LEAD_MM_DEFAULT = 150.0   # mm total (entry + exit, 75mm each side)
+
+
 def _Fd(D: float) -> float:
-    """iGSE duty-cycle correction for triangular current ripple.
-
-    F(D) = K × [D^(1−c) + (1−D)^(1−c)]
-    where K = 2^c / ((2π)^(c−1) × IC),  c = 1.444.
-
-    Multiply database core-loss by _Fd(D) to convert from sinusoidal-test
-    data to the triangular-ripple excitation present in a PFC boost inductor.
-    """
+    """iGSE duty-cycle correction for triangular current ripple."""
     D = max(0.02, min(0.98, D))
     return IGSE_K * (D ** (1.0 - IGSE_C) + (1.0 - D) ** (1.0 - IGSE_C))
 
 
 def _retention_edge(H_Oe: float) -> float:
-    """Analytical DC-bias retention k(H) for EDGE (Magnetics Inc.) powder cores.
-
-    k(H) = 1 / [100 × (0.01 + 9.202×10⁻¹⁰ × H^3.044)]
-
-    Matches JS V5.1 `retention()` exactly. Used as a fast analytical fallback
-    inside the waveform-integration loop where 360 DB calls per core would add
-    latency. The DB-based k_bias is still used for the main N-convergence loop.
-    """
+    """Analytical DC-bias retention k(H) for EDGE powder cores (fast loop fallback)."""
     H = max(0.0, H_Oe)
     return min(1.0, (1.0 / (0.01 + 9.202e-10 * H ** 3.044)) / 100.0)
 
@@ -101,14 +111,13 @@ class DesignResult:
     Ve_total_cm3:   float = 0.0
     Le_single_mm:   float = 0.0
     h_effective_mm: float = 0.0
-    # Core physical dimensions (needed for report generation)
     OD_mm:          float = 0.0
     ID_mm:          float = 0.0
     HT_mm:          float = 0.0
     Ae_single_mm2:  float = 0.0
     Wa_single_mm2:  float = 0.0
-    AL_nom_nH:      float = 0.0   # single-stack AL nominal
-    AL_tol_pct:     float = 8.0   # AL tolerance %
+    AL_nom_nH:      float = 0.0
+    AL_tol_pct:     float = 8.0
     supplier:       str   = ""
 
     # Turns & inductance (Step 13.3)
@@ -119,14 +128,14 @@ class DesignResult:
     kreq_min:       float = 0.0
     kreq_nom:       float = 0.0
     kreq_max:       float = 0.0
-    AT_design:      float = 0.0   # N × Iavg@crest at 90 Vac
-    H_Oe_design:    float = 0.0   # H at design point
-    I_dc_worst_A:   float = 0.0   # worst-case per-phase DC bias current driving N convergence (powder)
-    H_Oe_worst:     float = 0.0   # H(Oe) = 0.4*pi*N*I_dc_worst/Le at the converged N — sets k_bias rolloff
-    k_bias_worst:   float = 0.0   # permeability retention k(H_Oe_worst) used in the L_full,min >= 0.85*Ltarget check
+    AT_design:      float = 0.0
+    H_Oe_design:    float = 0.0
+    I_dc_worst_A:   float = 0.0
+    H_Oe_worst:     float = 0.0
+    k_bias_worst:   float = 0.0
 
     # Gap (ferrite only)
-    lg_mm:          float = 0.0   # total gap length
+    lg_mm:          float = 0.0
 
     # Flux density (Step 13.5)
     dBpp_T:         float = 0.0
@@ -137,58 +146,80 @@ class DesignResult:
     Bsat_at_Tcore:  float = 0.0
     sat_margin_pct: float = 0.0
 
+    # v10 B(r) radial crowding
+    crowd_axial:          float = 1.0  # rmean/rin — inner-bore crowding factor
+    Bmax_inner_FL_T:      float = 0.0  # inner-bore peak flux = Bmax × crowd_axial
+    sat_margin_inner_pct: float = 0.0  # saturation margin at inner bore (%)
+
     # Winding (Step 13.6)
-    wire_designation: str   = ""
-    n_strands:          int   = 0
-    d_strand_mm:        float = 0.0
-    wire_OD_mm:         float = 0.0
-    Cu_area_mm2:        float = 0.0
-    R_per_m_20C:        float = 0.0
-    FFcu:               float = 0.0   # copper fill factor
-    Ku:                 float = 0.0   # window fill including insulation
-    wound_HT_actual_mm:  float = 0.0  # assembled height: core stack + wire OD (top+bottom)
-    wound_OD_actual_mm:  float = 0.0  # assembled OD: core OD + radial winding build at actual FFcu
-    mounting:            str   = 'horizontal'  # 'horizontal' | 'vertical'
-    installed_height_mm: float = 0.0  # chassis height for the chosen mounting orientation
+    wire_designation:    str   = ""
+    n_strands:           int   = 0
+    d_strand_mm:         float = 0.0
+    wire_OD_mm:          float = 0.0
+    Cu_area_mm2:         float = 0.0
+    R_per_m_20C:         float = 0.0
+    FFcu:                float = 0.0
+    Ku:                  float = 0.0
+    wound_HT_actual_mm:  float = 0.0
+    wound_OD_actual_mm:  float = 0.0
+    mounting:            str   = 'horizontal'
+    installed_height_mm: float = 0.0
+
+    # v10 winding geometry (from bore/layer computation)
+    bundle_OD_computed_mm: float = 0.0  # catalog OD (primary) or computed from strand geom
+    layers_needed:         int   = 1    # bore layers required to fit N×n_par turns
+    turns_per_layer:       int   = 0    # turns fitting in innermost bore layer
+    bore_hole_r_mm:        float = 0.0  # residual bore clearance after winding (mm)
+    lead_length_mm:        float = 0.0  # lead wire added to Cu length (mm)
 
     # Losses (Step 13.7)
-    MLT_mm:         float = 0.0
-    Cu_length_m:    float = 0.0
+    MLT_mm:         float = 0.0   # legacy MLT (3.8mm fixed — kept for report compat)
+    MLT_v10_mm:     float = 0.0   # v10 MLT using 2×bundleOD
+    Cu_length_m:    float = 0.0   # total Cu length including lead wire
     DCR_25C_mOhm:   float = 0.0
     DCR_100C_mOhm:  float = 0.0
-    Rac_Rdc:        float = 1.0   # Dowell factor (ferrite only)
+    Rac_Rdc:        float = 1.0   # AC/DC resistance ratio (Dowell/proximity)
+    Rac_Rdc_litz:   float = 1.0   # v10 physics-based value (same for litz/TIW)
     Pcu_25C_W:      float = 0.0
     Pcu_100C_W:     float = 0.0
-    Pcu_25C_firstpass_W:  float = 0.0   # genuine first-pass I_rms,ref^2*DCR estimate (90 Vac) —
-    Pcu_100C_firstpass_W: float = 0.0   # preserved separately so Sec 3.6 ("first-pass") can show
-                                        # operands that literally sum to its displayed P_total
-    P_fringing_W:   float = 0.0   # Rogowski fringing (ferrite only)
-    Pcore_W:        float = 0.0   # half-cycle averaged core loss with iGSE F(D), at T_core
-    Pcore_crest_W:  float = 0.0   # crest-only core loss (legacy reference point)
+    Pcu_25C_firstpass_W:  float = 0.0
+    Pcu_100C_firstpass_W: float = 0.0
+    P_fringing_W:   float = 0.0
+    Pcore_W:        float = 0.0
+    Pcore_crest_W:  float = 0.0
     Ptotal_25C_W:   float = 0.0
     Ptotal_100C_W:  float = 0.0
 
-    # iGSE / waveform-integration results (JS V5.1 equivalent)
-    Fd_design:      float = 1.0   # F(D) correction at 90 Vac design crest
-    Bdc_max_T:      float = 0.0   # max B_dc over the half line cycle (from 360-pt integration)
-    Ihf_rms_A:      float = 0.0   # HF ripple RMS current  I_hf = ΔI_pp / (2√3) averaged
-    Pac_W:          float = 0.0   # AC (HF ripple) copper loss: I_hf_rms² × R_ac
-    J_A_mm2:        float = 0.0   # current density A/mm² in the copper conductor
-    P_unc_lo_W:     float = 0.0   # lower uncertainty bound: P_cu + 1.05 × P_core
-    P_unc_hi_W:     float = 0.0   # upper uncertainty bound: P_cu + 1.20 × P_core
+    # iGSE / waveform-integration results
+    Fd_design:      float = 1.0
+    Bdc_max_T:      float = 0.0
+    Ihf_rms_A:      float = 0.0
+    Pac_W:          float = 0.0
+    J_A_mm2:        float = 0.0
+    P_unc_lo_W:     float = 0.0
+    P_unc_hi_W:     float = 0.0
 
-    # Loss vs Vin tables (Steps 13.8 + 13.9)
+    # Loss vs Vin tables
     loss_table_25C:  list = field(default_factory=list)
     loss_table_100C: list = field(default_factory=list)
 
-    # Inductance vs Vin (Step 13.4) — powder only
+    # Inductance vs Vin (powder only)
     L_vs_Vin_table:  list = field(default_factory=list)
 
-    # Thermal
+    # Thermal — SA single-node (preserved for backward compat + pass/fail)
     T_amb_C:        float = 50.0
-    T_core_C:       float = 0.0
-    dT_rise_C:      float = 0.0
+    T_core_C:       float = 0.0   # surface temperature from SA model
+    dT_rise_C:      float = 0.0   # surface ΔT (SA model — used for pass/fail + score)
     dT_budget_C:    float = 60.0
+
+    # v10 two-node thermal (core + winding separate)
+    dT_core_C:      float = 0.0   # core node ΔT above ambient
+    dT_wdg_C:       float = 0.0   # winding node ΔT above ambient
+    dT_hotspot_C:   float = 0.0   # hotspot ΔT = max(dTc,dTw) × hotspotFactor
+    T_hotspot_C:    float = 0.0   # absolute hotspot temperature
+    Rca_KperW:      float = 0.0   # core-to-ambient thermal resistance
+    Rwa_KperW:      float = 0.0   # winding-to-ambient thermal resistance
+    Rcw_KperW:      float = 0.0   # core-winding coupling resistance
 
     # Medical
     creepage_ok:    bool  = True
@@ -202,27 +233,135 @@ class DesignResult:
     score:          float = 999.0
 
 
-def _compute_MLT(core: dict, stacks: int = 1) -> float:
+# ── v10 helper functions ──────────────────────────────────────────────────
+
+def _bundle_OD_mm(d_strand_mm: float, n_strands: int, n_parallel: int,
+                  OD_catalog_mm: float, fill_factor: float = 0.55) -> float:
+    """Bundle outer diameter in mm.
+    Uses catalog OD as primary source (measured/specified by manufacturer).
+    Falls back to computed value only if catalog OD is absent.
     """
-    Mean length per turn (mm).
+    if OD_catalog_mm > 0:
+        return OD_catalog_mm
+    n_total = max(1, n_strands * n_parallel)
+    Cu_area_m2 = n_total * math.pi * (d_strand_mm * 0.5e-3) ** 2
+    return 2.0 * math.sqrt(Cu_area_m2 * 1e6 / max(fill_factor, 0.2) / math.pi)
 
-    Toroid: cross-section perimeter method — matches JS V5.1 calibrated formula.
-      MLT = 2 × (coreW + HT_total) + 3.8
-      where coreW = (OD-ID)/2  (radial width of one core)
-            HT_total = HT × stacks  (winding traverses the full stack height)
-            3.8 mm = lead-routing allowance (calibrated to EDGE reference design)
-    This correctly scales with stack count, unlike the pure-circumferential formula.
 
+def _compute_layers(N: int, n_parallel: int, ID_mm: float,
+                    bundle_OD_mm: float) -> tuple:
+    """Layer count and geometry through toroid bore (v10 formula).
+
+    Returns (layers, turns_per_layer, bore_hole_r_mm).
+    bore_hole_r_mm < 0 means winding does not fit (overfull).
+    """
+    if bundle_OD_mm <= 0 or ID_mm <= 0:
+        return 1, N, ID_mm / 2.0
+    od  = bundle_OD_mm
+    rin = ID_mm / 2.0
+    # Turns fitting in innermost layer (v10: tpl = floor(2π×max(rin-od/2, od)/od))
+    tpl     = max(1, int(math.floor(2.0 * math.pi * max(rin - od / 2.0, od) / od)))
+    layers  = max(1, math.ceil((N * n_parallel) / tpl))
+    bore_r  = rin - layers * od
+    return layers, tpl, bore_r
+
+
+def _rac_rdc_litz(d_strand_mm: float, layers: int,
+                  OD_core_mm: float, ID_core_mm: float,
+                  fsw_Hz: float, T_C: float = 100.0) -> float:
+    """Physics-based Rac/Rdc for litz/TIW wire (v10 Dowell-proximity model).
+
+    Accounts for:
+      - Fskin: skin effect within individual strands (kSkin = 0.50)
+      - Fprox: inter-layer proximity effect (kProx = 0.40)
+      - kCrowd = 0.25: radial crowding amplifies proximity for inner-bore layers
+
+    For a single-layer winding Fprox = 1.0 (no proximity between layers).
+    For litz strands (d << 2δ): Fskin ≈ 1.0; Fprox dominates at >1 layer.
+    """
+    rho_T  = RHO_CU_20 * (1.0 + ALPHA_CU * (T_C - 20.0))
+    delta  = math.sqrt(rho_T / (math.pi * fsw_Hz * MU0))   # skin depth, m
+    if delta <= 0:
+        return 1.0
+    x = (d_strand_mm * 1e-3) / (2.0 * delta)   # strand radius / skin depth
+
+    # Radial crowding factor at inner bore (v10: crowdAxial = rmean/rin)
+    if ID_core_mm > 0 and OD_core_mm > 0:
+        rin       = ID_core_mm / 2.0
+        rmean     = (ID_core_mm / 2.0 + OD_core_mm / 2.0) / 2.0
+        crowd_ax  = rmean / max(rin, 1e-9)
+    else:
+        crowd_ax  = 1.0
+
+    Fskin = 1.0 + _PROX_kSkin * x ** 2
+    Fprox = 1.0 + _PROX_kProx * max(layers - 1, 0) * x ** 2 * (
+        1.0 + _PROX_kCrowd * (crowd_ax - 1.0))
+    return max(1.0, Fskin * Fprox)
+
+
+def _two_node_thermal(wound_OD_mm: float, wound_HT_mm: float,
+                       hole_ID_mm: float, Pcore_W: float, Pcu_W: float,
+                       T_amb_C: float) -> tuple:
+    """v10 two-node thermal network for wound toroid.
+
+    Derives Rca/Rwa from the calibrated SA power-law (preserves empirical baseline),
+    splits by _THERM_sC/_THERM_sW fractions, couples via Rcw = theta × _THERM_couple.
+
+    Returns (dT_core_C, dT_wdg_C, dT_hotspot_C, Rca_KperW, Rwa_KperW, Rcw_KperW).
+    dT_hotspot = max(dTc, dTw) × _THERM_hotspot (1.12) accounts for interior gradient.
+    """
+    Ptot = Pcore_W + Pcu_W
+    if Ptot < 1e-6:
+        return 0.0, 0.0, 0.0, 1e6, 1e6, 1e6
+
+    # Total theta from calibrated SA formula
+    dT_sa = _thermal_dT_SA(wound_OD_mm, wound_HT_mm, hole_ID_mm, Ptot)
+    theta  = dT_sa / Ptot     # K/W total
+
+    # Split by surface fractions (v10 defaults)
+    sC  = _THERM_sC; sW = _THERM_sW
+    Rca = theta * (sC + sW) / sC           # core-to-ambient (higher R — less exposed area)
+    Rwa = theta * (sC + sW) / sW           # winding-to-ambient (lower R — outer surface)
+    Rcw = max(theta * _THERM_couple, 1e-3)  # core-winding coupling
+
+    # 2-node KCL solve:
+    #   dTc × (1/Rca + 1/Rcw) − dTw × (1/Rcw) = Pcore
+    #   dTw × (1/Rwa + 1/Rcw) − dTc × (1/Rcw) = Pcu
+    a11 = 1.0 / Rca + 1.0 / Rcw
+    a12 = -1.0 / Rcw
+    a22 = 1.0 / Rwa + 1.0 / Rcw
+    det = a11 * a22 - a12 * a12    # a12 = a21 (symmetric)
+    if abs(det) < 1e-20:
+        det = 1e-20
+    dTc = max(0.0, ( Pcore_W * a22 + Pcu_W  / Rcw) / det)
+    dTw = max(0.0, ( Pcu_W   * a11 + Pcore_W / Rcw) / det)
+
+    dT_hotspot = max(dTc, dTw) * _THERM_hotspot
+    return dTc, dTw, dT_hotspot, Rca, Rwa, Rcw
+
+
+# ── MLT ───────────────────────────────────────────────────────────────────
+
+def _compute_MLT(core: dict, stacks: int = 1, wire_OD_mm: float = 0.0) -> float:
+    """Mean length per turn (mm).
+
+    Toroid (v10 formula when wire_OD_mm > 0):
+      MLT = 2 × (coreW + HT_total) + 2 × wire_OD_mm
+    Toroid (legacy, wire_OD_mm = 0):
+      MLT = 2 × (coreW + HT_total) + 3.8  (fixed routing allowance)
     ETD/EE: use catalog MLT_mm value.
     """
     if "ID_mm" in core and float(core.get("ID_mm", 0)) > 0:
-        OD = float(core["OD_mm"])
-        ID = float(core["ID_mm"])
-        HT = float(core["HT_mm"])
-        coreW = (OD - ID) / 2          # radial width of core cross-section
-        return 2 * (coreW + HT * stacks) + 3.8
+        OD     = float(core["OD_mm"])
+        ID     = float(core["ID_mm"])
+        HT     = float(core["HT_mm"])
+        coreW  = (OD - ID) / 2.0
+        build  = (2.0 * wire_OD_mm) if wire_OD_mm > 0 else 3.8
+        return 2.0 * (coreW + HT * stacks) + build
     return float(core.get("MLT_mm", 100.0))
 
+
+# ── Thermal helpers ───────────────────────────────────────────────────────
 
 def _thermal_dT_SA(wound_OD_mm: float, wound_HT_mm: float,
                    hole_ID_mm: float, P_total_W: float) -> float:
@@ -230,26 +369,20 @@ def _thermal_dT_SA(wound_OD_mm: float, wound_HT_mm: float,
 
     SA [cm²] = [π·OD_w·OH + (π/2)·(OD_w² − hole²) + π·hole·OH] / 100
     ΔT [°C]  = (P_total [W] × 1000 / SA [cm²]) ^ 0.833
-
-    All dimensions in mm.  Matches the JS studio 'Thermal envelope' model
-    (identical to generate_steps13_14.py SA model).
     """
     od   = wound_OD_mm
-    oh   = wound_HT_mm           # total wound height (stack + build)
-    hole = max(0.5, hole_ID_mm)  # residual bore hole after winding
+    oh   = wound_HT_mm
+    hole = max(0.5, hole_ID_mm)
     SA   = (math.pi * od * oh
             + 2 * (math.pi / 4) * (od**2 - hole**2)
-            + math.pi * hole * oh) / 100.0   # cm²
-    SA   = max(SA, 1.0)          # guard against zero
+            + math.pi * hole * oh) / 100.0
+    SA   = max(SA, 1.0)
     return (P_total_W * 1000.0 / SA) ** 0.833
 
 
 def _thermal_Rth(core: dict, stacks: int = 1, h_forced: float = 17.5) -> float:
-    """Kept for ETD/ferrite cores and backwards compatibility.
-    Toroid path now uses _thermal_dT_SA which matches the JS studio exactly.
-    """
+    """Kept for ETD/ferrite cores. Toroid path uses _thermal_dT_SA."""
     if "ID_mm" in core and float(core.get("ID_mm", 0)) > 0:
-        # Toroid — caller should use _thermal_dT_SA; return a reasonable fallback
         OD_core = float(core["OD_mm"]) * 1e-3
         HT      = float(core["HT_mm"]) * stacks * 1e-3
         OD_eff  = OD_core + 2 * 4e-3
@@ -263,6 +396,8 @@ def _thermal_Rth(core: dict, stacks: int = 1, h_forced: float = 17.5) -> float:
         return 8.5 + 1.0 / max(1e-6, h_forced * A_surf)
 
 
+# ── 360-point half-cycle waveform integration ────────────────────────────
+
 def _half_cycle_averages(
     material_key: str,
     core_type: str,
@@ -271,35 +406,21 @@ def _half_cycle_averages(
     Ve_m3: float,
     Le_s: float,
     L0_nom_H: float,
-    Icrest_A: float,         # per-phase crest-average current (I_phi,avg @ crest)
+    Icrest_A: float,
     Vout_V: float,
-    Vin_pk_V: float,         # peak line voltage at the chosen operating point
+    Vin_pk_V: float,
     fsw_Hz: float,
-    Rdc: float,              # Ω at operating temperature
-    Rac: float,              # Ω_ac = Rdc × Rac_Rdc
+    Rdc: float,
+    Rac: float,
     T_core_C: float = 100.0,
     f_line_Hz: float = 60.0,
     M: int = 360,
-    return_series: bool = False,   # also return per-angle θ/Bac_pk/Pcore arrays
+    return_series: bool = False,
 ) -> dict:
-    """360-point half-cycle waveform integration matching JS V5.1 `compute()` loop.
-
-    Samples θ = 0 … π (one half of the rectified line cycle) at M uniformly
-    spaced points.  At each point:
-      • V_in(θ) = V_pk × sin(θ)
-      • D(θ)    = 1 − V_in/V_out   (boost duty cycle)
-      • I_avg(θ) = I_crest × sin(θ)  (half-sine current envelope)
-      • k(H)    from analytical retention formula (fast, no DB)
-      • B_ac,pk = V_in × D / (2 × N × A_e × f_sw)
-      • P_core  = P_v(B_ac,pk, f_sw, T) × V_e × F(D)   [iGSE correction]
-      • I_hf    = ΔI_pp / (2√3)  [triangular ripple RMS]
-      • P_cu    = R_dc × I_avg² + R_ac × I_hf²
-
-    Returns a dict with time-averaged and peak quantities.
-    """
+    """360-point half-cycle waveform integration matching JS V5.1 compute() loop."""
     pCoreAcc = 0.0
-    i2       = 0.0   # Σ I_avg²
-    r2       = 0.0   # Σ I_hf²
+    i2       = 0.0
+    r2       = 0.0
     BdcMax   = 0.0
     BmaxPk   = 0.0
     pCorePk  = 0.0
@@ -316,32 +437,27 @@ def _half_cycle_averages(
         D     = max(0.0, min(0.98, 1.0 - Vin / Vout_V))
         Iavg  = Icrest_A * s
 
-        # DC bias → retention → effective L(θ) — use analytical formula (fast)
         if core_type == "powder":
-            Le_cm = Le_s * 100.0   # m → cm
+            Le_cm = Le_s * 100.0
             H_Oe  = 0.4 * math.pi * N * Iavg / Le_cm
             k_b   = _retention_edge(H_Oe)
         else:
             k_b = 1.0
         Lth = max(L0_nom_H * k_b, 1e-9)
 
-        # Flux densities
         dBpp  = Vin * D / (N * Ae_m2 * fsw_Hz)
         BacPk = dBpp / 2.0
         Bdc   = Lth * Iavg / (N * Ae_m2)
         Bmx   = Bdc + BacPk
 
-        # Core loss with iGSE F(D) correction
         Fd      = _Fd(D)
         Pv_Wm3  = _db().get_core_loss(material_key, fsw_Hz, BacPk, T_core_C) * 1e3
         Pcore_i = Pv_Wm3 * Fd * Ve_m3
 
-        # HF ripple current: ΔI_pp / (2√3) — triangular ripple RMS
         dIpp  = Vin * D / max(Lth * fsw_Hz, 1e-12)
         Ihf   = dIpp / (2.0 * math.sqrt(3.0))
 
-        # Instantaneous copper loss: DC term + AC term (JS decomposition)
-        Pcu_i = Rdc * Iavg ** 2 + Rac * Ihf ** 2
+        Pcu_i  = Rdc * Iavg ** 2 + Rac * Ihf ** 2
         Ptot_i = Pcore_i + Pcu_i
 
         pCoreAcc += Pcore_i
@@ -381,16 +497,18 @@ def _half_cycle_averages(
     }
 
 
+# ── Main design function ──────────────────────────────────────────────────
+
 def design_one_core(
-    core: dict,          # from _db().filter_cores()
+    core: dict,
     material_key: str,
     L_target_H: float,
-    Ipk_A: float,        # per-phase peak current
-    Irms_A: float,       # per-phase RMS current
-    IL_HF_rms_A: float,  # HF ripple component of Irms
-    dIL_pp_A: float,     # peak-to-peak ripple at design point
+    Ipk_A: float,
+    Irms_A: float,
+    IL_HF_rms_A: float,
+    dIL_pp_A: float,
     fsw_Hz: float,
-    wire: dict,          # from get_wire_options()
+    wire: dict,
     N_phases: int,
     OPS: np.ndarray,
     T_amb_C: float = 50.0,
@@ -398,13 +516,21 @@ def design_one_core(
     J_target: float = 5.0,
     app_class: str = "Industrial",
     h_conv: float = 17.5,
-    FFcu_limit: float = 0.40,   # designer-selectable fill factor
-    mounting:   str   = 'horizontal',  # 'horizontal' | 'vertical'
+    FFcu_limit: float = 0.40,
+    mounting:   str   = 'horizontal',
+    lead_length_mm: float = _LEAD_MM_DEFAULT,
 ) -> DesignResult:
     """
     Full Step 13 calculation for one (core, material, wire) combination.
-    Matches reference document Steps 13.1–13.10 exactly.
-    Adds: Dowell AC factor, Rogowski fringing, Rth thermal, 9-op-point checks.
+
+    Phase 1 v10 improvements applied:
+      - v10 MLT (2×bundleOD) replaces fixed 3.8mm build allowance
+      - Lead wire added to total Cu length (default 150mm)
+      - Litz/TIW Rac/Rdc from physics-based proximity model (not hardcoded 1.0)
+      - Layer count computed from bore geometry; feeds proximity model
+      - Two-node thermal network gives dT_core, dT_wdg, dT_hotspot
+      - B(r) radial crowding: Bmax_inner = Bmax × (rmean/rin)
+      - Inner-bore saturation check added to pass/fail
     """
     res = DesignResult()
     res.material_key   = material_key
@@ -419,7 +545,6 @@ def design_one_core(
     res.h_effective_mm = float(core["h_effective_mm"])
     res.T_amb_C        = T_amb_C
     res.dT_budget_C    = dT_budget_C
-    # Physical dims for report (single-stack values)
     res.OD_mm         = float(core.get("OD_mm", 0.0))
     res.ID_mm         = float(core.get("ID_mm", 0.0))
     res.HT_mm         = float(core.get("HT_mm", 0.0))
@@ -427,29 +552,22 @@ def design_one_core(
                               float(core["Ae_total_mm2"]) / max(int(core.get("stacks", 1)), 1)))
     res.Wa_single_mm2 = float(core.get("Wa_mm2",
                               float(core.get("Wa_total_mm2", 0)) / max(int(core.get("stacks", 1)), 1)))
-    # AL values for report (single-stack nominal and tolerance)
     _stk   = max(int(core.get("stacks", 1)), 1)
     _al_t  = float(core.get("AL_nom_total", core.get("AL_nom_nH", 75)))
-    res.AL_nom_nH  = round(_al_t / _stk, 2)           # single-stack nominal
+    res.AL_nom_nH  = round(_al_t / _stk, 2)
     res.AL_tol_pct = float(core.get("AL_tolerance_pct", 8))
     res.supplier   = str(core.get("supplier", ""))
 
-    Ae   = res.Ae_total_mm2  * 1e-6    # m²
-    Wa   = res.Wa_total_mm2  * 1e-6    # m²
-    Ve   = res.Ve_total_cm3  * 1e-6    # m³
-    Le_s = res.Le_single_mm  * 1e-3    # m (single core, used for H calculation)
+    Ae   = res.Ae_total_mm2  * 1e-6
+    Wa   = res.Wa_total_mm2  * 1e-6
+    Ve   = res.Ve_total_cm3  * 1e-6
+    Le_s = res.Le_single_mm  * 1e-3
 
-    # Design point: Vin=90Vac row from OPS (index 0)
     Vout_V = 393.0
-    # Ipk_A is per-phase PEAK (DC bias + half ripple).
-    # DC bias component = Ipk_A - dIL_pp/2 = Iφ,avg@crest (reference Step 13.1: 14.152A)
-    # Do NOT divide by N_phases again — Ipk_A is already per-phase.
     I_phi_avg_crest = max(Ipk_A - dIL_pp_A / 2.0, Irms_A * 0.9)
 
     # ── Step 13.3: Turns ────────────────────────────────────────────────────
     if res.core_type == "powder":
-        # Worst-case DC bias = max per-phase Iavg across all 9 op-points
-        # 180Vac full-load gives Iavg=14.82A > 90Vac Iavg=14.15A (higher power level)
         I_dc_worst = I_phi_avg_crest
         for op_row in OPS:
             vin_op,pout_op,eta_op,pf_op = float(op_row[0]),float(op_row[1]),float(op_row[2]),float(op_row[3])
@@ -463,7 +581,7 @@ def design_one_core(
         res.lg_mm = 0.0
     else:
         N, lg_mm, Bpk_converged = _turns_ferrite(core, material_key, L_target_H, Ipk_A)
-        L0_min = L0_nom = L0_max = L_target_H * 1e6  # ferrite L ≈ flat vs bias
+        L0_min = L0_nom = L0_max = L_target_H * 1e6
         kreq_min = kreq_nom = kreq_max = 1.0
         res.lg_mm = lg_mm
 
@@ -481,20 +599,17 @@ def design_one_core(
     res.AT_design   = round(N * I_phi_avg_crest, 2)
     res.H_Oe_design = round((N * I_phi_avg_crest / Le_s) / 79.577, 2)
 
-    # ── Step 13.4: Inductance vs Vin (all op-points) ─────────────────────────
+    # ── Step 13.4: Inductance vs Vin ─────────────────────────────────────────
     res.L_vs_Vin_table = _build_L_vs_Vin_table(
         material_key, res.core_type, N, L0_nom * 1e6, L0_min * 1e6, L0_max * 1e6,
         Le_s, OPS, L_target_H * 1e6)
 
     # ── Step 13.5: Flux density ──────────────────────────────────────────────
-    # 13.5.1: AC flux swing from volt-seconds at 90 Vac crest
     Vin_pk90 = OPS[0, 0] * math.sqrt(2)
-    Vout_V   = 393.0
     Dpk90    = 1 - Vin_pk90 / Vout_V
     dBpp     = Vin_pk90 * Dpk90 / (N * Ae * fsw_Hz)
     Bac_pk   = dBpp / 2
 
-    # 13.5.2: DC flux density at full-load crest
     if res.core_type == "powder":
         H_dc  = N * I_phi_avg_crest / Le_s
         H_Oe  = H_dc / 79.577
@@ -512,77 +627,83 @@ def design_one_core(
     res.Bmin_FL_T   = round(Bdc - Bac_pk, 6)
     res.Bmax_FL_T   = round(Bdc + Bac_pk, 6)
 
-    # ── Step 13.6: Winding fill factor ────────────────────────────────────────
-    # MLT passes res.stacks so the winding path scales correctly with stack count.
-    MLT    = _compute_MLT(core, res.stacks)   # mm/turn  (JS V5.1 formula)
-    Cu_len = N * MLT / 1000.0                 # m
+    # Radial crowding factor (v10: crowdAxial = rmean/rin)
+    if res.ID_mm > 0 and res.OD_mm > 0:
+        _rin      = res.ID_mm / 2.0
+        _rmean    = (res.ID_mm / 2.0 + res.OD_mm / 2.0) / 2.0
+        crowd_ax  = _rmean / max(_rin, 1e-9)
+    else:
+        crowd_ax  = 1.0
+    res.crowd_axial = round(crowd_ax, 4)
 
-    d_s_mm  = float(wire.get("strand_dia_mm", 0.1))
-    n_str   = int(wire.get("strands", 200))
-    OD_mm   = float(wire.get("OD_mm", 2.0))
-    Cu_area = float(wire.get("Cu_area_mm2", 1.0))
-    R_per_m = float(wire.get("R_per_m_20C_ohm", 0.01))
-    designation = str(wire.get("designation", ""))
+    # ── Step 13.6: Winding ───────────────────────────────────────────────────
+    # Extract wire parameters first (needed for v10 MLT and layer-count geometry)
+    d_s_mm        = float(wire.get("strand_dia_mm", 0.1))
+    n_str         = int(wire.get("strands", 200))
+    OD_mm         = float(wire.get("OD_mm", 2.0))
+    Cu_area       = float(wire.get("Cu_area_mm2", 1.0))
+    R_per_m       = float(wire.get("R_per_m_20C_ohm", 0.01))
+    designation   = str(wire.get("designation", ""))
+    wire_type_str = str(wire.get("type", "litz")).lower()
+    n_parallel    = int(wire.get("n_parallel", 1) or 1)
 
-    # Read n_parallel from wire dict (set by main.py adjusted_wires to 1/2/3)
-    n_parallel = int(wire.get("n_parallel", 1) or 1)
+    # Bundle OD: catalog value is authoritative (measured); computation is fallback
+    bundleOD = _bundle_OD_mm(d_s_mm, n_str, n_parallel, OD_mm)
 
-    # ── Fill factor — Reference Step 13.6.2 (corrected denominator) ──────────
-    # For a stacked toroid the winding passes through the bore of EACH core,
-    # but the bore opening is the SAME for every core in the stack — it does NOT
-    # multiply with stack count.  The correct denominator is Wa_single_mm2.
-    #
-    # FFcu (bare copper) = N × Cu_area / Wa_single   ← reference criterion (≤ 0.40)
-    # Ku   (insulated)   = N × n_par × (π/4 × bundleOD²) / Wa_single  ← physical fit
-    #                      matches JS V5.1: fillIns = (N × 2 × π/4 × OD²) / Wa_single
-    #
-    # Cu_area from wire dict = Cu_per_conductor × n_parallel (set by main.py).
-    Wa_bore  = res.Wa_single_mm2          # bore cross-section of ONE core (invariant)
-    Acu_total = N * Cu_area               # mm² bare copper (n_par already in Cu_area)
-    FFcu      = Acu_total / Wa_bore       # bare-copper fill (reference Step 13.6.2)
+    # Layer count through toroid bore (v10)
+    layers, tpl, bore_r = _compute_layers(N, n_parallel, res.ID_mm, bundleOD)
+    _hole_ID = max(0.5, bore_r * 2)   # residual bore diameter mm
 
-    # Medical deduction: toroid → TIW wire handles creepage (no Kapton area loss)
-    #                    ferrite → Kapton tape reserves ~6% of window
+    # v10 MLT: 2*(coreW + HT*stacks) + 2*bundleOD  (vs fixed 3.8mm)
+    MLT_old = _compute_MLT(core, res.stacks)              # legacy (3.8mm)
+    MLT_v10 = _compute_MLT(core, res.stacks, bundleOD)   # v10 formula
+    MLT = MLT_v10
+
+    # Total Cu length: N turns × MLT + lead wire (entry + exit)
+    Cu_len = N * MLT / 1000.0 + lead_length_mm / 1000.0   # m
+
+    # Fill factor computation (Wa_bore = bore area of ONE core — invariant with stacks)
+    Wa_bore   = res.Wa_single_mm2
+    Acu_total = N * Cu_area
+    FFcu      = Acu_total / Wa_bore
+
     kapton_factor = 1.0 if (res.core_type == "powder") else (
                     0.94 if app_class == "Medical" else 1.0)
-    Wa_avail = Wa_bore * kapton_factor    # effective available bore area
+    Wa_avail = Wa_bore * kapton_factor
 
-    # Physical (insulated) fill factor — determines whether the winding can
-    # actually be wound through the bore.
-    #   powder toroid → Ku_ins = N × n_par × (π/4 × OD_mm²) / Wa_avail
-    #   ferrite ETD   → Ku_ins = N × A_bundle / Wa_avail  (bundle OD includes all strands)
     if res.core_type == "powder":
-        A_bundle_ins = math.pi / 4 * OD_mm ** 2   # insulated area of ONE bundle
+        A_bundle_ins = math.pi / 4 * OD_mm ** 2
         Ku = N * n_parallel * A_bundle_ins / Wa_avail
     else:
-        d_bundle = d_s_mm * 1.05 * math.sqrt(n_str * n_parallel) * 1.20   # mm
+        d_bundle = d_s_mm * 1.05 * math.sqrt(n_str * n_parallel) * 1.20
         A_bundle = math.pi / 4 * d_bundle ** 2
         Ku       = N * A_bundle / Wa_avail
 
-    res.wire_designation = designation
-    res.n_strands        = n_str
-    res.d_strand_mm      = d_s_mm
-    res.wire_OD_mm       = OD_mm
-    res.Cu_area_mm2      = round(Cu_area, 4)
-    res.R_per_m_20C      = round(R_per_m / n_parallel, 8)
-    res.MLT_mm           = round(MLT, 4)
-    res.Cu_length_m      = round(Cu_len, 6)
-    res.FFcu             = round(FFcu, 4)
-    res.Ku               = round(Ku, 4)
+    res.wire_designation      = designation
+    res.n_strands             = n_str
+    res.d_strand_mm           = d_s_mm
+    res.wire_OD_mm            = OD_mm
+    res.Cu_area_mm2           = round(Cu_area, 4)
+    res.R_per_m_20C           = round(R_per_m / n_parallel, 8)
+    res.MLT_mm                = round(MLT_old, 4)      # legacy (3.8mm) — kept for report compat
+    res.MLT_v10_mm            = round(MLT_v10, 4)      # v10 (2×bundleOD)
+    res.Cu_length_m           = round(Cu_len, 6)
+    res.lead_length_mm        = lead_length_mm
+    res.FFcu                  = round(FFcu, 4)
+    res.Ku                    = round(Ku, 4)
+    res.bundle_OD_computed_mm = round(bundleOD, 3)
+    res.layers_needed         = layers
+    res.turns_per_layer       = tpl
+    res.bore_hole_r_mm        = round(max(0.0, bore_r), 2)
 
-    # Actual assembled dimensions using selected wire diameter and real FFcu
-    # wound_HT: bare stack height + one wire-OD above and below the core
+    # Actual assembled dimensions
     _HT_stack_bare        = res.HT_mm * res.stacks + max(0, res.stacks - 1) * 1.5
-    res.wound_HT_actual_mm = round(_HT_stack_bare + 2 * OD_mm, 1)  # OD_mm = wire OD
-    # wound_OD: core OD + radial build scaled from catalog ref (40% fill) to actual FFcu
+    res.wound_HT_actual_mm = round(_HT_stack_bare + 2 * OD_mm, 1)
     _wound_OD_cat         = float(core.get("wound_OD_mm") or (res.OD_mm + 8.0))
     _ref_build            = (_wound_OD_cat - res.OD_mm) / 2.0
     _scale                = (FFcu / 0.40) if FFcu > 0 else 1.0
     res.wound_OD_actual_mm = round(res.OD_mm + 2 * _ref_build * _scale, 1)
 
-    # Installed chassis height depends on mounting orientation:
-    #   horizontal → cores flat, stacked vertically → height = wound stack HT
-    #   vertical   → cores upright, side by side    → height = single wound OD
     res.mounting            = mounting
     res.installed_height_mm = (
         res.wound_HT_actual_mm if mounting == 'horizontal'
@@ -590,7 +711,6 @@ def design_one_core(
     )
 
     # ── Step 13.7: Losses ─────────────────────────────────────────────────────
-    # 13.7.2: DCR
     R_pm_20 = res.R_per_m_20C
     DCR_25  = R_pm_20 * (1 + ALPHA_CU * (25 - 20)) * Cu_len
     DCR_100 = R_pm_20 * (1 + ALPHA_CU * (100 - 20)) * Cu_len
@@ -598,38 +718,37 @@ def design_one_core(
     res.DCR_25C_mOhm  = round(DCR_25  * 1e3, 4)
     res.DCR_100C_mOhm = round(DCR_100 * 1e3, 4)
 
-    # Dowell AC factor (ferrite only — for Litz wound toroid: not applied)
+    # Rac/Rdc: physics-based for all winding types
     if res.core_type == "ferrite":
-        dowell = compute_dowell_factor(n_str, d_s_mm, N, res.Wa_total_mm2, fsw_Hz, 100.0)
+        # Ferrite ETD: Dowell factor (unchanged)
+        dowell  = compute_dowell_factor(n_str, d_s_mm, N, res.Wa_total_mm2, fsw_Hz, 100.0)
         Rac_Rdc = dowell["Rac_Rdc"]
     else:
-        Rac_Rdc = 1.0   # Litz toroid — Dowell factor small, reference uses simple DCR
+        # Powder toroid — v10 physics-based proximity model
+        if wire_type_str in ("solid", "solid-enamel"):
+            # Solid/enamel: exact Bessel skin-effect formula
+            rho_100   = RHO_CU_20 * (1.0 + ALPHA_CU * (100.0 - 20.0))
+            delta_mm  = math.sqrt(rho_100 / (math.pi * fsw_Hz * MU0)) * 1e3
+            Rac_Rdc   = max(1.0, _db()._rac_rdc_solid(d_s_mm, delta_mm))
+        else:
+            # Litz / TIW: skin + inter-layer proximity (v10 Dowell-like)
+            Rac_Rdc = _rac_rdc_litz(d_s_mm, layers, res.OD_mm, res.ID_mm, fsw_Hz, 100.0)
 
-    res.Rac_Rdc = round(Rac_Rdc, 4)
+    res.Rac_Rdc      = round(Rac_Rdc, 4)
+    res.Rac_Rdc_litz = round(Rac_Rdc, 4)   # v10 alias; same value
 
-    # 13.7.3: Copper loss at each temperature using decomposed formula
-    #   P_cu = I_rms² × R_dc  +  I_hf_rms² × R_ac   (JS V5.1 decomposition)
-    # Use IL_rms_ref from OPS table (90 Vac) for the 25/100°C rated figures.
-    IL_rms_ref = float(OPS[0, 4])   # 90 Vac Iφ,rms
-    # Estimate HF ripple at 90 Vac crest operating point for decomposed Pcu
+    # First-pass Pcu at reference Irms (90 Vac) — stored for report
+    IL_rms_ref    = float(OPS[0, 4])
     Vin_pk90_loss = OPS[0, 0] * math.sqrt(2)
     Dpk90_loss    = max(0.0, 1.0 - Vin_pk90_loss / 393.0)
     dIpp_90       = Vin_pk90_loss * Dpk90_loss / max(L_target_H * fsw_Hz, 1e-12)
     Ihf_ref       = dIpp_90 / (2.0 * math.sqrt(3.0))
 
-    res.Pcu_25C_W  = round(
-        IL_rms_ref**2 * DCR_25  + Ihf_ref**2 * DCR_25  * Rac_Rdc, 4)
-    res.Pcu_100C_W = round(
-        IL_rms_ref**2 * DCR_100 + Ihf_ref**2 * DCR_100 * Rac_Rdc, 4)
-    # Preserve these genuine first-pass figures under their own names — they get
-    # overwritten below with the cycle-averaged final Pcu (used by Ptotal_*_W and
-    # the legacy report generators). Sec 3.6 of the documentation reports the
-    # "first-pass" methodology and must show operands that literally sum to its
-    # displayed P_total — it reads these *_firstpass_W fields, not the overwritten ones.
+    res.Pcu_25C_W  = round(IL_rms_ref**2 * DCR_25  + Ihf_ref**2 * DCR_25  * Rac_Rdc, 4)
+    res.Pcu_100C_W = round(IL_rms_ref**2 * DCR_100 + Ihf_ref**2 * DCR_100 * Rac_Rdc, 4)
     res.Pcu_25C_firstpass_W  = res.Pcu_25C_W
     res.Pcu_100C_firstpass_W = res.Pcu_100C_W
 
-    # iGSE F(D) correction at the 90 Vac design crest
     Fd_crest  = _Fd(Dpk90)
     res.Fd_design = round(Fd_crest, 4)
 
@@ -643,30 +762,16 @@ def design_one_core(
     else:
         res.P_fringing_W = 0.0
 
-    # ── Thermal convergence loop ──────────────────────────────────────────────
-    # Toroid: SA power-law  ΔT = (P×1000/SA_cm²)^0.833  — matches JS V5.1 exactly.
-    # Ferrite ETD: convection Rth model (SA model is calibrated for wound toroids).
-    T_core = T_amb_C + 0.5 * dT_budget_C   # initial guess
+    # ── Thermal convergence loop (SA single-node, used for dT_rise_C pass/fail) ──
+    T_core = T_amb_C + 0.5 * dT_budget_C
     _is_toroid = "ID_mm" in core and float(core.get("ID_mm", 0)) > 0
 
-    if _is_toroid:
-        # Compute residual bore hole (bore area remaining after all winding layers)
-        _bore_r  = res.ID_mm / 2.0
-        _bnd_r   = OD_mm / 2.0
-        _passes  = N * n_parallel
-        _r_cur   = _bore_r - _bnd_r
-        while _passes > 0 and _r_cur >= _bnd_r:
-            _cap    = max(1, int(2 * math.pi * _r_cur / OD_mm))
-            _passes -= min(_passes, _cap)
-            _r_cur  -= OD_mm
-        _hole_ID = max(0.5, (_r_cur + _bnd_r) * 2)
-    else:
-        _hole_ID = 0.0
-        Rth      = _thermal_Rth(core, res.stacks, h_conv)
+    if not _is_toroid:
+        Rth = _thermal_Rth(core, res.stacks, h_conv)
 
     for _ in range(10):
-        Pv    = _db().get_core_loss(material_key, fsw_Hz, Bac_pk, T_core) * 1e3  # W/m³
-        Pcore = Pv * Fd_crest * Ve    # iGSE F(D) applied at crest duty cycle
+        Pv    = _db().get_core_loss(material_key, fsw_Hz, Bac_pk, T_core) * 1e3
+        Pcore = Pv * Fd_crest * Ve
         Pcu_T = IL_rms_ref**2 * R_pm_20 * (1 + ALPHA_CU * (T_core - 20)) * Cu_len * Rac_Rdc
         Ptot  = Pcore + Pcu_T + res.P_fringing_W
         if _is_toroid:
@@ -679,12 +784,10 @@ def design_one_core(
             break
         T_core = T_new
 
-    # ── 360-point half-cycle waveform integration (JS V5.1 `compute()` loop) ─
-    # Run once at the converged T_core.  Uses the analytical retention formula
-    # (fast, no DB per point) and the iGSE F(D) correction at every θ.
-    Rdc_Tc = R_pm_20 * (1 + ALPHA_CU * (T_core - 20)) * Cu_len   # Ω at T_core
-    Rac_Tc = Rdc_Tc * Rac_Rdc
-    L0_nom_H = (res.AL_nom_nH * res.stacks) * 1e-9 * N**2  # total L0 at 0 A bias
+    # ── 360-point half-cycle waveform integration ─────────────────────────────
+    Rdc_Tc  = R_pm_20 * (1 + ALPHA_CU * (T_core - 20)) * Cu_len
+    Rac_Tc  = Rdc_Tc * Rac_Rdc
+    L0_nom_H = (res.AL_nom_nH * res.stacks) * 1e-9 * N**2
 
     wf = _half_cycle_averages(
         material_key = material_key,
@@ -701,47 +804,67 @@ def design_one_core(
         Rdc          = Rdc_Tc,
         Rac          = Rac_Tc,
         T_core_C     = T_core,
-        f_line_Hz    = 60.0,   # standard 60 Hz (from OPS table design assumption)
+        f_line_Hz    = 60.0,
         M            = 360,
     )
 
-    # Use waveform-averaged core loss as the authoritative Pcore_W value
     Pcore_avg = wf["Pcore_avg_W"]
     Pcu_avg   = wf["Pcu_avg_W"]
 
     res.T_core_C      = round(T_core, 2)
-    res.dT_rise_C     = round(T_core - T_amb_C, 2)
-    res.Pcore_crest_W = round(Pcore, 4)       # crest-only (legacy)
-    res.Pcore_W       = round(Pcore_avg, 4)   # half-cycle average with iGSE (primary)
+    res.dT_rise_C     = round(T_core - T_amb_C, 2)   # SA surface ΔT (pass/fail criterion)
+    res.Pcore_crest_W = round(Pcore, 4)
+    res.Pcore_W       = round(Pcore_avg, 4)
     res.Ihf_rms_A     = round(wf["IhfRms_A"], 5)
     res.Pac_W         = round(wf["Pac_W"], 5)
     res.Bdc_max_T     = round(wf["BdcMax_T"], 6)
-    res.Bmax_FL_T     = round(wf["Bmax_T"], 6)  # overwrite crest estimate with waveform max
+    res.Bmax_FL_T     = round(wf["Bmax_T"], 6)
 
-    # Current density J = I_rms / Cu_area_per_conductor (single-strand Cu area × n_strands)
     Cu_per_cond = float(wire.get("Cu_area_mm2", 1.0)) / max(n_parallel, 1)
     res.J_A_mm2 = round(wf["Irms_A"] / max(Cu_per_cond, 0.001), 3)
 
-    # Final Pcu using decomposed formula with waveform Irms and Ihf_rms
     Pcu_final_100 = wf["Irms_A"]**2 * DCR_100 + wf["IhfRms_A"]**2 * DCR_100 * Rac_Rdc
     Pcu_final_25  = wf["Irms_A"]**2 * DCR_25  + wf["IhfRms_A"]**2 * DCR_25  * Rac_Rdc
 
     res.Ptotal_25C_W  = round(Pcu_final_25  + Pcore_avg + res.P_fringing_W, 4)
     res.Ptotal_100C_W = round(Pcu_final_100 + Pcore_avg + res.P_fringing_W, 4)
-
-    # Uncertainty band: P_cu + [1.05 … 1.20] × P_core  (matches JS V5.1)
     res.P_unc_lo_W = round(Pcu_final_100 + 1.05 * Pcore_avg, 4)
     res.P_unc_hi_W = round(Pcu_final_100 + 1.20 * Pcore_avg, 4)
 
-    # Back-fill Pcu fields from waveform decomposition
     res.Pcu_25C_W  = round(Pcu_final_25,  4)
     res.Pcu_100C_W = round(Pcu_final_100, 4)
 
     # Saturation margin at T_core
     res.Bsat_at_Tcore  = round(_db().get_Bsat(material_key, T_core), 4)
-    res.sat_margin_pct = round((res.Bsat_at_Tcore - res.Bmax_FL_T) / res.Bsat_at_Tcore * 100, 1)
+    res.sat_margin_pct = round(
+        (res.Bsat_at_Tcore - res.Bmax_FL_T) / res.Bsat_at_Tcore * 100, 1)
 
-    # ── Steps 13.8 + 13.9: Loss vs Vin sweeps (with iGSE F(D) correction) ────
+    # v10 inner-bore B(r) crowding: peak inner-bore flux = Bmax × (rmean/rin)
+    res.Bmax_inner_FL_T   = round(res.Bmax_FL_T * crowd_ax, 6)
+    res.sat_margin_inner_pct = round(
+        (res.Bsat_at_Tcore - res.Bmax_inner_FL_T) / max(res.Bsat_at_Tcore, 1e-9) * 100, 1)
+
+    # ── v10 Two-node thermal (core + winding separate temperatures) ───────────
+    # Uses waveform-averaged losses for maximum accuracy
+    if _is_toroid:
+        dT_c, dT_w, dT_hs, Rca, Rwa, Rcw = _two_node_thermal(
+            res.wound_OD_actual_mm, res.wound_HT_actual_mm, _hole_ID,
+            Pcore_avg, Pcu_final_100, T_amb_C)
+        res.dT_core_C    = round(dT_c,  2)
+        res.dT_wdg_C     = round(dT_w,  2)
+        res.dT_hotspot_C = round(dT_hs, 2)
+        res.T_hotspot_C  = round(T_amb_C + dT_hs, 2)
+        res.Rca_KperW    = round(Rca, 4)
+        res.Rwa_KperW    = round(Rwa, 4)
+        res.Rcw_KperW    = round(Rcw, 4)
+    else:
+        # ETD: single-node as before (2-node needs toroid geometry)
+        res.dT_core_C    = res.dT_rise_C
+        res.dT_wdg_C     = res.dT_rise_C
+        res.dT_hotspot_C = round(res.dT_rise_C * _THERM_hotspot, 2)
+        res.T_hotspot_C  = round(T_amb_C + res.dT_hotspot_C, 2)
+
+    # Loss vs Vin sweeps
     res.loss_table_25C  = _build_loss_table(material_key, N, Ae, Ve, Le_s,
                                             R_pm_20, Rac_Rdc, Cu_len, fsw_Hz,
                                             Vout_V, OPS, T_C=25.0,
@@ -756,30 +879,20 @@ def design_one_core(
         creepage = float(core.get("bobbin_creepage_mm", 0) or 0)
         res.creepage_mm = creepage
         if res.core_type == "powder":
-            # Powder toroids have no bobbin — creepage achieved via TIW wire or Kapton
-            # Do NOT fail the design — flag it as a winding note instead
             res.creepage_ok = True
-            if creepage < 6.0:
-                res.fail_reasons  # don't add to fail_reasons — winding note only
         else:
             res.creepage_ok = creepage >= 6.0
             if not res.creepage_ok:
                 res.fail_reasons.append(
                     f"Creepage {creepage:.0f}mm < 6mm (IEC 60601-1 Medical). "
-                    "Use extended-flange bobbin (e.g. ETD59/31/22-E with 14mm).")
+                    "Use extended-flange bobbin.")
 
     # ── Pass/fail checks ──────────────────────────────────────────────────────
-    # Pass/fail limits:
-    #   FFcu (bare copper) ≤ FFcu_limit (default 0.40) — reference Step 13.6.2
-    #   Ku   (insulated)   ≤ ku_lim    — physical winding limit:
-    #     powder toroid: Ku_ins uses insulated bundle area; practical limit ≈ 0.75
-    #     ferrite ETD:   Ku_ins uses full bundle OD; limit = FFcu_limit + 0.05
     if res.core_type == "powder":
-        ku_lim = 0.75   # ≥0.75 = beyond practical toroid winding limit (JS: fitHard ≥ 0.85, fitTight > 0.70)
+        ku_lim = 0.75
     else:
         ku_lim = min(FFcu_limit + 0.05, 0.50)
 
-    # Check BOTH bare-copper fill AND insulated fill
     if FFcu > FFcu_limit:
         res.fail_reasons.append(
             f"FFcu={FFcu:.3f} ({FFcu*100:.1f}%) exceeds bare-copper fill limit {FFcu_limit:.2f}.")
@@ -788,6 +901,12 @@ def design_one_core(
             f"Ku={res.Ku:.3f} ({res.Ku*100:.1f}% insulated) exceeds winding fit limit {ku_lim:.2f}.")
     if res.sat_margin_pct < 15.0:
         res.fail_reasons.append(f"Saturation margin {res.sat_margin_pct:.1f}% < 15%.")
+    # v10 inner-bore saturation check (radial crowding): fails if inner bore saturates
+    if _is_toroid and res.Bmax_inner_FL_T >= res.Bsat_at_Tcore:
+        res.fail_reasons.append(
+            f"Inner-bore flux saturates: Bmax_inner={res.Bmax_inner_FL_T:.3f}T "
+            f">= Bsat={res.Bsat_at_Tcore:.3f}T "
+            f"(crowd×{res.crowd_axial:.2f} at rin={res.ID_mm/2:.1f}mm).")
     if res.dT_rise_C > dT_budget_C:
         res.fail_reasons.append(f"ΔT={res.dT_rise_C:.1f}°C > budget {dT_budget_C:.0f}°C.")
     if res.L_vs_Vin_table:
@@ -825,15 +944,12 @@ def _turns_powder(core: dict, mat_key: str, L_H: float,
     AL_nom = float(core.get("AL_nom_total", core.get("AL_nom_nH", 75))) * 1e-9
     AL_min = float(core.get("AL_min_total", core.get("AL_min_nH", 69))) * 1e-9
     AL_max = float(core.get("AL_max_total", core.get("AL_max_nH", 81))) * 1e-9
-    tol    = float(core.get("AL_tolerance_pct", 8)) / 100.0
 
     N = max(1, math.ceil(math.sqrt(L_H / AL_nom)))
     for _ in range(40):
         H_Am  = N * I_dc / Le_s
         H_Oe  = H_Am / 79.577
         k_b   = _db().get_k_bias(mat_key, H_Oe)
-        # Check L_full_MIN (worst-case AL tolerance) meets 85% of target
-        # This ensures the engine converges to the same N as the reference design
         L_full_min = N**2 * AL_min * k_b
         if L_full_min >= L_H * 0.85:
             break
@@ -843,9 +959,9 @@ def _turns_powder(core: dict, mat_key: str, L_H: float,
     L0_nom = N**2 * AL_nom
     L0_max = N**2 * AL_max
 
-    H_Am   = N * I_dc / Le_s
-    H_Oe   = H_Am / 79.577
-    k_b    = _db().get_k_bias(mat_key, H_Oe)
+    H_Am  = N * I_dc / Le_s
+    H_Oe  = H_Am / 79.577
+    k_b   = _db().get_k_bias(mat_key, H_Oe)
 
     kreq_nom = L_H / L0_nom if L0_nom > 0 else 0
     kreq_min = L_H / L0_min if L0_min > 0 else 0
@@ -920,13 +1036,7 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
                        Cu_len: float, fsw_Hz: float, Vout: float,
                        OPS: np.ndarray, T_C: float,
                        L_target_H: float = 235e-6) -> list:
-    """Steps 13.8/13.9: loss vs Vin at constant temperature T_C.
-
-    Enhancements vs original:
-    • iGSE F(D) applied to core loss at the crest duty cycle of each op-point.
-    • Copper loss decomposed into DC (I_rms²×R_dc) + AC (I_hf_rms²×R_ac) terms.
-    • Fd column added for traceability.
-    """
+    """Steps 13.8/13.9: loss vs Vin at constant temperature T_C."""
     result = []
     for row in OPS:
         Vin, Pout, eta, PF, Irms = row
@@ -935,15 +1045,9 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
         Bac_pk  = Vin_pk * Dpk / (2 * N * Ae * fsw_Hz)
         DCR_T   = R_pm_20 * (1 + ALPHA_CU * (T_C - 20)) * Cu_len
         R_ac    = DCR_T * Rac_Rdc
-
-        # iGSE duty-cycle correction
         Fd      = _Fd(Dpk)
-
-        # Core loss with F(D) applied
-        Pv      = _db().get_core_loss(mat_key, fsw_Hz, Bac_pk, T_C) * 1e3  # W/m³
+        Pv      = _db().get_core_loss(mat_key, fsw_Hz, Bac_pk, T_C) * 1e3
         Pcore   = Pv * Fd * Ve
-
-        # Copper loss: DC term + AC (HF ripple) term
         dIpp    = Vin_pk * Dpk / max(L_target_H * fsw_Hz, 1e-12)
         Ihf     = dIpp / (2.0 * math.sqrt(3.0))
         Pcu_dc  = Irms**2 * DCR_T
@@ -970,19 +1074,11 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
 def rank_candidates(results: list[DesignResult], n_top: int = 5,
                     optimization_goal: str = 'best_performance') -> list[dict]:
     """
-    Return the top n_top candidates PER stack count so the designer can compare
-    size, cost, and performance across all stack tiers side-by-side.
-
-    With max_stacks=3 and n_top=5 the output contains up to 15 candidates:
-      5 best 3-stack  |  5 best 2-stack  |  5 best 1-stack  (descending stack order)
+    Return the top n_top candidates PER stack count.
 
     optimization_goal:
-      'best_performance' — sort by composite score (loss 35% + volume 25% + ΔT 25%
-                           + cost 10% + fill penalty 5%).  Default.
-      'max_ffu'          — sort by FFcu descending so the highest window-utilisation
-                           (densest/most-compact) cores come first within each group.
-                           Useful for finding the physically smallest core that
-                           still satisfies all pass/fail gates for the chosen wire.
+      'best_performance' — sort by composite score (loss/volume/ΔT/cost/fill).
+      'max_ffu'          — sort by FFcu descending (densest/most-compact first).
     """
     passed = [r for r in results if r.passed]
     if not passed:
@@ -991,12 +1087,10 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
     def _key(r: DesignResult) -> str:
         return r.part_number + str(r.stacks)
 
-    # Group passing candidates by stack count
     groups: dict[int, list[DesignResult]] = {}
     for r in passed:
         groups.setdefault(r.stacks, []).append(r)
 
-    # Global best and its badge depend on the optimisation goal
     if optimization_goal == 'max_ffu':
         global_best_key = _key(max(passed, key=lambda r: r.FFcu))
         global_label    = "★ Most compact"
@@ -1004,7 +1098,6 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
         global_best_key = _key(min(passed, key=lambda r: r.score))
         global_label    = "★ Best overall"
 
-    # Build per-group labels: assign each dimension winner its label (first match wins)
     labels: dict[str, str] = {}
     for s, grp in sorted(groups.items(), reverse=True):
         by_sc   = sorted(grp, key=lambda r: r.score)
@@ -1028,10 +1121,8 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
             if k not in labels:
                 labels[k] = lbl
 
-    # Override with global badge (takes priority over per-group label)
     labels[global_best_key] = global_label
 
-    # Collect top n_top per stack group, descending stack order (3→2→1)
     output: list[dict] = []
     rank = 1
     for s in sorted(groups.keys(), reverse=True):

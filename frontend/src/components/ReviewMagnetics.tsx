@@ -93,15 +93,19 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const satT       = result.Bsat_at_Tcore   ?? 1.0
 
     // Wire / winding
-    const bundleOD   = result.wire_OD_mm          ?? 2.23
+    const bundleOD   = Number(result.bundle_OD_computed_mm ?? result.wire_OD_mm ?? 2.23)
     const boreID     = ID_mm
     const woundOD    = result.wound_OD_actual_mm   ?? (OD_mm + 8)
     const htBuild    = Math.max(0.5,
       (result.wound_HT_actual_mm ?? (HT_mm * stacks + bundleOD * 2)) - HT_mm * stacks)
-    const passesTotal = N * 2
-    const layerCap    = Math.max(1, Math.floor(Math.PI * boreID / bundleOD))
-    const layersUsed  = Math.ceil(passesTotal / layerCap)
-    const holeID      = Math.max(2, boreID - layersUsed * bundleOD * 2)
+    // v10 layer count from Python (bore_hole_r_mm is residual radius after all layers)
+    const pyNpar      = winding === 'bifilar' ? 2 : winding === 'trifilar' ? 3 : 1
+    const passesTotal = N * pyNpar
+    const layerCap    = Math.max(1, Math.floor(2 * Math.PI * Math.max(boreID / 2 - bundleOD / 2, bundleOD / 2) / bundleOD))
+    const layersUsed  = result.layers_needed ?? Math.ceil(passesTotal / layerCap)
+    const holeID      = result.bore_hole_r_mm > 0
+      ? Math.max(1, result.bore_hole_r_mm * 2)
+      : Math.max(2, boreID - layersUsed * bundleOD * 2)
 
     // Display labels
     const partNumber  = result.part_number    ?? '—'
@@ -122,6 +126,17 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const pyPtot_100_W  = result.Ptotal_100C_W       ?? 0
     const pyDT_C        = result.dT_rise_C           ?? 0
     const pyBmax_T      = result.Bmax_FL_T           ?? 0
+
+    // ── v10 Phase 1 new fields ─────────────────────────────────────────────
+    const pyDT_core_C    = Number(result.dT_core_C              ?? 0)
+    const pyDT_wdg_C     = Number(result.dT_wdg_C               ?? 0)
+    const pyDT_hotspot_C = Number(result.dT_hotspot_C            ?? 0)
+    const pyT_hotspot_C  = Number(result.T_hotspot_C             ?? 0)
+    const pyBmax_inner   = Number(result.Bmax_inner_FL_T         ?? 0)
+    const pySatInner_pct = Number(result.sat_margin_inner_pct    ?? 0)
+    const pyMLT_v10_mm   = Number(result.MLT_v10_mm              ?? 0)
+    const pyLeadMm       = Number(result.lead_length_mm          ?? 150)
+    const pyCuArea_mm2   = Number(result.Cu_area_mm2             ?? 3.14)
 
     // ── Compute currentMap from actual OPS table ───────────────────────────
     // Icrest_phase = √2 × (Pout/eta) / (Vin × PF) / n_phases
@@ -313,6 +328,9 @@ export const ReviewMagnetics: React.FC<Props> = ({
   cfg.Vout          = ${Vout};
   cfg.fsw           = ${fsw};
   cfg.satT          = ${satT.toFixed(3)};
+  cfg.leadMm        = ${pyLeadMm};
+  cfg.CuArea_mm2    = ${pyCuArea_mm2.toFixed(4)};
+  cfg.nParallel     = ${pyNpar};
 
   /* 8 ── Replace currentMap with actual operating-point currents ──────────
      currentMap[Vin] = per-phase Icrest = √2×(Pout/η)/(Vin×PF)/n_phases    */
@@ -388,6 +406,13 @@ export const ReviewMagnetics: React.FC<Props> = ({
     var pyPtot  = ${pyPtot_100_W.toFixed(6)};
     var pyDT    = ${pyDT_C.toFixed(4)};
     var pyBmax  = ${pyBmax_T.toFixed(6)};
+    // v10 new fields
+    var pyThotspot  = ${pyT_hotspot_C.toFixed(4)};
+    var pyDTcore    = ${pyDT_core_C.toFixed(4)};
+    var pyDTwdg     = ${pyDT_wdg_C.toFixed(4)};
+    var pyBinner    = ${pyBmax_inner.toFixed(6)};
+    var pySatInner  = ${pySatInner_pct.toFixed(1)};
+    var pyMLTv10    = ${pyMLT_v10_mm.toFixed(2)};
 
     function applyPyOverrides() {
       var d = document;
@@ -411,19 +436,21 @@ export const ReviewMagnetics: React.FC<Props> = ({
         var curStk = +(d.getElementById('stacks') || {value: ${stacks}}).value;
         var curT   = +(d.getElementById('tempC')  || {value: 100}).value;
         ctx.fillStyle = 'rgba(15,23,42,.78)';
-        ctx.fillRect(14, 14, 392, 112);
+        ctx.fillRect(14, 14, 392, 160);
         ctx.strokeStyle = 'rgba(148,163,184,.18)';
-        ctx.strokeRect(14, 14, 392, 112);
+        ctx.strokeRect(14, 14, 392, 160);
         ctx.fillStyle = '#e5e7eb'; ctx.font = '14px Segoe UI';
         ctx.fillText('N = ' + curN + '   stacks = ' + curStk + '   temp = ' + curT + '°C', 26, 38);
         ctx.fillText('Lfull = ' + pyLfull.toFixed(1) + ' µH   Ptotal = ' + pyPtot.toFixed(2) + ' W', 26, 62);
-        ctx.fillText('Bmax ≈ ' + pyBmax.toFixed(3) + ' T   DCR = ' + pyDCR.toFixed(1) + ' mΩ   ΔT ≈ ' + pyDT.toFixed(1) + '°C', 26, 86);
+        ctx.fillText('Bmax,mean = ' + pyBmax.toFixed(3) + ' T   DCR = ' + pyDCR.toFixed(1) + ' mΩ   ΔT = ' + pyDT.toFixed(1) + '°C', 26, 86);
+        ctx.fillStyle = '#a78bfa'; ctx.font = '13px Segoe UI';
+        ctx.fillText('T_hotspot = ' + pyThotspot.toFixed(1) + '°C  (core +' + pyDTcore.toFixed(1) + ' / wdg +' + pyDTwdg.toFixed(1) + ' K)   Bmax,inner = ' + pyBinner.toFixed(3) + ' T', 26, 110);
         ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI';
         var cg = window.cfg || {};
         var cOD = (cg.coreOD_mm || 40.9).toFixed(1), cID = (cg.coreID_mm || 21.3).toFixed(1);
         var cH  = (curStk * (cg.coreHeight_mm || 0)).toFixed(1), cLbl = cg.coreLabel || '';
         ctx.fillText('OD ' + cOD + ' · ID ' + cID + ' · stack height ' + cH + ' mm' +
-          (cLbl ? ' · ' + cLbl : '') + ' · winding fades when exploded', 26, 108);
+          (cLbl ? ' · ' + cLbl : '') + ' · winding fades when exploded', 26, 136);
       }
 
       /* C ── Audit table (Design Review Summary tab) ────────────────────── */
@@ -438,20 +465,39 @@ export const ReviewMagnetics: React.FC<Props> = ({
         });
       }
 
-      /* D ── Overview table — Estimated ΔT row (index 7) ──────────────── */
+      /* D ── Overview table — patch ΔT row + append v10 thermal / flux rows ─ */
       var ovTbl = d.getElementById('overviewTbl');
       if (ovTbl) {
         var ovR = ovTbl.querySelectorAll('tr')[7];
-        if (ovR) { var tds7 = ovR.querySelectorAll('td'); if (tds7[1]) tds7[1].textContent = pyDT.toFixed(1) + ' °C'; }
+        if (ovR) { var tds7 = ovR.querySelectorAll('td'); if (tds7[1]) tds7[1].textContent = pyDT.toFixed(1) + ' °C (SA surface)'; }
+        // Append v10 rows only once (guard by checking first new label)
+        var alreadyAdded = Array.from(ovTbl.querySelectorAll('td')).some(function(td){ return td.textContent === 'T_hotspot (v10)'; });
+        if (!alreadyAdded) {
+          var ovBody = ovTbl.querySelector('tbody') || ovTbl;
+          [['T_hotspot (v10)',     pyThotspot.toFixed(1) + ' °C',   'max(ΔT_core, ΔT_wdg) × 1.12 hotspot factor (2-node)'],
+           ['ΔT core node',        pyDTcore.toFixed(1)   + ' °C',   'Core node temperature rise above ambient'],
+           ['ΔT winding node',     pyDTwdg.toFixed(1)    + ' °C',   'Winding node temperature rise above ambient'],
+           ['Bmax inner bore',     pyBinner.toFixed(3)   + ' T',    'Bmax × (r_mean/r_in) radial crowding — inner bore peak'],
+           ['Sat. margin inner',   pySatInner.toFixed(1) + ' %',    'Inner-bore headroom vs Bsat at T_core'],
+           ['MLT (v10)',           pyMLTv10.toFixed(2)   + ' mm',   '2(coreW + HT×stacks) + 2×bundleOD']
+          ].forEach(function(row) {
+            var tr = document.createElement('tr');
+            row.forEach(function(txt) { var td = document.createElement('td'); td.textContent = txt; tr.appendChild(td); });
+            ovBody.appendChild(tr);
+          });
+        }
       }
 
-      /* E ── Overview status — Lfull / Bmax / ΔT health-check banners ──── */
+      /* E ── Overview status — Lfull / Bmax / ΔT / hotspot health-check ──── */
       var osi = d.getElementById('overviewStatus');
       if (osi) {
         var cg2 = window.cfg || {};
         var satT2 = cg2.satT || 1.0;
         var okL2 = pyLfull >= 235, okB2 = pyBmax < 0.5, okT2 = pyDT < 40;
-        var sm2  = (satT2 / Math.max(pyBmax, 1e-9)).toFixed(2);
+        var okBi2 = pyBinner < satT2 * 0.85;      // inner-bore: healthy when <85% of Bsat
+        var okThs2 = pyThotspot < 110;             // hotspot: healthy when <110°C absolute
+        var sm2   = (satT2 / Math.max(pyBmax,   1e-9)).toFixed(2);
+        var smI2  = (satT2 / Math.max(pyBinner, 1e-9)).toFixed(2);
         var cStk2 = +(d.getElementById('stacks') || {value: ${stacks}}).value;
         var htBEl = d.getElementById('htBuild'), wODEl = d.getElementById('woundOD'), hlEl = d.getElementById('holeID');
         var htB2  = +(htBEl ? htBEl.value  : ${htBuild.toFixed(1)});
@@ -468,24 +514,46 @@ export const ReviewMagnetics: React.FC<Props> = ({
           } else if (t.indexOf('Flux level') >= 0) {
             dv.innerHTML = '<span class="' + (okB2?'ok':'warn') + '">' +
               (okB2?'Flux level looks comfortable':'Flux level is getting high') +
-              '</span> — Bmax ≈ ' + pyBmax.toFixed(3) + ' T (≈' + sm2 + '× to ' + satT2.toFixed(2) + ' T).';
+              '</span> — Bmax,mean = ' + pyBmax.toFixed(3) + ' T (≈' + sm2 + '× to ' + satT2.toFixed(2) + ' T);  inner-bore peak = ' + pyBinner.toFixed(3) + ' T (≈' + smI2 + '× B(r) crowded).';
           } else if (t.indexOf('temperature rise') >= 0) {
             dv.innerHTML = '<span class="' + (okT2?'ok':'warn') + '">' +
               (okT2?'Estimated temperature rise looks manageable':'Estimated temperature rise is getting high') +
-              '</span> — ΔT ≈ ' + pyDT.toFixed(1) + ' °C (SA ' + sa2.toFixed(0) + ' cm², ' + cStk2 + '-stack).';
+              '</span> — ΔT_surface ≈ ' + pyDT.toFixed(1) + ' °C (SA ' + sa2.toFixed(0) + ' cm²); T_hotspot = ' + pyThotspot.toFixed(1) + ' °C (core +' + pyDTcore.toFixed(1) + ' / wdg +' + pyDTwdg.toFixed(1) + ' K, 2-node v10).';
           }
         });
+        // Append inner-bore saturation banner only once
+        var hasBiDiv2 = Array.from(osi.querySelectorAll('div')).some(function(dv){ return dv.textContent.indexOf('Inner-bore saturation') >= 0; });
+        if (!hasBiDiv2) {
+          var biDiv2 = document.createElement('div');
+          biDiv2.innerHTML = '<span class="' + (okBi2?'ok':'warn') + '">' +
+            (okBi2?'Inner-bore saturation margin OK':'Inner-bore saturation margin tight') +
+            '</span> — Bmax,inner = ' + pyBinner.toFixed(3) + ' T (' + pySatInner.toFixed(1) + '% margin). B(r) crowding factor from radial geometry (v10).';
+          osi.appendChild(biDiv2);
+        }
       }
 
-      /* F ── Waveform metrics table — Peak H and Peak Bmax rows ─────────── */
+      /* F ── Waveform metrics table — patch H/Bmax + append v10 thermal rows ─ */
       var wvTbl = d.getElementById('waveTbl');
       if (wvTbl) {
         wvTbl.querySelectorAll('tr').forEach(function (r) {
           var tds = r.querySelectorAll('td'); if (!tds[0]) return;
           var lbl = tds[0].textContent.trim();
           if (lbl === 'Peak H(t)'    && tds[1]) tds[1].textContent = pyH.toFixed(1)    + ' Oe';
-          if (lbl === 'Peak Bmax(t)' && tds[1]) tds[1].textContent = pyBmax.toFixed(3) + ' T';
+          if (lbl === 'Peak Bmax(t)' && tds[1]) tds[1].textContent = pyBmax.toFixed(3) + ' T (mean)';
         });
+        // Append v10 rows only once
+        var hasWvRow = Array.from(wvTbl.querySelectorAll('td')).some(function(td){ return td.textContent === 'T_hotspot (v10)'; });
+        if (!hasWvRow) {
+          var wvBody = wvTbl.querySelector('tbody') || wvTbl;
+          [['Bmax inner bore',      pyBinner.toFixed(3) + ' T'],
+           ['T_hotspot (v10)',      pyThotspot.toFixed(1) + ' °C'],
+           ['ΔT core / winding',   pyDTcore.toFixed(1) + ' / ' + pyDTwdg.toFixed(1) + ' °C']
+          ].forEach(function(row) {
+            var tr = document.createElement('tr');
+            row.forEach(function(t) { var td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+            wvBody.appendChild(tr);
+          });
+        }
       }
 
       /* G ── Summary textarea — replace Python-authoritative lines ──────── */
@@ -504,20 +572,23 @@ export const ReviewMagnetics: React.FC<Props> = ({
             lines[si] = 'Inductance: L0 = ' + pyL0.toFixed(1) + ' µH, Lfull = ' + pyLfull.toFixed(1) +
               ' µH, Hcrest = ' + pyH.toFixed(1) + ' Oe, retention = ' + pyK.toFixed(3) + '.';
           } else if (ln.indexOf('Flux:') >= 0) {
-            lines[si] = 'Flux: Bac,pk@crest = ' + pyBac.toFixed(3) + ' T, Bmax ≈ ' + pyBmax.toFixed(3) +
-              ' T, estimated saturation margin ≈ ' + sm3 + '× to ' + satT3.toFixed(2) + ' T reference.';
+            var crowdFactor3 = pyBmax > 0 ? (pyBinner / pyBmax).toFixed(2) : '—';
+            lines[si] = 'Flux: Bac,pk@crest = ' + pyBac.toFixed(3) + ' T, Bmax,mean = ' + pyBmax.toFixed(3) +
+              ' T, Bmax,inner = ' + pyBinner.toFixed(3) + ' T (×' + crowdFactor3 + ' B(r) crowding), sat. margin inner = ' + pySatInner.toFixed(1) + '% vs Bsat ' + satT3.toFixed(2) + ' T.';
           } else if (ln.indexOf('Loss:') >= 0) {
             lines[si] = 'Loss: Pcore = ' + pyPcore.toFixed(2) + ' W, Pcu ≈ ' + pyPcu2.toFixed(2) +
               ' W, Ptotal = ' + pyPtot.toFixed(2) + ' W, total-loss uncertainty range = ' +
               pyUncLo + ' to ' + pyUncHi + ' W (analytical uncertainty, not simulation-backed).';
           } else if (ln.indexOf('Build:') >= 0) {
-            // Keep copper length, fill, current density (geometric, accurate);
-            // replace only estimated ΔT which needs Python value
+            // Replace ΔT value and append v10 hotspot (2-node thermal); keep copper length / fill / J
             var dtTag = 'estimated ΔT = ';
             var di = ln.indexOf(dtTag);
             if (di >= 0) {
               var di2 = ln.indexOf('°C', di + dtTag.length);
-              if (di2 >= 0) lines[si] = ln.substring(0, di) + dtTag + pyDT.toFixed(1) + ln.substring(di2 - 1);
+              if (di2 >= 0) {
+                lines[si] = ln.substring(0, di) + dtTag + pyDT.toFixed(1) + ' °C (surface), T_hotspot = ' +
+                  pyThotspot.toFixed(1) + ' °C (core +' + pyDTcore.toFixed(1) + ' / wdg +' + pyDTwdg.toFixed(1) + ' K, 2-node v10).';
+              }
             }
           } else if (ln.trim() === 'Recommended talking points:') {
             recIdx = si;
