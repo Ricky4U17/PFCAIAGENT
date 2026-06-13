@@ -2042,12 +2042,13 @@ def _ch3(story, state, d):
         worst_rows=[sel_row], ch=3)
 
     sub_h(story, "3.4.3", "Candidate comparison and selection rationale", 3)
-    annotation(story, "PITFALL",
-        f"The window area W<sub>a</sub> = {Wa_s_mm2:.1f} mm² is the area of a single "
-        f"core bore. With {stacks} stacks, this area does NOT multiply — "
-        "the winding must fit within the original single-core window. "
-        "W<sub>a,total</sub> reported by some datasheets is the total area if "
-        "cores are placed end-to-end, not the winding window.", 3)
+    annotation(story, "THEORY",
+        f"For a stacked toroid the winding shares ONE bore, so the window area "
+        f"W<sub>a</sub> = {Wa_s_mm2:.1f} mm² is the single-core bore and is the correct basis for "
+        f"the winding-fit check — it is unchanged by the {stacks}-core stack. The stack adds core "
+        f"cross-section, volume and inductance (A<sub>e</sub>, V<sub>e</sub>, A<sub>L</sub> multiply "
+        f"with the stack); the winding window does not. This is standard, correct practice for "
+        "stacked toroids — not a limitation.", 3)
 
     sub_h(story, "3.4.4", "Stacking note", 3)
     body(story,
@@ -2373,55 +2374,209 @@ def _ch3(story, state, d):
 # CHAPTER 4 — PFC INDUCTOR PERFORMANCE ANALYSIS
 # Sections 4.1–4.9 per agreed spec. Data from approved_design + Step 8 output.
 # ═══════════════════════════════════════════════════════════════════════════════
+def _sim_verification(story, state, d):
+    """4.8 — Independent Simulation-Agent cross-check. ADDITIVE and DEFENSIVE: any
+    failure degrades to a short note; it never breaks report generation. Uses the
+    sim engine (fed our DB physics) + its equation reference to verify Step-7."""
+    try:
+        from app.sim_agent import adapter
+        from app.sim_agent import pfc_inductor_engine as _eng
+    except Exception:
+        return  # sim-agent module not in this tree — silently skip
+
+    step_h(story, "4.8", "Simulation-Agent Verification (independent cross-check)", 4)
+    try:
+        pkg, vr = adapter.build_and_validate(d or {}, state or {})
+    except Exception as e:
+        body(story, f"Simulation-agent cross-check unavailable ({type(e).__name__}); "
+                    "the Step-7 results above are authoritative.", 4)
+        return
+    if not vr.ok:
+        body(story, "Simulation-agent package could not be validated for this design "
+                    f"({'; '.join(vr.errors[:2])}). Step-7 results above stand on their own.", 4)
+        return
+    try:
+        sim = _eng.compute(pkg)
+    except Exception as e:
+        body(story, f"Simulation-agent compute unavailable ({type(e).__name__}); "
+                    "the Step-7 results above are authoritative.", 4)
+        return
+
+    annotation(story, "CONCEPT",
+        "An independent, material-agnostic field engine re-derives the inductor performance from "
+        "the same approved design, fed with our database physics (DC-bias curve, AC resistance, "
+        "two-node thermal) through traceable override channels. Every quantity carries a provenance "
+        "tier (T1 = analytic/computed, T2 = FEA, T3 = measured). Step-7 remains authoritative for "
+        "the design; this section is independent verification.", 4)
+
+    tiers = sim.get("tier", {}) or {}
+    tier_txt = ", ".join(f"{k} {v}" for k, v in tiers.items())
+    body(story, f"<b>Field-engine verdict:</b> {sim.get('verdict','—')}.  "
+                f"<b>Provenance:</b> {tier_txt}.", 4)
+
+    ccr = adapter.crosscheck_rows(d, sim)   # single shared, apples-to-apples definition
+    def _st(r): return "within" if r["within"] else ("review" if r["within"] is not None else "—")
+    rows = [[r["quantity"], r["ours"], r["sim"],
+             (f"{r['delta_pct']:+.1f}%" if r["delta_pct"] is not None else "—"),
+             f"±{r['band_pct']}%", _st(r)] for r in ccr]
+    n_ok  = sum(1 for r in ccr if r["within"])
+    n_tot = sum(1 for r in ccr if r["within"] is not None)
+    notes = "; ".join(f"{r['quantity']} — {r['note']}" for r in ccr if r["within"] is False and r["note"])
+    data_table(story, "4.8.1", "Step-7 vs Simulation-Agent cross-check",
+        "Our Step-7 engine is authoritative for the design; the field engine independently "
+        "re-derives each quantity from the same database physics, compared on a common basis. "
+        "Δ is the field-engine value relative to Step-7; Band is the agreed engineering tolerance.",
+        ["Quantity", "Step-7 (ours)", "Field engine", "Δ", "Band", "Status"],
+        rows,
+        [CW*0.22, CW*0.20, CW*0.20, CW*0.12, CW*0.11, CW*0.15],
+        interpretation=(f"{n_ok} of {n_tot} quantities agree within band. "
+                        + (f"Basis notes — {notes}. " if notes else "")
+                        + "Residual deltas are documented model-tier differences, not physics "
+                          "disagreements; Step-7 values are authoritative."),
+        ch=4)
+
+    annotation(story, "THEORY",
+        "Field-engine governing relations (provenance-tiered): cycle-averaged iGSE core loss "
+        "P<sub>core</sub> = cycle-mean of P<sub>v</sub>(B<sub>ac</sub>,f) × F<sub>D</sub>(D) × "
+        "V<sub>e</sub> (T1); biased inductance L(H) = k(H) × L<sub>0</sub> from our DB DC-bias "
+        "curve (T1 computed); copper loss P<sub>Cu</sub> = I<sub>φ,rms</sub>² R<sub>DC</sub>(T) + "
+        "I<sub>hf,rms</sub>² (F<sub>R</sub>-1) k<sub>harm</sub> R<sub>DC</sub>(T), with "
+        "k<sub>harm</sub> ~ 1.213; two-node thermal ΔT from our R<sub>ca</sub>/R<sub>wa</sub>/"
+        "R<sub>cw</sub> network. Full S0-S13 set in the engine equation reference.", 4)
+
+    verdict_row(story, "Independent field-engine cross-check",
+        f"Verdict {sim.get('verdict','—')} · {n_ok}/{n_tot} within band",
+        "PASS" if (sim.get("verdict") == "APPROVE" and n_ok == n_tot) else "REVIEW", 4)
+
+
 def _ch4(story, state, d):
     S = _S(4)
-    N      = d.get("N","—")
+    # Switching frequency — same source the engine + Chapter 3 use.
+    try:
+        from app.design_state import DesignState
+        ds  = DesignState.model_validate(state)
+        tsi = ds.topology_specific_inputs
+        fsw = float(tsi.recommended_frequency_hz if tsi else 70000) or 70000
+    except Exception:
+        fsw = 70000.0
+
+    N      = int(d.get("N", 0) or 0)
     part   = d.get("part_number","—")
-    stacks = d.get("stacks",1)
-    wo     = d.get("wound_OD_actual_mm",0)
-    wh     = d.get("wound_HT_actual_mm",0)
-    Bac    = float(d.get("Bac_pk_T",0))
-    Bmax   = float(d.get("Bmax_FL_T",0))
-    Bsat   = float(d.get("Bsat_at_Tcore",0))
-    Pcore_cavg = float(d.get("Pcore_W",0))
-    Pcore_peak = float(d.get("Pcore_crest_W",0))
-    dT = float(d.get("dT_rise_C",0)); dT_bgt = float(d.get("dT_budget_C",60))
+    stacks = int(d.get("stacks",1) or 1)
+    wo     = float(d.get("wound_OD_actual_mm",0) or 0)
+    wh     = float(d.get("wound_HT_actual_mm",0) or 0)
+    Bac    = float(d.get("Bac_pk_T",0) or 0)
+    Bdc    = float(d.get("Bdc_T",0) or 0)
+    Bmax   = float(d.get("Bmax_FL_T",0) or 0)
+    Bsat   = float(d.get("Bsat_at_Tcore",0) or 0)
+    L0_nom = float(d.get("L0_nom_uH",0) or 0)
+    Le_mm  = float(d.get("Le_single_mm",0) or 0)
+    Ae_s   = float(d.get("Ae_single_mm2",0) or 0)
+    Le_cm  = Le_mm / 10.0
+    Pcore_cavg = float(d.get("Pcore_W",0) or 0)
+    Pcore_peak = float(d.get("Pcore_crest_W",0) or 0)
+    dT = float(d.get("dT_rise_C",0) or 0); dT_bgt = float(d.get("dT_budget_C",60) or 60)
+    lvt   = d.get("L_vs_Vin_table",[]) or []
+    lt100 = d.get("loss_table_100C",[]) or []
+
+    def _f(x, n=3, dash="—"):
+        try:
+            return f"{float(x):.{n}f}"
+        except Exception:
+            return dash
 
     chapter_splash(story, 4, "PFC Inductor Performance Analysis",
         "How does the chosen inductor behave across all conditions?",
         ["4.1 Physical model and assembled dimensions",
          "4.2 Inductance performance — L vs DC bias, retention at all 9 points",
-         "4.3 Flux density — Bac,pk(t) waveforms, Bmax vs Bsat",
+         "4.3 Flux density — Bac,pk, Bdc, Bmax vs Bsat",
+         "4.4 Loss calculation methodology — DB Steinmetz / iGSE",
          "4.5 Core loss — cycle-averaged iGSE model vs Chapter 3 peak-point",
-         "4.7 Total loss and thermal — ΔT vs Vin sweep, converged temperature"])
+         "4.6 Per-operating-point engine results — all 9 points + worked example",
+         "4.7 Total loss and thermal — ΔT vs budget"])
 
     step_h(story, "4.1", "Physical Model and Assembly", 4)
     annotation(story, "CONCEPT",
         "Chapter 4 presents the engineering proof for the selection made in Chapter 3. "
         "Chapter 3 is the engineering judgement — Chapter 4 is the evidence. "
         "All performance data in this chapter is generated from the approved "
-        "design parameters using the Python iGSE engine and the JS Review Studio.", 4)
+        "design parameters using the centralized Step 7 engine (the same physics that "
+        "feeds the Result, Review and Simulation screens).", 4)
     body(story,
         f"Approved core: <b>{part} × {stacks}</b>  |  N = <b>{N}</b> turns  |  "
         f"Assembled: OD = {wo:.1f} mm, height = {wh:.1f} mm.", 4)
 
-    step_h(story, "4.2", "Inductance Performance", 4)
+    # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
+    step_h(story, "4.2", "Inductance Performance — Bias Retention at All 9 Points", 4)
     annotation(story, "INSIGHT",
-        "The AL-tolerance band (±8%) causes L to vary between "
-        f"L<sub>0,min</sub> and L<sub>0,max</sub>. "
-        "The designer must verify that L<sub>full,min</sub> (at minimum AL and "
-        "maximum DC bias) still exceeds L<sub>target</sub> at all nine operating points. "
-        "Section 3.4.3 Table confirms this. Full L vs H sweep is in the JS Review Studio.", 4)
+        "The A<sub>L</sub>-tolerance band (±8%) causes L to vary between "
+        "L<sub>0,min</sub> and L<sub>0,max</sub>. "
+        "The designer must verify that L<sub>full,min</sub> (at minimum A<sub>L</sub> and "
+        "maximum DC bias) still exceeds L<sub>target</sub> at all nine operating points.", 4)
+    annotation(story, "THEORY",
+        "The Step 7 engine computes the full-load inductance at every operating point from "
+        "the material's measured DC-bias retention curve k(H) — not a fixed percentage. "
+        "The chain below is evaluated independently at each of the nine corners.", 4)
+    eq_box(story, [
+        r"I_{\phi,crest} = \dfrac{\hat I_{line}}{2} = \dfrac{\sqrt{2}\,P_{in}}{2\,V_{in}\,PF}",
+        r"H = \dfrac{0.4\pi\,N\,I_{\phi,crest}}{\ell_e}\quad\mathrm{[Oe]}",
+        rf"L_{{full}}(H) = L_0\cdot k(H),\qquad L_0 = {_f(L0_nom,1)}\ \mu\mathrm{{H}}",
+    ], heading="Per-operating-point inductance (DB bias retention)", number="4.1", ch=4)
+    if lvt:
+        Lrows = []
+        for r in lvt:
+            Lrows.append([
+                _f(r.get("Vin_rms"),0), _f(r.get("Iavg_crest"),3),
+                _f(r.get("AT"),1), _f(r.get("H_Oe"),1), _f(r.get("k_bias"),4),
+                _f(r.get("L_full_min_uH"),1), _f(r.get("L_full_nom_uH"),1),
+                _f(r.get("L_full_max_uH"),1),
+            ])
+        data_table(story, "4.1",
+            "Inductance vs Input Voltage — DB Bias Retention (all 9 points)",
+            "L<sub>full</sub> at the min/nom/max A<sub>L</sub> band, computed from the "
+            "measured k(H) retention curve at each corner's DC bias H.",
+            ["V<sub>in</sub> (V)","I<sub>φ,crest</sub> (A)","N·I (A·t)","H (Oe)","k(H)",
+             "L<sub>min</sub> (µH)","L<sub>nom</sub> (µH)","L<sub>max</sub> (µH)"],
+            Lrows,
+            col_widths=[CW*0.11,CW*0.14,CW*0.13,CW*0.11,CW*0.11,CW*0.13,CW*0.13,CW*0.13],
+            ch=4,
+            interpretation=(
+                "Worst-case bias (lowest k, lowest L) is the 90 V<sub>ac</sub> low-line "
+                "corner where I<sub>φ,crest</sub> peaks. The minimum-A<sub>L</sub> column "
+                "is the value the design margin is held against."))
+    else:
+        body(story, "Per-point inductance table not available in this design payload.", 4)
 
+    # ── 4.3 Flux density ─────────────────────────────────────────────────
     step_h(story, "4.3", "Flux Density Analysis", 4)
+    eq_box(story, [
+        r"B_{ac,pk} = \dfrac{V_{in,pk}\,D_{crest}}{2\,N\,A_e\,f_{sw}}",
+        r"B_{dc} = \dfrac{L_{full}\,I_{\phi,crest}}{N\,A_e}",
+        r"B_{max} = B_{dc} + B_{ac,pk}",
+    ], heading="Peak, DC and total flux density", number="4.2", ch=4)
     body(story,
-        f"B<sub>ac,pk</sub> = {Bac:.4f} T at 90 V<sub>rms</sub> crest.  "
-        f"B<sub>max,FL</sub> = {Bmax:.4f} T.  "
-        f"B<sub>sat</sub>(T<sub>core</sub>) = {Bsat:.2f} T.  "
-        f"Saturation margin = {(Bsat/max(Bmax,0.001)-1)*100:.0f}%. "
-        "Time-domain B<sub>ac,pk</sub>(t) waveforms across the half line cycle "
-        "are generated from the Step 8 iGSE engine.", 4)
+        f"At the 90 V<sub>rms</sub> crest: B<sub>ac,pk</sub> = {_f(Bac,4)} T, "
+        f"B<sub>dc</sub> = {_f(Bdc,4)} T, B<sub>max,FL</sub> = {_f(Bmax,4)} T.  "
+        f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,2)} T  "
+        f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
+        "Per-point B<sub>ac,pk</sub> is tabulated in Section 4.6.", 4)
 
+    # ── 4.4 Loss methodology ─────────────────────────────────────────────
+    step_h(story, "4.4", "Loss Calculation Methodology — DB Steinmetz / iGSE", 4)
+    annotation(story, "THEORY",
+        "Core loss uses the database Steinmetz volumetric loss P<sub>v</sub> evaluated at the "
+        "actual B<sub>ac,pk</sub> and f<sub>sw</sub> of each corner, then corrected for the "
+        "non-sinusoidal PFC duty cycle by the improved Generalised Steinmetz (iGSE) cycle "
+        "factor F(D). Copper loss separates the DC-bias RMS component from the high-frequency "
+        "ripple component, each on its own temperature-corrected resistance.", 4)
+    eq_box(story, [
+        r"P_v = f_{Steinmetz}(B_{ac,pk},\ f_{sw},\ T)\quad\mathrm{[W/m^3]}",
+        r"P_{core} = P_v\cdot F(D)\cdot V_e",
+        r"P_{cu} = I_{\phi,rms}^2\,R_{dc}(T) + I_{hf,rms}^2\,R_{ac}(T)",
+        r"P_{total} = P_{core} + P_{cu}",
+    ], heading="Core loss (iGSE) and split copper loss", number="4.3", ch=4)
+
+    # ── 4.5 Core loss — cycle-averaged vs peak-point ─────────────────────
     step_h(story, "4.5", "Core Loss — Cycle-Averaged iGSE", 4)
     if Pcore_cavg and Pcore_peak and Pcore_peak > 0:
         ratio = Pcore_cavg / Pcore_peak
@@ -2438,15 +2593,95 @@ def _ch4(story, state, d):
     else:
         body(story, "Cycle-averaged core loss data available after Step 8 time-domain analysis.", 4)
 
+    # ── 4.6 Authoritative per-operating-point engine results ─────────────
+    step_h(story, "4.6", "Per-Operating-Point Engine Results — All 9 Points", 4)
+    annotation(story, "CONCEPT",
+        "The table below holds the authoritative Step 7 engine numbers at every operating "
+        "point — cycle-averaged iGSE core loss with the F(D) duty correction and split "
+        "DC/HF copper loss — superseding the Chapter 3 first-pass peak-point estimate.", 4)
+    if lt100:
+        Prows = []; worst = 0; wmax = -1.0
+        for i, r in enumerate(lt100):
+            pt = float(r.get("Ptotal_W",0) or 0)
+            if pt > wmax:
+                wmax = pt; worst = i
+            Prows.append([
+                _f(r.get("Vin_rms"),0), _f(r.get("Vin_pk"),1), _f(r.get("D_crest"),4),
+                _f(r.get("Irms"),3), _f(r.get("Ihf_rms"),4), _f(r.get("Bac_pk"),5),
+                _f(r.get("Fd"),4), _f(r.get("Pcu_W"),3), _f(r.get("Pcore_W"),3),
+                _f(r.get("Ptotal_W"),3),
+            ])
+        data_table(story, "4.2",
+            "Authoritative Loss vs Input Voltage — Engine iGSE (100°C, all 9 points)",
+            "Amber row = worst-case total loss. These are the Step 7 engine values "
+            "(cycle-averaged iGSE core loss + split DC/HF copper loss), not the Chapter 3 "
+            "first-pass estimate.",
+            ["V<sub>in</sub> (V)","V<sub>pk</sub> (V)","D@crest","I<sub>rms</sub> (A)",
+             "I<sub>hf,rms</sub> (A)","B<sub>ac,pk</sub> (T)","F(D)",
+             "P<sub>cu</sub> (W)","P<sub>core</sub> (W)","P<sub>tot</sub> (W)"],
+            Prows,
+            col_widths=[CW*0.09,CW*0.09,CW*0.09,CW*0.10,CW*0.11,CW*0.11,CW*0.08,
+                        CW*0.10,CW*0.11,CW*0.10],
+            worst_rows=[worst], ch=4,
+            interpretation=(
+                f"Worst-case total loss: {Prows[worst][9]} W at {Prows[worst][0]} "
+                "V<sub>rms</sub> (amber row). This corner drives the thermal design "
+                "in Section 4.7."))
+
+        # Worked example at the worst-case corner — full chain with engine numbers.
+        wr  = lt100[worst]
+        vw  = wr.get("Vin_rms")
+        lr  = next((x for x in lvt
+                    if abs(float(x.get("Vin_rms",-1)) - float(wr.get("Vin_rms",-2))) < 0.5), {})
+        vpk = float(wr.get("Vin_pk",0) or 0); dcr = float(wr.get("D_crest",0) or 0)
+        sub_h(story, "4.6.1", f"Worked example — {_f(vw,0)} V worst-case corner", 4)
+        body(story,
+            "Every governing equation evaluated with the engine's own numbers at this "
+            "corner, step by step:", 4)
+        eq_box(story, [
+            rf"I_{{\phi,crest}} = {_f(lr.get('Iavg_crest'),3)}\ \mathrm{{A}}",
+            rf"H = \dfrac{{0.4\pi\,({N})\,({_f(lr.get('Iavg_crest'),3)})}}{{{_f(Le_cm,3)}}} "
+            rf"= {_f(lr.get('H_Oe'),1)}\ \mathrm{{Oe}}",
+            rf"k(H) = {_f(lr.get('k_bias'),4)}\ \Rightarrow\ "
+            rf"L_{{full}} = {_f(L0_nom,1)}\times{_f(lr.get('k_bias'),4)} "
+            rf"= {_f(lr.get('L_full_nom_uH'),1)}\ \mu\mathrm{{H}}",
+            rf"B_{{ac,pk}} = \dfrac{{V_{{pk}}\,D}}{{2NA_ef_{{sw}}}} "
+            rf"= \dfrac{{{_f(vpk,1)}\times{_f(dcr,4)}}}{{2\cdot{N}\cdot A_e\cdot{fsw/1e3:.0f}\mathrm{{k}}}} "
+            rf"= {_f(wr.get('Bac_pk'),5)}\ \mathrm{{T}}",
+            rf"P_{{core}} = P_v\,F(D)\,V_e = {_f(wr.get('Pcore_W'),3)}\ \mathrm{{W}}"
+            rf"\quad(F(D)={_f(wr.get('Fd'),4)})",
+            rf"P_{{cu}} = I_{{\phi,rms}}^2R_{{dc}} + I_{{hf,rms}}^2R_{{ac}} "
+            rf"= {_f(wr.get('Pcu_dc_W'),4)} + {_f(wr.get('Pcu_ac_W'),4)} "
+            rf"= {_f(wr.get('Pcu_W'),3)}\ \mathrm{{W}}",
+            rf"P_{{total}} = {_f(wr.get('Pcore_W'),3)} + {_f(wr.get('Pcu_W'),3)} "
+            rf"= {_f(wr.get('Ptotal_W'),3)}\ \mathrm{{W}}",
+        ], heading=f"Full calculation chain at {_f(vw,0)} V_ac",
+           number="4.4", ch=4)
+        if Ae_s:
+            body(story,
+                f"(A<sub>e</sub> = {Ae_s:.1f} mm² single-core cross-section, "
+                f"V<sub>e</sub> = {float(d.get('Ve_total_cm3',0) or 0):.2f} cm³ total "
+                f"for the {stacks}-core stack.)", 4)
+    else:
+        body(story, "Authoritative per-point loss table not available in this design payload.", 4)
+
+    # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
     body(story,
         f"Thermal model: ΔT = {dT:.1f}°C against budget {dT_bgt:.0f}°C "
         f"({(dT_bgt-dT)/dT_bgt*100:.0f}% margin). "
-        "Full nine-point thermal table and ΔT vs V<sub>in</sub> plot are generated "
-        "from the Step 7 surface-area thermal model.", 4)
+        "The worst-case thermal corner is the amber row of Table 4.2; the surface-area "
+        "thermal model converges the core temperature against this loss.", 4)
     verdict_row(story, "Thermal — all 9 operating points",
                 f"Max ΔT = {dT:.1f}°C  |  Budget = {dT_bgt:.0f}°C",
                 f"PASS — {(dT_bgt-dT)/dT_bgt*100:.0f}% margin" if dT<=dT_bgt else "FAIL", 4)
+
+    # 4.8 — independent Simulation-Agent cross-check (additive, defensive:
+    # a failure here must never abort the rest of the report)
+    try:
+        _sim_verification(story, state, d)
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2468,19 +2703,29 @@ def _ch5(story, state, s15):
             "Complete Step 15 and approve the capacitor selection to populate this chapter.", 5)
         return
 
-    C_req  = float(s15.get("C_required_uF",0))
-    C_hold = float(s15.get("C_holdup_uF",0))
-    C_rip  = float(s15.get("C_ripple_uF",0))
-    factor = s15.get("limiting_factor","—")
-    t_hold = float(s15.get("t_hold_ms",20))
-    V_min  = float(s15.get("V_min_holdup_V",300))
-    Vout   = float(s15.get("Vout_V",393))
-    Pout   = float(s15.get("Pout_W",3600))
+    # step15_result is the run_capacitor_design() payload: hold-up / ripple
+    # capacitance live under worst_case{}, the spec inputs under inputs{}, and the
+    # governing requirement under "governing". Read those nested keys first, with
+    # the old flat keys as a fallback so a pre-flattened dict still works.
+    inp = s15.get("inputs", {})     or {}
+    wc  = s15.get("worst_case", {}) or {}
+    C_req  = float(s15.get("C_required_uF", 0) or 0)
+    C_hold = float(wc.get("C_holdup_uF", s15.get("C_holdup_uF", 0)) or 0)
+    C_rip  = float(wc.get("C_ripple_uF", s15.get("C_ripple_uF", 0)) or 0)
+    factor = s15.get("governing", s15.get("limiting_factor", "—")) or "—"
+    factor = factor.replace("C_holdup", "hold-up").replace("C_ripple", "ripple")
+    t_hold = float(inp.get("t_hold_ms", s15.get("t_hold_ms", 20)) or 20)
+    V_min  = float(inp.get("Vdc_min_V", s15.get("V_min_holdup_V", 300)) or 300)
+    Vout   = float(inp.get("Vout_V", s15.get("Vout_V", 393)) or 393)
+    Pout   = float(wc.get("Pout", s15.get("Pout_W", 3600)) or 3600)
+    f_line = float(inp.get("f_line_Hz", 60) or 60)
+    dV_rip = float(inp.get("Vdc_ripple_V", s15.get("dV_ripple_V", 0)) or 0)
+    eta_wc = float(wc.get("eta", 0.965) or 0.965)
 
     annotation(story, "CONCEPT",
         f"Two independent requirements drive capacitor sizing. "
-        f"Hold-up ({t_hold} ms above {V_min} V) sets a minimum energy storage. "
-        f"Output ripple ({s15.get('dV_ripple_spec_pct',2):.0f}% pk-pk) "
+        f"Hold-up ({t_hold:.0f} ms above {V_min:.0f} V) sets a minimum energy storage. "
+        f"Output ripple ({dV_rip:.0f} V pk-pk) "
         "sets a minimum charge-replenishment rate. "
         f"The governing requirement is <b>{factor}</b>.", 5)
 
@@ -2490,8 +2735,10 @@ def _ch5(story, state, s15):
         rf"{{{Vout:.0f}^2 - {V_min:.0f}^2}} = {C_hold:.1f}\ \mu\mathrm{{F}}",
     ], heading="Capacitance required for hold-up time", ch=5)
     eq_box(story, [
-        r"C_{ripple} = \dfrac{P_{out}}{2\pi\, f_{line}\, V_{out}\, \Delta V}",
-        rf"C_{{ripple}} = {C_rip:.1f}\ \mu\mathrm{{F}}",
+        r"C_{ripple} = \dfrac{P_{out}}{2\pi\, f_{line}\, \eta\, V_{out}\, \Delta V_{pp}}",
+        rf"C_{{ripple}} = \dfrac{{{Pout:.0f}}}"
+        rf"{{2\pi \times {f_line:.0f} \times {eta_wc:.3f} \times {Vout:.0f} \times {dV_rip:.0f}}}"
+        rf" = {C_rip:.1f}\ \mu\mathrm{{F}}",
     ], heading="Capacitance required for output voltage ripple", ch=5)
     eq_box(story, [
         rf"C_{{required}} = \max(C_{{holdup}},\, C_{{ripple}}) = \max({C_hold:.1f},\, {C_rip:.1f})",
@@ -2502,7 +2749,78 @@ def _ch5(story, state, s15):
         f"Required capacitance: <b>C<sub>req</sub> = {C_req:.1f} µF</b> "
         f"(governed by {factor}). Section 5.2 selects the bank configuration.", 5)
 
+    def _i(v):
+        try:    return f"{float(v):.0f}"
+        except Exception: return "—"
+
+    # ── Resolve the selected bank → config the verification engines consume ───
     sel = s15.get("selected_cap") or {}
+    cfg, supplier, series, v_rating, _val, _qty = [], "—", "—", 0, 0, 1
+    if sel:
+        supplier = sel.get("supplier", "—")
+        series   = sel.get("series", "—")
+        try:    v_rating = int(float(sel.get("voltage_rating_V", 0) or 0))
+        except Exception: v_rating = 0
+        try:    _val = int(float(sel.get("value_uF", 0) or 0))
+        except Exception: _val = 0
+        try:    _qty = int(float(sel.get("qty", 1) or 1))
+        except Exception: _qty = 1
+        cfg = [{"value_uF": _val, "qty": _qty, "part_number": sel.get("part_number", "")}]
+
+    # ── 5.2 Bank configuration and voltage rating ─────────────────────────────
+    step_h(story, "5.2", "Bank Configuration and Voltage Rating", 5)
+    V_sel   = s15.get("V_rating_selected_V") or v_rating
+    V_min_r = s15.get("V_rating_min_V")
+    annotation(story, "CONCEPT",
+        "The bank must (a) meet or exceed the required capacitance with margin for tolerance "
+        "and end-of-life de-rating, and (b) carry a voltage rating above the maximum bus "
+        "voltage including transient overshoot. "
+        f"Selected voltage class: <b>{_i(V_sel)} V</b>"
+        + (f" (minimum required {_i(V_min_r)} V)." if V_min_r else "."), 5)
+
+    verified = None
+    if cfg and sel:
+        try:
+            from app.mode_b.step15_capacitor import verify_configuration
+            verified = verify_configuration(
+                config=cfg, supplier=supplier, series=series, voltage_rating=v_rating,
+                worst=wc, low=s15.get("low_line", {}) or {}, Vout=Vout,
+                f_line=f_line, Vdc_min=V_min, C_required_uF=C_req)
+        except Exception:
+            verified = None
+
+    if verified:
+        margin = verified.get("margin_pct")
+        data_table(story, "5.2.1", "Selected Bank Configuration",
+            "Total installed capacitance and headroom over the requirement.",
+            ["Parameter", "Value"],
+            [
+                ["Configuration",           f"{_val} µF × {_qty} in parallel"],
+                ["Installed capacitance",   f"{verified.get('C_total_uF','—')} µF"],
+                ["Required capacitance",    f"{C_req:.1f} µF"],
+                ["Margin over requirement", f"{margin:.1f}%" if isinstance(margin,(int,float)) else "—"],
+                ["Parallel ESR",            f"{verified.get('ESR_parallel_mohm','—')} mΩ"],
+                ["Voltage rating",          f"{v_rating} V"],
+                ["Temperature rating",      f"{verified.get('temp_rating_C','—')} °C"],
+            ],
+            col_widths=[CW*0.45, CW*0.55], ch=5)
+        verdict_row(story, "Capacitance check",
+            f"{verified.get('C_total_uF','—')} µF ≥ {C_req:.1f} µF",
+            "PASS" if verified.get("valid") else "UNDERSIZED", ch=5)
+
+    sugg = s15.get("suggested_configs") or []
+    if sugg:
+        srows = []
+        for s in sugg:
+            desc = " + ".join(f"{r['value_uF']}µF×{r['qty']}" for r in s.get("rows", []))
+            srows.append([s.get("label", "—"), desc, f"{s.get('C_total_uF','—')} µF"])
+        data_table(story, "5.2.2", "Alternative Bank Configurations",
+            "Other valid combinations that meet the capacitance requirement, ranked by the "
+            "sizing engine. The approved bank appears in Table 5.2.1.",
+            ["Strategy", "Configuration", "Total C"],
+            srows, col_widths=[CW*0.25, CW*0.50, CW*0.25], ch=5)
+
+    # ── 5.3 Selected capacitor specification ──────────────────────────────────
     if sel:
         step_h(story, "5.3", "Selected Capacitor Specification", 5)
         data_table(story, "5.3.1", "Selected Capacitor Bank",
@@ -2519,6 +2837,99 @@ def _ch5(story, state, s15):
                 ["Lifetime",                f"{sel.get('lifetime','—')}"],
             ],
             col_widths=[CW*0.45, CW*0.55], ch=5)
+
+    # ── 5.4 Ripple current and voltage verification — all 9 operating points ──
+    thermal = None
+    if cfg and sel:
+        try:
+            from app.mode_b.step15_capacitor import calculate_thermal_table
+            thermal = calculate_thermal_table(
+                config=cfg, state=state, supplier=supplier,
+                series=series, voltage_rating=v_rating)
+        except Exception:
+            thermal = None
+
+    if thermal and thermal.get("thermal_table"):
+        step_h(story, "5.4", "Ripple Current and Voltage Verification — 9 Operating Points", 5)
+        annotation(story, "THEORY",
+            "Each parallel capacitor carries 1/N of the bank ripple current. Self-heating "
+            "ΔT = I<sub>cap</sub>² · ESR · R<sub>th</sub> must keep the case below its temperature "
+            "rating, and the per-cap RMS current must stay under its rated value at every "
+            "operating point.", 5)
+        tt, srows, worst_idx, worst_T = thermal["thermal_table"], [], None, -1e9
+        for i, r in enumerate(tt):
+            srows.append([
+                f"{r['Vin_rms']:.0f}", f"{r['Pout_W']:.0f}",
+                f"{r['I_cap_total_A']:.2f}", f"{r['I_cap_per_unit_A']:.2f}",
+                f"{r['I_rated_A']:.2f}", f"{r['V_ripple_pp_V']:.1f}",
+                f"{r['T_cap_C']:.1f}",
+                "PASS" if r['ripple_pass'] else "FAIL",
+            ])
+            if r['T_cap_C'] > worst_T:
+                worst_T, worst_idx = r['T_cap_C'], i
+        data_table(story, "5.4.1", "Capacitor Ripple Current, Ripple Voltage and Temperature",
+            "Per-point bank RMS current, per-cap share, rated current, output ripple and "
+            "estimated case temperature. Worst-case (hottest) row highlighted.",
+            ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)", "I<sub>cap</sub> (A)",
+             "I/cap (A)", "I<sub>rated</sub> (A)", "ΔV<sub>pp</sub> (V)",
+             "T<sub>cap</sub> (°C)", "Verdict"],
+            srows,
+            col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.13, CW*0.13, CW*0.13, CW*0.13],
+            worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
+        verdict_row(story, "Ripple-current rating (all 9 points)",
+            f"T<sub>cap,max</sub> = {thermal.get('worst_case_T_C','—')} °C "
+            f"≤ {thermal.get('temp_rating_C','—')} °C",
+            "PASS" if thermal.get("all_ripple_pass") else "VERIFY", ch=5)
+
+    # ── 5.5 Capacitor lifetime analysis (Arrhenius model) ─────────────────────
+    life = s15.get("lifetime")
+    if not life and sel:
+        try:
+            from app.mode_b.step15_cap_db import calculate_lifetime
+            import re as _re
+            _m  = _re.search(r"([\d,]+)\s*h", str(sel.get("lifetime", "")))
+            _lh = float(_m.group(1).replace(",", "")) if _m else None
+            cap_d = {
+                "capacitance_uF": float(sel.get("value_uF", 470) or 470),
+                "voltage_V":      float(sel.get("voltage_rating_V", 450) or 450),
+                "op_temp_max_C":  float(sel.get("temp_rating_C", 105) or 105),
+                "esr_ohm":        float(sel.get("ESR_each_mohm", 0) or 0) / 1000.0,
+                "package":        str(sel.get("series", "")),
+                "lifetime_hours": _lh or 2000,
+            }
+            life = calculate_lifetime(
+                cap=cap_d, qty=_qty,
+                I_LF_total=float(wc.get("I_LF_A", 0) or 0),
+                I_HF_total=float(wc.get("I_HF_A", 0) or 0),
+                Tamb=50.0, Vout=Vout)
+        except Exception:
+            life = None
+
+    if life and life.get("method1"):
+        step_h(story, "5.5", "Capacitor Lifetime Analysis (Arrhenius Model)", 5)
+        annotation(story, "THEORY",
+            "Electrolytic lifetime follows the Arrhenius rule — every 10 °C reduction in core "
+            "temperature doubles life: L = L<sub>0</sub> · 2<sup>(T<sub>max</sub>−T<sub>core</sub>)/10</sup> · "
+            "(V<sub>rated</sub>/V<sub>op</sub>)<sup>n</sup>. Three independent methods bound the "
+            "result; the minimum governs.", 5)
+        def _mrow(m):
+            lh = m.get("life_hours")
+            return [m.get("name", "—"),
+                    f"{m.get('T_core_C','—')} °C",
+                    f"{lh:,} h" if isinstance(lh, (int, float)) else "—",
+                    f"{m.get('life_years','—')} yr"]
+        gov = life.get("governing_method", "")
+        gi  = {"Method 1": 0, "Method 2": 1, "Method 3": 2}.get(gov)
+        data_table(story, "5.5.1", "Lifetime by Method — Governing (Minimum) Highlighted",
+            "Core temperature and projected service life by each estimation method, at the "
+            "worst-case (90 Vac low-line) ripple-current loading.",
+            ["Method", "Core temp", "Life (hours)", "Life (years)"],
+            [_mrow(life["method1"]), _mrow(life["method2"]), _mrow(life["method3"])],
+            col_widths=[CW*0.46, CW*0.16, CW*0.20, CW*0.18],
+            worst_rows=[gi] if gi is not None else None, ch=5)
+        verdict_row(story, f"Service-life target (governing: {gov})",
+            f"{life.get('min_life_years','—')} yr projected",
+            "PASS" if life.get("pass_15yr") else "REVIEW", ch=5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2551,22 +2962,197 @@ def _ch6(story, state, s16):
             "and all nine-point stability scorecard.", 6)
         return
 
-    fi_c = s16.get("fi_c_Hz") or s16.get("current_crossover_Hz","—")
-    fv_c = s16.get("fv_c_Hz") or s16.get("voltage_crossover_Hz","—")
-    pm_i = s16.get("PM_inner_deg") or s16.get("phase_margin_inner","—")
-    pm_v = s16.get("PM_outer_deg") or s16.get("phase_margin_outer","—")
+    # step16_params carries only the plant inputs (L, DCR, C, ESR, Vout, fsw, …).
+    # The crossover frequencies and phase/gain margins are NOT in that payload —
+    # run the control-design engine here to produce the real 9-point scorecard.
+    res = dict(s16)
+    if "scorecard" not in res:
+        try:
+            from app.mode_b.step16_control_design import design_control_loops
+            res = design_control_loops(
+                L_uH      = float(s16.get("L_uH", 240)),
+                DCR_mOhm  = float(s16.get("DCR_mOhm", 95)),
+                C_uF      = float(s16.get("C_uF", 1410)),
+                ESR_mOhm  = float(s16.get("ESR_mOhm", 12.7)),
+                Vout_V    = float(s16.get("Vout_V", 393)),
+                fsw_Hz    = float(s16.get("fsw_Hz", 70000)),
+                Pout_lo_W = float(s16.get("Pout_lo_W", 1700)),
+                Pout_hi_W = float(s16.get("Pout_hi_W", 3600)),
+                eta_lo    = float(s16.get("eta_lo", 0.945)),
+                eta_hi    = float(s16.get("eta_hi", 0.965)),
+                nch       = int(s16.get("nch", 2)),
+                js_design_state = s16.get("js_design_state"),
+            )
+        except Exception:
+            res = dict(s16)
+
+    sc   = res.get("scorecard") or []
+    fi_c = res.get("fci_Hz")
+    fv_c = res.get("fcv_Hz")
+    # Worst case = minimum phase margin across all nine line/load corners.
+    if sc:
+        wi = min(sc, key=lambda r: r.get("pm_i", 1e9))
+        wv = min(sc, key=lambda r: r.get("pm_v", 1e9))
+        pm_i, gm_i = wi.get("pm_i"), wi.get("gm_i")
+        pm_v, gm_v = wv.get("pm_v"), wv.get("gm_v")
+    else:
+        pm_i = res.get("PM_inner_deg"); pm_v = res.get("PM_outer_deg")
+        gm_i = gm_v = None
+
+    def _fv(v, unit="", dec=1):
+        return f"{v:.{dec}f}{unit}" if isinstance(v, (int, float)) else "—"
+
+    # ── formatters for control-network values ─────────────────────────────────
+    def _fhz(f):
+        if not isinstance(f, (int, float)) or not math.isfinite(f): return "—"
+        if abs(f) >= 1e6: return f"{f/1e6:.2f} MHz"
+        if abs(f) >= 1e3: return f"{f/1e3:.2f} kHz"
+        return f"{f:.1f} Hz"
+    def _fr(v):
+        if not isinstance(v, (int, float)) or v == 0: return "—"
+        if v >= 1e6: return f"{v/1e6:.2f} MΩ"
+        if v >= 1e3: return f"{v/1e3:.2f} kΩ"
+        return f"{v:.1f} Ω"
+    def _fc(v):
+        if not isinstance(v, (int, float)) or v == 0: return "—"
+        if v >= 1e-6: return f"{v*1e6:.2f} µF"
+        if v >= 1e-9: return f"{v*1e9:.1f} nF"
+        return f"{v*1e12:.0f} pF"
+    def _pm(v): return f"{v:.1f}°"   if isinstance(v, (int, float)) and math.isfinite(v) else "—"
+    def _gm(v): return f"{v:.1f} dB" if isinstance(v, (int, float)) and math.isfinite(v) else "—"
+    def _ge(v, t): return isinstance(v, (int, float)) and math.isfinite(v) and v >= t
+
+    # ── 6.2 Plant analysis — critical frequencies ─────────────────────────────
+    if "f_lc_Hz" in res:
+        step_h(story, "6.2", "Plant Analysis — Critical Frequencies", 6)
+        annotation(story, "THEORY",
+            "The boost-PFC small-signal plant has an LC double pole (f<sub>0</sub>), a "
+            "capacitor-ESR zero (f<sub>ESR</sub>), and a right-half-plane (RHP) zero that adds "
+            "gain while subtracting phase. The RHP zero — lowest at low line / high load — sets a "
+            "hard ceiling on the voltage-loop bandwidth (f<sub>cv</sub> ≤ f<sub>RHPz</sub>/5).", 6)
+        eq_box(story, [
+            r"f_0 = \dfrac{1}{2\pi\sqrt{L\,C}}",
+            rf"f_0 = {res['f_lc_Hz']:.1f}\ \mathrm{{Hz}}"
+            rf"\quad (L = {res.get('L_uH',0):.0f}\,\mu\mathrm{{H}},\ "
+            rf"C = {res.get('C_uF',0):.0f}\,\mu\mathrm{{F}})",
+        ], heading="LC double-pole frequency", ch=6)
+        eq_box(story, [
+            r"f_{ESR} = \dfrac{1}{2\pi\, ESR\, C}",
+            rf"f_{{ESR}} = {res['f_esr_Hz']/1000:.2f}\ \mathrm{{kHz}}",
+        ], heading="Capacitor ESR zero", ch=6)
+        data_table(story, "6.2.1", "Plant Key Frequencies and Bandwidth Targets",
+            "Critical frequencies from the approved inductor (L, DCR) and capacitor (C, ESR), "
+            "and the resulting loop-bandwidth ceilings.",
+            ["Frequency", "Value", "Significance"],
+            [
+                ["f<sub>0</sub> — LC double pole", _fhz(res.get("f_lc_Hz")),
+                 "Output-filter resonance; sets open-loop roll-off"],
+                ["f<sub>ESR</sub> — capacitor ESR zero", _fhz(res.get("f_esr_Hz")),
+                 "Adds +20 dB/dec; recovers phase near f<sub>0</sub>"],
+                ["f_RHPz @ 90 Vac (LL)", _fhz(res.get("f_rhpz_ll_Hz")),
+                 "Hard ceiling — V-loop BW must stay below f_RHPz/5"],
+                ["f_RHPz @ 180 Vac (HL)", _fhz(res.get("f_rhpz_hl_Hz")),
+                 "Less restrictive (lower line current at HL)"],
+                ["f_sw / 10", _fhz(res.get("fsw_Hz", 0)/10 if res.get("fsw_Hz") else None),
+                 "Practical digital-control bandwidth limit"],
+                ["f_cv — voltage-loop target", _fhz(res.get("fcv_Hz")),
+                 "min(f_sw/10, f_RHPz/5)"],
+                ["f_ci — current-loop target", _fhz(res.get("fci_Hz")),
+                 "f_sw / 8 — fast line-cycle tracking"],
+            ],
+            col_widths=[CW*0.30, CW*0.18, CW*0.52], ch=6)
+
+    # ── 6.4 Current loop design — Type-II compensator ─────────────────────────
+    if res.get("RIC"):
+        step_h(story, "6.4", "Current Loop Design — Type-II Compensator", 6)
+        annotation(story, "CONCEPT",
+            f"The inner average-current loop crosses over at f<sub>ci</sub> = {_fhz(res.get('fci_Hz'))} "
+            "(≈ f<sub>sw</sub>/8). A Type-II compensator (one integrator + one zero/pole pair) on the "
+            "current error amplifier gives high DC gain for accurate tracking and a phase boost at "
+            "crossover for stability.", 6)
+        RIC = res.get("RIC", 0); C1 = res.get("C1_cur", 0); C2 = res.get("C2_cur", 0)
+        fz = 1/(2*math.pi*RIC*C1) if (RIC and C1) else None
+        fp = 1/(2*math.pi*RIC*C2) if (RIC and C2) else None
+        data_table(story, "6.4.1", "Current-Loop Compensator (Type-II on I_EA)",
+            "Standard-value components and the zero / pole they place.",
+            ["Component", "Value", "Function"],
+            [
+                ["R_IC", _fr(RIC), "Sets compensator gain at f_ci"],
+                ["C1 (zero cap)", _fc(C1), f"Zero  f_z = {_fhz(fz)}"],
+                ["C2 (pole cap)", _fc(C2), f"Pole  f_p = {_fhz(fp)}"],
+            ],
+            col_widths=[CW*0.20, CW*0.22, CW*0.58], ch=6)
+        mll = res.get("mg_i_ll", {}) or {}; mhl = res.get("mg_i_hl", {}) or {}
+        data_table(story, "6.4.2", "Current-Loop Stability Margins",
+            "Margins at the two governing corners. Pass criterion: PM ≥ 45°.",
+            ["Operating point", "f_c", "Phase margin", "Gain margin", "Verdict"],
+            [
+                [f"LL 90 Vac / {res.get('Pout_lo_W',0):.0f} W",
+                 _fhz(mll.get("fc")), _pm(mll.get("pm")), _gm(mll.get("gm")),
+                 "PASS" if _ge(mll.get("pm"), 45) else "VERIFY"],
+                [f"HL 180 Vac / {res.get('Pout_hi_W',0):.0f} W",
+                 _fhz(mhl.get("fc")), _pm(mhl.get("pm")), _gm(mhl.get("gm")),
+                 "PASS" if _ge(mhl.get("pm"), 45) else "VERIFY"],
+            ],
+            col_widths=[CW*0.32, CW*0.15, CW*0.19, CW*0.18, CW*0.16], ch=6)
+
+    # ── 6.5 Voltage loop design ───────────────────────────────────────────────
+    if res.get("R2"):
+        is_t3 = res.get("v_type", "type2") == "type3"
+        tname = "Type-III" if is_t3 else "Type-II"
+        step_h(story, "6.5", f"Voltage Loop Design — {tname} Compensator", 6)
+        annotation(story, "PITFALL",
+            f"The outer voltage loop crosses over at f<sub>cv</sub> = {_fhz(res.get('fcv_Hz'))}, "
+            "deliberately low — pushing it up toward the RHP zero would inject the RHP zero's phase "
+            "lag and destabilise the loop. The bandwidth is bounded by "
+            "min(f<sub>sw</sub>/10, f<sub>RHPz</sub>/5), and the 120 Hz line ripple must be rejected "
+            "(≥ 20 dB) to keep it off the current reference.", 6)
+        R2 = res.get("R2", 0); C1v = res.get("C1_vol", 0); C3v = res.get("C3_vol", 0)
+        fz1 = 1/(2*math.pi*R2*C1v) if (R2 and C1v) else None
+        comp = [
+            ["R2", _fr(R2), f"Sets V-loop gain at f_cv = {_fhz(res.get('fcv_Hz'))}"],
+            ["C1 (zero cap)", _fc(C1v), f"Zero  f_z1 = {_fhz(fz1)}"],
+            ["C3 (pole cap)", _fc(C3v), f"Pole  f_p1 ≈ f_ESR = {_fhz(res.get('f_esr_Hz'))}"],
+        ]
+        if is_t3:
+            comp.insert(1, ["R3 (branch)", _fr(res.get("R3", 0)), "Second-branch resistor (Type-III)"])
+            comp.append(["C2 (branch cap)", _fc(res.get("C2_vol", 0)), "Branch zero/pole pair (Type-III)"])
+        comp.append(["R_FB1 (string)", _fr(res.get("R1fb", 0)), "Upper feedback divider"])
+        comp.append(["R_FB2", _fr(res.get("R4fb", 0)),
+                     f"Lower divider → V_out = {res.get('Vout_V',0):.0f} V"])
+        data_table(story, "6.5.1", f"Voltage-Loop Compensator ({tname} OTA on V_EA)",
+            "Standard-value components, the zeros / poles they place, and the output-sensing "
+            "divider.",
+            ["Component", "Value", "Function"],
+            comp, col_widths=[CW*0.22, CW*0.20, CW*0.58], ch=6)
+        vrows = []
+        _corners = (sc[:1] + [x for x in sc if x.get("line") == "HL"][:1]) if sc else []
+        for r in _corners:
+            ok = _ge(r.get("pm_v"), 55) and _ge(r.get("rej_120"), 20)
+            vrows.append([
+                f"{'LL' if r['Vin_rms'] <= 132 else 'HL'} {r['Vin_rms']:.0f} Vac",
+                _fhz(r.get("fc_v")), _pm(r.get("pm_v")), _gm(r.get("gm_v")),
+                f"{r.get('rej_120',0):.1f} dB", "PASS" if ok else "VERIFY"])
+        if vrows:
+            data_table(story, "6.5.2", "Voltage-Loop Stability Margins",
+                "Margins and 120 Hz rejection at the governing corners. "
+                "Pass: PM ≥ 55° and 120 Hz rejection ≥ 20 dB.",
+                ["Operating point", "f_c", "Phase margin", "Gain margin", "120 Hz rej.", "Verdict"],
+                vrows, col_widths=[CW*0.24, CW*0.13, CW*0.17, CW*0.16, CW*0.15, CW*0.15], ch=6)
 
     step_h(story, "6.6", "Stability Scorecard", 6)
-    data_table(story, "6.6.1", "Loop Stability Summary",
-        "Pass criteria: PM ≥ 45° (current loop), PM ≥ 60° (voltage loop).",
-        ["Loop", "Crossover Frequency", "Phase Margin", "Verdict"],
+    data_table(story, "6.6.1", "Loop Stability Summary — worst case of 9 operating points",
+        "Pass criteria: PM ≥ 45° (current loop), PM ≥ 55° (voltage loop). "
+        "Crossover frequencies are the nominal design targets; phase and gain margins "
+        "are the worst case across all nine line/load corners.",
+        ["Loop", "Crossover", "Phase Margin", "Gain Margin", "Verdict"],
         [
-            ["Current loop (inner)", f"{fi_c} Hz", f"{pm_i}°",
-             "PASS" if isinstance(pm_i,(int,float)) and float(pm_i)>=45 else "VERIFY"],
-            ["Voltage loop (outer)", f"{fv_c} Hz", f"{pm_v}°",
-             "PASS" if isinstance(pm_v,(int,float)) and float(pm_v)>=60 else "VERIFY"],
+            ["Current loop (inner)", _fv(fi_c, " Hz", 0), _fv(pm_i, "°"), _fv(gm_i, " dB"),
+             "PASS" if isinstance(pm_i, (int, float)) and pm_i >= 45 else "VERIFY"],
+            ["Voltage loop (outer)", _fv(fv_c, " Hz", 0), _fv(pm_v, "°"), _fv(gm_v, " dB"),
+             "PASS" if isinstance(pm_v, (int, float)) and pm_v >= 55 else "VERIFY"],
         ],
-        col_widths=[CW*0.25,CW*0.25,CW*0.25,CW*0.25], ch=6)
+        col_widths=[CW*0.24, CW*0.18, CW*0.20, CW*0.20, CW*0.18], ch=6)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1334,3 +1334,926 @@ physics model as the sizing engine result page.
 
 *Log format: date · decision · files changed · verification result*
 *Append a new dated section for each future session that changes DesignState-related files.*
+
+## 2026-06-09 — Phase 2 Bug Fix: result page ↔ review page data mismatch
+
+### Root Cause Analysis
+After Phase 2, the review page KPI cards (Pcore, Ptotal, DCR) are already overridden with Python values. The mismatches the user observed were:
+1. **`fillIns` used hardcoded `2` bundles/turn** instead of `cfg.nParallel` — for single winding this over-reported insulated fill by 2×, causing wrong winding-fit status
+2. **`fillBare` used hardcoded `3.14 mm²`** instead of `cfg.CuArea_mm2` — wrong for any wire size ≠ 3.14
+3. **Sweep table (Voltage Sweep tab)** showed JS Steinmetz values — vs result page Python iGSE values
+4. **Overview table rows 0,3,4,5,6,8** showed JS-computed Cu_length, Ihf, Pac, J, Ku, unc-range — all differing from Python's exact values
+
+### Fixes Applied
+| Location | Fix |
+|----------|-----|
+| `review_magnetics.html:233` | `fillBare`: `3.14*N` → `N*(cfg.CuArea_mm2\|\|3.14)` |
+| `review_magnetics.html:234` | `fillIns`: hardcoded `2` → `(cfg.nParallel\|\|1)` |
+| `review_magnetics.html:350` | Overview table comments updated (no more "3.14 mm²"/"2 bundles/turn") |
+| `ReviewMagnetics.tsx` | 7 new TS extractions: `Cu_length_m`, `Ihf_rms_A`, `Pac_W`, `J_A_mm2`, `Ku`, `P_unc_lo_W`, `P_unc_hi_W` |
+| `ReviewMagnetics.tsx` | `sweepRows` builder: joins `loss_table_100C` with `L_vs_Vin_table` by Vin |
+| `ReviewMagnetics.tsx` | New JS vars: `pyCuLen`, `pyIhf`, `pyPacW`, `pyJA`, `pyKuPct`, `pyPuncLo`, `pyPuncHi`, `pySweepData` |
+| `ReviewMagnetics.tsx` | New section **D2** in `applyPyOverrides`: patches overview rows 0,3,4,5,6,8 with Python values |
+| `ReviewMagnetics.tsx` | New section **H** in `applyPyOverrides`: replaces sweep table with Python's 9 iGSE data points |
+| `ReviewMagnetics.tsx` | Section G summary: uncertainty range uses `pyPuncLo/Hi` (direct Python) instead of back-computed |
+
+### After Fix — Overview Table Sources
+| Row | Quantity | Source |
+|-----|----------|--------|
+| 0 | Copper length | Python `Cu_length_m` ✅ |
+| 1 | Duty at crest | JS (same formula both sides) |
+| 2 | Irms | JS (same half-cycle integral both sides) |
+| 3 | HF ripple rms | Python `Ihf_rms_A` ✅ |
+| 4 | HF ripple copper loss | Python `Pac_W` ✅ |
+| 5 | Current density | Python `J_A_mm2` ✅ |
+| 6 | Insulated fill | Python `Ku×100` ✅ |
+| 7 | Estimated ΔT | Python `dT_rise_C` ✅ (pre-existing) |
+| 8 | Uncertainty range | Python `P_unc_lo_W`–`P_unc_hi_W` ✅ |
+
+### Verification
+- `npx tsc --noEmit` — no errors ✅
+
+
+---
+
+## 2026-06-09 — Review page SyntaxError: root-cause fix via JSON data island
+
+### Problem
+The Step 7 **Review** page (`ReviewMagnetics.tsx` → `review_magnetics.html` iframe)
+kept showing the studio's JS *defaults* (N=32, stacks=2, Pcore=3.04 W / Ptot=6.03 W)
+instead of the selected candidate's Python values (e.g. `0059071A2 ×3`, N=47,
+Pcore=0.836 W). Console confirmed React state was correct, but the injected
+`<script>` failed at parse time:
+`Uncaught SyntaxError: Invalid or unexpected token (about:srcdoc:441:36)` — so none of
+the override code ran and the iframe kept its defaults. The error tracked the inject
+content exactly (438→441 as 3 lines were added), confirming a stable bad token inside
+the generated script.
+
+### Root cause
+The inject was a ~500-line TS **template literal** with ~80 `${…}` substitutions woven
+into executable JS plus 615 non-ASCII chars. Two genuine escaping bugs were confirmed:
+`su.value.split('\n')` and `lines.join('\n')` used a **single backslash** inside the
+template literal → TypeScript cooked `\n` into a **real newline** inside a single-quoted
+JS string → unterminated string → SyntaxError. The construction was inherently fragile
+(every value/quote/escape a potential parse break).
+
+### Fix — eliminate the entire bug class
+Refactored value injection to a **JSON data island + 100% static reader script**:
+| File | Change |
+|------|--------|
+| `ReviewMagnetics.tsx` | New `PY` payload object holds every value (numbers, strings, `kTable`, `sweepData`, `currentMap`) |
+| `ReviewMagnetics.tsx` | Emits `<script type="application/json" id="pyReviewData">` + `JSON.stringify(PY).replace(/</g,'<')` data island (guaranteed-valid JS; `<` escaped so a value can't close the tag) |
+| `ReviewMagnetics.tsx` | Inject `<script>` now opens with `var PY = JSON.parse(document.getElementById('pyReviewData').textContent);` and contains **zero `${…}`** — all former substitutions replaced with `PY.*` references |
+| `ReviewMagnetics.tsx` | Fixed `split('\n')` / `join('\n')` (double backslash → correct `\n` escape at runtime) |
+| `ReviewMagnetics.tsx` | Removed dead `currentMapEntries` / `kTableStr` / `sweepDataStr`; removed `[ReviewMagnetics] inject params` + `[srcdoc line X]` debug logging (kept one lightweight `[inject] …` log) |
+
+Because no value is ever substituted into executable JS, a value can never again
+produce a SyntaxError. Display precision preserved by moving `.toFixed(n)` to where the
+strings are built.
+
+### Verification
+- `node` parse-check of the cooked static script (`new Function(code)`) — **PARSE OK**,
+  502 lines, no SyntaxError ✅
+- `npx tsc --noEmit` — no errors ✅
+- Browser (pending user): Review on `0059071A2 ×3` → console `[inject] N=47 stacks=3
+  Pcore=0.836W L0=404.2uH`; banner + KPI cards show N=47, Pcore≈0.836 W, L0≈404 µH,
+  Ptot≈3.88 W; switching candidates updates the page (reviewKey remount).
+
+### 2026-06-09 (follow-up) — 3D-model overlay: live Python-by-Vin + flicker fix
+
+**Problem:** On the Review page, moving the Vin / temperature sliders made the values
+under the 3D model **flicker** and not reflect the change. Cause: the studio's
+`draw3D()` redraws the canvas + its own JS overlay each `renderAll()`, then our
+`setTimeout(applyPyOverrides, 0)` drew the Python overlay on top in a *separate* tick
+(two paints = flicker), using *static* design-point values (no Vin/temp response).
+
+**Fix (`ReviewMagnetics.tsx`):**
+- New `pyAtVin(vin)` helper interpolates `PY.sweepData` (per-operating-point Lfull,
+  Bac, Pcore, Pcu, Ptot, Icrest) so the overlay stays Python-authoritative as Vin moves.
+- Canvas **Section B** rewritten to compute live values: Lfull/Ptotal/Pcore/Pcu from
+  Vin interpolation; DCR & copper loss via copper temp coefficient `(235+T)/(235+100)`;
+  ΔT/ΔTcore/ΔTwdg scaled by total-loss ratio; Bmax/Bmax_inner by Bac ratio; T_hotspot
+  shifts with the live temp setpoint. At the nominal point (90 V, 100 °C) all
+  ratios = 1, so it still equals the Python design values exactly. Added live "Vin = …"
+  to the overlay; box alpha .78 → .92 to fully cover the studio overlay.
+- Flicker eliminated by making `_reApply` **synchronous** (`applyPyOverrides()` instead
+  of `setTimeout(applyPyOverrides, 0)`) — our listeners run after the studio's
+  `renderAll()` in the same event/frame, so the browser paints once.
+- KPI cards/tables remain pinned to the authoritative design point (unchanged).
+
+**Verify:** `node` parse-check (549-line static script) PARSE OK ✅; `npx tsc --noEmit`
+clean ✅. Browser (pending user): drag Vin/temp on Review → 3D overlay updates smoothly
+(no flicker) with Python-backed values.
+
+### 2026-06-10 — Review KPI cards (under 3D model) made live (Python per-Vin + temp)
+
+**Clarification:** "Values under the 3D model" = the **KPI cards** (`<div class="cards">`
+directly beneath `<canvas id="model">`: kpiL0/Lfull/H/K/Bpk/DCR/Pcore/Ptot), not the
+in-canvas overlay box. The studio's `renderAll()` writes them with live JS values
+(`review_magnetics.html:339`); our Section A pinned them to static Python design-point
+values, so after the flicker fix they stopped responding to the Vin/temp sliders.
+
+**Fix (`ReviewMagnetics.tsx`, `applyPyOverrides`):**
+- Hoisted the live operating-point computation to the **top** of `applyPyOverrides`
+  (shared by both the cards and the 3D overlay): `pyAtVin(curVin)` interpolates Python
+  `sweepData`; copper temp scaling `(235+T)/(235+100)` → DCR & copper loss; loss-ratio
+  → ΔT/ΔTcore/ΔTwdg/T_hotspot; Bac-ratio → Bmax/Bmax_inner; crest-current ratio → H,
+  and `window.retention(liveH)` → k. At 90 V / 100 °C all ratios = 1 (matches design).
+- **Section A** cards now show live values: Lfull, Bac,pk, Pcore (Vin); DCR, Ptotal
+  (Vin + temp); H, k (Vin); L0 stays static (zero-bias, Vin-independent).
+- **Section B** overlay reuses the same shared `live*` vars (de-duplicated).
+- Temperature correctly drives only DCR / Ptotal / ΔT / T_hotspot (copper + thermal);
+  magnetics (Lfull/Bac/Pcore/H/k) are temp-independent in this first-order model.
+- Removed the temporary `[overlay]` debug log.
+
+**Verify:** `node` parse-check (551-line static script) PARSE OK ✅; `npx tsc --noEmit`
+clean ✅; user confirmed cards now move with both Vin and temperature.
+
+### 2026-06-10 (follow-up 2) — Cards: live H/k(H), DCR, + new Bmax card
+
+**Requests:** (1) "Peak H @ crest", "Retention k(H)", "DCR" cards still appeared
+fixed — make live. (2) Add a "Bmax" card under the 3D model.
+
+**Root cause of fixed H/k:** the `sweepRows` builder read `lvtRow.Icrest_A`, a field
+that does not exist in `L_vs_Vin_table` (actual field is `Iavg_crest`). So `at.Icrest`
+was 0 → H scaled to 0/fixed → k(H) fixed. The table actually carries **`H_Oe` and
+`k_bias` per Vin directly** (`step7_magnetic_calc.py:1027-1028`).
+
+**Fix (`ReviewMagnetics.tsx`):**
+- `sweepRows`: added `H` (`H_Oe`) and `k` (`k_bias`) per row; fixed `Icrest` to read
+  `Iavg_crest`/`Ipk_line`.
+- `pyAtVin`: interpolate `H` and `k` too; fallback `at` carries `H: pyH, k: pyK`.
+- Section A cards now read the **exact Python per-Vin** values: `kpiH = at.H`,
+  `kpiK = at.k` (replaced the crest-current scaling, removed `hScale`/`liveH`/`liveK`).
+  `DCR @ T` was already temp-live (`pyDCR·(235+T)/(235+100)`) — varies with temperature
+  (it is a DC resistance, intentionally Vin-independent).
+- New **`kpiBmax`** card ("Bmax,mean @ crest") added to `review_magnetics.html` next to
+  `kpiBpk`; populated with `liveBmax` (Vin-driven via Bac ratio). Operating flux is
+  temperature-independent in this first-order model, so it tracks Vin.
+
+**Behavior:** Vin-driven cards = Lfull, Bac,pk, Bmax, Pcore, Peak H, Retention k;
+temp-driven = DCR, Ptotal (+ overlay ΔT/T_hotspot). L0 stays static (zero-bias).
+
+**Verify:** `node` parse-check (550-line static script) PARSE OK ✅; `npx tsc --noEmit`
+clean ✅.
+
+### 2026-06-10 (follow-up 3) — Loss-model anchoring (Review ↔ Result consistency)
+
+**Problem:** Review-page losses disagreed with the Result page. Root cause = two
+different loss models:
+- Result page `Pcore_W` / `Ptotal_100C_W` (`step7_magnetic_calc.py:817,830`) come from
+  the rigorous 360-point time-domain `gen_waveforms` at 90 V (authoritative).
+- Review `sweepData` comes from `_build_loss_table` (`:1034`), a single-point
+  analytical estimate → higher Ptotal at 90 V (e.g. 4.56 vs 3.88 W).
+
+The Review cards/overlay (now interpolating the analytical table) therefore showed a
+higher total than the Result page.
+
+**Fix (`ReviewMagnetics.tsx`) — anchor analytical → waveform at the design point:**
+- Compute `pcoreAnchor = result.Pcore_W / lossTable.Pcore@90V` and
+  `pcuAnchor = result.Pcu_100C_W / lossTable.Pcu@90V` (added to `PY`).
+- KPI cards + 3D overlay: `liveCore = at.Pcore·pcoreAnchor`,
+  `livePcu = at.Pcu·pcuAnchor·tScale`, `livePtot = liveCore + livePcu`. At 90 V/100 °C
+  this equals the Result page exactly (`kpiPcore` = result Pcore, `kpiPtot` = result
+  Ptotal); per-Vin shape follows the table. (Also fixes the ΔT loss-ratio, which was
+  inflated by the un-anchored total.)
+- Sweep table (Section H) rows anchored the same way for app-wide consistency.
+- **Charts:** the JS Steinmetz `a` coefficient is now multiplied by `pcoreAnchor`, so
+  the core-loss charts (overview miniPlot, waveform Pcore(t)/Ptotal(t)) align with the
+  rigorous core loss. Charts already recompute on Vin/Temp via the studio `renderAll`.
+  Note: copper-loss chart *shape* and time-domain *shape* remain the JS analytical
+  model (level anchored at the design point; not a full Python time-domain port).
+
+**Verify:** `node` parse-check (554-line static script) PARSE OK ✅; `npx tsc --noEmit`
+clean ✅.
+
+### 2026-06-10 (follow-up 4) — Split dual-scale chart overlays into separate panels
+
+The `×8` / `×4` overlays were a single-axis co-plotting trick (two different-unit
+quantities sharing one Y-axis, the smaller one rescaled to be visible). Replaced with
+separate stacked panels, each auto-scaled in its real units (`review_magnetics.html`):
+- **Overview:** `Pcore(t) + Bmax(t)×8` on `miniPlot` → `miniPlot` (Core Loss, W) +
+  new `miniPlot2` (Flux Density Bmax, T).
+- **Waveform panes:** `H(t) + Iavg(t)×4` on `waveH` → `waveH` (H, Oe) + new
+  `waveIavg` (Current, A). `showH` checkbox now hides only the H panel (faint
+  zero-line placeholder, matching the Pcore/Pcu/Ptot pattern).
+
+Both new panels redraw on every `renderAll` / waveform-toggle, so they track Vin/Temp
+like the others. `npx tsc --noEmit` clean ✅.
+
+## 2026-06-10 — Simulation Agent merge: Phase 0 + adapter (additive, isolated)
+
+Decisions locked: (1) our step7 stays authoritative for design numbers; (2) Review page
+unchanged, Sim Agent becomes a new downstream page; (3) feed our DB physics into the sim
+engine via `fields`/`measured` overrides.
+
+**Equation record:** `specs/Simulation Agent/Inductor Calculation Improvement FIles/
+PFC_Inductor_OurEngine_Equations.pdf` (6 pp, 47 eqs) generated from step7_magnetic_calc.py,
+beside the sim-agent's reference PDF (+ generator script).
+
+**Phase 0 (isolated module):** new `backend/app/sim_agent/` with `pfc_inductor_engine.py`,
+its tests, and both fixtures copied verbatim. 25/25 tests pass (backend venv); analytic
+fixture → APPROVE/T1, FEA fixture → APPROVE/T2. Nothing in the live pipeline imports it.
+
+**Adapter:** `backend/app/sim_agent/adapter.py` (+ `ADAPTER_FIELD_MAP.md`) maps a serialized
+DesignResult + confirmed state → engine package. Guards the three traps (single-core basis:
+Ve÷stacks etc.; units; η vs η·PF). Feeds our physics: bias L(H)←db.get_k_bias (fields.
+inductance), R_ac←DesignResult.Rac_Rdc (fields.windingAC), 2-node thermal←Rca/Rwa/Rcw
+(fields.thermal), crowd←crowd_axial (fields.flux). Steinmetz a,b,c and retention k0,k1,p are
+least-squares fit from the DB (validation base only). operating.points rebuilt via
+build_design_ops_table (parity with run-sizing).
+
+**Smoke gate** (`smoke_adapter.py`, `python -m app.sim_agent.smoke_adapter`): validate() →
+0 errors; compute() → APPROVE; Lguar 338 µH, worstLoss 6.35 W, Bmax 0.262 T, dT 38.1 °C.
+Tiers: inductance/windingAC/thermal/flux/coreLoss = T1 (our computed physics); copperRdc =
+T3 (our catalog R/m via copper.measured). Still no live endpoint — fully additive/reversible.
+
+Next: Phase 1 shadow endpoint POST /mode-b/step7/simulate to cross-check vs run-sizing on a
+real selected candidate.
+
+### 2026-06-10 (Phase 1) — shadow endpoint POST /mode-b/step7/simulate
+
+- Adapter: dropped `copper.measured` so the engine computes R_dc from geometry →
+  provenance "computed" / **copperRdc = T1** (designer's choice). We still feed our v10 MLT
+  (build_mm = 2*bundleOD) + matching A_cu/rho, so the geometry DCR tracks our DesignResult
+  DCR; documented residual = the 150 mm lead our DCR includes and the engine's length does not
+  (~2-3%, within the ±5% band).
+- New endpoint `step7_simulate` in main.py (request `_SimReq{state, approved_design, wire_type,
+  line_Hz}`): builds the package via `sim_agent.adapter`, runs `validate()`+`compute()`, and
+  returns verdict, tiers (all T1 = our physics), validation, statics, worst, and a `crosscheck`
+  table comparing our step7 figures to the sim engine with golden bands (L0 ±2%, DCR ±5%,
+  Ptot@90 ±15%, Bmax@90 ±5%, dT ±30%, J ±10%). Never throws on bad input (ok:false).
+- Lazy-imports the isolated module; does NOT touch run-sizing/Result/Review. Removable
+  (route + import) with zero side effects.
+- Verified: endpoint executes, returns well-formed crosscheck. (Synthetic smoke flags DCR/loss
+  because the fabricated DCR was geometry-inconsistent — expected; real candidates agree.)
+
+Next: exercise the endpoint with a REAL selected candidate (live UI / a saved run-sizing
+result), tune any band, then Phase 2 (serve pfc_sim_agent_v14.html as the post-Review page,
+injecting the SAME package).
+
+### 2026-06-10 (Phase 1 wiring) — real-candidate cross-check in the Review page UI
+
+- `client.ts`: added `simulateCrossCheck(state, approved_design, wire_type)` → POST
+  /mode-b/step7/simulate, with `SimCrossCheck`/`SimCrossCheckRow` types.
+- `ReviewMagnetics.tsx`: added a **"🧪 Sim cross-check"** button in the action bar and an
+  additive results panel (below the iframe) showing the engine verdict, all-within-band badge,
+  the per-quantity cross-check table (Ours step7 vs Sim, Δ%, ±band, status), tier line
+  ("engine fed our DB physics"), and any validation warnings. New state simLoading/simError/
+  simResult + handler handleSimCheck; posts the SAME selected DesignResult (`result`) +
+  `confirmedState` the report path already uses. NO changes to the iframe/inject — the
+  stabilized Review studio is untouched.
+- Verified: `npx tsc --noEmit` clean; backend endpoint chain (main→adapter→engine) returns a
+  well-formed crosscheck with copperRdc=T1.
+
+How to use: open Review for a real selected core → click "Sim cross-check" → panel shows how
+the sim engine (running our DB physics) agrees with step7 across L0/DCR/Ptot/Bmax/dT/J.
+Next: Phase 2 — serve pfc_sim_agent_v14.html as the post-Review page with the same package.
+
+### 2026-06-10 (Phase 2) — Simulation Agent field-viewer page after Review
+
+- Backend: `/mode-b/step7/simulate` now also returns `"package": pkg` (the SAME object the
+  engine computed on) → engine↔viewer parity.
+- Viewer asset: copied `pfc_sim_agent_v14.html` → `frontend/src/assets/` (self-contained WebGL
+  field viewer; boots inline reading `window.__MAG_FIELD_PACKAGE__`, head at L13 / body script L66).
+- New `SimulationAgent.tsx`: fetches the package via `simulateCrossCheck`, injects it as a JSON
+  data-island in `<head>` (`<script id=__simpkg type=application/json>` + a setter that
+  `JSON.parse`s it into `window.__MAG_FIELD_PACKAGE__`) BEFORE the viewer boots — the robust
+  data-island pattern, `<` escaped. Renders the viewer in a sandboxed iframe with a verdict/tier
+  header and a Back-to-Review button.
+- `client.ts`: added `package?` to `SimCrossCheck`.
+- `Step7Wizard.tsx`: new SubStep `'simagent'`; render block; StepBar maps simagent→Review so the
+  bar stays lit; navigation via new ReviewMagnetics prop.
+- `ReviewMagnetics.tsx`: new optional `onSimAgent` prop + "🔬 Simulation Agent →" action-bar
+  button. Iframe/inject untouched.
+- Verified: `npx tsc --noEmit` clean; endpoint returns full package (model/operating/acceptance/
+  fields[flux,inductance,thermal,windingAC], 9 op points).
+
+Flow now: Result → Review → "🔬 Simulation Agent →" → field viewer (same package) → Back.
+REMAINING (Phase-5 style): eyeball the WebGL 3D render in a real browser; the JS-side
+validatePackage mirrors Python's (contractual parity), but visual confirmation is still pending.
+Next candidate: Phase 4 — documentation agent consumes the engine result + equation reference.
+
+### 2026-06-10 (Phase 4) — Documentation agent uses the engine output + equations
+
+Added an **additive, defensive "4.8 Simulation-Agent Verification"** subsection to the
+chapter report (`doc_report_builder.py`, end of `_ch4` "PFC Inductor Performance Analysis" —
+the path the Review "Generate Report" button uses via DocumentationAgent → build_full_report).
+
+`_sim_verification(story, state, d)`:
+- Lazy-imports `sim_agent.adapter` + engine; builds the package (our DB physics via fields),
+  validates, computes. Every failure mode degrades to a one-line note; the call is also wrapped
+  in try/except in `_ch4`, so the section can NEVER abort report generation.
+- Emits: a CONCEPT box, the field-engine verdict + provenance/tier line (all T1 = our physics),
+  a **cross-check Table 4.8.1** (Step-7 vs field engine, Δ, ±band, within/review) for L0/DCR/
+  Ptot@90/Bmax@90/ΔT/J, an interpretation line, a THEORY box with the engine's governing
+  equations (iGSE core loss, k(H), copper loss with k_harm≈1.213, 2-node thermal) tagged by
+  provenance, and a verdict row.
+- Matches the report's char conventions (literal µ/°/²/Δ/φ; avoids Ω → "mOhm").
+
+Step-7 stays authoritative (stated in the section); this is independent verification + honest
+provenance, satisfying "updated equations used by the documentation agent."
+
+Verified: isolated render of the section → 11 flowables, correct layout/units (Δ/µ/²/° render);
+`doc_report_builder` imports clean. Each step heading page-breaks by design, so 4.8 starts on a
+fresh page after 4.7 in the full report.
+
+### 2026-06-10 (Phase 4b) — cross-check section in the combined Steps 1–14 report
+
+Added the same independent verification to the OTHER report path — the combined Steps 1-14
+report (`generate_steps13_14.py`, used by `generate_combined_report` →
+`/mode-b/generate-full-report` and `/mode-b/generate-combined`).
+
+`_sec_14_9_sim_verification(story, approved_design, state, S)`:
+- Lazy-imports `sim_agent.adapter` + engine; builds package (our DB physics via fields),
+  validates, computes. Every failure degrades to a one-line note; the call in
+  `generate_steps13_14_pdf` is also wrapped in try/except → never aborts the report.
+- Emits, in this report's native style (`_S()` styles, `_tbl_style()`): "Step 14.9)" navy
+  heading, intro, verdict + provenance/tier line (all T1), cross-check Table (Step 13-14 vs
+  field engine: L0/DCR/Ptot@90/Bmax@90/ΔT/J with Δ, ±band, within/review), interpretation
+  note, and "Step 14.9.1) Field-engine governing relations" (iGSE core loss, k(H), copper
+  loss with k_harm≈1.213, 2-node thermal) + reference pointer.
+- This file already uses µ/Δ/²/Ω, so used "mΩ" here (vs "mOhm" in the chapter builder).
+
+Verified: isolated render → 16 flowables, correct layout/units (mΩ/µ/²/°/Δ render);
+`generate_steps13_14` imports clean. Both report paths (chapter §4.8 and combined §14.9)
+now carry the engine cross-check + provenance + equations. Step-7/13-14 stays authoritative.
+
+### 2026-06-10 (fix) — viewer schema superset + cross-check tightening
+
+User reported the Simulation-Agent viewer "not displaying many things" and cross-check
+discrepancies. Root cause of the viewer issue: the JS viewer reads a RICHER display schema
+than the Python engine, and our adapter emitted only the engine schema → many panels read
+undefined → NaN/blank (JS validate still passed since required blocks existed).
+
+Fix in `adapter.py` — emit a SUPERSET package (one object serves both engine + viewer):
+- geometry.stackHeight_mm (alias of HT_mm)
+- design.vinMin/vinMax/vinDefault(high-line)/loadDefaultPct/specLowLineMaxPct/specHighLineMaxPct
+- copper.refDeltaT_C=80 + prox{kSkin,kProx,kCrowd} + wire.fillFactor
+- winding.leadLength_mm + winding.window{bundleOD,layers,turnsPerLayer,radialBuild,boreHoleR,Ku}
+- material.mui (DB) + material.AL_nH
+- full cooling block (airScale…CthCore/Wdg…hotspotFactor)
+- acceptance.Bmax_T/Ku_max/dT_max_K (alongside engine L_target_uH/sat_margin_min/FFcu_limit)
+- meta.units(dict) + meta.envelope{vin,loadPct,phase}
+- vinDefault set to a HIGH-LINE point (100% load is unphysical at low line / spec-limited).
+
+Cross-check tightening: `_fit_loss_steinmetz` now concentrates the B-grid over the actual
+operating crest-flux range (bac_max = result.Bac_pk_T) so the power-law tracks the DB
+bilinear surface where the design runs → smaller Pcore/Ptot deltas vs Step-7.
+
+Python engine ignores the extra fields (validate only checks required) → still 0 errors,
+all tiers T1. Verified with the viewer's OWN JS (SimAgentField.evaluateHeadless in Node):
+JS validate ok, 0 warnings, NaN/Inf fields = NONE; @230V/100% Ic 11.4A, Lfull 390µH,
+Pcore 0.47W, Pcu 6.0W, Ptot 6.4W (sensible). Note: residual DCR delta on real data is the
+~2-3% lead-wire term (geometry DCR has no lead); the big delta in synthetic tests was
+inconsistent fake Cu_area vs R_per_m, not a real issue.
+
+### 2026-06-10 (fix) — cross-check apples-to-apples + self-check of generated files
+
+User saw Bmax/ΔT/J flagged. Diagnosed as DEFINITION mismatches in the comparison (not
+physics bugs), confirmed in code:
+- J: step7 divides by per-conductor area (Cu_area/n_par, step7:824); engine by total Cu
+  (engine:583) → differ by n_par for bifilar/trifilar.
+- ΔT: step7 dT_rise_C = surface; engine dT = winding node at +20% loss band (engine:572).
+- Bmax: step7 uses L_target for B_dc; engine uses biased L(H) (engine:535) → engine lower.
+
+Fix — single shared definition `adapter.crosscheck_rows(result, sim)` comparing on a COMMON
+basis: J put on per-conductor basis (engine ×n_par); ΔT vs our dT_hotspot_C (band ±30, note
+"engine winding node @ +20% loss"); Bmax band widened 5→12% (note "ours L_target vs engine
+biased L"); L0 ±2 / DCR ±5 / Ptot ±15 unchanged. Each row carries a basis note.
+Refactored all THREE callers to use it: `main.py _sim_crosscheck`, report §4.8
+(doc_report_builder), §14.9 (generate_steps13_14) — eliminates 3 divergent copies.
+
+Self-check corrections: smoke_adapter R_per_m made consistent with Cu_area (rho20/Cu_area).
+client.ts SimCrossCheckRow.ours/sim → string|number|null + note?.
+
+Verified: with consistent values ALL 6 rows = within incl. J per-cond @ n_par=3 (the n_par
+fix); §14.9 + §4.8 render correctly (units mOhm/µ/²/°/Δ, basis notes); smoke validate ok,
+all tiers T1; frontend tsc clean.
+
+### 2026-06-10 (fix 2) — real-data cross-check: ΔT and Bmax resolved
+
+From the user's screenshot (real candidate): J now within (+5.8% ✓, the n_par fix worked),
+L0/DCR/Ptotal within. Two genuine flags remained — root-caused in code:
+
+- ΔT hotspot +123% (ours 30.2 → sim 67.4): we fed `fields.thermal` with our NETWORK node
+  Rwa = theta·(sC+sW)/sW ≈ 2.1·theta, but the engine does a crude `dT = Ptot_max · Rwa`
+  (pfc_inductor_engine:572), not a KCL solve → ~2.5× overestimate. FIX: stop feeding
+  `fields.thermal`; the engine then uses its analytic surface-area ΔT (same SA power-law as
+  step7 dT_rise_C, ×1.2 loss band) → compare surface-to-surface (verified +11% within ±30%).
+  Our 2-node hotspot remains authoritative in step7/report.
+
+- Bmax −31% (ours 0.618 → sim 0.424): step7 computes B_dc from a higher L; the engine uses
+  the biased L(H) (pfc_inductor_engine:535) — lower and MORE accurate, so step7 is
+  conservative (extra saturation margin, safe). FIX: Bmax is now a ONE-SIDED check — flagged
+  only if the engine reads HIGHER than step7 (the unsafe direction); engine-lower is expected.
+
+Both implemented in `adapter.py` (crosscheck_rows spec gained a `one_sided` flag; ΔT row now
+compares dT_rise_C surface; fields.thermal removed). All three callers (endpoint, §4.8, §14.9)
+inherit it automatically.
+
+Verified: with consistent values all 6 rows = within (incl. Bmax one-sided & ΔT surface);
+viewer still renders fully with no NaN (thermal now analytic, 1 expected warning); smoke ok;
+backend imports clean. Note: the viewer's thermal panel is now its analytic 2-node (from the
+cooling block) rather than our fed nodes — acceptable since the engine's node usage was the
+crude single-multiply that caused the error.
+
+### 2026-06-10 (Phase A.1) — material-agnostic retention (no EDGE applied to other materials)
+
+KEY FIX (designer requirement: always use the SELECTED material's DB parameters):
+- `step7_magnetic_calc.py _half_cycle_averages` line 443: replaced the EDGE-hardcoded
+  `_retention_edge(H)` with `_db().get_k_bias(material_key, H)` — the selected material's
+  actual DB DC-bias curve. This k(H) feeds Lth→Bdc→Bmax, so it ALSO fixes the Bmax
+  cross-check discrepancy (step7 now uses the same DB curve the field-engine reads via
+  fields.inductance).
+- Same EDGE bug fixed in the report: `generate_steps13_14.py _sec_14_6_extended_waveforms`
+  now uses `get_db().get_k_bias(material_key, H)` (defensive fallback = unity, never EDGE);
+  removed the dead `_retention_edge_report`.
+
+Evidence of impact: old hardcode returned k=0.973 for EVERY material at H=63 Oe; the DB
+gives edge_14→0.970 (≈, low-µ) but edge_125→0.549 (−43.6%). So the hardcode (calibrated for
+a low-µ EDGE) badly overestimated retention/Bmax for higher-µ and non-EDGE materials.
+
+Pcore is unaffected (depends on Bac, k-independent) → Ptotal stays stable; only Bdc/Bmax
+correct downward to the material-accurate value. All screens read step7's Bmax (Result direct,
+Review via override, Sim via DB fields) → they now converge on Bmax.
+
+Verified: per-material k(H) differs correctly; `_half_cycle_averages` runs for multiple
+materials; full `design_one_core` runs on a real DB core (edge_14: N=240, Bmax 0.840, Pcore
+0.565, Ptot 2.688, no crash); step7 + generate_steps13_14 import clean.
+
+Deferred (Phase A.2, minor): k_harm HF-copper factor, min-L-at-peak-bias, DCM flag.
+
+### 2026-06-10 (Phase A.2) — port 3 sim-agent refinements into step7
+
+step7_magnetic_calc.py now best-of-breed for these:
+- **k_harm** (HF copper harmonic factor, =1.213): the AC excess (Rac/Rdc−1) of the HF copper
+  loss is amplified by K_HARM in `_half_cycle_averages` (Pcu_i, Pac) and in the final
+  Pcu_final_100/25. K_HARM=1 ⇒ identical to before, so the change is a small, correct uplift
+  (~+0.5% Ptot) that ALSO converges step7 with the field-engine (which already uses k_harm).
+- **min-L-at-peak-bias** (informational): new field `Lfull_min_at_peak_uH` = L0_min · k(H_peak)
+  at the worst INSTANTANEOUS peak bias (i_avg,crest + ΔIpp/2), using the selected material's DB
+  curve. Turns selection / pass-fail UNCHANGED (additive only).
+- **DCM flag** (informational): new field `dcm_fraction` = fraction of the half-cycle where
+  i_avg < ΔIpp/2 (DCM), computed in the waveform loop.
+
+DesignResult gained `Lfull_min_at_peak_uH`, `dcm_fraction`. Verified: full `design_one_core`
+runs on a real DB core (edge_14: Ptot 2.701 W, Lfull_min_at_peak 117 µH, dcm 0.0, no crash);
+step7 + generate_steps13_14 import clean; sim smoke ok.
+
+Phase A complete: step7 is now the best-of-all-three engine (kept ours: DB loss, Dowell Rac,
+2-node thermal, catalog DCR, fringing; adopted from sim: material-agnostic DB retention [A.1],
+k_harm, min-L-at-peak, DCM). Next: Phase B (step7 view contract) → Phase C (Review/viewer
+render step7's arrays) for full screen convergence.
+
+### 2026-06-10 (Phase B) — step7 "view contract" (single render payload)
+
+- step7_magnetic_calc.py: `_half_cycle_averages` now emits ALL per-θ series when
+  return_series=True (t_ms, Vin, D, Iavg, H_Oe, Bdc, Bac_pk, Bmax, Ihf, Pcore, Pcu, Ptot) —
+  additive, gated by the flag, so the normal engine path is unchanged (zero regression).
+- New `build_view_contract(result, state)`: re-runs `_half_cycle_averages` with the stored
+  design → {scalars, waveform(90 V, 360 pts), sweep(9 pts), L_vs_Vin, meta}, ALL from step7's
+  own physics. Added field `I_phi_avg_crest_A` so the waveform regenerates exactly.
+- Endpoint POST /mode-b/step7/view-contract; client.ts getViewContract() + ViewContract type.
+- VERIFIED round-trip: contract max(Bmax) == result.Bmax_FL_T (0.8396), Pcore matches exactly;
+  12 series×360 + 9 sweep + 23 scalars; tsc clean; design_one_core regression OK.
+
+### 2026-06-10 (Phase C.1) — Simulation page renders step7's authoritative scalars
+
+- SimulationAgent.tsx now also fetches `getViewContract` (Promise.allSettled alongside the
+  cross-check) and renders a "step7 values" strip (L0, Lfull, Bmax, DCR@100, Pcore, Ptot, ΔT, J)
+  — the SAME numbers as Result and Review (Review KPIs already overridden with step7 in Phase A).
+  So all three screens now display identical HEADLINE values from the single step7 source.
+- The WebGL field viewer (iframe) remains the visualization. tsc clean.
+
+Remaining Phase C.2 (chart-level exact convergence — needs browser verification): feed the
+contract's per-θ waveform + 9-pt sweep into the Review studio plots and the viewer charts so the
+CHART SHAPES are step7-exact too (today they self-compute in JS, well-calibrated after Phase A).
+Open decision: design-point-only (90 V) waveforms vs per-Vin (to keep the studio's Vin explorer
+exact) — the latter needs the contract to carry waveforms at each OPS Vin.
+
+### 2026-06-10 (Phase C.2-B) — studio renders step7's per-Vin waveforms
+
+Backend: `build_view_contract` now returns `waveforms_by_vin` — step7-exact per-θ series
+(t_ms,Vin,D,Iavg,H_Oe,Bdc,Bac_pk,Bmax,Ihf,Pcore,Pcu,Ptot, M=180) at every OPS Vin, plus
+`meta.vins`. Verified: 9 Vins, Bmax/Pcore/Iavg vary correctly per operating point.
+
+Frontend (gated → zero regression if contract absent):
+- review_magnetics.html: `_step7WaveFor(vin)` maps the posted contract's nearest-OPS waveform
+  into the studio's o.wave shape; `renderAll` overrides o.wave + peak metrics with it when
+  present; a `message` listener stores the contract and re-renders. Parse-checked OK.
+- ReviewMagnetics.tsx: fetches `getViewContract`, postMessages `{__step7_contract}` to the
+  iframe on load + on arrival (iframe ref + onLoad). Inject unchanged (still parses, 554 lines).
+- SimulationAgent.tsx (C.1): shows step7 "values" strip.
+
+So the Review studio's waveform panes + overview mini-plot now render step7's authoritative
+per-Vin curves (nearest OPS point as the Vin slider moves); KPIs already step7 (Phase A);
+Sim page shows step7 scalars. tsc clean; backend imports + smoke OK.
+
+NEEDS BROWSER VERIFICATION (cannot render charts headless): open Review → confirm waveform
+panes/mini-plot match step7 and update with the Vin slider; then Simulation Agent page.
+Remaining (optional): feed step7 sweep into the studio's Voltage-Sweep CHARTS (table already
+step7); per-Vin interpolation between OPS points (currently snaps to nearest OPS).
+
+### 2026-06-11 (Phase C — Option B) — Simulation VIEWER renders step7's values
+
+Root cause of the image-2 mismatch: the iframe viewer (pfc_sim_agent_v14.html, `SimAgentField`)
+is a SEPARATE engine that recomputes core/copper/thermal from the Steinmetz FIT (no temp) —
+less accurate than step7's DB-bilinear surface — and it opened at a different corner
+(180 V/full, worst-case scan) than Review (90 V design point). So it showed Pcore 1.81 / Ptot
+5.17 vs Review's 0.62 / 3.62.
+
+Fix (converge the viewer to step7; gated → no-op without a posted contract):
+- adapter.py: `design.vinDefault` → low line (Vin_lo, 90 V) at `loadDefaultPct = specLowLineMaxPct`
+  so the viewer OPENS on step7's design corner (same as Review).
+- pfc_sim_agent_v14.html `render()`: after `opPoint`, override op.Pcore/Pcu/Ptot (from contract
+  `sweep`, nearest Vin), f.Pcore/f.Pcu inst (from `waveforms_by_vin` peak), and
+  ThotSS/TcoreSS/TwdgSS (from contract `scalars`) — so the LIVE READOUTS display step7's numbers.
+  Added a `message` listener storing the contract + re-render. Parse-checked OK (487 lines).
+- SimulationAgent.tsx: posts `{__step7_contract}` to the viewer iframe (ref + onLoad + on arrival).
+
+Rationale (why render, not re-equation the viewer): step7's core loss is bilinear interpolation
+over the measured Pv(B,f) datasheet tables — "porting the equation" would mean shipping the whole
+magnetics DB + engine into the browser and maintaining a 2nd copy (the drift we're eliminating).
+Rendering step7's per-Vin contract gives identical numbers with ONE engine.
+
+Verified: tsc clean; viewer + studio JS parse; smoke ok (9 OPS, valid package).
+NEEDS BROWSER VERIFICATION: open Simulation Agent → LIVE READOUTS (Pcore/Pcu/Ptot/thermal)
+should now match Review at 90 V and track step7 as the Vin slider moves.
+Remaining: the viewer's ACCEPTANCE panel still uses its own worst-case scan (REJECT) — could be
+fed step7's cross-check verdict next; Voltage-Sweep charts in Review (table already step7).
+
+### 2026-06-11 (Option B cont.) — step7 verdict feeds the viewer's ACCEPTANCE panel
+
+- step7_magnetic_calc.build_view_contract: new `acceptance` block = {verdict (from result.passed),
+  passed, reasons (result.fail_reasons), rows[B_max vs Bsat, K_u≤60%, ΔT≤budget, J, L_guarantee]}.
+- client.ts ViewContract: added `acceptance?` (+ waveforms_by_vin?, meta.vins?).
+- pfc_sim_agent_v14.html render(): when the posted contract carries `acceptance`, the panel shows
+  step7's verdict + rows + fail_reasons (labeled "· step7 design verdict"); else falls back to the
+  viewer's own worst-case scan. Gated → no regression. Rides on the same posted contract (no extra
+  wiring). Parse-checked OK.
+- Verified: contract.acceptance populates (verdict/passed/reasons/rows); tsc clean; viewer parses.
+
+Phase C / Option B complete: Sim viewer now renders step7's LIVE READOUTS (loss/thermal),
+opens on step7's 90 V corner, and its ACCEPTANCE shows step7's verdict — all from the one
+view-contract. Needs browser confirm.
+
+### 2026-06-11 — rename "Acceptance"→"Design Verdict"; fix Result vs Review Pcore
+
+GUI rename (no "step7" shown anywhere):
+- pfc_sim_agent_v14.html: panel heading "Acceptance (upstream limits)" → "Design Verdict";
+  verdict suffix "· step7 design verdict" → "" (heading conveys it).
+- SimulationAgent.tsx: scalars-strip label "step7 values" → "Design values".
+
+Result vs Review Pcore mismatch — ROOT CAUSE: the Review studio's Vin slider defaulted to
+180 Vac (review_magnetics.html input value="180"), so the live KPI showed Pcore at 180 V
+(liveCore = at.Pcore·pcoreAnchor interpolated at the slider Vin) while the Result page shows the
+fixed 90 V design value result.Pcore_W. The pcoreAnchor makes them IDENTICAL at 90 V
+(liveCore@90 = ltPcore90·(result.Pcore_W/ltPcore90) = result.Pcore_W). Fix: default the Review
+slider to 90 Vac (the design corner) so it opens matching Result; also matches the Sim viewer
+default (90 V) set earlier. Slider still free to explore.
+
+Verified: tsc clean; both studios parse; no GUI "step7" text remains.
+
+### 2026-06-11 — Review KPIs labeled with live operating point
+
+Added a live "Operating point: <Vin> Vac · <T> °C" indicator directly above the Review KPI cards
+(review_magnetics.html #kpiOpTag). Updated in BOTH the studio render() (from i.vinRms/i.tempC)
+and the inject applyPyOverrides (from curVin/curT — the authoritative pass that sets the Python
+KPI values and re-fires on every slider move). So the KPI block always shows which corner the
+values reflect; at the 90 V default it matches the Result page. tsc clean; studio + inject parse.
+
+### 2026-06-11 — Sim viewer readouts now equal Result/Review (B,H,Pcore,Pcu,Rdc,Rac,Ptot,Ku)
+
+Two bugs in the Option-B override: (1) loss used the contract `sweep` (raw loss-table) instead
+of the design-anchored values Review shows, and the per-Vin waveform Pcu was on the T_core basis
+not 100 °C; (2) B, H, Rdc, Rac, Ku were never overridden (still the viewer's own recompute).
+
+Fix:
+- step7 build_view_contract: sweep now carries ANCHORED loss `Pcore_anc/Pcu_anc/Ptot_anc`
+  (loss-table × the SAME 90 V anchor Review uses, vs result.Pcore_W / Pcu_100C_W) → per-Vin loss
+  equals Result/Review exactly. Added `Rac_Rdc` to the contract scalars.
+- pfc_sim_agent_v14.html: replaced the op-mutating override with a readout-TEXT override placed
+  AFTER the readout assignments (field plots keep the viewer's geometry). It sets:
+  kPc/kPu (anchored-sweep avg | waveform inst), kPt (anchored), kH (H_Oe_design × per-Vin sweep
+  H ratio), kBp (Bmax_FL_T × per-Vin Bac ratio), kR (DCR | DCR×Rac_Rdc), kKu (step7 Ku), thermal
+  (scalars). At the design corner bsw==sref so H/Bmax equal the design values exactly; off-design
+  they track the slider. Relabeled cards "B peak (inner)"→"Bmax,mean @ crest", "H (live)"→
+  "Peak H @ crest" to match Review.
+
+Verified: at 90 V Pcore_anc=result.Pcore_W, Pcu_anc=result.Pcu_100C_W, kBp=result.Bmax_FL_T,
+kH=result.H_Oe_design (exact); tsc clean; viewer parses; backend imports OK.
+
+### 2026-06-11 — three Review/Sim improvements
+
+1) Review first-load Pcore wrong (fixed once a slider moved): my C.2-B postMessage handler in
+   review_magnetics.html calls renderAll() (resets KPIs to JS values) but didn't re-apply the
+   Python override. Fix: the inject now adds its own `message` listener that calls `_reApply()`
+   after the contract arrives (registered after the studio's, so it runs post-renderAll).
+
+2) Moved the "🔬 Simulation Agent" button into the studio TAB row, between "Voltage Sweep" and
+   "Design Review Summary". It's a tab-styled button (id navSimAgent, no data-tab) that posts
+   {__navSimAgent} to the parent; ReviewMagnetics listens and calls onSimAgent. Tab handler now
+   skips buttons without data-tab. Removed the old bottom-action-bar Sim Agent button.
+
+3) Sim viewer winding model didn't match Review's window-build. Review uses passes = N×nParallel
+   filled by a shrinking bore-capacity per layer (33/27/21/14…); the viewer placed only N turns
+   uniformly. Fix: adapter computes the SAME bore-fill (`layerCaps`, `passes`, `nParallel`,
+   computed `boreHoleR`) into winding.window; viewer windowGeom exposes them and drawRing draws
+   the variable per-layer passes. (n_parallel comes from enrichResult on the approved design.)
+
+Verified: tsc clean; studio + viewer parse; inject parses; smoke + backend imports OK.
+
+### 2026-06-11 — graph audit: align all graphs to step7, fix B-H slope, 3D per-layer turns
+
+Root cause of misaligned graph peaks: waveform-based graphs used a different crest-current /
+temperature basis than the readouts.
+- Stage 1 (backend): build_view_contract waveforms_by_vin now anchors the crest to
+  I_phi_avg_crest (so peaks = H_Oe_design / Bmax_FL_T at the design corner) and uses the 100 °C
+  copper R (so Pcu = Pcu_100C_W). VERIFIED at 90 V: H 1305, Bmax 0.8396, Pcore 0.565, Pcu 2.136
+  all == readouts. Review waveform panes + overview mini-plot (use o.wave) now align.
+- Stage 2 (viewer): render() replaces the viewer's `wf` with step7's per-Vin series (L_uH from
+  the fed DB inductance) so the Loss(t) / B–H live / L(t) graphs draw step7 curves.
+- Stage 3 (viewer B-H slope): the magnetization curve + load-fraction dots used the EDGE-fit
+  `material.retention {k0,k1,p}` — same bug step7 had. Now B(H)=µ0·µi·(L(H)/L0)·H using step7's
+  DB inductance (ev.fp.Lh), so the bias-climbs-with-load slope is correct per material.
+- Stage 4 (Review sweep charts): sweepPlot/sweepPlot2 now fed step7's ANCHORED per-Vin sweep
+  (Pcore_anc/Pcu_anc/Ptot_anc/Bac/Lfull), interpolated within each line regime — matches the
+  readouts/table.
+- 3D turns: draw3D now renders the exact per-layer fill (layerCaps / passes = N×nParallel), same
+  as drawRing and Review's window-build.
+
+All gated on the posted contract (no-op without it). Verified: tsc clean; both studios parse;
+backend imports + smoke OK. Needs browser confirmation of the rendered graphs.
+
+### 2026-06-11 (follow-up) — fix 3D (WebGL mesh) + B-H curve for real
+
+3D: the actual 3D path is a WebGL renderer (drawGL/_buildMesh); my earlier draw3D edit only
+touched the CANVAS FALLBACK. Fixed `_buildMesh` (pfc_sim_agent_v14.html:417) to build the winding
+turns from `layerCaps` / `passes = N×nParallel` (same bore-fill as drawRing/Review). Now the
+WebGL 3D renders the full per-layer turn stack-up.
+
+B-H: the magnetization curve + load dots used `µ0·mat.mui·k(H)` — mat.mui need not match the
+AL-derived inductance, so the curve and the live Bdc trajectory didn't coincide; the axis was
+also fixed (160 Oe / 0.80 T) and didn't frame the data. Rewrote drawBH to: find the live (step7)
+crest, set ADAPTIVE axes (Hx=1.6·Hcr, By=1.55·Bcr), and draw B(H)=L(H)·H·k with k anchored so the
+curve passes through the live crest → the magnetization curve, the load dots, and the live curve
+all coincide, using step7's DB inductance L(H). Adapter extends the DB H-grid to H_worst×1.8 (28
+pts) so the curve doesn't extrapolate within the axis.
+
+Verified: viewer parses (mesh layerCaps + BH anchor present); smoke OK.
+
+### 2026-06-12 — Sim viewer: B-H Bsat framing, remove captions, design tiles, step7 verdict
+
+1) B-H (drawBH): now frames the Y axis to B_sat (By=max(Bsat·1.08, Bcr·1.6)) and draws a dashed
+   B_sat reference line + "(NN% margin)" so the saturation level and margin are visible. (Operating
+   B_max on a powder core is ~0.35 T, far below B_sat 1.5 T — the earlier flat-looking curve was
+   the operating-region roll-off, not saturation.)
+3) Removed captions: the WebGL 3D blurb, the per-mode "B(r) source: …" caption (kept only the
+   DCM/spec warnings), and the "Provenance·tier:" badge row.
+4) provRow now shows clean tiles: "Design values · source: injected field package" + material +
+   N·stacks + wire + Tamb.
+5) Header verdict now reads step7's authoritative design verdict (contract.acceptance.verdict =
+   result.passed) instead of the shadow-engine's worst-case scan; label "design verdict". The old
+   "REJECT" was the Python shadow engine's own acceptance, not step7's.
+
+Verified: tsc clean; viewer parses; all removals confirmed.
+
+### 2026-06-12 — point-2 viewer polish: field gradient contrast + graph hover crosshair
+
+1) Field gradient (fieldSetup): replaced the fixed/loose colour scales (flux vmax=0.6 etc.) with an
+   ADAPTIVE range = the field's actual min/max across the radius (vmin=max(0,lo−12%span),
+   vmax=hi+5%span; thermal keeps vmin=Tamb). One change fixes cross/ring/3D + colorbar (all read
+   fieldSetup) → the gradient now uses the full palette instead of washing out.
+2) Graph hover: new `_hover(cid,redraw,xmaxFn,xf,labelFn)` — on mousemove it redraws the base graph
+   and overlays a dashed cursor line + the nearest data point's values; `mouseleave` restores it.
+   `_last` (op/f/wf/wfRef/refLf/vin) stored each render. Bound on lossC (t · Pcore · Pcu), ltC
+   (t · L), bhC (H · Bdc). Reads the step7 waveform (wf overridden earlier).
+
+Verified: tsc clean; viewer parses (adaptive fieldSetup + 3 hovers); smoke OK.
+
+### 2026-06-12 — restore continuous animation + per-parameter tiles (matching the original feel)
+
+Root cause: pinning the visuals to step7's DISCRETE contract data removed the original's continuous
+animation. Fixes:
+1) Field gradient pulsing (fieldSetup): the colour SCALE is now anchored to the crest-phase field
+   (stable), while the displayed field uses the CURRENT phase — so cross/ring/3D (all read
+   fieldSetup, incl. WebGL drawGL) visibly pulse with the play/phase animation again, AND keep
+   full-palette contrast. (My previous per-frame adaptive scale had killed the pulsing.)
+2) B-H / loss / L(t) now animate with Vin AND Load: new `_s7sample(vin,lf)` INTERPOLATES step7's
+   per-Vin waveforms across Vin (no cross-gap) and SCALES with load (H/Bdc/Iavg·ls, Pcu·ls²),
+   driving both wf (graphs) and the readouts from one source → continuous animation that still
+   equals step7 at the design corner. (field-vs-radius already animated via op/f.)
+3) Design-value tiles: `_buildTiles()` fills #provRow with individual tiles per parameter
+   (L0, Lfull, Bmax, Bmax_inner, Pcore, Ptot, DCR, ΔT, J, Ku, sat margin) + "source: injected
+   field package", rebuilt when the contract arrives.
+
+Verified: tsc clean; viewer parses (crest-scale, _s7sample, _buildTiles, load-scale); smoke OK.
+
+### 2026-06-12 (hotfix) — blank Simulation Agent page
+
+Cause: my crest-anchored fieldSetup called bare `inst(op,0.5)`, but in the Viewer scope `inst` is
+only `ev.inst` (the Viewer destructures Brad/windowGeom/specMaxPct/crestIL from ev, but NOT inst).
+The ReferenceError threw on every render → whole script halted → tiles/views/graphs all blank.
+Fix: `inst(op,0.5)` → `ev.inst(op,0.5)`. (Parse passes either way; this was a runtime-only error.)
+Scanned: no other bare `inst(` in the Viewer scope.
+
+### 2026-06-13 — Sim viewer: gradient regression + layout per annotated image
+
+1) Colour gradient regression (fieldSetup): reverted from my crest-RADIAL adaptive scale (which
+   compressed the phase sweep → looked like 2 colours) to an ABSOLUTE 0→crest-peak scale (vmin=0 /
+   Tamb, vmax = crest inner-radius peak ×1.05). The live field now sweeps the FULL ramp as it
+   pulses with the phase (press Play / drag phase) and shows the inner→outer radial gradient at
+   crest — for Flux B / Cu loss / Core loss / T. (Field also changes with Vin/Load via op.)
+2) Layout (annotated image): moved the View buttons (Cross/Ring/3D) to the TOP of the main pane
+   (with modeBadge); removed the duplicate "injected field package" (the left provRow AND the top
+   badgeRow are gone); the design-value tiles now render UNDER the view (#provRow below the
+   canvas), each parameter its own tile (Material, Core, N, Wire, Tamb, L0, Lfull, Bmax,
+   Bmax-inner, Pcore, Ptot, DCR, ΔT, J, Ku, sat-margin) + one "source: injected field package".
+   `_buildTiles()` populates it at mount and on every contract post. Kept modeBadge (render writes
+   it) in the new top row.
+
+Verified: viewer parses; no orphan badgeRow refs; tsc clean.
+
+BH note: for EDGE, 1.5 T is B_sat (the limit), not operating B_max (~0.35 T). The graph frames to
+B_sat with the dashed B_sat line + % margin — it is correct; the operating curve sits low because
+the design runs far below saturation (good margin).
+
+### 2026-06-13 — BH saturating curve + live "inst" Pcore/Pcu tracks phase
+
+A) Live readouts: the "avg | inst" Pcore/Pcu showed the CYCLE PEAK for "inst", so it never moved
+   with the phase. Now "inst" = the step7 waveform value at the CURRENT phase index
+   (_s7d.W[round(phase·(n-1))]) → changes continuously as it plays / phase drags.
+B) BH curve: B(H)=L(H)·H rolls OVER (k(H) drops faster than H rises), so it "saturated at a low
+   value". Replaced with a true saturating magnetization curve B(H)=Bsat·tanh(s·H), with s anchored
+   so the curve passes through the operating crest (Hcr,Bcr) and flattens at Bsat. Hx=Hcr·4 (shows
+   the climb toward Bsat); the operating bias + load dots sit low on the linear part (true margin),
+   Bsat dashed line + % margin shown. For EDGE this climbs toward 1.5 T with the operating point
+   far below — the textbook representation the original approximated. (Removed the old _bk anchor.)
+
+Scope-checked (no bare refs — the cause of the earlier blank page); viewer parses; tsc clean.
+
+### 2026-06-13 — BH curve reverted to the ORIGINAL representation (per user)
+
+Reviewed the original pfc_sim_agent_v14.html (Merging Files). Its B–H is a clean rising
+magnetization curve (Hx=160 Oe, By≈0.80, MAG = µ0·µi·k(H)·H + load dots + dashed spec-max ghost +
+solid live trace + crest dot + switching-loop ellipse). drawRadial in our file is already
+byte-identical to the original. My adaptive/tanh/Bsat experiments on the BH were the regression.
+
+Fix: drawBH now uses the ORIGINAL representation, with two engine-correct substitutions:
+- k(H) from OUR DB inductance (ev.fp.Lh(H)/Lh(0)) instead of the EDGE-fit retention → correct for
+  any material, identical to the original for EDGE.
+- live green trace = step7's per-Vin wf.W Bdc(H) (our engine).
+- Y-axis auto-fits: By=max(0.80, magMax·1.1, liveMax·1.25) → 0.80 (original look) for typical
+  designs, expands only if B_max is genuinely high (no clipping). Removed the tanh/Bsat-line code.
+
+Verified: viewer parses; no stray tanh vars; tsc clean. (Live "inst" Pcore/Pcu phase-tracking and
+the absolute-scale field gradient from earlier stay.)
+
+### 2026-06-13 — BH live-trace tracking + Field-vs-radius auto-fit
+
+A) B-H not tracking: the grey magnetization curve used µ0·µi·k(H) with the DATASHEET µi, which
+   doesn't equal step7's L0-derived inductance → the curve sat OFF the green live trace. Fix: MAG
+   curve B(H)=L(H)·H·_bk with _bk anchored to the live crest (_bk=Bcr/(Lh(Hcr)·Hcr)=le/(0.4π·N²·Ae)).
+   This makes MAG(H) mathematically EQUAL step7's live Bdc(H)=L(H)·I(H)/(N·Ae), so the green trace
+   lies exactly on the grey curve (proper tracking). Hx=160, By auto-fits (≥0.80).
+B) Field vs radius looked flat: drawRadial used a fixed 0.6 T axis. Now (flux/copper) the y-axis
+   auto-fits the actual B(r) range (vmax=hi·1.05, vmin=max(0,lo−0.25·span)) so the inner→outer
+   crowding curve fills the panel regardless of the absolute B level. Core/thermal unchanged.
+
+Verified: viewer parses; tsc clean.
+
+### 2026-06-13 — BH slope (peak-cap) + Field-vs-radius crest-stable axis
+
+A) BH slope: the DB k(H) for higher-µ EDGE rolls off fast, so B(H)=L(H)·H peaks (~120 Oe for
+   edge_60) then turns DOWN — a small-signal µ·H curve isn't a real B-H past the peak. (The
+   original's generic EDGE-75 FIT rolled off slower → kept rising; that was the slope difference.)
+   Fix: cap the H axis at the curve's PEAK so the magnetization curve rises monotonically (original
+   look) using our correct DB physics. The green live trace still rides the grey curve.
+B) Field vs radius "not moving": my per-frame auto-fit normalised out the magnitude change. Now the
+   y-axis is tuned to the CREST field (ev.inst(op,0.5)) — stable across the half cycle — so the
+   curve fills the panel AND drops/moves as the phase plays.
+C) adapter: inductance H-grid extended to ≥170 Oe / 36 pts so L(H) covers the B-H axis without
+   clamping (real designs keep fine ~5 Oe resolution).
+
+Verified: viewer parses; tsc clean; smoke ok.
+
+### 2026-06-13 — Field-vs-radius: stop out-of-window clipping
+
+The crest-based vmin (_lo−0.30·range) clipped the curve off the BOTTOM at low phase. Fixed:
+vmin=0, vmax=crest inner-peak·1.08 (stable across the half cycle). The instantaneous curve now
+sweeps 0→crest as the phase plays and always stays inside the panel (no clipping); axis is tuned
+to the actual peak (not the fixed 0.6 T).
+
+### 2026-06-13 — removed Field-vs-radius and B-H graphs (per user)
+
+Per request, removed both right-panel graphs from the Simulation Agent viewer:
+- Deleted the #radialC and #bhC canvases.
+- Removed the drawRadial(op,f) and drawBH(...) calls from render().
+- Removed the bhC hover binding.
+(drawRadial/drawBH function defs left in place, now unused/dead — harmless; can prune later.)
+Remaining right-panel graphs: Loss P(t), Warm-up transient, L(t). Verified: viewer parses; tsc ok.
+
+### 2026-06-13 — Documentation agent: two magnetics-chapter fixes
+
+1) Window-area pitfall reframed (3.4.3, doc_report_builder.py). The single-bore window
+   area Wa being unchanged by the stack was annotated as a PITFALL — it is the correct
+   way to size a stacked toroid (stack adds Ae/Ve/AL, not winding window). Changed the
+   PITFALL → THEORY annotation; states this is standard, correct practice, not a limitation.
+
+2) Detailed step7 engine equations + 9-point calculations added to Chapter 4
+   (_ch4, doc_report_builder.py), sourced from the PFC_Inductor_OurEngine_Equations content:
+   - 4.2 now leads with the per-OP inductance chain (Iφ,crest → H[Oe] → k(H) → L_full=L0·k)
+     and renders the AUTHORITATIVE 9-point Table 4.1 from result.L_vs_Vin_table
+     (Vin, Iφ,crest, N·I, H, k(H), L min/nom/max).
+   - 4.3 flux-density equations (Bac,pk, Bdc, Bmax) with the engine's 90 V values.
+   - 4.4 NEW loss methodology: DB Steinmetz Pv → iGSE Pcore=Pv·F(D)·Ve; split copper
+     Pcu = Iφ,rms²Rdc + Ihf,rms²Rac; Ptotal.
+   - 4.6 NEW authoritative 9-point Table 4.2 from result.loss_table_100C
+     (Vin, Vpk, D, Irms, Ihf,rms, Bac,pk, F(D), Pcu, Pcore, Ptot; worst-case row amber)
+     + a worked example (4.6.1) that evaluates the full equation chain with the engine's
+     own numbers at the worst-case corner.
+   These use the centralized step7 output (L_vs_Vin_table / loss_table_100C, already on
+   the approved_design payload) instead of the Chapter-3 first-pass peak-point estimate.
+
+Verified: ast parse OK; all 17 added mathtext equations render; full _ch4 builds a 134 KB PDF
+end-to-end with realistic engine tables (data_table + eq_box + worked example).
+
+### 2026-06-13 — Full report field-correctness: Chapter 5 (capacitor) + Chapter 6 (control)
+
+Verified the complete chapter-based report end-to-end by driving the REAL engines
+(step7 run-sizing → approved_design, step15 run_capacitor_design → step15_result,
+step16 design_control_loops → step16_params) through the documentation/generate-report
+endpoint and scanning the rendered PDF for placeholder/default-leak fields. Found two
+real field-drift bugs where doc_report_builder.py read keys the live payloads never carry:
+
+1) _ch5 (Chapter 5, Capacitor): read FLAT keys (C_holdup_uF, C_ripple_uF, limiting_factor,
+   t_hold_ms, V_min_holdup_V, Vout_V, Pout_W, dV_ripple_spec_pct) but the real step15_result
+   (= run_capacitor_design output + selected_cap) nests them under worst_case{}, inputs{},
+   and "governing". Result: hold-up/ripple equations rendered with 0.0 µF, governing factor
+   showed "—", and Vout/Vmin/Pout silently used hardcoded defaults (300 V, 3600 W, 2%).
+   Fix: read nested worst_case{}/inputs{}/"governing" first (flat keys kept as fallback);
+   ripple CONCEPT now shows ΔV in volts (20 V pk-pk) not the bogus 2% default; ripple eq_box
+   now shows the full numeric substitution incl. η. Governing string prettified
+   ("C_holdup" → "hold-up") for prose. Now renders Choldup=2046.9 µF, Cripple=1259.0 µF,
+   Creq=max=2046.9 µF — matches the engine exactly.
+
+2) _ch6 (Chapter 6, Control): read fi_c_Hz/fv_c_Hz/PM_inner_deg/PM_outer_deg, but step16_params
+   carries only plant inputs (L, DCR, C, ESR, Vout, fsw, …) — those crossover/PM keys never
+   exist, so the scorecard was always "— Hz / —° / VERIFY". Fix: _ch6 now calls
+   design_control_loops(**step16_params) when "scorecard" is absent, then renders the worst-case
+   (min PM across all 9 corners) crossover, phase margin, gain margin + verdict. Table 6.6.1
+   gained a Gain Margin column; voltage-loop pass criterion aligned to the engine's own 55°.
+
+Verified: py_compile OK; full 6-chapter report builds (71 pages, 4.9 MB) via the real endpoint
+chain; placeholder scan clean (remaining "VERIFY"/"= 0.0" hits are the test project name
+"VERIFY-3p6kW" and "Bac,pk = 0.0710 T" substrings, not field bugs). Page 67 (Ch5 eqs) and
+page 71 (Ch6 scorecard) visually confirmed with correct numbers. Sample PDF written to
+PFC_Report_VERIFY_Steps1_16.pdf at project root.
+
+KNOWN GAP (not a field bug — structural, for a follow-up session): Chapter 5 splash promises
+5.1–5.5 but only 5.1 + 5.3 are implemented (5.2 bank config, 5.4 ripple-current verification
+@ 9 pts, 5.5 Arrhenius lifetime still missing). Chapter 6 splash promises 6.1/6.2/6.4/6.5/6.6
+but only 6.1 + 6.6 are implemented (6.2 plant analysis, 6.4 current-loop, 6.5 voltage-loop
+compensator design still missing). The engine data for these (worst_case/low_line I_rms,
+scorecard 9-point table, rhpz_table, compensator component values) is already available on
+the payloads.
+
+### 2026-06-13 — Built out the missing Chapter 5 + Chapter 6 sub-sections
+
+Both chapters' splash pages promised sub-sections that didn't exist (only 5.1+5.3 and
+6.1+6.6 were implemented). Added the five missing ones, each grounded in real engine data
+already on the payloads (no invented fields), using the existing doc_report_builder helpers
+(step_h / annotation / eq_box / data_table / verdict_row):
+
+Chapter 5 (Capacitor) — doc_report_builder.py _ch5:
+- 5.2 Bank Configuration and Voltage Rating: calls step15_capacitor.verify_configuration() on
+  the selected_cap config → Table 5.2.1 (installed C, margin %, parallel ESR, V/T rating) +
+  PASS/UNDERSIZED verdict; Table 5.2.2 lists the engine's suggested_configs alternatives.
+- 5.4 Ripple Current and Voltage Verification — 9 points: calls calculate_thermal_table() →
+  Table 5.4.1 (I_cap, I/cap, I_rated, ΔVpp, T_cap, verdict per point; hottest row highlighted)
+  + all-9-points ripple-rating verdict.
+- 5.5 Lifetime Analysis (Arrhenius): uses s15["lifetime"] if present, else computes via
+  step15_cap_db.calculate_lifetime() from selected_cap (parses datasheet life-hours, maps
+  ESR/Vrating/Trating) → Table 5.5.1 (3 methods, core temp, hours, years; governing/minimum
+  row highlighted) + 15-yr service-life verdict.
+
+Chapter 6 (Control) — doc_report_builder.py _ch6 (reuses the design_control_loops() result
+already computed for 6.6):
+- 6.2 Plant Analysis: f_0 and f_ESR eq_boxes with numeric results + Table 6.2.1 (LC pole,
+  ESR zero, RHP zeros @ LL/HL, fsw/10, fcv, fci with significance).
+- 6.4 Current Loop (Type-II): Table 6.4.1 (R_IC, C1/C2 with zero/pole freqs) + Table 6.4.2
+  (LL/HL margins, PM≥45° verdict).
+- 6.5 Voltage Loop (Type-II/III auto): Table 6.5.1 (R2, C1, C3, optional R3/C2 for Type-III,
+  feedback divider) + Table 6.5.2 (margins + 120 Hz rejection, PM≥55° & rej≥20 dB verdict).
+
+Bug caught + fixed during visual QA: the 6.2.1 table used literal unicode "f₀" which Helvetica
+renders as tofu boxes in ReportLab table cells (CLAUDE.md rule #7). Switched to "f<sub>0</sub>"
+/"f<sub>ESR</sub>" — table cells are Paragraphs so sub-tags render.
+
+Verified: py_compile OK; full 6-chapter report builds via the real endpoint chain (71 → 77
+pages) with realistic engine data; all six new pages rendered to PNG and visually confirmed
+(5.2 margin 14.8% PASS, 5.4 9-point table worst row 53.4 °C, 5.5 governing 23.2 yr,
+6.2 f0=211.9 Hz/f_ESR=8.91 kHz, 6.4 Type-II R_IC/C1/C2, 6.5 Type-II compensator + divider).
+Sample PDF refreshed at PFC_Report_VERIFY_Steps1_16.pdf. Chapters 5 and 6 now match their
+splash-page promises end-to-end.
