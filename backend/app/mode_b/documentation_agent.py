@@ -259,6 +259,7 @@ class DocumentationAgent:
             status="ready" if step16_params else "pending",
             sections=["6.1 Control architecture overview",
                       "6.2 Plant analysis — critical frequencies, RHP zero",
+                      "6.3 FAN9672 pin configuration — pin map and operating envelope",
                       "6.4 Current loop design — Type-II compensator",
                       "6.5 Voltage loop design — Type-II/III compensator",
                       "6.6 Stability scorecard — all 9 operating points",

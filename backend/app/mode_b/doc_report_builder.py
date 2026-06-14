@@ -1035,7 +1035,7 @@ def _ch2(story, state):
 
     sub_h(story, "2.7.1", "Final design specification summary", 2)
     data_table(story, "2.7.1", "Confirmed Design Specification",
-        "Design targets confirmed via Mode A HITL gates — referenced by all downstream chapters.",
+        "Design targets confirmed and locked — referenced by all downstream chapters.",
         ["Parameter", "Value"],
         [
             ["Input voltage (Low line)",    f"{vin_min:.0f} – 132 Vac @ {f_line:.0f} Hz"],
@@ -2862,24 +2862,32 @@ def _ch4(story, state, d):
     else:
         body(story, "Cycle-averaged core loss data available after Step 8 time-domain analysis.", 4)
 
-    # Item 22 — show the iGSE F(D) duty correction worked at the 90 Vac crest.
+    # Items 22 / 2b,2c — full iGSE + copper worked chain at 90 Vac AND 180 Vac.
     if lt100:
-        _r0 = lt100[0]
-        _D = float(_r0.get("D_crest", 0) or 0)
-        _Fd = float(_r0.get("Fd", 0) or 0)
-        eq_box(story, [
-            r"F(D) = K_{iGSE}\,\left[\,D^{\,1-c} + (1-D)^{\,1-c}\,\right],\quad c = 1.444",
-            rf"F(D) = K_{{iGSE}}\left[\,{_D:.3f}^{{-0.444}} + {1-_D:.3f}^{{-0.444}}\,\right] "
-            rf"= {_Fd:.4f}\quad(\mathrm{{at}}\ {_f(_r0.get('Vin_rms'),0)}\ \mathrm{{V_{{ac}}}},\ D = {_D:.3f})",
-            rf"P_{{core}} = P_v(B_{{ac,pk}},\,f_{{sw}},\,T)\cdot F(D)\cdot V_e "
-            rf"= {_f(_r0.get('Pcore_W'),3)}\ \mathrm{{W}}",
-        ], heading="iGSE duty-cycle correction F(D) and resulting core loss at 90 Vac", number="4.4", ch=4)
+        def _r_at(vin):
+            return next((r for r in lt100 if abs(float(r.get("Vin_rms", -1) or -1) - vin) < 1.0), None)
+        def _igse_steps(r):
+            if not r:
+                return
+            D = float(r.get("D_crest", 0) or 0); Fd = float(r.get("Fd", 0) or 0)
+            eq_box(story, [
+                rf"F(D) = K_{{iGSE}}\,[\,D^{{1-c}} + (1-D)^{{1-c}}\,],\ c = 1.444 "
+                rf"\ \Rightarrow\ F({D:.3f}) = {Fd:.4f}",
+                rf"P_{{core}} = P_v(B_{{ac,pk}},\,f_{{sw}},\,T)\cdot F(D)\cdot V_e "
+                rf"= {_f(r.get('Pcore_W'),3)}\ \mathrm{{W}}\quad(B_{{ac,pk}} = {_f(r.get('Bac_pk'),5)}\ \mathrm{{T}})",
+                rf"P_{{cu}} = I_{{\phi,rms}}^2 R_{{dc}} + I_{{hf,rms}}^2 R_{{ac}} = {_f(r.get('Pcu_W'),3)}\ \mathrm{{W}}"
+                rf"\quad(I_{{rms}} = {_f(r.get('Irms'),3)},\ I_{{hf}} = {_f(r.get('Ihf_rms'),4)}\ \mathrm{{A}})",
+                rf"P_{{total}} = P_{{core}} + P_{{cu}} = {_f(r.get('Ptotal_W'),3)}\ \mathrm{{W}}",
+            ], heading=f"iGSE worked chain at {_f(r.get('Vin_rms'),0)} V_ac (D = {D:.3f})", ch=4)
+        _igse_steps(_r_at(90))
+        _igse_steps(_r_at(180))
         annotation(story, "THEORY",
-            "F(D) corrects the sinusoidal Steinmetz density for the asymmetric triangular flux of "
-            "a PFC inductor. At the line crest the duty cycle D sits far from 0.5, so the flux "
-            "rise and fall times differ strongly — F(D) integrates that asymmetry. The database "
-            "P<sub>v</sub>(B,f,T) is interpolated from measured curves (not a fixed Steinmetz fit), "
-            "then scaled by F(D) and the core volume V<sub>e</sub>.", 4)
+            "F(D) corrects the sinusoidal Steinmetz density for the asymmetric triangular flux of a "
+            "PFC inductor. At 90 V<sub>ac</sub> the crest duty cycle is high (D far from 0.5) so the "
+            "correction is large; at 180 V<sub>ac</sub> D is nearer 0.5 and the correction is milder. "
+            "The database P<sub>v</sub>(B,f,T) is interpolated from measured curves (not a fixed "
+            "Steinmetz fit), then scaled by F(D) and the core volume V<sub>e</sub>. The full "
+            "nine-point breakdown is Table 4.2 in Section 4.6.", 4)
 
     # ── 4.6 Authoritative per-operating-point engine results ─────────────
     step_h(story, "4.6", "Per-Operating-Point Engine Results — All 9 Points", 4)
@@ -2956,26 +2964,32 @@ def _ch4(story, state, d):
     # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
 
-    # Item 24 — peak-point (Ch3) vs cycle-averaged iGSE (Ch4) loss-method comparison.
+    # Item 24 / 2d — Method 1 (Ch3 peak-point) vs Method 2 (Ch4 iGSE): core, copper AND total.
     if Pcore_peak and Pcore_cavg:
-        _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else 0.0
+        _r90 = lt100[0] if lt100 else {}
+        _pcu90 = float(_r90.get("Pcu_W", 0) or 0)        # copper at 90 Vac (same I²R basis in both)
+        _t1 = Pcore_peak + _pcu90                          # Method 1 total
+        _t2 = Pcore_cavg + _pcu90                          # Method 2 total
         _dcore = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
-        data_table(story, "4.5", "Loss-Method Comparison — Peak-Point vs Cycle-Averaged iGSE",
-            "Chapter 3 used a single peak-point Steinmetz estimate for candidate screening; "
-            "Chapter 4 uses the cycle-averaged iGSE model. Copper loss uses the same I²R method "
-            "in both, so only the core-loss method differs.",
-            ["Quantity", "Ch 3 peak-point", "Ch 4 cycle-avg iGSE", "Difference"],
+        _dtot  = (_t2 - _t1) / _t1 * 100 if _t1 else 0.0
+        data_table(story, "4.5", "Loss Comparison at 90 Vac — Method 1 (peak-point) vs Method 2 (iGSE)",
+            "Method 1 is the Chapter 3 first-pass (Table 3.6.1: peak-point Steinmetz core loss); "
+            "Method 2 is the Chapter 4 cycle-averaged iGSE core loss. Copper loss uses the same "
+            "I²R method in both, so it is unchanged — only the core-loss method differs.",
+            ["Loss term", "Method 1 — peak-point", "Method 2 — iGSE", "Difference"],
             [
-                ["Core loss (90 Vac crest)", f"{Pcore_peak:.3f} W", f"{Pcore_cavg:.3f} W", f"{_dcore:+.0f}%"],
-                ["Worst-case total loss", "screening only", f"{_wtot:.3f} W", "authoritative"],
+                ["Core loss", f"{Pcore_peak:.3f} W", f"{Pcore_cavg:.3f} W", f"{_dcore:+.0f}%"],
+                ["Copper loss", f"{_pcu90:.3f} W", f"{_pcu90:.3f} W", "—"],
+                ["Total loss", f"{_t1:.3f} W", f"{_t2:.3f} W", f"{_dtot:+.0f}%"],
             ],
-            col_widths=[CW*0.30, CW*0.23, CW*0.25, CW*0.22], ch=4)
+            col_widths=[CW*0.22, CW*0.28, CW*0.28, CW*0.22], ch=4)
         annotation(story, "INSIGHT",
             f"The peak-point estimate evaluates core loss only at the line crest — where B<sub>ac</sub> "
             "is largest — and applies that swing to the whole cycle, overestimating at low line where "
             f"the duty cycle sits far from 0.5. The iGSE F(D) correction integrates the true per-angle "
-            f"flux swing, giving the {abs(_dcore):.0f}% {'lower' if _dcore < 0 else 'higher'} "
-            "cycle-averaged value used for the final thermal design.", 4)
+            f"flux swing, giving a {abs(_dcore):.0f}% {'lower' if _dcore < 0 else 'higher'} core loss "
+            f"and a {abs(_dtot):.0f}% {'lower' if _dtot < 0 else 'higher'} total — the cycle-averaged "
+            "value is what the final thermal design uses.", 4)
 
     # Item 25 — thermal calculation steps + per-Vin temperature-rise table.
     _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else float(d.get("Ptotal_100C_W", 0) or 0)
@@ -3191,10 +3205,19 @@ def _ch5(story, state, s15):
             "rating, and the per-cap RMS current must stay under its rated value at every "
             "operating point.", 5)
 
-        # Item 28 — worked calculation chain at the hottest corner, before the table.
+        # Item 28 / 2e — worked calculation chain at the hottest corner, before the table.
         _hr = max(thermal["thermal_table"], key=lambda r: r["T_cap_C"])
         _ncap = int(_qty) if _qty else 1
         _rth = float(thermal.get("Rth_ca_CW", 15) or 15)
+        _vinpk = _hr['Vin_rms'] * math.sqrt(2)
+        # First: where the bank ripple current comes from (DC, 120 Hz LF, switching HF).
+        eq_box(story, [
+            rf"I_{{dc}} = \dfrac{{P_{{out}}}}{{\eta\,V_{{out}}}} = {_hr['I_dc_A']:.3f}\ \mathrm{{A}}",
+            rf"I_{{LF}} = \dfrac{{I_{{dc}}}}{{\sqrt{{2}}}} = {_hr['I_LF_A']:.3f}\ \mathrm{{A}}\quad(120\ \mathrm{{Hz}})",
+            rf"I_{{HF}} = \sqrt{{\,I_{{dc}}^2\,\dfrac{{16\,V_{{out}}}}{{6\,V_{{in,pk}}\,2\pi}} - I_{{LF}}^2\,}} "
+            rf"= {_hr['I_HF_A']:.3f}\ \mathrm{{A}}\quad(\mathrm{{switching}})",
+        ], heading=f"Capacitor ripple-current decomposition at {_hr['Vin_rms']:.0f} Vac "
+                   f"(V_in,pk = {_vinpk:.1f} V, V_out = 393 V)", ch=5)
         eq_box(story, [
             rf"I_{{cap,total}} = \sqrt{{I_{{LF}}^2 + I_{{HF}}^2}} = {_hr['I_cap_total_A']:.3f}\ \mathrm{{A}}"
             rf"\quad(\mathrm{{at}}\ {_hr['Vin_rms']:.0f}\ \mathrm{{V_{{ac}}}},\ {_hr['Pout_W']:.0f}\ \mathrm{{W}})",
@@ -3263,19 +3286,43 @@ def _ch5(story, state, s15):
         annotation(story, "THEORY",
             "Electrolytic lifetime follows the Arrhenius rule — every 10 °C reduction in core "
             "temperature doubles life: L = L<sub>0</sub> · 2<sup>(T<sub>max</sub>−T<sub>core</sub>)/10</sup> · "
-            "(V<sub>rated</sub>/V<sub>op</sub>)<sup>n</sup>. Three independent methods bound the "
-            "result; the minimum governs.", 5)
+            "(V<sub>rated</sub>/V<sub>op</sub>)<sup>n</sup>, where L<sub>0</sub> is the datasheet "
+            "endurance rating at T<sub>max</sub>.", 5)
 
-        # Item 29 — show each method's Arrhenius chain worked out before the table.
+        # Items 2f/2g — explain R_th and T_core, then work each method end to end.
+        _ilf = float(wc.get("I_LF_A", 0) or 0) / max(_qty, 1)
+        _ihf = float(wc.get("I_HF_A", 0) or 0) / max(_qty, 1)
+        _m1 = life["method1"]
+        _Rth = (float(_m1.get("dT_C", 0) or 0) / float(_m1.get("P_W", 1) or 1)) \
+               if float(_m1.get("P_W", 0) or 0) else 15.0
+        annotation(story, "CONCEPT",
+            f"<b>R<sub>th</sub></b> is the capacitor's case-to-ambient thermal resistance — "
+            f"≈ {_Rth:.0f} °C/W for this radial-leaded aluminium electrolytic (snap-in / screw "
+            "types are lower, ≈ 10 °C/W, thanks to their larger case surface). "
+            "<b>T<sub>core</sub></b> is the capacitor's internal hot-spot temperature: "
+            "T<sub>core</sub> = T<sub>amb</sub> + ΔT, where ΔT = P<sub>ripple</sub> · R<sub>th</sub>. "
+            "The three methods differ only in how they estimate the ripple ESR — and therefore "
+            "P<sub>ripple</sub> — so each gives a slightly different ΔT and T<sub>core</sub>. "
+            "Method 2 (worst-case tan-δ ESR) runs hottest and gives the shortest, governing life.", 5)
+        body(story,
+            f"Per-capacitor worst-case ripple currents (bank ÷ {_qty} caps): "
+            f"I<sub>LF</sub> = {_ilf:.3f} A (120 Hz) and I<sub>HF</sub> = {_ihf:.3f} A (switching); "
+            f"ambient T<sub>amb</sub> = 50 °C; R<sub>th</sub> = {_Rth:.0f} °C/W.", 5)
+
         def _life_steps(m):
-            fT = float(m.get("temp_factor", 0) or 0)
-            fV = float(m.get("volt_factor", 0) or 0)
+            el = float(m.get("esr_lf_ohm", 0) or 0); eh = float(m.get("esr_hf_ohm", 0) or 0)
+            P  = float(m.get("P_W", 0) or 0); dT = float(m.get("dT_C", 0) or 0)
             tc = float(m.get("T_core_C", 0) or 0)
+            fT = float(m.get("temp_factor", 0) or 0); fV = float(m.get("volt_factor", 0) or 0)
             lh = float(m.get("life_hours", 0) or 0)
             L0 = lh / (fT * fV) if (fT and fV) else 0.0
             eq_box(story, [
-                rf"f_T = 2^{{(T_{{max}}-T_{{core}})/10}} = {fT:.2f}\quad(T_{{core}} = {tc:.1f}\,^\circ\mathrm{{C}})",
-                rf"f_V = (V_{{rated}}/V_{{op}})^{{n}} = {fV:.3f}",
+                rf"P = I_{{LF}}^2\,\mathrm{{ESR}}_{{LF}} + I_{{HF}}^2\,\mathrm{{ESR}}_{{HF}} "
+                rf"= {_ilf:.3f}^2({el:.4f}) + {_ihf:.3f}^2({eh:.4f}) = {P:.4f}\ \mathrm{{W}}",
+                rf"\Delta T = P\,R_{{th}} = {P:.4f}\times{_Rth:.0f} = {dT:.1f}\,^\circ\mathrm{{C}}"
+                rf"\ \Rightarrow\ T_{{core}} = 50 + {dT:.1f} = {tc:.1f}\,^\circ\mathrm{{C}}",
+                rf"f_T = 2^{{(T_{{max}}-T_{{core}})/10}} = {fT:.2f},\qquad "
+                rf"f_V = (V_{{rated}}/V_{{op}})^{{3}} = {fV:.3f}",
                 rf"L = L_0\,f_T\,f_V = {L0:,.0f}\times{fT:.2f}\times{fV:.3f} = {lh:,.0f}\ \mathrm{{h}}"
                 rf"\ ({m.get('life_years','—')}\ \mathrm{{yr}})",
             ], heading=m.get("name", "—"), ch=5)
@@ -3284,11 +3331,13 @@ def _ch5(story, state, s15):
         _m3 = life.get("method3", {}) or {}
         if _m3:
             eq_box(story, [
+                rf"I_{{eq}} = \sqrt{{(I_{{LF}}/k_{{LF}})^2 + (I_{{HF}}/k_{{HF}})^2}} "
+                rf"= {float(_m3.get('I_eq_A',0) or 0):.3f}\ \mathrm{{A}}\ \Rightarrow\ "
+                rf"\Delta T_j = {float(_m3.get('dTj_C',0) or 0):.2f}\,^\circ\mathrm{{C}},\quad "
+                rf"T_{{core}} = {float(_m3.get('T_core_C',0) or 0):.1f}\,^\circ\mathrm{{C}}",
                 rf"L = L_0\,f_T\,f_I\,f_V,\quad f_T = {float(_m3.get('f_T',0) or 0):.2f},\ "
-                rf"f_I = {float(_m3.get('f_I',0) or 0):.3f},\ f_V = {float(_m3.get('f_V',0) or 0):.3f}",
-                rf"L = {float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}}\quad"
-                rf"(\mathrm{{manufacturer\ ripple\text{{-}}current\ model;}}\ "
-                rf"T_{{core}} = {float(_m3.get('T_core_C',0) or 0):.1f}\,^\circ\mathrm{{C}})",
+                rf"f_I = {float(_m3.get('f_I',0) or 0):.3f},\ f_V = {float(_m3.get('f_V',0) or 0):.3f}"
+                rf"\ \Rightarrow\ L = {float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}}",
             ], heading=_m3.get("name", "Method 3 — Manufacturer Model"), ch=5)
 
         def _mrow(m):
@@ -3346,6 +3395,7 @@ def _ch6(story, state, s16):
         "How do we close the loops stably across all conditions?",
         ["6.1 Control architecture — ACM two-loop, GMOD block",
          "6.2 Plant analysis — RHP zero, LC double pole, bandwidth targets",
+         "6.3 FAN9672 pin configuration — pin map and operating envelope",
          "6.4 Current loop design — Type-II compensator, pole-zero placement",
          "6.5 Voltage loop design — bandwidth limitation from RHP zero",
          "6.6 Stability scorecard — Phase Margin, Gain Margin, all 9 points",
@@ -3469,6 +3519,54 @@ def _ch6(story, state, s16):
                  "f_sw / 8 — fast line-cycle tracking"],
             ],
             col_widths=[CW*0.30, CW*0.18, CW*0.52], ch=6)
+
+    # ── 6.3 FAN9672 pin configuration ─────────────────────────────────────────
+    if res.get("fci_Hz") or res.get("RIC"):
+        step_h(story, "6.3", "FAN9672 Pin Configuration", 6)
+        annotation(story, "CONCEPT",
+            "The FAN9672 is a two-channel interleaved CCM PFC controller. Each control function is "
+            "set by an external R/C network on a dedicated pin. The table below maps the compensators "
+            "and sense networks designed in this chapter to their controller pins; the values are the "
+            "standard-value selections from the loop designs in Sections 6.4–6.8.", 6)
+        _rcs = res.get("RCS_mOhm", 0) or 0
+        pinrows = [
+            ["IEAO (COMI)", "Current-loop error-amp output — Type-II compensation",
+             f"R_IC {_fr(res.get('RIC'))}, C1 {_fc(res.get('C1_cur'))}, C2 {_fc(res.get('C2_cur'))}"],
+            ["VEAO (COMV)", "Voltage-loop error-amp output — Type-II compensation",
+             f"R2 {_fr(res.get('R2'))}, C1 {_fc(res.get('C1_vol'))}, C3 {_fc(res.get('C3_vol'))}"],
+            ["CS (I_SENSE)", "Inductor current sense → cycle-by-cycle peak-current clamp",
+             (f"R_CS = {_rcs:.0f} mΩ" if _rcs else "shunt / current transformer")],
+            ["VFB", "Output-voltage feedback divider → V_out regulation",
+             f"R_FB1 {_fr(res.get('R1fb'))}, R_FB2 {_fr(res.get('R4fb'))}"],
+            ["SS", "Soft-start ramp (fixed-current charge to the 5 V threshold)",
+             f"C_SS = {_fc(res.get('css'))}"],
+            ["VIN / BIBO", "Input-voltage sense → brown-in / brown-out + feed-forward", "V_in sense divider"],
+            ["GMOD", "Gain modulation (÷ V_in²) → constant loop gain over the line", "internal / R_RM"],
+            ["RAMP", "PWM ramp slope", "R_RAMP / C_RAMP"],
+            ["VREF", "Internal reference output (bypass)", "100 nF"],
+            ["GATE1 / GATE2", "Interleaved gate drives (180° phase-shifted)", "gate resistors"],
+            ["VCC / GND", "Bias supply and ground", "VCC bypass"],
+        ]
+        data_table(story, "6.3.1", "FAN9672 Pin Function and External Component Map",
+            "Each pin's control function and the external component values designed in this chapter "
+            "(compensator and sense values are the standard-value selections from the loop designs).",
+            ["Pin", "Function", "External component / value"],
+            pinrows, col_widths=[CW*0.16, CW*0.46, CW*0.38], ch=6)
+        data_table(story, "6.3.2", "Operating-Envelope Parameters",
+            "Fixed controller parameters that bound the design.",
+            ["Parameter", "Value", "Role"],
+            [
+                ["R_CS — current-sense gain", (f"{_rcs:.0f} mΩ" if _rcs else "—"),
+                 "sets the peak-current (ILIMIT) clamp"],
+                ["f_sw — switching frequency", _fhz(res.get("fsw_Hz")), "per channel, fixed"],
+                ["V_out — regulation setpoint", f"{res.get('Vout_V',393):.0f} V",
+                 "set by the VFB divider ratio"],
+            ],
+            col_widths=[CW*0.34, CW*0.22, CW*0.44], ch=6)
+        annotation(story, "INSIGHT",
+            "The GMOD block divides the current reference by V<sub>in</sub><sup>2</sup>, keeping the "
+            "current-loop gain constant across the full 9:1 line range — without it the loop bandwidth "
+            "would swing by roughly 19 dB from low to high line.", 6)
 
     # ── 6.4 Current loop design — Type-II compensator ─────────────────────────
     if res.get("RIC"):

@@ -2447,3 +2447,30 @@ the engine does not produce a pin map; left as an honest gap rather than renumbe
 
 Verified: py_compile OK (builder + agent); report rebuilds (85 pages); TOC/splash/body consistent
 for Ch5 (5.1-5.5) and Ch6 (incl. 6.7/6.8).
+
+### 2026-06-14 — §6.3 pin table + round-2 corrections
+
+(1) §6.3 FAN9672 Pin Configuration (new): pin-function map (IEAO/VEAO/CS/VFB/SS/VIN/GMOD/RAMP/
+VREF/GATE/VCC) populated with the design's real compensator/sense/soft-start component values,
+plus an operating-envelope table (R_CS, f_sw, V_out) and a GMOD insight. Added to the Ch6 splash
+and the documentation_agent Ch6 list; Ch6 now reads a complete 6.1-6.8.
+
+(2) Round-2 corrections from "Improvments and Corrections.docx":
+- 2.7.1 CONCEPT: removed "via Mode A HITL gates".
+- 4.4/4.5: full iGSE worked chain (F(D) -> Pcore -> Pcu -> Ptotal) at BOTH 90 and 180 Vac, with a
+  THEORY note (the 9-point breakdown is Table 4.2).
+- 4.7: loss comparison expanded to core + copper + TOTAL for Method 1 (peak-point, Table 3.6.1)
+  vs Method 2 (iGSE), with the +/-% difference and an INSIGHT.
+- 5.3: added the ripple-current decomposition (I_dc -> I_LF -> I_HF -> I_cap,total) before the
+  worked example.
+- 5.4: answered the reviewer's questions — CONCEPT explaining R_th (case-to-ambient ~15 C/W radial,
+  ~10 snap) and T_core (= Tamb + P_ripple*R_th, differs per method because the ESR estimate
+  differs); each of the 3 methods now worked end to end (ESR -> P -> dT -> T_core -> f_T,f_V -> L;
+  Method 3 via I_eq/f_I/f_V). Confirms why T_core differs (M1 51.2 C, M2 62.5 C, M3 69.5 C).
+
+Build-fail caught and fixed during QA: a bare "\sqrt2" in the 5.3 decomposition is invalid
+matplotlib mathtext (needs \sqrt{2}); it threw inside build_full_report, silently falling the
+report back to the legacy generator (58 pages). Fixed -> chapter builder restored (88 pages).
+
+Verified: py_compile OK; report rebuilds via the real endpoint chain (88 pages); 0 replacement
+chars, no duplicate table refs; §6.3 pin table and the 3-method lifetime page visually confirmed.
