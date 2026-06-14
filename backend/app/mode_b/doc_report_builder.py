@@ -2682,7 +2682,34 @@ def _ch4(story, state, d):
         f"B<sub>dc</sub> = {_f(Bdc,4)} T, B<sub>max,FL</sub> = {_f(Bmax,4)} T.  "
         f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,2)} T  "
         f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
-        "Per-point B<sub>ac,pk</sub> is tabulated in Section 4.6.", 4)
+        "The full nine-point flux table follows.", 4)
+
+    # Item 20 — flux density at all 9 operating points (Bac,pk / Bdc / Bmax vs Bsat).
+    Ae_tot_mm2 = float(d.get("Ae_total_mm2", 0) or (Ae_s * stacks))
+    Ae_m2 = Ae_tot_mm2 * 1e-6
+    if lt100 and lvt and N and Ae_m2:
+        _lv = {round(float(r.get("Vin_rms", 0) or 0)): r for r in lvt}
+        frows, wi, wB = [], 0, -1.0
+        for i, r in enumerate(lt100):
+            vin = float(r.get("Vin_rms", 0) or 0)
+            lvr = _lv.get(round(vin), {})
+            bac = float(r.get("Bac_pk", 0) or 0)
+            Lh  = float(lvr.get("L_full_nom_uH", 0) or 0) * 1e-6
+            ic  = float(lvr.get("Iavg_crest", 0) or 0)
+            bdc = (Lh * ic / (N * Ae_m2)) if (N and Ae_m2) else 0.0
+            bmx = bdc + bac
+            mar = (Bsat - bmx) / Bsat * 100 if Bsat else 0.0
+            if bmx > wB:
+                wB, wi = bmx, i
+            frows.append([f"{vin:.0f}", f"{bac:.4f}", f"{bdc:.4f}", f"{bmx:.4f}", f"{mar:.0f}%"])
+        data_table(story, "4.3", "Flux Density vs Input Voltage — All 9 Operating Points",
+            f"Per-point AC peak, DC and total flux density against the saturation flux "
+            f"B<sub>sat</sub> = {_f(Bsat,2)} T (selected EDGE material, at core temperature). "
+            "Amber row = highest B<sub>max</sub>.",
+            ["V<sub>in</sub> (V)", "B<sub>ac,pk</sub> (T)", "B<sub>dc</sub> (T)",
+             "B<sub>max</sub> (T)", "Sat. margin"],
+            frows, col_widths=[CW*0.16, CW*0.21, CW*0.21, CW*0.21, CW*0.21],
+            worst_rows=[wi], ch=4)
 
     # ── 4.4 Loss methodology ─────────────────────────────────────────────
     step_h(story, "4.4", "Loss Calculation Methodology — DB Steinmetz / iGSE", 4)
@@ -2715,6 +2742,25 @@ def _ch4(story, state, d):
             "is far from 0.5 — the iGSE F(D) correction accounts for this.", 4)
     else:
         body(story, "Cycle-averaged core loss data available after Step 8 time-domain analysis.", 4)
+
+    # Item 22 — show the iGSE F(D) duty correction worked at the 90 Vac crest.
+    if lt100:
+        _r0 = lt100[0]
+        _D = float(_r0.get("D_crest", 0) or 0)
+        _Fd = float(_r0.get("Fd", 0) or 0)
+        eq_box(story, [
+            r"F(D) = K_{iGSE}\,\left[\,D^{\,1-c} + (1-D)^{\,1-c}\,\right],\quad c = 1.444",
+            rf"F(D) = K_{{iGSE}}\left[\,{_D:.3f}^{{-0.444}} + {1-_D:.3f}^{{-0.444}}\,\right] "
+            rf"= {_Fd:.4f}\quad(\mathrm{{at}}\ {_f(_r0.get('Vin_rms'),0)}\ \mathrm{{V_{{ac}}}},\ D = {_D:.3f})",
+            rf"P_{{core}} = P_v(B_{{ac,pk}},\,f_{{sw}},\,T)\cdot F(D)\cdot V_e "
+            rf"= {_f(_r0.get('Pcore_W'),3)}\ \mathrm{{W}}",
+        ], heading="iGSE duty-cycle correction F(D) and resulting core loss at 90 Vac", number="4.4", ch=4)
+        annotation(story, "THEORY",
+            "F(D) corrects the sinusoidal Steinmetz density for the asymmetric triangular flux of "
+            "a PFC inductor. At the line crest the duty cycle D sits far from 0.5, so the flux "
+            "rise and fall times differ strongly — F(D) integrates that asymmetry. The database "
+            "P<sub>v</sub>(B,f,T) is interpolated from measured curves (not a fixed Steinmetz fit), "
+            "then scaled by F(D) and the core volume V<sub>e</sub>.", 4)
 
     # ── 4.6 Authoritative per-operating-point engine results ─────────────
     step_h(story, "4.6", "Per-Operating-Point Engine Results — All 9 Points", 4)
@@ -2790,11 +2836,62 @@ def _ch4(story, state, d):
 
     # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
+
+    # Item 24 — peak-point (Ch3) vs cycle-averaged iGSE (Ch4) loss-method comparison.
+    if Pcore_peak and Pcore_cavg:
+        _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else 0.0
+        _dcore = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
+        data_table(story, "4.5", "Loss-Method Comparison — Peak-Point vs Cycle-Averaged iGSE",
+            "Chapter 3 used a single peak-point Steinmetz estimate for candidate screening; "
+            "Chapter 4 uses the cycle-averaged iGSE model. Copper loss uses the same I²R method "
+            "in both, so only the core-loss method differs.",
+            ["Quantity", "Ch 3 peak-point", "Ch 4 cycle-avg iGSE", "Difference"],
+            [
+                ["Core loss (90 Vac crest)", f"{Pcore_peak:.3f} W", f"{Pcore_cavg:.3f} W", f"{_dcore:+.0f}%"],
+                ["Worst-case total loss", "screening only", f"{_wtot:.3f} W", "authoritative"],
+            ],
+            col_widths=[CW*0.30, CW*0.23, CW*0.25, CW*0.22], ch=4)
+        annotation(story, "INSIGHT",
+            f"The peak-point estimate evaluates core loss only at the line crest — where B<sub>ac</sub> "
+            "is largest — and applies that swing to the whole cycle, overestimating at low line where "
+            f"the duty cycle sits far from 0.5. The iGSE F(D) correction integrates the true per-angle "
+            f"flux swing, giving the {abs(_dcore):.0f}% {'lower' if _dcore < 0 else 'higher'} "
+            "cycle-averaged value used for the final thermal design.", 4)
+
+    # Item 25 — thermal calculation steps + per-Vin temperature-rise table.
+    _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else float(d.get("Ptotal_100C_W", 0) or 0)
+    _SA = (_wtot * 1000.0) / (dT ** (1.0 / 0.833)) if (dT and _wtot) else 0.0
+    if _SA and _wtot:
+        annotation(story, "THEORY",
+            "The wound part sheds heat from its exposed surface by natural convection. The "
+            "converged surface-area model relates the total dissipation to the surface temperature "
+            "rise by the empirical power law ΔT = (P<sub>total</sub>·1000 / SA)<sup>0.833</sup>, "
+            "with SA the wound-envelope area; core and copper loss are iterated against this until "
+            "the temperature settles.", 4)
+        eq_box(story, [
+            r"\Delta T = \left(\dfrac{P_{total}\times 1000}{SA}\right)^{0.833}",
+            rf"SA = {_SA:.1f}\ \mathrm{{cm^2}}\ \ (\mathrm{{wound\ envelope}}),\qquad "
+            rf"P_{{total}} = {_wtot:.3f}\ \mathrm{{W}}",
+            rf"\Delta T = \left(\dfrac{{{_wtot:.3f}\times 1000}}{{{_SA:.1f}}}\right)^{{0.833}} "
+            rf"= {dT:.1f}\ ^\circ\mathrm{{C}}",
+        ], heading="Surface-area natural-convection temperature rise (converged)", number="4.6", ch=4)
+        if lt100:
+            trows, wti, wtd = [], 0, -1.0
+            for i, r in enumerate(lt100):
+                pt = float(r.get("Ptotal_W", 0) or 0)
+                dti = (pt * 1000.0 / _SA) ** 0.833 if _SA else 0.0
+                if dti > wtd:
+                    wtd, wti = dti, i
+                trows.append([f"{float(r.get('Vin_rms',0)):.0f}", f"{pt:.3f}", f"{dti:.1f}"])
+            data_table(story, "4.6", "Temperature Rise vs Input Voltage — All 9 Operating Points",
+                "Surface temperature rise at each corner from its total loss and the converged "
+                "wound-envelope surface area. Amber row = hottest corner.",
+                ["V<sub>in</sub> (V)", "P<sub>total</sub> (W)", "ΔT (°C)"],
+                trows, col_widths=[CW*0.34, CW*0.33, CW*0.33], worst_rows=[wti], ch=4)
+
     body(story,
-        f"Thermal model: ΔT = {dT:.1f}°C against budget {dT_bgt:.0f}°C "
-        f"({(dT_bgt-dT)/dT_bgt*100:.0f}% margin). "
-        "The worst-case thermal corner is the amber row of Table 4.2; the surface-area "
-        "thermal model converges the core temperature against this loss.", 4)
+        f"Worst-case ΔT = {dT:.1f}°C against budget {dT_bgt:.0f}°C "
+        f"({(dT_bgt-dT)/dT_bgt*100:.0f}% margin).", 4)
     verdict_row(story, "Thermal — all 9 operating points",
                 f"Max ΔT = {dT:.1f}°C  |  Budget = {dT_bgt:.0f}°C",
                 f"PASS — {(dT_bgt-dT)/dT_bgt*100:.0f}% margin" if dT<=dT_bgt else "FAIL", 4)
@@ -2959,6 +3056,25 @@ def _ch5(story, state, s15):
             "ΔT = I<sub>cap</sub>² · ESR · R<sub>th</sub> must keep the case below its temperature "
             "rating, and the per-cap RMS current must stay under its rated value at every "
             "operating point.", 5)
+
+        # Item 28 — worked calculation chain at the hottest corner, before the table.
+        _hr = max(thermal["thermal_table"], key=lambda r: r["T_cap_C"])
+        _ncap = int(_qty) if _qty else 1
+        _rth = float(thermal.get("Rth_ca_CW", 15) or 15)
+        eq_box(story, [
+            rf"I_{{cap,total}} = \sqrt{{I_{{LF}}^2 + I_{{HF}}^2}} = {_hr['I_cap_total_A']:.3f}\ \mathrm{{A}}"
+            rf"\quad(\mathrm{{at}}\ {_hr['Vin_rms']:.0f}\ \mathrm{{V_{{ac}}}},\ {_hr['Pout_W']:.0f}\ \mathrm{{W}})",
+            rf"I_{{per\,cap}} = \dfrac{{I_{{cap,total}}}}{{N_{{cap}}}} = "
+            rf"\dfrac{{{_hr['I_cap_total_A']:.3f}}}{{{_ncap}}} = {_hr['I_cap_per_unit_A']:.3f}\ \mathrm{{A}}",
+            rf"P_{{cap}} = I_{{per\,cap}}^2\,\mathrm{{ESR}} = {_hr['P_dissipated_W']:.4f}\ \mathrm{{W}}",
+            rf"\Delta T = P_{{cap}}\,R_{{th}} = {_hr['P_dissipated_W']:.4f}\times{_rth:.0f} "
+            rf"= {_hr['dT_rise_C']:.1f}\ ^\circ\mathrm{{C}}\ \Rightarrow\ "
+            rf"T_{{cap}} = {_hr['T_cap_C']:.1f}\ ^\circ\mathrm{{C}}",
+            rf"\Delta V_{{pp}} = \dfrac{{P_{{out}}}}{{2\pi f_{{line}}\,C\,\eta\,V_{{out}}}} "
+            rf"= {_hr['V_ripple_pp_V']:.2f}\ \mathrm{{V}}",
+        ], heading=f"Worked example at the hottest corner "
+                   f"({_hr['Vin_rms']:.0f} Vac, {_hr['Pout_W']:.0f} W)", ch=5)
+
         tt, srows, worst_idx, worst_T = thermal["thermal_table"], [], None, -1e9
         for i, r in enumerate(tt):
             srows.append([
@@ -3015,6 +3131,32 @@ def _ch5(story, state, s15):
             "temperature doubles life: L = L<sub>0</sub> · 2<sup>(T<sub>max</sub>−T<sub>core</sub>)/10</sup> · "
             "(V<sub>rated</sub>/V<sub>op</sub>)<sup>n</sup>. Three independent methods bound the "
             "result; the minimum governs.", 5)
+
+        # Item 29 — show each method's Arrhenius chain worked out before the table.
+        def _life_steps(m):
+            fT = float(m.get("temp_factor", 0) or 0)
+            fV = float(m.get("volt_factor", 0) or 0)
+            tc = float(m.get("T_core_C", 0) or 0)
+            lh = float(m.get("life_hours", 0) or 0)
+            L0 = lh / (fT * fV) if (fT and fV) else 0.0
+            eq_box(story, [
+                rf"f_T = 2^{{(T_{{max}}-T_{{core}})/10}} = {fT:.2f}\quad(T_{{core}} = {tc:.1f}\,^\circ\mathrm{{C}})",
+                rf"f_V = (V_{{rated}}/V_{{op}})^{{n}} = {fV:.3f}",
+                rf"L = L_0\,f_T\,f_V = {L0:,.0f}\times{fT:.2f}\times{fV:.3f} = {lh:,.0f}\ \mathrm{{h}}"
+                rf"\ ({m.get('life_years','—')}\ \mathrm{{yr}})",
+            ], heading=m.get("name", "—"), ch=5)
+        _life_steps(life["method1"])
+        _life_steps(life["method2"])
+        _m3 = life.get("method3", {}) or {}
+        if _m3:
+            eq_box(story, [
+                rf"L = L_0\,f_T\,f_I\,f_V,\quad f_T = {float(_m3.get('f_T',0) or 0):.2f},\ "
+                rf"f_I = {float(_m3.get('f_I',0) or 0):.3f},\ f_V = {float(_m3.get('f_V',0) or 0):.3f}",
+                rf"L = {float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}}\quad"
+                rf"(\mathrm{{manufacturer\ ripple\text{{-}}current\ model;}}\ "
+                rf"T_{{core}} = {float(_m3.get('T_core_C',0) or 0):.1f}\,^\circ\mathrm{{C}})",
+            ], heading=_m3.get("name", "Method 3 — Manufacturer Model"), ch=5)
+
         def _mrow(m):
             lh = m.get("life_hours")
             return [m.get("name", "—"),

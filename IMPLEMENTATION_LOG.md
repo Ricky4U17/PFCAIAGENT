@@ -2369,3 +2369,29 @@ PASS 2 REMAINING: Ch4 — 4.3 nine-point flux table (item 20), iGSE worked steps
 (item 22), method-vs-method loss comparison 4.7 (item 24), thermal calc steps (item 25);
 Ch5 — 5.4 capacitor-current/thermal calc steps (item 28), 5.5 lifetime per-method steps
 (item 29); FIGURES — 4.1 2D winding cross-section (item 19), thermal 2D/3D (item 25).
+
+### 2026-06-14 — Improvements & Corrections (pass 2b: Chapter 4 + 5 calculation steps)
+
+doc_report_builder.py — added the remaining step-by-step calculations and tables:
+Chapter 4:
+- 4.3 (item 20): Table 4.3 — nine-point flux density (Bac,pk / Bdc / Bmax + saturation margin)
+  against the corrected EDGE Bsat = 1.50 T. Bdc(Vin) computed from L_full*Iavg_crest/(N*Ae).
+- 4.5 (item 22): worked iGSE F(D) = K_iGSE[D^(1-c)+(1-D)^(1-c)] with the 90 Vac numbers, plus a
+  THEORY box on why the duty correction matters.
+- 4.7 (item 24): Table 4.5 — peak-point (Ch3) vs cycle-averaged iGSE (Ch4) loss-method comparison
+  (core loss 1.83 -> 1.07 W, -42%) + INSIGHT explaining the difference.
+- 4.7 (item 25, calc part): thermal calculation steps — SA natural-convection law
+  dT=(Ptot*1000/SA)^0.833 worked out (SA 60.6 cm^2, dT 51.9 C) + Table 4.6 per-Vin temperature
+  rise across all 9 points.
+Chapter 5:
+- 5.4 (item 28): worked example at the hottest corner before Table 5.4.1 — I_cap,total ->
+  I_per_cap -> P_cap -> dT/T_cap -> dV_pp, all from engine values.
+- 5.5 (item 29): per-method Arrhenius chains before Table 5.5.1 — f_T, f_V, L=L0*f_T*f_V for
+  Methods 1 & 2, and the f_T/f_I/f_V manufacturer model for Method 3.
+
+Verified: py_compile OK; report rebuilds (85 pages); all seven additions present and visually
+confirmed (4.3 flux table with Bsat 1.50 T, 4.7 loss comparison + thermal steps + per-Vin dT
+table, 5.4 worked chain).
+
+PASS 2 REMAINING: only the two FIGURES — 4.1 2D winding cross-section with turns (item 19) and
+the thermal 2D/3D visualization (figure part of item 25).
