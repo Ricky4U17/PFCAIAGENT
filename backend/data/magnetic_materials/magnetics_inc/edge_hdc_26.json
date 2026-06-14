@@ -6,13 +6,13 @@
   "type": "powder",
   "description": "High DC Bias Edge powder core, permeability 26",
   "basic": {
-    "Bsat_T": 1.05,
+    "Bsat_T": 1.5,
     "temp_coeff_ppm_per_C": 0,
     "AL_tolerance_pct": 8,
     "data_source": "Magnetics High DC Bias Edge Bulletin (2023)"
   },
-  "Bsat_25C_T": 1.05,
-  "Bsat_100C_T": 1.001,
+  "Bsat_25C_T": 1.5,
+  "Bsat_100C_T": 1.427,
   "dc_bias_rolloff": {
     "H_Oe": [
       0,

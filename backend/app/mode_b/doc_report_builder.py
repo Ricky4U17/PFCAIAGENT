@@ -152,11 +152,11 @@ def _S(ch: int = 1):
         "tbl_h":s("tbl_h",fontName="Helvetica-Bold", fontSize=8.5,
                   textColor=WHITE, leading=12, alignment=TA_CENTER),
         "tbl_c":s("tbl_c",fontName="Helvetica", fontSize=8.5,
-                  textColor=BLACK, leading=12),
+                  textColor=BLACK, leading=12, alignment=TA_CENTER),
         "tbl_b":s("tbl_b",fontName="Helvetica-Bold", fontSize=8.5,
-                  textColor=BLACK, leading=12),
+                  textColor=BLACK, leading=12, alignment=TA_CENTER),
         "ann":  s("ann",  fontName="Helvetica", fontSize=9,
-                  textColor=BLACK, leading=13),
+                  textColor=BLACK, leading=13, alignment=TA_JUSTIFY),
         "ann_l":s("ann_l",fontName="Helvetica-Bold", fontSize=8.5,
                   textColor=WHITE, leading=12),
         "sm":   s("sm",   fontName="Helvetica", fontSize=8,
@@ -256,7 +256,13 @@ def _eq_img(tex, fontsize=12, color="#1E3A5F", dpi=220):
     iw, ih = ImageReader(buf).getSize()
     buf.seek(0)
     scale = 72.0 / dpi
-    return Image(buf, width=iw*scale, height=ih*scale)
+    w, h = iw * scale, ih * scale
+    # Never let a wide equation overflow the text margin — scale it down to fit CW.
+    max_w = CW - 8 * mm
+    if w > max_w:
+        h *= max_w / w
+        w = max_w
+    return Image(buf, width=w, height=h)
 
 
 def eq_box(story, expr, heading=None, number=None, ch=1):
@@ -584,14 +590,14 @@ def _ch1(story, state):
         ["Standard", "Parameter", "Requirement / Limit", "Design Impact"],
         [
             ["CISPR 32 / EN 55032",     "Conducted EMI",          emi_req,
-             "Input filter design (Chapter 2)"],
+             "Input filter design"],
             ["IEC 61000-3-2",           "Harmonic currents",       harm_req,
              "PF > 0.99 achieved by ACM control"],
             ["IEC 62368-1 / 60601-1",   "Leakage current",         leak_req,
-             "Insulation and creepage (Chapter 3)"],
+             "Insulation and creepage"],
             ["IEC 61000-4-5  Level 3",  "Surge immunity",
              "2 kV L-E / 1 kV L-L (1.2/50 µs)",
-             "MOV / TVS on input (future chapter)"],
+             "MOV / TVS on input"],
             ["IEC 61000-4-4  Level 3",  "EFT / burst immunity",
              "2 kV power ports, 1 kV signal ports",
              "Input filter common-mode choke"],
@@ -600,7 +606,7 @@ def _ch1(story, state):
              "No action required for this topology"],
             ["IEC 61000-4-11",          "Voltage dips",
              f"0% for 0.5 cyc; 40% for 5 cyc; 70% for 25 cyc",
-             f"Hold-up ≥ {t_hold:.0f} ms above {vdc_min:.0f} V — sizes Ch.5 capacitor"],
+             f"Hold-up ≥ {t_hold:.0f} ms above {vdc_min:.0f} V — sizes the output capacitor"],
         ],
         col_widths=[CW*0.20, CW*0.18, CW*0.32, CW*0.30],
         worst_rows=[6],
@@ -612,10 +618,12 @@ def _ch1(story, state):
         ), ch=1)
 
     if app_cls == "Medical":
-        annotation(story, "PITFALL",
-            "IEC 60601-1 creepage: ETD ferrite with extended-flange bobbin requires "
-            "≥14 mm creepage. Powder toroid requires TIW wire or ≥3 Kapton layers. "
-            "Every core candidate in Chapter 3 is screened for creepage compliance.", 1)
+        annotation(story, "INSIGHT",
+            "IEC 60601-1 creepage: an ETD ferrite with an extended-flange bobbin must provide "
+            "≥14 mm creepage. A powder toroid ships with a factory polymer/parylene coating that "
+            "already provides the turn-to-core isolation, so it does not require triple-insulated "
+            "(TIW) wire — standard magnet wire over the coated core is acceptable. Every core "
+            "candidate is screened for creepage compliance during sizing.", 1)
 
     # ── 1.4 Thermal and Mechanical Constraints ────────────────────────────────
     # (renumbered from 1.5 — former §1.4 "Operating Points Matrix" and §1.6
@@ -623,12 +631,12 @@ def _ch1(story, state):
     step_h(story, "1.4", "Thermal and Mechanical Constraints", 1)
     data_table(story, "1.4.1", "Thermal and Mechanical Budget",
         "Constraints applied to all component temperature and geometry calculations.",
-        ["Parameter", "Symbol", "Value", "Unit", "Applied in"],
+        ["Parameter", "Symbol", "Value", "Unit", "Role"],
         [
             ["Maximum ambient temperature", "T<sub>amb</sub>", f"{t_amb:.0f}", "°C",
-             "Thermal model baseline — Chapters 3, 4, 5"],
+             "Thermal model baseline"],
             ["Component hotspot limit",     "T<sub>hot</sub>", f"{t_hot:.0f}", "°C",
-             "Pass/fail criterion — Chapters 3, 4, 5"],
+             "Temperature-rise pass/fail criterion"],
             ["ΔT budget",  "ΔT<sub>max</sub>",  f"{t_hot-t_amb:.0f}", "°C",
              f"= T<sub>hot</sub> − T<sub>amb</sub> = {t_hot:.0f} − {t_amb:.0f}"],
         ],
@@ -880,7 +888,7 @@ def _ch2(story, state):
         "is allowed to appear as net input ripple at the crest of the line cycle "
         "(after interleaving cancellation): ΔI<sub>in,pp</sub> = r × I<sub>in,pk</sub>. "
         "It is the last selection needed before the target inductance L<sub>φ</sub> "
-        "can be derived — Chapter 3 §3.1 builds directly on the value chosen here.", 2)
+        "can be derived.", 2)
 
     sub_h(story, "2.6.1", "Ripple-ratio trade-off", 2)
     data_table(story, "2.6.1", "Crest Ripple Ratio — Trade-off Comparison",
@@ -1966,7 +1974,7 @@ def _ch3(story, state, d):
             ["Fringing loss",         "None — no discrete gap",              "Present — Rogowski correction needed","Powder"],
             ["B<sub>sat</sub>",       "0.75–1.60 T (material dependent)",    "0.40–0.45 T",                       "Powder — higher Bsat"],
             ["Core shape",            "Toroid only",                         "ETD, EE, PQ — bobbin wound",        "Ferrite — lower winding cost"],
-            ["Medical creepage",      "TIW wire or Kapton tape required",    "Extended-flange bobbin ≥14 mm",     "Ferrite — simpler compliance"],
+            ["Medical creepage",      "Factory-coated core — standard magnet wire OK", "Extended-flange bobbin ≥14 mm",     "Comparable"],
             ["Core loss at 70 kHz",   "Moderate (material dependent)",       "Low — 3C97/N95 optimised for 70 kHz","Ferrite — lower loss"],
             ["Best for this design",  "High current CCM PFC > 1 kW",        "Lower current, Medical",            "—"],
         ],
@@ -2018,7 +2026,7 @@ def _ch3(story, state, d):
 
     sub_h(story, "3.4.1", "Sizing engine inputs", 3)
     data_table(story, "3.4.1", "Sizing Engine Inputs — Reference Operating Point",
-        "Values passed to the sizing engine. Outputs shown in Table 3.4.2.",
+        "Values passed to the sizing engine.",
         ["Parameter", "Symbol", "Value", "Unit"],
         [
             ["DC bus voltage",             "V<sub>out</sub>",       f"{vout:.0f}",       "V<sub>dc</sub>"],
@@ -2068,7 +2076,7 @@ def _ch3(story, state, d):
 
     data_table(story, "3.4.2", "Top Core Candidates — Sizing Engine Output",
         "Amber row = selected design (#1). All remaining rows are alternatives. "
-        "Full 9-point analysis of the selected core follows in Sections 3.6 and Chapter 4.",
+        "",
         ["#", "Part number", "Stacks", "N", "FF<sub>cu</sub>%", "ΔT °C", "P<sub>total</sub> W", "Result"],
         cand_rows,
         col_widths=[CW*0.05,CW*0.20,CW*0.08,CW*0.06,CW*0.10,CW*0.10,CW*0.15,CW*0.26],
@@ -2144,11 +2152,21 @@ def _ch3(story, state, d):
     ], heading=f"Skin depth at f_sw = {fsw/1e3:.0f} kHz, T = 100°C", ch=3)
 
     sub_h(story, "3.5.2", "Strand count and bundle OD", 3)
+    _skin_ok = d_str <= 2 * skin_mm
+    _cmp = "≤" if _skin_ok else ">"
     body(story,
         f"Selected wire: <b>{wire}</b>  |  "
-        f"Strand diameter: {d_str:.4f} mm (< {2*skin_mm:.4f} mm limit ✓)  |  "
+        f"Strand diameter: {d_str:.4f} mm ({_cmp} {2*skin_mm:.4f} mm 2δ skin limit)  |  "
         f"Strands: {n_str}  |  Bundle OD: {wire_OD:.3f} mm  |  "
         f"n<sub>par</sub> = {n_par} conductors per turn.", 3)
+    if not _skin_ok:
+        body(story,
+            f"The selected conductor diameter ({d_str:.4f} mm) is <b>larger</b> than the 2δ skin "
+            f"limit ({2*skin_mm:.4f} mm). That is expected for a solid conductor: the per-phase "
+            "current here is low-frequency dominated (the switching-ripple RMS is a small fraction "
+            "of the total), so a solid wire is acceptable — the small AC excess is captured by the "
+            "R<sub>AC</sub>/R<sub>DC</sub> ratio (Section 3.6), not by sub-skin stranding. "
+            "Litz/TIW stranding is only warranted when the HF ripple fraction is large.", 3)
 
     sub_h(story, "3.5.3", "Number of turns N — bias-aware A_L sizing", 3)
     I_dc_worst   = float(d.get("I_dc_worst_A", 0)) or iavg_90
@@ -2801,7 +2819,7 @@ def _ch5(story, state, s15):
         cfg = [{"value_uF": _val, "qty": _qty, "part_number": sel.get("part_number", "")}]
 
     # ── 5.2 Bank configuration and voltage rating ─────────────────────────────
-    step_h(story, "5.2", "Bank Configuration and Voltage Rating", 5)
+    step_h(story, "5.2", "Bank Configuration and Selected Capacitor", 5)
     V_sel   = s15.get("V_rating_selected_V") or v_rating
     V_min_r = s15.get("V_rating_min_V")
     annotation(story, "CONCEPT",
@@ -2822,49 +2840,29 @@ def _ch5(story, state, s15):
         except Exception:
             verified = None
 
+    # Verify the selected configuration meets the required capacitance (verdict only —
+    # the per-parameter detail is folded into the selected-capacitor table below).
     if verified:
-        margin = verified.get("margin_pct")
-        data_table(story, "5.2.1", "Selected Bank Configuration",
-            "Total installed capacitance and headroom over the requirement.",
-            ["Parameter", "Value"],
-            [
-                ["Configuration",           f"{_val} µF × {_qty} in parallel"],
-                ["Installed capacitance",   f"{verified.get('C_total_uF','—')} µF"],
-                ["Required capacitance",    f"{C_req:.1f} µF"],
-                ["Margin over requirement", f"{margin:.1f}%" if isinstance(margin,(int,float)) else "—"],
-                ["Parallel ESR",            f"{verified.get('ESR_parallel_mohm','—')} mΩ"],
-                ["Voltage rating",          f"{v_rating} V"],
-                ["Temperature rating",      f"{verified.get('temp_rating_C','—')} °C"],
-            ],
-            col_widths=[CW*0.45, CW*0.55], ch=5)
+        _m = verified.get("margin_pct")
         verdict_row(story, "Capacitance check",
-            f"{verified.get('C_total_uF','—')} µF ≥ {C_req:.1f} µF",
+            (f"installed {verified.get('C_total_uF','—')} µF ≥ required {C_req:.1f} µF "
+             f"(+{_m:.1f}% margin)") if isinstance(_m, (int, float))
+            else f"installed {verified.get('C_total_uF','—')} µF ≥ required {C_req:.1f} µF",
             "PASS" if verified.get("valid") else "UNDERSIZED", ch=5)
 
-    sugg = s15.get("suggested_configs") or []
-    if sugg:
-        srows = []
-        for s in sugg:
-            desc = " + ".join(f"{r['value_uF']}µF×{r['qty']}" for r in s.get("rows", []))
-            srows.append([s.get("label", "—"), desc, f"{s.get('C_total_uF','—')} µF"])
-        data_table(story, "5.2.2", "Alternative Bank Configurations",
-            "Other valid combinations that meet the capacitance requirement, ranked by the "
-            "sizing engine. The approved bank appears in Table 5.2.1.",
-            ["Strategy", "Configuration", "Total C"],
-            srows, col_widths=[CW*0.25, CW*0.50, CW*0.25], ch=5)
-
-    # ── 5.3 Selected capacitor specification ──────────────────────────────────
     if sel:
-        step_h(story, "5.3", "Selected Capacitor Specification", 5)
-        data_table(story, "5.3.1", "Selected Capacitor Bank",
-            "Parameters of the approved capacitor bank from the database.",
+        data_table(story, "5.2.1", "Selected Capacitor Bank",
+            f"Approved capacitor bank from the database — {_val} µF × {_qty} in parallel, "
+            f"{_i(V_sel)} V class.",
             ["Parameter", "Value"],
             [
                 ["Supplier / Series",       f"{sel.get('supplier','—')} / {sel.get('series','—')}"],
                 ["Part number",             sel.get("part_number","—")],
                 ["Value × Qty",             f"{sel.get('value_uF','—')} µF × {sel.get('qty','—')}"],
+                ["Installed capacitance",   f"{(verified or {}).get('C_total_uF','—')} µF"],
                 ["Voltage rating",          f"{sel.get('voltage_rating_V','—')} V"],
-                ["ESR each",                f"{sel.get('ESR_each_mohm','—')} mΩ"],
+                ["ESR each / bank parallel",
+                 f"{sel.get('ESR_each_mohm','—')} mΩ / {(verified or {}).get('ESR_parallel_mohm','—')} mΩ"],
                 ["Rated I<sub>rms</sub>",   f"{sel.get('I_rated_A','—')} A"],
                 ["Temperature rating",      f"{sel.get('op_temp','—')}"],
                 ["Lifetime",                f"{sel.get('lifetime','—')}"],
@@ -3296,6 +3294,8 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     story.append(HRFlowable(width=CW*0.5, thickness=2, color=CH_COLORS[1], hAlign="CENTER"))
     story.append(Spacer(1, 8*mm))
     story.append(Paragraph(f"Project: {pid}  |  Topology: {topo}", S["cover_s"]))
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph("Design Engineer: Ricky Shah", S["cover_s"]))
     story.append(PageBreak())
 
     # ── Table of Contents (index) — rendered on the page after the cover ──────

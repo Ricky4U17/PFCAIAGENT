@@ -6,14 +6,14 @@
   "type": "powder",
   "description": "EDGE powder core, permeability 14",
   "basic": {
-    "Bsat_T": 1.05,
+    "Bsat_T": 1.5,
     "temp_coeff_ppm_per_C": 0,
     "AL_tolerance_pct": 8,
     "data_source": "Magnetics Inc 2025 catalog + published DC bias curves. Sigmoid model calibrated: edge_60 k(137Oe)=0.435 (Step 13 reference)."
   },
-  "Bsat_25C_T": 1.05,
-  "Bsat_100C_T": 1.001,
-  "Bsat_150C_T": 0.969,
+  "Bsat_25C_T": 1.5,
+  "Bsat_100C_T": 1.427,
+  "Bsat_150C_T": 1.378,
   "Bsat_Tcoeff": -0.00065,
   "dc_bias_rolloff": {
     "H_Oe": [

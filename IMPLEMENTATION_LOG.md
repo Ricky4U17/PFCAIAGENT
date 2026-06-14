@@ -2292,3 +2292,54 @@ executive-summary scorecard, nomenclature, abbreviations tables); back matter ap
 (BOM/bench-plan/sensitivity/references); Chapter 4 §4.8 CCM/DCM boundary check (engine now exposes
 dcm_fraction — collides with the existing "4.8 Simulation-Agent Verification", needs renumber) and
 §4.9 design-validation checklist; Chapter 6 §6.3 FAN9672 pin map.
+
+### 2026-06-13 — Improvements & Corrections (pass 1: corrections + formatting + root-cause bugs)
+
+Worked through specs/"Improvments and Corrections.docx" (designer review of the generated
+report). This pass = the clear corrections, global formatting, and the three "find the reason
+and correct it" root-cause bugs. Heavy calc-narratives/new-tables and the two new figures
+(2D winding cross-section, thermal 2D/3D) are pass 2.
+
+GLOBAL FORMATTING (doc_report_builder.py _S):
+- Annotation box body text -> TA_JUSTIFY (item 1).
+- Data-table cell content -> TA_CENTER (item 2).
+- _eq_img now caps equation image width to the content width so wide equations no longer
+  overflow the right margin (item 13).
+
+TEXT CORRECTIONS:
+- Cover: added "Design Engineer: Ricky Shah" (item 3).
+- Ch1 PITFALL rewritten -> INSIGHT: powder toroids ship factory-coated and do NOT require TIW
+  wire (items 4 & 8; same fix in Table 3.3.1 "Medical creepage" row).
+- Removed chapter cross-references: Table 1.3.1 "Design Impact" (item 5), Table 1.4.1 "Applied
+  in" -> "Role" (item 6), 2.6 CONCEPT "...Chapter 3 3.1 builds directly..." (item 7), the
+  "Outputs shown in Table 3.4.2" forward ref (item 9), and the "...follows in Sections 3.6 and
+  Chapter 4" forward ref (item 10).
+- Ch5: merged 5.2 + 5.3 (item 27) -> "Bank Configuration and Selected Capacitor": kept the
+  CONCEPT + a capacitance-check verdict, folded the selected-cap spec into one Table 5.2.1, and
+  removed the two tables the reviewer flagged as not making sense (old 5.2.1 bank-config,
+  5.2.2 alternatives).
+
+ROOT-CAUSE BUG FIXES (engine/data — "fix everything" per designer):
+- Bsat (item 21): edge_*.json had Bsat 1.05 T (Kool-Mu's value, copied in error). Corrected all
+  10 EDGE files to 1.5 T at 25 C (100 C -> 1.427, 150 C -> 1.378 via the existing -0.00065/C
+  coeff). Saturation margin now reads against the correct EDGE Bsat.
+- Wire-diameter logic (item 11, doc): 3.5.2 showed "1.6277 mm (< 0.5720 mm limit)" which was
+  false. Now prints the correct comparison and, for a solid conductor that exceeds 2*delta,
+  explains it is acceptable (LF-dominated current; AC excess captured by Rac/Rdc), not a defect.
+- Verdict REJECT with all-in-band (item 26): the field engine (sim_agent/pfc_inductor_engine.py)
+  had TWO over-strict asserts. (a) skin_depth hard-failed any wire thicker than 2*delta -> now
+  N/A for a solid single-strand conductor. (b) L_guarantee compared the INSTANTANEOUS-PEAK
+  inductance against 100% of L_target, whereas step7 (authoritative) guarantees the
+  CREST-AVERAGE inductance at AL_min >= 85% of target (standard DC-bias rolloff allowance).
+  Aligned the assert to step7's basis/threshold; peak-bias L kept as informational. Verdict now
+  APPROVE, consistent with step7 and the 6/6 cross-check agreement.
+
+Verified: py_compile OK (doc_report_builder + pfc_inductor_engine); full report rebuilds via the
+real endpoint chain (83 pages); 9/9 spot-checks pass; field-engine verdict APPROVE (0 REJECTs);
+cover, justified CONCEPT box, centered tables, and the merged 5.2 visually confirmed. Sample
+PDF refreshed.
+
+PASS 2 (pending): step-by-step calc narratives + new tables (DCR 25/100C steps, copper-loss in
+3.6.2, current-density 3.5.7, full-load L table in 3.5.4, iGSE worked steps 4.4/4.5, method-vs-
+method loss comparison 4.7, thermal calc steps, 9-point flux table 4.3 with correct Bsat,
+capacitor calc steps 5.4/5.5); figures (4.1 2D winding cross-section, thermal 2D/3D).
