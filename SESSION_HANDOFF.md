@@ -82,7 +82,10 @@ diameter logic.
 2. **Page 77 / Method 3 lifetime:** more detail for f_T, f_I, f_V — no shortcuts/approximations
    (show the full manufacturer-model derivation: I_eq with k_LF/k_HF, ΔTj, the f_T/f_I/f_V
    formulas with every constant substituted). Source: `step15_cap_db.calculate_lifetime` method3.
-3. **Apply all 12 v11 quantities** (from the task-3 table). STATUS as of 2026-06-14: **10 of 12 DONE**.
+3. **Apply all 12 v11 quantities** (from the task-3 table). STATUS: **ALL 12 DONE** (2026-06-14).
+   #4 per-θ flux waveforms = Figure 4.3 (§4.3) and #12 Pcore(θ) double-hump = Figure 4.4 (§4.5),
+   both from `build_view_contract()` via the new `_view_contract`/`_fig_flux_waveforms`/
+   `_fig_pcore_waveform` helpers. Earlier status retained below for the record.
    - DONE: #1 K_harm (4.4 copper eq+THEORY) · #2 Rac/Rdc Dowell-proximity (3.5.1 eq+note) ·
      #3 CCM/DCM boundary at design corner (4.2 note, dcm_fraction) · #5 inner-bore crowding B_inner
      9-pt (4.3 crowd eq + column) · #6 L_full,min@pk (4.2 eq+note) · #7 bore layers / turns-per-layer

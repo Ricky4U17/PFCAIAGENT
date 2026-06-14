@@ -2517,3 +2517,19 @@ documentation_agent change needed — these are additions within existing sectio
 
 Verified: builds via direct build_full_report() (91 pages); the 6 new blocks present; two-node
 thermal page visually confirmed (ΔT_core 31.2, ΔT_wdg 36.1, hotspot 40.5 °C).
+
+### 2026-06-14 — The two waveform figures → ALL 12 v11 quantities done
+
+Added the last two of the 12 v11 quantities, both per-θ figures fed by
+step7_magnetic_calc.build_view_contract() (new helpers _view_contract [caches the contract on the
+result dict so it runs once], _fig_flux_waveforms, _fig_pcore_waveform):
+- #4 Figure 4.3 (§4.3): Bac,pk(t), Bdc(t), Bmax(t) over the half line cycle at 90 Vac, with the
+  Bdc±Bac shaded band.
+- #12 Figure 4.4 (§4.5): instantaneous core loss Pcore(t) at low line (90) vs high line (264),
+  showing the characteristic high-line double-hump + an INSIGHT on why peak-point misreads it.
+
+Verified: builds via direct build_full_report() (93 pages); both figures rendered and visually
+confirmed (flux band + the double-hump signature). The full report is regenerated at
+PFC_Report_VERIFY_Steps1_16.pdf for review.
+
+All 12 v11 quantities (E1–E54 task-3 list) are now part of the report.

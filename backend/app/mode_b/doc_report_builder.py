@@ -515,6 +515,69 @@ def _fig_thermal(d, t_amb):
         return None
 
 
+def _view_contract(d, state):
+    """Per-θ waveform series from the engine's single-source view contract (cached on d)."""
+    try:
+        if not isinstance(d.get("_vc_cache"), dict):
+            from app.mode_b.step7_magnetic_calc import build_view_contract
+            d["_vc_cache"] = build_view_contract(d, state) or {}
+        return d["_vc_cache"]
+    except Exception:
+        return {}
+
+
+def _fig_flux_waveforms(d, state):
+    """Item 4 — Bac,pk(t), Bdc(t), Bmax(t) over the half line cycle at the 90 Vac corner."""
+    try:
+        wf = (_view_contract(d, state).get("waveform") or {})
+        t, bac, bdc, bmx = wf.get("t_ms"), wf.get("Bac_pk"), wf.get("Bdc"), wf.get("Bmax")
+        if not (t and bmx and bdc and bac):
+            return None
+        fig, ax = plt.subplots(figsize=(7.2, 3.1))
+        lo = [a - b for a, b in zip(bdc, bac)]
+        hi = [a + b for a, b in zip(bdc, bac)]
+        ax.fill_between(t, lo, hi, color="#ce93d8", alpha=0.25, label=r"$B_{dc}\pm B_{ac,pk}$")
+        ax.plot(t, bmx, color="#6a1b9a", lw=2.0, label=r"$B_{max}$")
+        ax.plot(t, bdc, color="#1565c0", lw=1.6, label=r"$B_{dc}$")
+        ax.plot(t, bac, color="#ef6c00", lw=1.4, label=r"$B_{ac,pk}$")
+        ax.set_xlabel("time over half line cycle (ms)", fontsize=9)
+        ax.set_ylabel("flux density (T)", fontsize=9)
+        ax.set_title("Flux density over the half line cycle — 90 Vac", fontsize=10)
+        ax.legend(fontsize=8, ncol=4, loc="upper center"); ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=8); ax.set_ylim(bottom=0)
+        fig.tight_layout()
+        return _fig_img(fig, width_mm=160)
+    except Exception:
+        return None
+
+
+def _fig_pcore_waveform(d, state):
+    """Item 12 — Pcore(t) at low vs high line, showing the high-line double-hump."""
+    try:
+        wbv = (_view_contract(d, state).get("waveforms_by_vin") or {})
+        ks = sorted(int(k) for k in wbv)
+        if not ks:
+            return None
+        def _pick(target):
+            kk = min(ks, key=lambda v: abs(v - target))
+            return kk, wbv[str(kk)]
+        v_lo, w_lo = _pick(90); v_hi, w_hi = _pick(264)
+        if not (w_lo.get("Pcore") and w_hi.get("Pcore")):
+            return None
+        fig, ax = plt.subplots(figsize=(7.2, 3.1))
+        ax.plot(w_lo["t_ms"], w_lo["Pcore"], color="#1565c0", lw=1.9, label=f"{v_lo} Vac — low line")
+        ax.plot(w_hi["t_ms"], w_hi["Pcore"], color="#c62828", lw=1.9, label=f"{v_hi} Vac — high line")
+        ax.set_xlabel("time over half line cycle (ms)", fontsize=9)
+        ax.set_ylabel("instantaneous core loss (W)", fontsize=9)
+        ax.set_title("Core-loss waveform — low vs high line (double-hump at high line)", fontsize=10)
+        ax.legend(fontsize=8); ax.grid(True, alpha=0.3); ax.tick_params(labelsize=8)
+        ax.set_ylim(bottom=0)
+        fig.tight_layout()
+        return _fig_img(fig, width_mm=160)
+    except Exception:
+        return None
+
+
 # ── Operating-point engine ────────────────────────────────────────────────────
 # η/PF are taken per-point from the canonical estimated reference table
 # (see _canonical_ops_table / Section 1.2.4, Table 1.2.2) — NOT from a single
@@ -2914,6 +2977,16 @@ def _ch4(story, state, d):
             frows, col_widths=[CW*0.14, CW*0.17, CW*0.17, CW*0.17, CW*0.17, CW*0.18],
             worst_rows=[wi], ch=4)
 
+    # Item 4 — per-θ flux-density waveforms over the half line cycle.
+    _ffig = _fig_flux_waveforms(d, state)
+    if _ffig:
+        story.append(_ffig)
+        fig_caption(story,
+            "Figure 4.3 — Flux density over the half line cycle at 90 V<sub>ac</sub>. B<sub>dc</sub> "
+            "follows the rectified-sine DC bias; B<sub>ac,pk</sub> is the switching-ripple half-swing; "
+            "B<sub>max</sub> = B<sub>dc</sub> + B<sub>ac,pk</sub> (shaded band) is the peak the core sees "
+            "and is checked against B<sub>sat</sub>.", 4)
+
     # ── 4.4 Loss methodology ─────────────────────────────────────────────
     step_h(story, "4.4", "Loss Calculation Methodology — DB Steinmetz / iGSE", 4)
     annotation(story, "THEORY",
@@ -2979,6 +3052,19 @@ def _ch4(story, state, d):
             "The database P<sub>v</sub>(B,f,T) is interpolated from measured curves (not a fixed "
             "Steinmetz fit), then scaled by F(D) and the core volume V<sub>e</sub>. The full "
             "nine-point breakdown is Table 4.2 in Section 4.6.", 4)
+
+    # Item 12 — Pcore(t) waveform: low line vs high line (double-hump signature).
+    _pfig = _fig_pcore_waveform(d, state)
+    if _pfig:
+        story.append(_pfig)
+        fig_caption(story,
+            "Figure 4.4 — Instantaneous core loss over the half line cycle. At low line the loss "
+            "peaks once at the crest; at high line the lower, flatter duty cycle splits it into the "
+            "characteristic <b>double-hump</b>, with minima where B<sub>ac</sub> and F(D) offset.", 4)
+        annotation(story, "INSIGHT",
+            "The high-line double-hump is why the peak-point (single-crest) estimate misreads core "
+            "loss: the true loss is distributed across the cycle, not concentrated at the crest. The "
+            "cycle-averaged iGSE integral captures it correctly.", 4)
 
     # ── 4.6 Authoritative per-operating-point engine results ─────────────
     step_h(story, "4.6", "Per-Operating-Point Engine Results — All 9 Points", 4)
