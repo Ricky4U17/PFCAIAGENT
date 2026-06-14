@@ -2851,7 +2851,7 @@ def _ch4(story, state, d):
         ratio = Pcore_cavg / Pcore_peak
         body(story,
             f"Cycle-averaged: P<sub>core,avg</sub> = {Pcore_cavg:.3f} W (iGSE).  "
-            f"Peak-point estimate (Chapter 3): {Pcore_peak:.3f} W.  "
+            f"Peak-point (first-pass) estimate: {Pcore_peak:.3f} W.  "
             f"Ratio = {ratio:.2f}.", 4)
         annotation(story, "INSIGHT",
             f"The cycle-averaged iGSE core loss ({Pcore_cavg:.3f} W) is "
@@ -3045,10 +3045,10 @@ def _ch5(story, state, s15):
     chapter_splash(story, 5, "DC Bus Capacitor Selection",
         "How do we size and qualify the capacitor bank?",
         ["5.1 Hold-up and ripple sizing — energy balance equations",
-         "5.2 Bank configuration — quantity and voltage rating",
-         "5.3 Part selection from database",
-         "5.4 Ripple current and voltage verification at all 9 operating points",
-         "5.5 Capacitor lifetime analysis (Arrhenius model)"])
+         "5.2 Bank configuration and selected capacitor",
+         "5.3 Ripple current and voltage verification at all 9 operating points",
+         "5.4 Capacitor lifetime analysis (Arrhenius model)",
+         "5.5 Capacitor bank summary — design margins"])
 
     step_h(story, "5.1", "Capacitor Sizing Requirements", 5)
     if not s15:
@@ -3184,7 +3184,7 @@ def _ch5(story, state, s15):
             thermal = None
 
     if thermal and thermal.get("thermal_table"):
-        step_h(story, "5.4", "Ripple Current and Voltage Verification — 9 Operating Points", 5)
+        step_h(story, "5.3", "Ripple Current and Voltage Verification — 9 Operating Points", 5)
         annotation(story, "THEORY",
             "Each parallel capacitor carries 1/N of the bank ripple current. Self-heating "
             "ΔT = I<sub>cap</sub>² · ESR · R<sub>th</sub> must keep the case below its temperature "
@@ -3220,7 +3220,7 @@ def _ch5(story, state, s15):
             ])
             if r['T_cap_C'] > worst_T:
                 worst_T, worst_idx = r['T_cap_C'], i
-        data_table(story, "5.4.1", "Capacitor Ripple Current, Ripple Voltage and Temperature",
+        data_table(story, "5.3.1", "Capacitor Ripple Current, Ripple Voltage and Temperature",
             "Per-point bank RMS current, per-cap share, rated current, output ripple and "
             "estimated case temperature. Worst-case (hottest) row highlighted.",
             ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)", "I<sub>cap</sub> (A)",
@@ -3259,7 +3259,7 @@ def _ch5(story, state, s15):
             life = None
 
     if life and life.get("method1"):
-        step_h(story, "5.5", "Capacitor Lifetime Analysis (Arrhenius Model)", 5)
+        step_h(story, "5.4", "Capacitor Lifetime Analysis (Arrhenius Model)", 5)
         annotation(story, "THEORY",
             "Electrolytic lifetime follows the Arrhenius rule — every 10 °C reduction in core "
             "temperature doubles life: L = L<sub>0</sub> · 2<sup>(T<sub>max</sub>−T<sub>core</sub>)/10</sup> · "
@@ -3299,7 +3299,7 @@ def _ch5(story, state, s15):
                     f"{m.get('life_years','—')} yr"]
         gov = life.get("governing_method", "")
         gi  = {"Method 1": 0, "Method 2": 1, "Method 3": 2}.get(gov)
-        data_table(story, "5.5.1", "Lifetime by Method — Governing (Minimum) Highlighted",
+        data_table(story, "5.4.1", "Lifetime by Method — Governing (Minimum) Highlighted",
             "Core temperature and projected service life by each estimation method, at the "
             "worst-case (90 Vac low-line) ripple-current loading.",
             ["Method", "Core temp", "Life (hours)", "Life (years)"],
@@ -3312,7 +3312,7 @@ def _ch5(story, state, s15):
 
     # ── 5.6 Capacitor bank summary ────────────────────────────────────────────
     if sel:
-        step_h(story, "5.6", "Capacitor Bank Summary", 5)
+        step_h(story, "5.5", "Capacitor Bank Summary", 5)
         annotation(story, "DECISION",
             f"Approved bank: <b>{_val} µF × {_qty}</b> "
             f"{sel.get('supplier','')} {sel.get('part_number','')} rated {_i(V_sel)} V. "
@@ -3331,9 +3331,9 @@ def _ch5(story, state, s15):
             _mar.append(["Service life vs 15-year target",
                          f"{life.get('min_life_years','—')} yr projected",
                          "PASS" if life.get('pass_15yr') else "REVIEW"])
-        data_table(story, "5.6.1", "Approved Capacitor Bank — Design Margins",
+        data_table(story, "5.5.1", "Approved Capacitor Bank — Design Margins",
             "Consolidated margins for the approved bank across every qualification check "
-            "(Sections 5.1–5.5).",
+            "(Sections 5.1–5.4).",
             ["Qualification check", "Value", "Status"],
             _mar, col_widths=[CW*0.46, CW*0.34, CW*0.20], ch=5)
 
@@ -3348,7 +3348,9 @@ def _ch6(story, state, s16):
          "6.2 Plant analysis — RHP zero, LC double pole, bandwidth targets",
          "6.4 Current loop design — Type-II compensator, pole-zero placement",
          "6.5 Voltage loop design — bandwidth limitation from RHP zero",
-         "6.6 Stability scorecard — Phase Margin, Gain Margin, all 9 points"])
+         "6.6 Stability scorecard — Phase Margin, Gain Margin, all 9 points",
+         "6.7 Soft-start and protection — C_SS, current clamp, brown-out",
+         "6.8 Control network bill of materials"])
 
     step_h(story, "6.1", "Control Architecture Overview", 6)
     annotation(story, "CONCEPT",

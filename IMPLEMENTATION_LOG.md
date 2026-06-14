@@ -2420,3 +2420,30 @@ Verified: py_compile OK; report rebuilds (85 pages); both figures rendered and v
 
 ALL 29 ITEMS FROM "Improvments and Corrections.docx" ARE NOW COMPLETE (pass 1 corrections/
 formatting/root-cause bugs; pass 2a Ch3 calcs; pass 2b Ch4/5 calcs; pass 2c figures).
+
+### 2026-06-14 — Final read-through polish
+
+Ran a full-report automated scan (replacement chars, nan/inf/None leaks, leftover chapter
+forward-refs, suspicious zero results, duplicate table refs, section-heading order, verdict
+tokens) plus visual spot-checks. Fixes applied:
+- Chapter 5 had a 5.2 -> 5.4 numbering gap from the earlier 5.2/5.3 merge. Renumbered the body so
+  it reads 5.1-5.5 with no gap (Ripple 5.4->5.3, Lifetime 5.5->5.4, Bank summary 5.6->5.5; tables
+  5.x.1 follow; "Sections 5.1-5.5" intro -> "5.1-5.4"). Updated the Ch5 chapter splash bullets and
+  documentation_agent.py Ch5 section list to match; the auto-TOC now shows 5.1-5.5.
+- Ch6 chapter splash now lists the added 6.7 and 6.8 bullets.
+- Softened the one remaining inline chapter cross-ref in 4.5 ("Peak-point estimate (Chapter 3)"
+  -> "Peak-point (first-pass) estimate").
+
+No action needed (verified benign):
+- "None" on two pages is the literal English word in table cells ("None — no discrete gap",
+  "None — K(D) = 1.0 always"), not a value leak.
+- The 3 VERIFY verdicts (Ch6 6.4/6.5/6.6) are the genuine auto-sized control-loop margins from the
+  placeholder step16 inputs, not report bugs.
+- Scan otherwise clean: 0 replacement chars, no nan/inf, no duplicate table refs, no leftover
+  "(Chapter X)" forward-refs in spec tables.
+
+KNOWN GAP (intentional, not a rough edge): Ch6 6.3 (FAN9672 pin configuration) is unbuilt because
+the engine does not produce a pin map; left as an honest gap rather than renumbering over it.
+
+Verified: py_compile OK (builder + agent); report rebuilds (85 pages); TOC/splash/body consistent
+for Ch5 (5.1-5.5) and Ch6 (incl. 6.7/6.8).
