@@ -405,6 +405,116 @@ def _mpl_img(fig, width_mm=165):
     return Image(buf, width=width_mm*mm, height=width_mm*mm*0.52)
 
 
+def _fig_img(fig, width_mm=150):
+    """Render a matplotlib figure to an Image flowable, preserving its aspect ratio."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    w_in, h_in = fig.get_size_inches()
+    plt.close(fig)
+    buf.seek(0)
+    return Image(buf, width=width_mm*mm, height=width_mm*mm*(h_in/max(w_in, 0.1)))
+
+
+def _fig_winding_cross_section(d):
+    """2D winding views: toroid top view with the N turns + a single-turn radial cross-section."""
+    try:
+        import matplotlib.patches as mpatches
+        OD = float(d.get("OD_mm", 0) or 0); ID = float(d.get("ID_mm", 0) or 0)
+        HT = float(d.get("HT_mm", 0) or 0); stk = int(d.get("stacks", 1) or 1)
+        N  = int(d.get("N", 0) or 0); wod = float(d.get("wire_OD_mm", 0) or 0)
+        if not (OD and ID and N):
+            return None
+        ro, ri = OD / 2.0, ID / 2.0
+        if wod <= 0:
+            wod = max((ro - ri) * 0.12, 0.8)
+        COPPER, CORE = "#b87333", "#5b6b7b"
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.4, 3.7))
+
+        # Panel 1 — top view with the winding turns
+        ax1.set_aspect("equal"); ax1.axis("off")
+        ax1.add_patch(mpatches.Circle((0, 0), ro, facecolor=CORE, edgecolor="#33414f", lw=1.2))
+        nshow = min(N, 64)
+        for k in range(nshow):
+            a = 2 * math.pi * k / nshow
+            ax1.plot([ri*math.cos(a), ro*math.cos(a)], [ri*math.sin(a), ro*math.sin(a)],
+                     color=COPPER, lw=max(wod*1.5, 1.3), solid_capstyle="round", zorder=3)
+        ax1.add_patch(mpatches.Circle((0, 0), ri, facecolor="white", edgecolor="#33414f", lw=1.0, zorder=4))
+        ax1.set_xlim(-ro*1.18, ro*1.18); ax1.set_ylim(-ro*1.18, ro*1.30)
+        ax1.annotate(f"OD = {OD:.1f} mm", xy=(0, ro), xytext=(0, ro*1.16), ha="center", fontsize=8,
+                     arrowprops=dict(arrowstyle="->", lw=0.8))
+        ax1.text(0, 0, f"ID = {ID:.1f} mm", ha="center", va="center", fontsize=7.5, color="#33414f")
+        ax1.set_title(f"Top view — {N} turns" + (f" ({nshow} shown)" if N > nshow else ""), fontsize=9)
+
+        # Panel 2 — radial cross-section of one turn over the core stack
+        ax2.set_aspect("equal"); ax2.axis("off")
+        cw = (ro - ri); ch = (HT * stk) if HT else cw * 0.8
+        ax2.add_patch(mpatches.Rectangle((-cw/2, -ch/2), cw, ch, facecolor=CORE, edgecolor="#33414f", lw=1.2))
+        ax2.add_patch(mpatches.Ellipse((0, 0), cw + 2*wod, ch + 2*wod, fill=False,
+                                       edgecolor=COPPER, lw=max(wod*2.0, 2.0)))
+        m = max(cw, ch)
+        ax2.set_xlim(-m*1.25 - wod, m*1.25 + wod); ax2.set_ylim(-m - 2.2*wod, m + wod)
+        # core dimensions labelled BELOW the (thin, tall) cross-section so text never overflows it
+        ax2.annotate(f"core {cw:.1f} × {ch:.1f} mm ({stk}-core stack)", xy=(0, -ch/2 - wod),
+                     xytext=(0, -m - 1.5*wod), ha="center", va="top", fontsize=7, color="#33414f",
+                     arrowprops=dict(arrowstyle="->", color="#33414f", lw=0.7))
+        ax2.annotate(f"wire OD {wod:.2f} mm", xy=(cw/2 + wod, 0),
+                     xytext=(cw/2 + wod + m*0.35, m*0.5), fontsize=7.5, color=COPPER,
+                     arrowprops=dict(arrowstyle="->", color=COPPER, lw=0.8))
+        ax2.set_title("Radial cross-section — 1 of N turns", fontsize=9)
+        fig.tight_layout()
+        return _fig_img(fig, width_mm=150)
+    except Exception:
+        return None
+
+
+def _fig_thermal(d, t_amb):
+    """2D thermal map of the wound cross-section + a thermal-budget ladder."""
+    try:
+        OD = float(d.get("wound_OD_actual_mm", d.get("OD_mm", 0)) or 0)
+        HT = float(d.get("wound_HT_actual_mm", d.get("HT_mm", 0)) or 0)
+        dT = float(d.get("dT_rise_C", 0) or 0)
+        dThs = float(d.get("dT_hotspot_C", 0) or 0)
+        dTb = float(d.get("dT_budget_C", 60) or 60)
+        Tamb = float(t_amb or 50)
+        if not (OD and HT and dT):
+            return None
+        # The interior hotspot is the hottest node; keep it strictly above the surface rise.
+        dT_hot = dThs if dThs >= dT else dT * 1.12
+        Tsurf, Thot, Tlim = Tamb + dT, Tamb + dT_hot, Tamb + dTb
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.4, 3.3),
+                                       gridspec_kw={"width_ratios": [1.35, 1.0]})
+        # Panel 1 — 2D temperature field over the wound cross-section
+        w, h = OD, HT
+        xs = np.linspace(-w/2, w/2, 160); ys = np.linspace(-h/2, h/2, 120)
+        X, Y = np.meshgrid(xs, ys)
+        rr = np.clip(np.sqrt((X/(w/2))**2 + (Y/(h/2))**2), 0, 1)
+        T = Thot + (Tsurf - Thot) * rr        # interior hotspot -> cooler surface
+        im = ax1.imshow(T, extent=[-w/2, w/2, -h/2, h/2], origin="lower", cmap="inferno", aspect="equal")
+        ax1.contour(X, Y, T, levels=6, colors="white", linewidths=0.4, alpha=0.5)
+        ax1.axis("off"); ax1.set_title("Wound cross-section — temperature (°C)", fontsize=9)
+        cb = fig.colorbar(im, ax=ax1, fraction=0.046, pad=0.04); cb.ax.tick_params(labelsize=7)
+        # Panel 2 — thermal-budget ladder
+        ax2.barh([0], [dThs], left=Tamb, color="#d97706", height=0.5)
+        ax2.barh([0], [dT], left=Tamb, color="#f59e0b", height=0.5)
+        ax2.axvline(Tlim, color="#991b1b", ls="--", lw=1.4)
+        ax2.text(Tlim, 0.82, f"limit {Tlim:.0f}°C", color="#991b1b", fontsize=7.5, ha="center")
+        # stagger the node labels (alternate above / below) so they never collide
+        for x, lab, c, yo in [(Tamb, f"ambient {Tamb:.0f}", "#374151", -0.55),
+                              (Tsurf, f"surface {Tsurf:.0f}", "#b45309", -0.55),
+                              (Thot, f"hotspot {Thot:.0f}", "#9a3412", 0.5)]:
+            ax2.plot([x], [0], "|", color=c, ms=16, mew=2)
+            ax2.text(x, yo, lab, fontsize=7, ha="center", color=c)
+        ax2.set_ylim(-0.9, 0.9); ax2.set_yticks([]); ax2.set_xlim(Tamb - 6, max(Tlim, Thot) + 10)
+        ax2.set_xlabel("Temperature (°C)", fontsize=8); ax2.tick_params(labelsize=7)
+        ax2.set_title("Thermal budget", fontsize=9)
+        for sp in ("top", "right", "left"):
+            ax2.spines[sp].set_visible(False)
+        fig.tight_layout()
+        return _fig_img(fig, width_mm=160)
+    except Exception:
+        return None
+
+
 # ── Operating-point engine ────────────────────────────────────────────────────
 # η/PF are taken per-point from the canonical estimated reference table
 # (see _canonical_ops_table / Section 1.2.4, Table 1.2.2) — NOT from a single
@@ -2629,6 +2739,15 @@ def _ch4(story, state, d):
         f"Approved core: <b>{part} × {stacks}</b>  |  N = <b>{N}</b> turns  |  "
         f"Assembled: OD = {wo:.1f} mm, height = {wh:.1f} mm.", 4)
 
+    # Item 19 — 2D winding cross-section (top view with turns + radial cut).
+    _wfig = _fig_winding_cross_section(d)
+    if _wfig:
+        story.append(_wfig)
+        fig_caption(story,
+            f"Figure 4.1 — Winding cross-section. Left: toroid top view with the {N} turns "
+            "distributed around the core. Right: radial cross-section of one turn over the "
+            f"{stacks}-core stack, showing the wire bundle over the core window.", 4)
+
     # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
     step_h(story, "4.2", "Inductance Performance — Bias Retention at All 9 Points", 4)
     annotation(story, "INSIGHT",
@@ -2888,6 +3007,21 @@ def _ch4(story, state, d):
                 "wound-envelope surface area. Amber row = hottest corner.",
                 ["V<sub>in</sub> (V)", "P<sub>total</sub> (W)", "ΔT (°C)"],
                 trows, col_widths=[CW*0.34, CW*0.33, CW*0.33], worst_rows=[wti], ch=4)
+
+    # Item 25 (figure) — 2D thermal map of the wound cross-section + budget ladder.
+    try:
+        _tamb = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
+    except Exception:
+        _tamb = 50.0
+    _tfig = _fig_thermal(d, _tamb)
+    if _tfig:
+        story.append(_tfig)
+        _dhs = float(d.get("dT_hotspot_C", 0) or 0)
+        _ths = _tamb + (_dhs if _dhs >= dT else dT * 1.12)
+        fig_caption(story,
+            f"Figure 4.2 — Thermal map of the wound cross-section: interior hotspot ≈ {_ths:.0f}°C "
+            f"cooling to the {_tamb+dT:.0f}°C surface, with the thermal-budget ladder against the "
+            f"{_tamb+dT_bgt:.0f}°C limit.", 4)
 
     body(story,
         f"Worst-case ΔT = {dT:.1f}°C against budget {dT_bgt:.0f}°C "

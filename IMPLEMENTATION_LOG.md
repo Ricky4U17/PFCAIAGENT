@@ -2395,3 +2395,28 @@ table, 5.4 worked chain).
 
 PASS 2 REMAINING: only the two FIGURES — 4.1 2D winding cross-section with turns (item 19) and
 the thermal 2D/3D visualization (figure part of item 25).
+
+### 2026-06-14 — Improvements & Corrections (pass 2c: the two figures — COMPLETE)
+
+doc_report_builder.py — added the two figures, finishing the designer review:
+- Item 19 (Figure 4.1, §4.1): 2D winding cross-section — matplotlib _fig_winding_cross_section(d).
+  Left panel: toroid top view (core annulus) with the N turns drawn as copper segments around the
+  ring (capped at 64 drawn for legibility), OD/ID labelled. Right panel: radial cross-section of
+  one turn wrapping the core stack, with core dims (below) and wire OD labelled.
+- Item 25 figure (Figure 4.2, §4.7): 2D thermal map — _fig_thermal(d, t_amb). Left: filled
+  temperature field over the wound cross-section (inferno), interior hotspot cooling to the
+  surface, °C colorbar + contour lines. Right: thermal-budget ladder (ambient -> surface ->
+  hotspot) against the dashed ΔT-limit line.
+
+Fixes during figure QA: the thermal map initially rendered the surface HOTTER than the hotspot
+(inverted) because dT_hotspot_C < dT_rise_C in the payload — now the interior hotspot is forced
+to the hottest node (max(dThs, 1.12*dT)); ladder labels staggered so hotspot/limit no longer
+collide; the winding cross-section core-dimension label moved below the (thin, tall stack)
+rectangle so it no longer overflows.
+
+Verified: py_compile OK; report rebuilds (85 pages); both figures rendered and visually confirmed
+(Fig 4.1: 44 turns + 3-stack core 7.1x34.3 mm, wire OD 1.68 mm; Fig 4.2: hotspot 108 C -> surface
+102 C vs 110 C limit).
+
+ALL 29 ITEMS FROM "Improvments and Corrections.docx" ARE NOW COMPLETE (pass 1 corrections/
+formatting/root-cause bugs; pass 2a Ch3 calcs; pass 2b Ch4/5 calcs; pass 2c figures).
