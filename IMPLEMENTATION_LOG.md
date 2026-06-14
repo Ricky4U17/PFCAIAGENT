@@ -2494,3 +2494,26 @@ have silently fallen the report back to the legacy generator; also avoided \text
 
 Verified: builds via direct builder call (89 pages); Table 4.5, Method-3, and 4.3 flux (B_inner)
 visually confirmed.
+
+### 2026-06-14 — Bug history saved + 6 more v11 quantities (10 of 12 done)
+
+Expanded SESSION_HANDOFF.md into a full "BUGS & GOTCHAS — history" (legacy-fallback trap;
+mathtext unsupported tokens \sqrt2/\le/\text{}; no unicode subscripts in ReportLab; circular
+all_candidates ref; Windows console encoding; 2-pass TOC; the engine/data fixes already applied —
+Bsat, field-engine asserts, wire-diameter, thermal-figure inversion).
+
+Implemented 6 more of the 12 v11 quantities (now 10/12):
+- #2 Rac/Rdc — 3.5.1: x = d/(2δ), F_skin/F_prox formulas, R_AC/R_DC = max(1, F_skin·F_prox) with
+  the calibrated k_skin/k_prox/k_crowd coefficients.
+- #3 CCM/DCM boundary — 4.2: i_avg > ΔIpp/2 condition + dcm_fraction at the design corner.
+- #7 bore layering — 3.5.6: layers_needed, turns_per_layer, residual bore clearance.
+- #9 thermal convergence — 4.7 THEORY: the T_core iterate-until-0.2K loop.
+- #10 two-node thermal — 4.7: θ/Rca/Rwa/Rcw split, ΔT_core/ΔT_wdg, hotspot = max×1.12.
+- #11 composite ranking score — 3.4.6: the weighted score formula + selected/top-5 candidate scores.
+
+REMAINING (only the 2 figures): #4 per-θ flux waveforms, #12 Pcore(θ) double-hump — both need the
+per-θ series from build_view_contract; deferred (recipe in SESSION_HANDOFF.md). No
+documentation_agent change needed — these are additions within existing sections.
+
+Verified: builds via direct build_full_report() (91 pages); the 6 new blocks present; two-node
+thermal page visually confirmed (ΔT_core 31.2, ΔT_wdg 36.1, hotspot 40.5 °C).

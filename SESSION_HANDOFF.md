@@ -33,16 +33,41 @@ Use a throwaway script in `backend/` driving the real endpoints via FastAPI Test
 4. POST `/mode-b/documentation/generate-report` → PDF; render pages with PyMuPDF (`fitz`) at matrix(2,2).
 Run with `PYTHONIOENCODING=utf-8 PYTHONUTF8=1 venv/Scripts/python.exe`.
 
-## GOTCHAS (important)
-- **Silent legacy fallback:** `DocumentationAgent.generate()` wraps the chapter builder in
-  try/except and falls back to the OLD generator on ANY exception. Symptom: report drops to ~58
-  pages and Ch6 headings vanish. ALWAYS verify page count (~88) after edits. To debug, call
-  `build_full_report(...)` directly to see the traceback.
-- **mathtext:** equations render via matplotlib mathtext. Use `\sqrt{2}` not `\sqrt2`; never use
-  unicode subscripts in ReportLab table cells — use `<sub>`/`<sup>` (CLAUDE.md rule #7). `_eq_img`
-  now caps width to CW so wide eqs don't overflow.
-- Tables are center-aligned, annotation body text is justified (global, in `_S`).
-- EDGE `Bsat` was corrected 1.05→1.5 T across `data/magnetic_materials/magnetics_inc/edge_*.json`.
+## BUGS & GOTCHAS — history (read before editing the builder)
+- **Silent legacy fallback (the big one):** `DocumentationAgent.generate()` wraps the chapter
+  builder in try/except and falls back to the OLD generator on ANY exception. Symptom: report
+  drops to ~58 pages, Ch6 headings vanish, and stale legacy text reappears (e.g. "via Mode A HITL
+  gates"). ALWAYS verify the page count (~88–89) after edits. To surface the real traceback, call
+  `build_full_report(state, approved_design=…, step15_result=…, step16_params=…)` DIRECTLY (not
+  through the agent) in the verify harness — the agent hides the error.
+- **matplotlib mathtext (equations are rendered images) — unsupported / tricky tokens that throw:**
+  - `\sqrt2` → must be `\sqrt{2}` (brace the argument).
+  - `\le` / `\ge` → unsupported; use `\leq` / `\geq`.
+  - `\text{...}` is unreliable; avoid (e.g. don't write `core\text{-}loss` — use `core\ loss`).
+  - `\left`/`\right`, `\dfrac`, `\mathrm`, `\Rightarrow`, `\Delta`, `\phi`, `\mu`, `\times`,
+    `\sqrt{}`, `^{}`, `_{}` all WORK. When unsure, test via a direct builder call.
+- **No unicode subscripts/Greek in ReportLab table cells or body Paragraphs** — use `<sub>`/`<sup>`
+  HTML tags (CLAUDE.md rule #7). Unicode `f₀`-style chars render as tofu boxes in Helvetica.
+  (Equation images via `_eq_img` are fine — those are matplotlib, not ReportLab.)
+- `_eq_img` caps equation image width to CW so wide equations don't overflow the right margin.
+- Global style (in `_S`): table cell text is centre-aligned; annotation body text is justified.
+- **Windows console encoding:** run the harness with `PYTHONIOENCODING=utf-8 PYTHONUTF8=1` or
+  prints of ★/µ/Ω/° throw `UnicodeEncodeError` (cp1252). Render PDFs with PyMuPDF (`fitz`).
+- **Circular reference when building approved_design:** `top_5[0].result` IS the same object you
+  then store under `approved_design["all_candidates"][0]` → JSON `Circular reference`. Use
+  `copy.deepcopy` for both.
+- **2-pass TOC:** the report uses `doc.multiBuild()` + `_ReportDoc.afterFlowable` + `_TOCMark`;
+  section/sub headings are tagged on the Paragraph (accurate page #), chapters via a 0-size mark.
+
+## ENGINE/DATA FIXES already applied (don't re-introduce)
+- EDGE `Bsat` corrected 1.05→1.5 T across `data/magnetic_materials/magnetics_inc/edge_*.json`
+  (1.05 was Kool-Mu's value). This also cleared a false saturation REJECT.
+- Field engine `sim_agent/pfc_inductor_engine.py`: `skin_depth` assert no longer hard-fails a
+  solid single-strand wire; `L_guarantee` aligned to step7's crest-average AL_min ≥ 85%·target
+  (was instantaneous-peak ≥ 100%). These fixed the "6/6 in band but REJECT" verdict.
+- Wire-diameter check (3.5.2) printed an inverted "< limit"; corrected + solid-wire explanation.
+- Thermal figure (`_fig_thermal`) once rendered the surface HOTTER than the hotspot when
+  `dT_hotspot_C < dT_rise_C` in the payload — now forces the interior to the hottest node.
 
 ## DONE (designer review "Improvments and Corrections.docx" — both rounds)
 All 29 round-1 items + round-2 items (2.7.1, 4.4/4.5 iGSE 90+180, 4.7 core+copper+total, 5.3
@@ -57,12 +82,17 @@ diameter logic.
 2. **Page 77 / Method 3 lifetime:** more detail for f_T, f_I, f_V — no shortcuts/approximations
    (show the full manufacturer-model derivation: I_eq with k_LF/k_HF, ΔTj, the f_T/f_I/f_V
    formulas with every constant substituted). Source: `step15_cap_db.calculate_lifetime` method3.
-3. **Apply all 12 v11 quantities** (from the task-3 table). STATUS as of 2026-06-14:
-   - DONE: #1 K_harm (4.4 copper-loss eq+THEORY) · #5 inner-bore crowding B_inner 9-pt (4.3 table
-     +crowd eq) · #6 L_full,min@pk (4.2 eq+note) · #8 loss uncertainty band +5–20% (4.7 eq+note).
-   - TODO (next): #2 Rac/Rdc derivation (E31–33, → 3.5 skin/Fprox) · #3 DCM/CCM boundary 9-pt
-     (E19, dcm_fraction; per-Vin needs recompute) · #4 per-θ flux waveforms (E20, FIGURE) ·
-     #7 bore layer count N_lay/turns-per-layer (E34–35) · #9 thermal convergence loop (E45) ·
-     #10 two-node thermal Rca/Rwa/Rcw + hotspot (E46–47, → 4.7) · #11 composite ranking score
-     (E50, score field + all_candidates, → 3.4) · #12 Pcore(θ) waveform + double-hump (E38, FIGURE).
-   Quick remaining (data-ready): #2, #11. Heavier: #4, #12 (figures), #10 (two-node), #9, #3, #7.
+3. **Apply all 12 v11 quantities** (from the task-3 table). STATUS as of 2026-06-14: **10 of 12 DONE**.
+   - DONE: #1 K_harm (4.4 copper eq+THEORY) · #2 Rac/Rdc Dowell-proximity (3.5.1 eq+note) ·
+     #3 CCM/DCM boundary at design corner (4.2 note, dcm_fraction) · #5 inner-bore crowding B_inner
+     9-pt (4.3 crowd eq + column) · #6 L_full,min@pk (4.2 eq+note) · #7 bore layers / turns-per-layer
+     / residual clearance (3.5.6 note) · #8 loss uncertainty band +5–20% (4.7 eq+note) · #9 thermal
+     convergence loop (4.7 THEORY) · #10 two-node core/winding split + hotspot (4.7 eq+THEORY) ·
+     #11 composite ranking score (3.4.6 eq + candidate scores).
+   - TODO (only the 2 figures left): **#4 per-θ flux waveforms** Bac,pk(θ)/Bdc(θ)/Bmax(θ) over the
+     half cycle (E20) and **#12 Pcore(θ) waveform + double-hump at high line** (E38). Both need the
+     per-θ series from `step7_magnetic_calc.build_view_contract(result, state)` (returns
+     `waveform`/`waveforms_by_vin` arrays: t_ms, Bdc, Bac_pk, Bmax, Pcore, …). Build two matplotlib
+     figures via the `_fig_img` helper and drop into §4.3 (flux) and §4.5 (core loss).
+   - #3/#5/#6/#8 currently report at the design corner / via the 9-pt flux table; a per-Vin 9-row
+     table for #3 DCM and #8 uncertainty could be added later if wanted.
