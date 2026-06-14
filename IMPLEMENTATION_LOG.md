@@ -2257,3 +2257,38 @@ pages) with realistic engine data; all six new pages rendered to PNG and visuall
 6.2 f0=211.9 Hz/f_ESR=8.91 kHz, 6.4 Type-II R_IC/C1/C2, 6.5 Type-II compensator + divider).
 Sample PDF refreshed at PFC_Report_VERIFY_Steps1_16.pdf. Chapters 5 and 6 now match their
 splash-page promises end-to-end.
+
+### 2026-06-13 — Report Structure Agreement: Table of Contents + missing chapter sections
+
+Went through specs/PFC_Report_Structure_Agreement.pdf and closed the highest-value gaps
+between the agreed structure and the chapter-based builder (doc_report_builder.py).
+
+ADDED — Table of Contents (index) after the cover page:
+- New _TOCMark zero-size flowable + _ReportDoc(SimpleDocTemplate).afterFlowable that notifies
+  ReportLab's TableOfContents. chapter_splash emits a level-0 mark at the top of each chapter
+  page (chapter title lives inside a Table, so it is not a direct Paragraph); step_h tags its
+  heading Paragraph level 1, sub_h level 2 — accurate page numbers.
+- build_full_report now renders a "Table of Contents" page (3-level styles, dotted leaders) after
+  the cover and uses doc.multiBuild() (two passes) so the page numbers resolve.
+
+ADDED — data-backed sections that were missing vs the agreement (all from real engine output):
+- 5.6 Capacitor Bank Summary — consolidated design-margins table (installed-vs-required C,
+  voltage rating, hottest-case temp, service life) with per-check status.
+- 6.7 Soft-Start and Protection — C_SS = I_SS·t_SS/V_SS eq_box + protection-component table
+  (C_SS, R_CS/ILIMIT, BIBO) from design_control_loops (css, t_ss_ms, RCS_mOhm).
+- 6.8 Control Network Bill of Materials — full compensator + feedback-divider + soft-start BOM
+  (R_IC/C1_IC/C2_IC, R2/[R3]/C1_V/[C2_V]/C3_V/R_FB1/R_FB2, C_SS) with reference designators.
+
+documentation_agent.py: updated the Chapter 5 and Chapter 6 section lists in _assess_chapters to
+match the new structure (5.1–5.6; 6.1/6.2/6.4/6.5/6.6/6.7/6.8).
+
+Verified: py_compile OK; full report builds via the real endpoint chain (77 -> 84 pages);
+TOC page rendered + visually confirmed (chapters bold/navy, sections + subsections indented,
+dotted leaders, correct page numbers); 5.6 / 6.7 / 6.8 rendered with real values
+(e.g. 6.8 BOM: R_IC 267 k�, R2 154 kΩ, C_SS 200 nF). Sample PDF refreshed.
+
+NOT YET DONE (larger items deferred — flagged for a follow-up): front matter (revision history,
+executive-summary scorecard, nomenclature, abbreviations tables); back matter appendices A–D
+(BOM/bench-plan/sensitivity/references); Chapter 4 §4.8 CCM/DCM boundary check (engine now exposes
+dcm_fraction — collides with the existing "4.8 Simulation-Agent Verification", needs renumber) and
+§4.9 design-validation checklist; Chapter 6 §6.3 FAN9672 pin map.

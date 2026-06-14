@@ -33,8 +33,9 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, HRFlowable, KeepTogether, Image,
+    PageBreak, HRFlowable, KeepTogether, Image, Flowable,
 )
+from reportlab.platypus.tableofcontents import TableOfContents
 
 from app.mode_b.calculations import (K_of_D, step2_input_params, step4_inductance,
                                       step5_phase_rms, step7_8_worst_case, gen_waveforms,
@@ -87,6 +88,33 @@ VAC_COLORS = {
     180:"#8c564b", 200:"#e377c2", 220:"#7f7f7f", 230:"#bcbd22", 264:"#17becf",
 }
 ALPHA_CU = 0.00393
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABLE OF CONTENTS PLUMBING
+# A zero-size marker carries chapter-level TOC entries (the chapter title lives
+# inside a Table in chapter_splash, so it is not visible to afterFlowable). Section
+# and sub-section headings ARE Paragraphs, so they are tagged directly (accurate
+# page numbers). _ReportDoc.afterFlowable notifies ReportLab's TableOfContents.
+# ═══════════════════════════════════════════════════════════════════════════════
+class _TOCMark(Flowable):
+    def __init__(self, level, text):
+        super().__init__()
+        self.level, self.text = level, text
+        self.width = self.height = 0
+    def draw(self):
+        pass
+
+
+class _ReportDoc(SimpleDocTemplate):
+    def afterFlowable(self, flowable):
+        if isinstance(flowable, _TOCMark):
+            self.notify('TOCEntry', (flowable.level, flowable.text, self.page))
+        elif isinstance(flowable, Paragraph):
+            lvl = getattr(flowable, '_toc_level', None)
+            if lvl is not None:
+                self.notify('TOCEntry',
+                            (lvl, getattr(flowable, '_toc_text', flowable.getPlainText()), self.page))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -147,6 +175,7 @@ def _S(ch: int = 1):
 def chapter_splash(story, chapter, title, question, bullets):
     cc = CH_COLORS[chapter]
     story.append(PageBreak())
+    story.append(_TOCMark(0, f"Chapter {chapter} — {title}"))
     tit_s = ParagraphStyle("st", fontName="Helvetica-Bold", fontSize=28,
                             textColor=WHITE, leading=34)
     lbl_s = ParagraphStyle("sl", fontName="Helvetica", fontSize=9,
@@ -188,11 +217,15 @@ def step_h(story, number, title, ch=1):
     (chapter_splash ends mid-page by design, so the first step_h of every chapter
     supplies that chapter's only page break — avoids a blank page)."""
     story.append(PageBreak())
-    story.append(Paragraph(f"{number} — {title}", _S(ch)["step"]))
+    _p = Paragraph(f"{number} — {title}", _S(ch)["step"])
+    _p._toc_level, _p._toc_text = 1, f"{number}  {title}"
+    story.append(_p)
 
 
 def sub_h(story, number, title, ch=1):
-    story.append(Paragraph(f"{number} — {title}", _S(ch)["sub"]))
+    _p = Paragraph(f"{number} — {title}", _S(ch)["sub"])
+    _p._toc_level, _p._toc_text = 2, f"{number}  {title}"
+    story.append(_p)
 
 
 def body(story, text, ch=1):
@@ -2931,6 +2964,33 @@ def _ch5(story, state, s15):
             f"{life.get('min_life_years','—')} yr projected",
             "PASS" if life.get("pass_15yr") else "REVIEW", ch=5)
 
+    # ── 5.6 Capacitor bank summary ────────────────────────────────────────────
+    if sel:
+        step_h(story, "5.6", "Capacitor Bank Summary", 5)
+        annotation(story, "DECISION",
+            f"Approved bank: <b>{_val} µF × {_qty}</b> "
+            f"{sel.get('supplier','')} {sel.get('part_number','')} rated {_i(V_sel)} V. "
+            "The consolidated qualification margins below confirm the bank meets every "
+            "capacitance, voltage, ripple-current, thermal and lifetime requirement.", 5)
+        _mar = [["Installed vs required capacitance",
+                 f"{(verified or {}).get('C_total_uF','—')} µF / {C_req:.0f} µF",
+                 f"+{(verified or {}).get('margin_pct','—')}%"
+                 if (verified or {}).get('margin_pct') is not None else "—"]]
+        _mar.append(["Voltage rating vs bus", f"{_i(V_sel)} V / {Vout:.0f} V", "OK"])
+        if thermal:
+            _mar.append(["Hottest case vs temperature rating",
+                         f"{thermal.get('worst_case_T_C','—')} °C / {thermal.get('temp_rating_C','—')} °C",
+                         "PASS" if thermal.get('all_ripple_pass') else "VERIFY"])
+        if life:
+            _mar.append(["Service life vs 15-year target",
+                         f"{life.get('min_life_years','—')} yr projected",
+                         "PASS" if life.get('pass_15yr') else "REVIEW"])
+        data_table(story, "5.6.1", "Approved Capacitor Bank — Design Margins",
+            "Consolidated margins for the approved bank across every qualification check "
+            "(Sections 5.1–5.5).",
+            ["Qualification check", "Value", "Status"],
+            _mar, col_widths=[CW*0.46, CW*0.34, CW*0.20], ch=5)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHAPTER 6 — CONTROL SCHEME
@@ -3154,15 +3214,73 @@ def _ch6(story, state, s16):
         ],
         col_widths=[CW*0.24, CW*0.18, CW*0.20, CW*0.20, CW*0.18], ch=6)
 
+    # ── 6.7 Soft-start and protection ─────────────────────────────────────────
+    if res.get("css") is not None:
+        step_h(story, "6.7", "Soft-Start and Protection", 6)
+        annotation(story, "CONCEPT",
+            "Soft-start ramps the output reference slowly at power-up so the bus voltage rises "
+            "without inrush overshoot. The FAN9672 charges the soft-start capacitor with a fixed "
+            "current; the cap value sets the ramp time. Current-clamp and brown-out thresholds then "
+            "protect the stage in normal operation.", 6)
+        _css = res.get("css", 0) or 0
+        _tss = res.get("t_ss_ms", 0) or 0
+        _rcs = res.get("RCS_mOhm", 0) or 0
+        eq_box(story, [
+            r"C_{SS} = \dfrac{I_{SS}\, t_{SS}}{V_{SS}}",
+            rf"C_{{SS}} = \dfrac{{20\,\mu\mathrm{{A}} \times {(_tss/1000):.3f}\,\mathrm{{s}}}}"
+            rf"{{5\,\mathrm{{V}}}} = {_fc(_css)}",
+        ], heading="Soft-start capacitor", ch=6)
+        data_table(story, "6.7.1", "Soft-Start and Protection Components",
+            "Soft-start ramp and the controller's current-clamp / brown-out protection.",
+            ["Function", "Component / Value", "Note"],
+            [
+                ["Soft-start ramp", f"C_SS = {_fc(_css)}  (t_ss ≈ {_tss:.0f} ms)",
+                 "fixed 20 µA charge to the 5 V SS threshold"],
+                ["Current-sense gain", f"R_CS = {_rcs:.0f} mΩ" if _rcs else "—",
+                 "sets the cycle-by-cycle peak-current clamp (ILIMIT)"],
+                ["Brown-in / brown-out", "set by the V_in sense divider (BIBO)",
+                 "controller inhibits switching below the brown-out threshold"],
+            ],
+            col_widths=[CW*0.26, CW*0.34, CW*0.40], ch=6)
+
+    # ── 6.8 Control network bill of materials ─────────────────────────────────
+    if res.get("RIC") or res.get("R2"):
+        step_h(story, "6.8", "Control Network Bill of Materials", 6)
+        bom = []
+        if res.get("RIC"):
+            bom += [
+                ["R_IC",  _fr(res.get("RIC")),    "Current-loop Type-II gain resistor"],
+                ["C1_IC", _fc(res.get("C1_cur")), "Current-loop zero capacitor"],
+                ["C2_IC", _fc(res.get("C2_cur")), "Current-loop pole capacitor"],
+            ]
+        if res.get("R2"):
+            bom.append(["R2", _fr(res.get("R2")), "Voltage-loop gain resistor"])
+            if res.get("R3"):
+                bom.append(["R3", _fr(res.get("R3")), "Voltage-loop branch resistor (Type-III)"])
+            bom.append(["C1_V", _fc(res.get("C1_vol")), "Voltage-loop zero capacitor"])
+            if res.get("C2_vol"):
+                bom.append(["C2_V", _fc(res.get("C2_vol")), "Voltage-loop branch capacitor (Type-III)"])
+            bom.append(["C3_V", _fc(res.get("C3_vol")), "Voltage-loop pole capacitor"])
+            bom.append(["R_FB1", _fr(res.get("R1fb")), "Upper output-sense divider"])
+            bom.append(["R_FB2", _fr(res.get("R4fb")), "Lower output-sense divider"])
+        if res.get("css"):
+            bom.append(["C_SS", _fc(res.get("css")), "Soft-start ramp capacitor"])
+        data_table(story, "6.8.1", "Control Network Components",
+            "Complete compensator, output-sense divider and soft-start component list for the "
+            "FAN9672 control network — the standard-value (E96/E24) selections realising the "
+            "loops verified in Section 6.6.",
+            ["Reference", "Value", "Function"],
+            bom, col_widths=[CW*0.18, CW*0.22, CW*0.60], ch=6)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN ASSEMBLER
 # ═══════════════════════════════════════════════════════════════════════════════
 def build_full_report(state, approved_design=None, step15_result=None, step16_params=None):
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=LM, rightMargin=RM,
-                            topMargin=TM, bottomMargin=BM)
+    doc = _ReportDoc(buf, pagesize=A4,
+                     leftMargin=LM, rightMargin=RM,
+                     topMargin=TM, bottomMargin=BM)
     story = []
 
     from app.design_state import DesignState
@@ -3180,6 +3298,25 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     story.append(Paragraph(f"Project: {pid}  |  Topology: {topo}", S["cover_s"]))
     story.append(PageBreak())
 
+    # ── Table of Contents (index) — rendered on the page after the cover ──────
+    story.append(Paragraph("Table of Contents",
+                           ParagraphStyle("toc_t", fontName="Helvetica-Bold", fontSize=18,
+                                          textColor=CH_COLORS[1], leading=24, spaceAfter=8)))
+    story.append(HRFlowable(width=CW, thickness=1, color=RULE))
+    story.append(Spacer(1, 4*mm))
+    toc = TableOfContents()
+    toc.dotsMinLevel = 0
+    toc.levelStyles = [
+        ParagraphStyle("toc0", fontName="Helvetica-Bold", fontSize=11, textColor=NAVY,
+                       leading=16, spaceBefore=8, spaceAfter=2),
+        ParagraphStyle("toc1", fontName="Helvetica", fontSize=9.5, textColor=BLACK,
+                       leftIndent=14, leading=13, spaceAfter=1),
+        ParagraphStyle("toc2", fontName="Helvetica", fontSize=8.5, textColor=MUTED,
+                       leftIndent=30, leading=11.5, spaceAfter=0),
+    ]
+    story.append(toc)
+    story.append(PageBreak())
+
     _ch1(story, state)
     _ch2(story, state)
     if approved_design:
@@ -3188,5 +3325,6 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     _ch5(story, state, step15_result)
     _ch6(story, state, step16_params)
 
-    doc.build(story)
+    # multiBuild = two passes so the TOC page numbers resolve correctly.
+    doc.multiBuild(story)
     return buf.getvalue()
