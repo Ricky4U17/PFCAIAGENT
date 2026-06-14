@@ -2187,6 +2187,17 @@ def _ch3(story, state, d):
     ], heading="Bias-aware turns convergence — N increments until the AL,min-derated "
                "inductance clears 85% of target under worst-case DC bias", ch=3)
 
+    annotation(story, "THEORY",
+        "Reading the equation term by term: the magnetising field is H = N·I / l<sub>e</sub> in "
+        "A/m. The powder DC-bias curve in the database is indexed in <b>oersteds</b>, and "
+        "<b>1 Oe = 79.577 A/m</b> (= 1000/4π), so dividing N·I/l<sub>e</sub> (with l<sub>e</sub> "
+        "in metres) by 79.577 converts the field to the Oe the curve expects: "
+        f"H<sub>Oe</sub> = {N}·{I_dc_worst:.3f} / ({Le_s:.4f}·79.577) = {H_Oe_worst:.2f} Oe. "
+        "<b>k<sub>bias</sub> = k(H<sub>Oe</sub>)</b> is the permeability-retention factor read "
+        "from that curve — the fraction of the no-bias inductance that survives at this field "
+        f"(here k = {k_bias_worst:.4f}, i.e. {k_bias_worst*100:.1f}% retained). The retained "
+        f"inductance is then L<sub>full,min</sub> = N²·A<sub>L,min</sub>·k = {L_full_min_uH:.1f} µH.", 3)
+
     annotation(story, "PITFALL",
         f"N is selected by the iterative <b>bias-aware</b> convergence loop, not "
         f"by the naive estimate N = ⌈√(L<sub>target</sub>/A<sub>L,nom</sub>)⌉ = {N_naive} "
@@ -2209,6 +2220,39 @@ def _ch3(story, state, d):
         rf"L_{{0,max}} = {AL_max:.1f}\ \mathrm{{nH/T^2}} \times {N}^2 = {L0_max:.3f}\ \mu\mathrm{{H}}",
     ], heading="No-load inductance across the A_L tolerance band", ch=3)
 
+    # Items 14/15 — full-load (DC-biased) inductance: worst case + all 9 operating points.
+    lvt = d.get("L_vs_Vin_table", []) or []
+    if lvt:
+        wrow = min(lvt, key=lambda r: float(r.get("L_full_nom_uH", 1e9)))
+        body(story,
+            "Under DC bias the powder permeability rolls off, so the full-load inductance is "
+            "lower than the no-load L<sub>0</sub> above. The worst case (lowest retained "
+            f"inductance) is at <b>{float(wrow.get('Vin_rms',0)):.0f} V<sub>ac</sub></b>: bias "
+            f"field H = {float(wrow.get('H_Oe',0)):.1f} Oe, retention k(H) = "
+            f"{float(wrow.get('k_bias',1)):.4f}, giving nominal full-load "
+            f"L<sub>full</sub> = {float(wrow.get('L_full_nom_uH',0)):.1f} µH "
+            f"(A<sub>L,min</sub> band {float(wrow.get('L_full_min_uH',0)):.1f} µH). "
+            f"Every point stays above 85% of the {L_tgt:.0f} µH target.", 3)
+        _lr, _wi = [], lvt.index(wrow)
+        for r in lvt:
+            _lr.append([
+                f"{float(r.get('Vin_rms',0)):.0f}",
+                f"{float(r.get('Iavg_crest',0)):.3f}",
+                f"{float(r.get('H_Oe',0)):.1f}",
+                f"{float(r.get('k_bias',1)):.4f}",
+                f"{float(r.get('L_full_min_uH',0)):.1f}",
+                f"{float(r.get('L_full_nom_uH',0)):.1f}",
+                f"{float(r.get('L_full_max_uH',0)):.1f}",
+            ])
+        data_table(story, "3.5.4", "Full-Load Inductance vs Input Voltage — All 9 Operating Points",
+            "DC-bias-derated inductance at each operating point, across the A<sub>L</sub> "
+            "min/nom/max band. Amber row = worst case (lowest retained inductance).",
+            ["V<sub>in</sub> (V)", "I<sub>φ,crest</sub> (A)", "H (Oe)", "k(H)",
+             "L<sub>full,min</sub> (µH)", "L<sub>full,nom</sub> (µH)", "L<sub>full,max</sub> (µH)"],
+            _lr,
+            col_widths=[CW*0.12, CW*0.16, CW*0.12, CW*0.12, CW*0.16, CW*0.16, CW*0.16],
+            worst_rows=[_wi], ch=3)
+
     sub_h(story, "3.5.5", "Window fill factor FF_cu", 3)
     Cu_area_one = math.pi*(d_str/2)**2*n_str if d_str else Cu_area1
     eq_box(story, [
@@ -2228,6 +2272,24 @@ def _ch3(story, state, d):
         f"Insulated fill factor K<sub>u</sub> = F<sub>F</sub> × (1 + insulation overhead) "
         f"≈ {Ku:.3f}. Practical limit for hand-wound toroid is 0.55–0.65. "
         + ("✓ Within limit." if Ku <= 0.65 else "⚠ Review winding approach."), 3)
+
+    # Item 16 — current density: step-by-step before the winding decision.
+    sub_h(story, "3.5.7", "Current density check", 3)
+    annotation(story, "CONCEPT",
+        "Current density J is the rated RMS current divided by the copper cross-section carrying "
+        "it. It sets the ohmic loss per unit volume and the local temperature rise; fan-cooled "
+        "magnet wire is typically held to ≈ 4–7 A/mm².", 3)
+    _Acu_cond = n_par * Cu_area_one
+    _Jcalc = (Iph_rms / _Acu_cond) if _Acu_cond else 0.0
+    eq_box(story, [
+        r"A_{cu,bundle} = n_{par}\, A_{cu,1}\ ,\qquad J = \dfrac{I_{\varphi,rms}}{A_{cu,bundle}}",
+        rf"A_{{cu,bundle}} = {n_par} \times {Cu_area_one:.4f} = {_Acu_cond:.4f}\ \mathrm{{mm^2}}",
+        rf"J = \dfrac{{{Iph_rms:.4f}}}{{{_Acu_cond:.4f}}} = {_Jcalc:.2f}\ \mathrm{{A/mm^2}}",
+    ], heading="Copper current density at rated per-phase RMS current", ch=3)
+    _Jrep = J_Amm2 or _Jcalc
+    verdict_row(story, "Current density",
+        f"J = {_Jrep:.2f} A/mm²  (target ≤ 7 A/mm² for fan-cooled magnet wire)",
+        "PASS" if _Jrep <= 7.0 else "REVIEW", ch=3)
 
     annotation(story, "DECISION",
         f"Wire confirmed: <b>{wire}</b>, N = <b>{N} turns</b>, "
@@ -2251,14 +2313,24 @@ def _ch3(story, state, d):
         rf"\ell_{{cu}} = \dfrac{{N\, \mathrm{{MLT}}\, n_{{par}}}}{{1000}} = \dfrac{{{N} \times {MLT_mm:.4f} \times {n_par}}}{{1000}} = {Cu_len:.4f}\ \mathrm{{m}}",
     ], heading="Mean turn length and total copper length", ch=3)
     eq_box(story, [
-        r"R'(T) = R'(20^\circ\mathrm{C})\,[1 + \alpha\,(T - 20)]",
-        (rf"R'(20^\circ\mathrm{{C}}) = {Rppm:.6f}\ \Omega/\mathrm{{m}}" if Rppm
-         else r"R'(20^\circ\mathrm{C})\ \mathrm{from\ wire\ table}"),
-        rf"\mathrm{{DCR}}(25^\circ\mathrm{{C}}) = {DCR25:.4f}\ \mathrm{{m}}\Omega",
-        rf"\mathrm{{DCR}}(100^\circ\mathrm{{C}}) = \mathrm{{DCR}}(25^\circ\mathrm{{C}})\,(1 + 0.00393 \times 80) = {DCR100:.4f}\ \mathrm{{m}}\Omega",
-    ], heading="DCR temperature correction", ch=3)
+        r"\mathrm{DCR}(T) = R'(20^\circ\mathrm{C})\,[1 + \alpha\,(T - 20)]\,\ell_{cu}",
+        (rf"R'(20^\circ\mathrm{{C}}) = {Rppm:.6f}\ \Omega/\mathrm{{m}},\ \ "
+         rf"\ell_{{cu}} = {Cu_len:.4f}\ \mathrm{{m}},\ \ \alpha = 0.00393\ \mathrm{{K^{{-1}}}}"
+         if Rppm else r"R'(20^\circ\mathrm{C})\ \mathrm{from\ wire\ table}"),
+        (rf"\mathrm{{DCR}}(25^\circ\mathrm{{C}}) = {Rppm:.6f} \times [1 + 0.00393\times5] "
+         rf"\times {Cu_len:.4f} \times 1000 = {DCR25:.4f}\ \mathrm{{m}}\Omega"
+         if Rppm else rf"\mathrm{{DCR}}(25^\circ\mathrm{{C}}) = {DCR25:.4f}\ \mathrm{{m}}\Omega"),
+        (rf"\mathrm{{DCR}}(100^\circ\mathrm{{C}}) = {Rppm:.6f} \times [1 + 0.00393\times80] "
+         rf"\times {Cu_len:.4f} \times 1000 = {DCR100:.4f}\ \mathrm{{m}}\Omega"
+         if Rppm else rf"\mathrm{{DCR}}(100^\circ\mathrm{{C}}) = {DCR100:.4f}\ \mathrm{{m}}\Omega"),
+    ], heading="DC resistance from per-metre wire resistance × total length × temperature factor", ch=3)
 
-    sub_h(story, "3.6.2", "Core loss estimate (anchored to Steinmetz model)", 3)
+    sub_h(story, "3.6.2", "Copper and core loss estimate (peak-point)", 3)
+    eq_box(story, [
+        r"P_{cu}(T) = I_{\varphi,rms}^2 \, \mathrm{DCR}(T)",
+        rf"P_{{cu}}(25^\circ\mathrm{{C}}) = {Iph_rms:.4f}^2 \times {DCR25/1000:.6f} = {Pcu25:.4f}\ \mathrm{{W}}",
+        rf"P_{{cu}}(100^\circ\mathrm{{C}}) = {Iph_rms:.4f}^2 \times {DCR100/1000:.6f} = {Pcu100:.4f}\ \mathrm{{W}}",
+    ], heading="Copper loss from per-phase RMS current and DCR", ch=3)
     eq_box(story, [
         rf"B_{{ac,pk}} = \dfrac{{\Delta B_{{pp}}}}{{2}} = {Bac_val:.6f}\ \mathrm{{T}} \quad (90\ \mathrm{{V_{{ac}}}}\ \mathrm{{crest}})",
         rf"V_{{e,total}} = {Ve_cm3:.3f}\ \mathrm{{cm^3}}",

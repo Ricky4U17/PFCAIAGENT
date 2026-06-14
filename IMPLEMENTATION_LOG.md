@@ -2343,3 +2343,29 @@ PASS 2 (pending): step-by-step calc narratives + new tables (DCR 25/100C steps, 
 3.6.2, current-density 3.5.7, full-load L table in 3.5.4, iGSE worked steps 4.4/4.5, method-vs-
 method loss comparison 4.7, thermal calc steps, 9-point flux table 4.3 with correct Bsat,
 capacitor calc steps 5.4/5.5); figures (4.1 2D winding cross-section, thermal 2D/3D).
+
+### 2026-06-13 — Improvements & Corrections (pass 2a: Chapter 3 calculation detail)
+
+doc_report_builder.py _ch3 — added the step-by-step calculations the designer asked for:
+- 3.5.3 (item 12): THEORY box explaining the 79.577 factor (1 Oe = 79.577 A/m = 1000/4pi, the
+  Oe<->A/m conversion the DB bias curve is indexed in) and k(H) (the permeability-retention
+  factor), term by term with the design's own numbers.
+- 3.5.4 (items 14/15): full-load (DC-biased) inductance — worst-case narrative (which Vin,
+  H, k(H), L_full) plus Table 3.5.4, the 9-point L_full(min/nom/max) sweep from the engine's
+  L_vs_Vin_table, worst row highlighted.
+- 3.5.7 (item 16): NEW "Current density check" subsection — CONCEPT + J = I_rms / (n_par*A_cu,1)
+  worked equation + PASS/REVIEW verdict against the 7 A/mm^2 target.
+- 3.6.1 (item 17): DCR eq expanded to show DCR(T) = R'(20C)*[1+alpha*(T-20)]*l_cu with the full
+  numeric substitution at 25 C and 100 C (per-metre R x total length x temperature factor) —
+  also corrected the from-25C 100 C factor (now both derived from the 20 C reference).
+- 3.6.2 (item 18): added the copper-loss calculation Pcu(T) = I_phi,rms^2 * DCR(T) with numeric
+  substitution at 25 C and 100 C (previously only core loss was shown); retitled 3.6.2 to cover
+  both copper and core loss.
+
+Verified: py_compile OK; report rebuilds (84 pages); all five additions present; 3.5.4 table and
+the 3.6 DCR/copper-loss page visually confirmed (DCR 33.23/42.83 mOhm, Pcu 3.49/4.50 W).
+
+PASS 2 REMAINING: Ch4 — 4.3 nine-point flux table (item 20), iGSE worked steps 4.4/4.5
+(item 22), method-vs-method loss comparison 4.7 (item 24), thermal calc steps (item 25);
+Ch5 — 5.4 capacitor-current/thermal calc steps (item 28), 5.5 lifetime per-method steps
+(item 29); FIGURES — 4.1 2D winding cross-section (item 19), thermal 2D/3D (item 25).
