@@ -2964,32 +2964,38 @@ def _ch4(story, state, d):
     # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
 
-    # Item 24 / 2d — Method 1 (Ch3 peak-point) vs Method 2 (Ch4 iGSE): core, copper AND total.
-    if Pcore_peak and Pcore_cavg:
-        _r90 = lt100[0] if lt100 else {}
-        _pcu90 = float(_r90.get("Pcu_W", 0) or 0)        # copper at 90 Vac (same I²R basis in both)
-        _t1 = Pcore_peak + _pcu90                          # Method 1 total
-        _t2 = Pcore_cavg + _pcu90                          # Method 2 total
-        _dcore = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
-        _dtot  = (_t2 - _t1) / _t1 * 100 if _t1 else 0.0
-        data_table(story, "4.5", "Loss Comparison at 90 Vac — Method 1 (peak-point) vs Method 2 (iGSE)",
-            "Method 1 is the Chapter 3 first-pass (Table 3.6.1: peak-point Steinmetz core loss); "
-            "Method 2 is the Chapter 4 cycle-averaged iGSE core loss. Copper loss uses the same "
-            "I²R method in both, so it is unchanged — only the core-loss method differs.",
-            ["Loss term", "Method 1 — peak-point", "Method 2 — iGSE", "Difference"],
-            [
-                ["Core loss", f"{Pcore_peak:.3f} W", f"{Pcore_cavg:.3f} W", f"{_dcore:+.0f}%"],
-                ["Copper loss", f"{_pcu90:.3f} W", f"{_pcu90:.3f} W", "—"],
-                ["Total loss", f"{_t1:.3f} W", f"{_t2:.3f} W", f"{_dtot:+.0f}%"],
-            ],
-            col_widths=[CW*0.22, CW*0.28, CW*0.28, CW*0.22], ch=4)
+    # Item 24 / 2d / Task-1 — Method 1 (peak-point) vs Method 2 (iGSE) at ALL 9 operating points.
+    if Pcore_peak and Pcore_cavg and lt100:
+        _bac90 = float(lt100[0].get("Bac_pk", 0) or 0)
+        rows45, w45, wt45 = [], 0, -1.0
+        for i, r in enumerate(lt100):
+            vin = float(r.get("Vin_rms", 0) or 0)
+            bac = float(r.get("Bac_pk", 0) or 0)
+            m1c = Pcore_peak * (bac / _bac90) ** 2.1 if _bac90 else 0.0   # peak-point core (scaled)
+            m2c = float(r.get("Pcore_W", 0) or 0)                          # iGSE core
+            cu  = float(r.get("Pcu_W", 0) or 0)                            # copper (same both methods)
+            m1t, m2t = m1c + cu, m2c + cu
+            if m2t > wt45:
+                wt45, w45 = m2t, i
+            rows45.append([f"{vin:.0f}", f"{m1c:.3f}", f"{m2c:.3f}", f"{cu:.3f}", f"{m1t:.3f}", f"{m2t:.3f}"])
+        data_table(story, "4.5",
+            "Loss Comparison — Method 1 (peak-point) vs Method 2 (iGSE), All 9 Operating Points",
+            "Method 1 = Chapter 3 first-pass peak-point Steinmetz core loss, scaled by "
+            "(B<sub>ac</sub>/B<sub>ac,90</sub>)<sup>2.1</sup>; Method 2 = Chapter 4 cycle-averaged "
+            "iGSE core loss. Copper loss uses the same I²R method in both, so totals differ only by "
+            "the core-loss method. Amber row = highest (worst-case) total.",
+            ["V<sub>in</sub> (V)", "Core M1 (W)", "Core M2 (W)", "Copper (W)",
+             "Total M1 (W)", "Total M2 (W)"],
+            rows45,
+            col_widths=[CW*0.13, CW*0.18, CW*0.18, CW*0.15, CW*0.18, CW*0.18],
+            worst_rows=[w45], ch=4)
+        _dc90 = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
         annotation(story, "INSIGHT",
-            f"The peak-point estimate evaluates core loss only at the line crest — where B<sub>ac</sub> "
-            "is largest — and applies that swing to the whole cycle, overestimating at low line where "
-            f"the duty cycle sits far from 0.5. The iGSE F(D) correction integrates the true per-angle "
-            f"flux swing, giving a {abs(_dcore):.0f}% {'lower' if _dcore < 0 else 'higher'} core loss "
-            f"and a {abs(_dtot):.0f}% {'lower' if _dtot < 0 else 'higher'} total — the cycle-averaged "
-            "value is what the final thermal design uses.", 4)
+            f"At 90 V<sub>ac</sub> the peak-point core loss ({Pcore_peak:.3f} W) overestimates the "
+            f"cycle-averaged iGSE value ({Pcore_cavg:.3f} W) by {abs(_dc90):.0f}% because the crest "
+            "duty cycle sits far from 0.5; the gap narrows toward high line where D approaches 0.5. "
+            "Copper loss is identical in both methods, so the cycle-averaged total — which the thermal "
+            "design uses — is correspondingly lower than the first-pass screening estimate.", 4)
 
     # Item 25 — thermal calculation steps + per-Vin temperature-rise table.
     _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else float(d.get("Ptotal_100C_W", 0) or 0)
@@ -3330,15 +3336,40 @@ def _ch5(story, state, s15):
         _life_steps(life["method2"])
         _m3 = life.get("method3", {}) or {}
         if _m3:
+            _Tmax = float(sel.get("temp_rating_C", 105) or 105)
+            _Vr   = float(V_sel or 450)
+            _ieq  = float(_m3.get('I_eq_A', 0) or 0); _dtj = float(_m3.get('dTj_C', 0) or 0)
+            _tc3  = float(_m3.get('T_core_C', 0) or 0)
+            _ft3  = float(_m3.get('f_T', 0) or 0); _fi3 = float(_m3.get('f_I', 0) or 0)
+            _fv3  = float(_m3.get('f_V', 0) or 0)
+            _dTo, _kprod, _kv = 10.0, 0.25, 3.37
+            _dToD = 10 - _kprod * _dTo                # = 7.5
+            _dTjD = 10 - _kprod * _dtj
+            _l3h  = float(_m3.get('life_hours', 0) or 0)
+            _L03  = _l3h / (_ft3 * _fi3 * _fv3) if (_ft3 and _fi3 and _fv3) else 0.0
             eq_box(story, [
-                rf"I_{{eq}} = \sqrt{{(I_{{LF}}/k_{{LF}})^2 + (I_{{HF}}/k_{{HF}})^2}} "
-                rf"= {float(_m3.get('I_eq_A',0) or 0):.3f}\ \mathrm{{A}}\ \Rightarrow\ "
-                rf"\Delta T_j = {float(_m3.get('dTj_C',0) or 0):.2f}\,^\circ\mathrm{{C}},\quad "
-                rf"T_{{core}} = {float(_m3.get('T_core_C',0) or 0):.1f}\,^\circ\mathrm{{C}}",
-                rf"L = L_0\,f_T\,f_I\,f_V,\quad f_T = {float(_m3.get('f_T',0) or 0):.2f},\ "
-                rf"f_I = {float(_m3.get('f_I',0) or 0):.3f},\ f_V = {float(_m3.get('f_V',0) or 0):.3f}"
-                rf"\ \Rightarrow\ L = {float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}}",
+                rf"I_{{eq}} = \sqrt{{(I_{{LF}}/k_{{LF}})^2 + (I_{{HF}}/k_{{HF}})^2}},\ "
+                rf"k_{{LF}}=1.00,\ k_{{HF}}=1.94\ \Rightarrow\ I_{{eq}} = {_ieq:.3f}\ \mathrm{{A}}",
+                rf"\Delta T_j = \Delta T_o\,(I_{{eq}}/I_o)^2 = {_dtj:.2f}\,^\circ\mathrm{{C}}"
+                rf"\ \Rightarrow\ T_{{core}} = 50 + {_dtj:.2f} = {_tc3:.1f}\,^\circ\mathrm{{C}}",
+                rf"f_T = 2^{{(T_{{max}}-T_{{amb}})/10}} = 2^{{({_Tmax:.0f}-50)/10}} "
+                rf"= 2^{{{(_Tmax-50)/10:.2f}}} = {_ft3:.2f}",
+                rf"d_{{To}} = 10 - 0.25\,\Delta T_o = {_dToD:.2f},\qquad "
+                rf"d_{{Tj}} = 10 - 0.25\,\Delta T_j = {_dTjD:.3f}",
+                rf"f_I = 2^{{\Delta T_o/d_{{To}} - \Delta T_j/d_{{Tj}}}} "
+                rf"= 2^{{{_dTo:.0f}/{_dToD:.2f} - {_dtj:.2f}/{_dTjD:.3f}}} = {_fi3:.3f}",
+                rf"f_V = 5(k_v-1)(1 - V_{{op}}/V_{{rated}}) + 1 "
+                rf"= 5(2.37)(1 - {Vout:.0f}/{_Vr:.0f}) + 1 = {_fv3:.3f}\quad(\leq k_v = {_kv})",
+                rf"L = L_0\,f_T\,f_I\,f_V = {_L03:,.0f}\times{_ft3:.2f}\times{_fi3:.3f}\times{_fv3:.3f} "
+                rf"= {_l3h:,.0f}\ \mathrm{{h}}\ ({float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}})",
             ], heading=_m3.get("name", "Method 3 — Manufacturer Model"), ch=5)
+            body(story,
+                "Constants (radial-leaded aluminium): k<sub>LF</sub>, k<sub>HF</sub> are the "
+                "low-/high-frequency ripple-current multipliers; ΔT<sub>o</sub> = 10 °C is the rated "
+                "core rise; k<sub>prod</sub> = 0.25 the product-type coefficient; k<sub>v</sub> = 3.37 "
+                "the can-size constant; I<sub>o</sub> is the datasheet rated 120 Hz ripple current. "
+                "Note f<sub>T</sub> here uses T<sub>amb</sub> (not T<sub>core</sub>), per the "
+                "manufacturer model.", 5)
 
         def _mrow(m):
             lh = m.get("life_hours")
