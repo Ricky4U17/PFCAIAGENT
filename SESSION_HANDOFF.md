@@ -57,12 +57,12 @@ diameter logic.
 2. **Page 77 / Method 3 lifetime:** more detail for f_T, f_I, f_V — no shortcuts/approximations
    (show the full manufacturer-model derivation: I_eq with k_LF/k_HF, ΔTj, the f_T/f_I/f_V
    formulas with every constant substituted). Source: `step15_cap_db.calculate_lifetime` method3.
-3. **Apply all 12 v11 quantities** (from the task-3 table) with detailed calcs + 9-voltage tables
-   where relevant:
-   1 K_harm (E4) in copper loss · 2 Rac/Rdc derivation (E31–33) · 3 DCM/CCM boundary 9-pt (E19) ·
-   4 per-θ flux waveforms (E20, figure) · 5 inner-bore crowding B_inner 9-pt (E23) · 6 L_full,min@pk
-   (E25) · 7 bore layer count (E34–35) · 8 loss uncertainty band ±5–20% (E39) · 9 thermal
-   convergence loop (E45) · 10 two-node thermal Rca/Rwa/Rcw (E46–47) · 11 composite ranking score
-   (E50) · 12 Pcore(θ) waveform + double-hump (E38, figure).
-   Data-ready (low effort): 1, 2, 5, 6, 8, 11. Figure/series-heavy: 4, 9, 10, 12 (and per-Vin
-   versions of 5/6/8 need recompute in the report or new engine outputs).
+3. **Apply all 12 v11 quantities** (from the task-3 table). STATUS as of 2026-06-14:
+   - DONE: #1 K_harm (4.4 copper-loss eq+THEORY) · #5 inner-bore crowding B_inner 9-pt (4.3 table
+     +crowd eq) · #6 L_full,min@pk (4.2 eq+note) · #8 loss uncertainty band +5–20% (4.7 eq+note).
+   - TODO (next): #2 Rac/Rdc derivation (E31–33, → 3.5 skin/Fprox) · #3 DCM/CCM boundary 9-pt
+     (E19, dcm_fraction; per-Vin needs recompute) · #4 per-θ flux waveforms (E20, FIGURE) ·
+     #7 bore layer count N_lay/turns-per-layer (E34–35) · #9 thermal convergence loop (E45) ·
+     #10 two-node thermal Rca/Rwa/Rcw + hotspot (E46–47, → 4.7) · #11 composite ranking score
+     (E50, score field + all_candidates, → 3.4) · #12 Pcore(θ) waveform + double-hump (E38, FIGURE).
+   Quick remaining (data-ready): #2, #11. Heavier: #4, #12 (figures), #10 (two-node), #9, #3, #7.

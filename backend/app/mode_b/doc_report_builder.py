@@ -2790,6 +2790,20 @@ def _ch4(story, state, d):
         body(story, "Per-point inductance table not available in this design payload.", 4)
 
     # ── 4.3 Flux density ─────────────────────────────────────────────────
+    # Item 6 — minimum inductance at the worst INSTANTANEOUS peak bias (more conservative).
+    _lpk = float(d.get("Lfull_min_at_peak_uH", 0) or 0)
+    if _lpk:
+        eq_box(story, [
+            r"H_{pk} = \dfrac{N\,(I_{\phi,crest} + \Delta I_{pp}/2)}{l_e \cdot 79.577},\qquad "
+            r"L_{full,min@pk} = L_{0,min}\cdot k(H_{pk})",
+            rf"L_{{full,min@pk}} = {_lpk:.1f}\ \mu\mathrm{{H}}",
+        ], heading="Minimum inductance at the worst instantaneous peak bias", number="4.1b", ch=4)
+        body(story,
+            f"This is more conservative than the crest-average values in Table 4.1: it adds half the "
+            f"switching ripple to the crest current before reading the DC-bias curve at minimum "
+            f"A<sub>L</sub>. At {_lpk:.1f} µH the inductor still holds inductance even at the "
+            "instantaneous current peak (informational — turns selection is unchanged).", 4)
+
     step_h(story, "4.3", "Flux Density Analysis", 4)
     eq_box(story, [
         r"B_{ac,pk} = \dfrac{V_{in,pk}\,D_{crest}}{2\,N\,A_e\,f_{sw}}",
@@ -2803,7 +2817,14 @@ def _ch4(story, state, d):
         f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
         "The full nine-point flux table follows.", 4)
 
-    # Item 20 — flux density at all 9 operating points (Bac,pk / Bdc / Bmax vs Bsat).
+    # Item 20 / 5 — flux density at all 9 points incl. inner-bore radial crowding.
+    crowd = float(d.get("crowd_axial", 0) or 0)
+    if crowd:
+        eq_box(story, [
+            r"\mathrm{crowd}_{ax} = \dfrac{r_{mean}}{r_{in}} = \dfrac{(ID/2 + OD/2)/2}{ID/2}",
+            rf"\mathrm{{crowd}}_{{ax}} = {crowd:.3f}\ \Rightarrow\ "
+            rf"B_{{inner}} = B_{{max}}\cdot \mathrm{{crowd}}_{{ax}}",
+        ], heading="Inner-bore radial crowding (1/r flux concentration on a toroid)", ch=4)
     Ae_tot_mm2 = float(d.get("Ae_total_mm2", 0) or (Ae_s * stacks))
     Ae_m2 = Ae_tot_mm2 * 1e-6
     if lt100 and lvt and N and Ae_m2:
@@ -2817,17 +2838,20 @@ def _ch4(story, state, d):
             ic  = float(lvr.get("Iavg_crest", 0) or 0)
             bdc = (Lh * ic / (N * Ae_m2)) if (N and Ae_m2) else 0.0
             bmx = bdc + bac
-            mar = (Bsat - bmx) / Bsat * 100 if Bsat else 0.0
-            if bmx > wB:
-                wB, wi = bmx, i
-            frows.append([f"{vin:.0f}", f"{bac:.4f}", f"{bdc:.4f}", f"{bmx:.4f}", f"{mar:.0f}%"])
+            binner = bmx * crowd if crowd else bmx
+            mar = (Bsat - binner) / Bsat * 100 if Bsat else 0.0
+            if binner > wB:
+                wB, wi = binner, i
+            frows.append([f"{vin:.0f}", f"{bac:.4f}", f"{bdc:.4f}", f"{bmx:.4f}",
+                          f"{binner:.4f}", f"{mar:.0f}%"])
         data_table(story, "4.3", "Flux Density vs Input Voltage — All 9 Operating Points",
-            f"Per-point AC peak, DC and total flux density against the saturation flux "
-            f"B<sub>sat</sub> = {_f(Bsat,2)} T (selected EDGE material, at core temperature). "
-            "Amber row = highest B<sub>max</sub>.",
+            f"AC peak, DC, mean-path total and inner-bore flux density against B<sub>sat</sub> = "
+            f"{_f(Bsat,2)} T (EDGE material at core temperature). B<sub>inner</sub> = "
+            f"B<sub>max</sub> × {crowd:.2f}; saturation margin is taken against the inner-bore peak "
+            "(the worst point). Amber row = highest B<sub>inner</sub>.",
             ["V<sub>in</sub> (V)", "B<sub>ac,pk</sub> (T)", "B<sub>dc</sub> (T)",
-             "B<sub>max</sub> (T)", "Sat. margin"],
-            frows, col_widths=[CW*0.16, CW*0.21, CW*0.21, CW*0.21, CW*0.21],
+             "B<sub>max</sub> (T)", "B<sub>inner</sub> (T)", "Sat. margin"],
+            frows, col_widths=[CW*0.14, CW*0.17, CW*0.17, CW*0.17, CW*0.17, CW*0.18],
             worst_rows=[wi], ch=4)
 
     # ── 4.4 Loss methodology ─────────────────────────────────────────────
@@ -2841,9 +2865,16 @@ def _ch4(story, state, d):
     eq_box(story, [
         r"P_v = f_{Steinmetz}(B_{ac,pk},\ f_{sw},\ T)\quad\mathrm{[W/m^3]}",
         r"P_{core} = P_v\cdot F(D)\cdot V_e",
-        r"P_{cu} = I_{\phi,rms}^2\,R_{dc}(T) + I_{hf,rms}^2\,R_{ac}(T)",
+        r"P_{cu} = I_{\phi,rms}^2\,R_{dc}(T) + I_{hf,rms}^2\,[\,R_{dc}(T) + (R_{ac}(T)-R_{dc}(T))\,K_{harm}\,]",
         r"P_{total} = P_{core} + P_{cu}",
-    ], heading="Core loss (iGSE) and split copper loss", number="4.3", ch=4)
+    ], heading="Core loss (iGSE) and split copper loss with harmonic AC-excess", number="4.3", ch=4)
+    annotation(story, "THEORY",
+        "The DC-resistance term acts on the full RMS current; the AC <i>excess</i> "
+        "(R<sub>ac</sub> − R<sub>dc</sub>) acts only on the HF ripple RMS and is multiplied by the "
+        "harmonic factor <b>K<sub>harm</sub> = 1.213</b>, because the triangular switching ripple "
+        "contains odd harmonics (n = 1, 3, 5…) that each see a higher effective AC resistance than "
+        "the fundamental. Setting K<sub>harm</sub> = 1 recovers the plain I<sub>hf</sub>²·R<sub>ac</sub> "
+        "form.", 4)
 
     # ── 4.5 Core loss — cycle-averaged vs peak-point ─────────────────────
     step_h(story, "4.5", "Core Loss — Cycle-Averaged iGSE", 4)
@@ -2996,6 +3027,19 @@ def _ch4(story, state, d):
             "duty cycle sits far from 0.5; the gap narrows toward high line where D approaches 0.5. "
             "Copper loss is identical in both methods, so the cycle-averaged total — which the thermal "
             "design uses — is correspondingly lower than the first-pass screening estimate.", 4)
+
+    # Item 8 — loss uncertainty band (+5% to +20% unanchored core loss).
+    _plo = float(d.get("P_unc_lo_W", 0) or 0); _phi = float(d.get("P_unc_hi_W", 0) or 0)
+    if _plo and _phi:
+        eq_box(story, [
+            r"P_{unc,lo} = P_{cu,100} + 1.05\,P_{core},\qquad P_{unc,hi} = P_{cu,100} + 1.20\,P_{core}",
+            rf"P_{{total}} = {_plo:.3f}\ \mathrm{{to}}\ {_phi:.3f}\ \mathrm{{W}}\quad"
+            rf"(+5\%\ \mathrm{{to}}\ +20\%\ \mathrm{{core\ loss\ band}})",
+        ], heading="Loss uncertainty band — unanchored core-loss tolerance", ch=4)
+        body(story,
+            "The database Steinmetz core loss carries a +5% to +20% uncertainty until it is anchored "
+            "to FEA or bench data, so the worst-case total is reported as a band. The thermal design "
+            "below uses the upper bound for margin.", 4)
 
     # Item 25 — thermal calculation steps + per-Vin temperature-rise table.
     _wtot = max((float(r.get("Ptotal_W", 0) or 0) for r in lt100), default=0.0) if lt100 else float(d.get("Ptotal_100C_W", 0) or 0)

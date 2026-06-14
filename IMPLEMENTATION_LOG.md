@@ -2474,3 +2474,23 @@ report back to the legacy generator (58 pages). Fixed -> chapter builder restore
 
 Verified: py_compile OK; report rebuilds via the real endpoint chain (88 pages); 0 replacement
 chars, no duplicate table refs; §6.3 pin table and the 3-method lifetime page visually confirmed.
+
+### 2026-06-14 — Table 4.5 9-voltage + Method-3 detail + 4 of the 12 v11 quantities
+
+Saved SESSION_HANDOFF.md (resume point) + project memory first.
+- Task 1: Table 4.5 loss comparison expanded to all 9 operating points (Core/Copper/Total for
+  Method 1 peak-point vs Method 2 iGSE; worst row highlighted).
+- Task 2: Method-3 lifetime fully worked (I_eq via k_LF/k_HF, ΔTj, T_core, and f_T/f_I/f_V each
+  with every constant substituted: f_T=2^((Tmax-Tamb)/10), f_I=2^(ΔTo/d_To−ΔTj/d_Tj) with
+  d_To=7.5/d_Tj, f_V=5(k_v−1)(1−Vop/Vrated)+1).
+- Task 3 (12 v11 quantities) — first 4 DONE: #1 K_harm in the 4.4 copper-loss equation (+THEORY);
+  #5 inner-bore radial crowding (4.3 crowd eq + B_inner column across all 9 points, sat margin now
+  vs inner-bore peak); #6 L_full,min@pk (4.2 eq + note); #8 loss uncertainty band +5%/+20% (4.7).
+  Remaining 8 queued in SESSION_HANDOFF.md (#2 Rac/Rdc, #3 DCM 9-pt, #4 flux waveforms[fig],
+  #7 layers, #9 convergence, #10 two-node, #11 ranking score, #12 Pcore(θ)[fig]).
+
+QA: 2 mathtext bugs caught via direct build_full_report() (\sqrt2→\sqrt{2}, \le→\leq) that would
+have silently fallen the report back to the legacy generator; also avoided \text{-} in mathtext.
+
+Verified: builds via direct builder call (89 pages); Table 4.5, Method-3, and 4.3 flux (B_inner)
+visually confirmed.
