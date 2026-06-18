@@ -154,12 +154,46 @@ curl -X POST http://localhost:8000/magnetics/validate
 
 ## Running tests
 
+### Backend (pytest)
+
 ```bash
 cd backend
 source venv/bin/activate
 python -m pytest tests/test_regression.py app/magnetics/tests/ -v
 # Expected: 99 passed
 ```
+
+### Frontend end-to-end (Playwright)
+
+`frontend/e2e/control_report.spec.cjs` drives the real Mode-A wizard
+(intake → topology → controller → channels → mini → done) against the live
+backend, then opens the Control Design page and clicks the **Control-Loop Report**
+button, asserting a valid PDF downloads from `/mode-b/control-report`.
+
+The test expects the backend on **:8077** and the built frontend served on
+**:5199**, with the app's API base pointed at the backend:
+
+```bash
+# 1. one-time: install the Chromium browser binary
+cd frontend && npx playwright install chromium
+
+# 2. build the app with its API base pointed at the test backend
+VITE_API_URL=http://localhost:8077 npm run build      # Windows PowerShell: $env:VITE_API_URL='http://localhost:8077'; npm run build
+
+# 3. start the backend (port 8077) — in a separate terminal
+cd ../backend && uvicorn app.main:app --port 8077
+
+# 4. serve the built frontend (port 5199) — in a separate terminal
+cd ../frontend/dist && python -m http.server 5199
+
+# 5. run the test
+cd ../        # back to frontend/
+node e2e/control_report.spec.cjs
+# Expected: ALL CHECKS PASSED
+```
+
+Remember to rebuild with the default (same-origin) API base for normal use:
+`cd frontend && npm run build`.
 
 ---
 
