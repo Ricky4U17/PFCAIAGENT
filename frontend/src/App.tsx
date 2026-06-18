@@ -47,6 +47,30 @@ const INIT: AppState = {
   docStatus:null, docStatusLoading:false,
 }
 
+// ── E2E test seam ────────────────────────────────────────────────────────────
+// Lets the Playwright control-report test land directly on the Control Design
+// step with minimal mock carry-through, so it can exercise the REAL ControlDesign
+// component + iframe + "Control-Loop Report" button against the live backend
+// without scripting the DB-backed Step-7/Step-15 selection UIs. Activated only
+// when window.__E2E_CONTROL__ is set (via Playwright addInitScript); inert in
+// normal use.
+function _e2eInit(): AppState | null {
+  if (typeof window === 'undefined' || !(window as any).__E2E_CONTROL__) return null
+  const intake = {
+    application: {
+      vin_rms_min: 90, vin_rms_max: 264, output_bus_voltage_v: 393.7,
+      output_power_w_low_line: 1700, output_power_w_high_line: 3600,
+    },
+  } as unknown as IntakeData
+  return {
+    ...INIT, step: 'step16', backendStatus: 'ok',
+    graphState: { project_id: 'e2e', intake, topology_specific_inputs: { recommended_frequency_hz: 70000 } },
+    intakeData: intake, selectedChannels: 2,
+    approvedInductorDesign: { L_target_uH: 235, DCR_100C_mOhm: 28 } as Record<string, unknown>,
+    approvedCapacitorDesign: { C_total_uF: 2200, ESR_parallel_mohm: 5 } as unknown as CapacitorResult,
+  }
+}
+
 const TOPO_LABEL: Record<string,string> = {
   single_boost_ccm:'Single Boost — CCM',interleaved_boost_ccm:'Interleaved Boost — CCM',
   boost_crcm:'Single Boost — CrCM',boost_dcm:'Single Boost — DCM',
@@ -61,7 +85,7 @@ const SS: Record<Step,string> = {
 }
 
 export default function App() {
-  const [s, setS] = useState<AppState>(INIT)
+  const [s, setS] = useState<AppState>(() => _e2eInit() ?? INIT)
 
   useEffect(() => {
     api.health().then(() => setS(p=>({...p,backendStatus:'ok'}))).catch(() => setS(p=>({...p,backendStatus:'error'})))

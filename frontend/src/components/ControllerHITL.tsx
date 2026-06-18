@@ -139,7 +139,7 @@ export const ControllerHITL: React.FC<Props> = ({
             const meta   = MODE_META[m]
             const chips  = getChips(m)
             return (
-              <div key={m} onClick={() => setSel(m)}
+              <div key={m} data-testid="gate-option" onClick={() => setSel(m)}
                 style={{ borderRadius: 10, border: `2px solid ${isSel ? meta.color : C.border}`,
                   background: isSel ? meta.bgActive : C.bg3,
                   padding: '16px 18px', cursor: 'pointer', flex: '1 1 220px',

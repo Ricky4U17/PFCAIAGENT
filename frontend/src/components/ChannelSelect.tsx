@@ -92,7 +92,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
           const compat = COMPAT[N]
           const selColor = N===2?C.green:N===3?(isAnalog?C.amber:C.green):isAnalog?C.red:C.accent
           return (
-            <div key={N} onClick={() => setSelN(N)}
+            <div key={N} data-testid="gate-option" onClick={() => setSelN(N)}
               style={{borderRadius:10,border:`2px solid ${isSel?selColor:C.border}`,background:isSel?`${selColor}18`:C.bg3,
                 cursor:'pointer',overflow:'hidden',flex:1,transition:'all .2s'}}>
               <div style={{padding:'12px 14px 9px',borderBottom:`0.5px solid ${C.border}`,position:'relative'}}>

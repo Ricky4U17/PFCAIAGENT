@@ -77,7 +77,7 @@ export const TopologyHITL: React.FC<Props> = ({ranking,modeScores,recommendedTop
           const isTTP = IS_TTP(r.topology)
           const isMedSafe = MEDICAL_SAFE_TOPOS.has(r.topology)
           return (
-            <div key={r.topology} onClick={() => setSel(r.topology)}
+            <div key={r.topology} data-testid="gate-option" onClick={() => setSel(r.topology)}
               style={{padding:'12px 14px',borderRadius:8,cursor:'pointer',marginBottom:8,
                 border:`1.5px solid ${isSel?C.accent:C.border}`,background:isSel?C.accentL:C.bg3,transition:'all .15s'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
