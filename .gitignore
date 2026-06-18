@@ -12,6 +12,8 @@ frontend/.vite/
 .env.local
 .DS_Store
 Thumbs.db
+# Office temporary lock files
+~$*
 .vscode/
 .idea/
 

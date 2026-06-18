@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PFC DC Bus Capacitor — Sim Agent v4</title>
+<style>
+  :root {
+    --ink: #0a0f1e;
+    --panel: #111a30;
+    --panel2: #0d1426;
+    --line: rgba(159,176,212,0.14);
+    --text: #e8ecf7;
+    --muted: #8fa0c4;
+    --ch1: #5fd4f2;   /* trace cyan — nominal */
+    --ch2: #b49af5;   /* trace violet — EOL / derated */
+    --lim: #ffc857;   /* amber — limits */
+    --pass: #4ed99b;
+    --fail: #ff6b7a;
+    --na:   #5a6a8c;
+    --radius: 14px;
+    --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ink); color: var(--text);
+    font-family: var(--sans); font-size: 14px; line-height: 1.45;
+  }
+  .app { max-width: 1480px; margin: 0 auto; padding: 18px; }
+
+  .masthead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 14px; flex-wrap: wrap; padding: 4px 2px 14px;
+    border-bottom: 1px solid var(--line); margin-bottom: 16px;
+  }
+  .masthead h1 { margin: 0; font: 600 19px var(--mono); letter-spacing: 0.4px; }
+  .masthead h1 .v { color: var(--ch1); }
+  .src-tag { font: 11px var(--mono); color: var(--muted); }
+  .src-tag b { color: var(--lim); font-weight: 600; }
+
+  .layout { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+
+  /* ---- inputs ---- */
+  .inputs { position: sticky; top: 14px; padding: 14px; max-height: calc(100vh - 28px); overflow: auto; }
+  .sec { font: 600 11px var(--mono); letter-spacing: 1.2px; text-transform: uppercase;
+         color: var(--muted); margin: 14px 0 8px; }
+  .sec:first-child { margin-top: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  input, select {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px;
+    font: 13px var(--mono); outline: none;
+  }
+  input:focus, select:focus { border-color: var(--ch1); }
+  input::placeholder { color: var(--na); font-style: italic; }
+  .acc input { border-style: dashed; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button {
+    border: 1px solid var(--line); cursor: pointer; border-radius: 9px;
+    padding: 8px 12px; font: 600 12px var(--mono); background: var(--panel2); color: var(--text);
+  }
+  button.primary { background: var(--ch1); border-color: var(--ch1); color: #04121f; }
+  button:active { transform: translateY(1px); }
+
+  /* ---- verdict plate (signature) ---- */
+  .plate { display: grid; grid-template-columns: auto 1fr; gap: 16px; padding: 16px; align-items: center; }
+  .stamp {
+    font: 700 26px var(--mono); letter-spacing: 3px; padding: 12px 22px;
+    border: 3px double currentColor; border-radius: 10px; transform: rotate(-2deg);
+    user-select: none; white-space: nowrap;
+  }
+  .stamp.approve { color: var(--pass); }
+  .stamp.reject  { color: var(--fail); }
+  .stamp.nolim   { color: var(--na); }
+  .plate .why { font: 12px var(--mono); color: var(--muted); line-height: 1.7; }
+  .plate .why b { color: var(--text); }
+
+  /* ---- KPIs ---- */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .kpi { padding: 12px 14px; }
+  .kpi .l { font: 11px var(--mono); color: var(--muted); letter-spacing: 0.6px; }
+  .kpi .v { font: 600 24px var(--mono); margin-top: 6px; }
+  .kpi .s { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
+  .good { color: var(--pass); } .bad { color: var(--fail); } .warn { color: var(--lim); }
+
+  /* ---- acceptance ledger ---- */
+  .ledger { padding: 14px; }
+  .ledger h3, .plotcard h3 { margin: 0 0 10px; font: 600 13px var(--mono); letter-spacing: 0.4px; }
+  table.checks { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+  table.checks th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px;
+                    border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: 0.6px; }
+  table.checks td { padding: 7px 8px; border-bottom: 1px solid rgba(159,176,212,0.07); }
+  table.checks tr:last-child td { border-bottom: none; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font: 600 11px var(--mono); }
+  .chip.pass { background: rgba(78,217,155,0.14); color: var(--pass); }
+  .chip.fail { background: rgba(255,107,122,0.14); color: var(--fail); }
+  .chip.na   { background: rgba(90,106,140,0.18); color: var(--na); }
+  .basis { color: var(--ch2); font-size: 11px; }
+  .nolimit { color: var(--na); font-style: italic; }
+
+  .right { display: grid; gap: 14px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tbl { padding: 12px 14px; }
+  .tbl table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+  .tbl td { padding: 6px 0; border-bottom: 1px solid rgba(159,176,212,0.07); }
+  .tbl td:first-child { color: var(--muted); }
+  .tbl td:last-child { text-align: right; font-weight: 600; }
+  .tbl tr:last-child td { border-bottom: none; }
+
+  .plots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .plotcard { padding: 12px; }
+  .plotcard .sub { font-size: 11px; color: var(--muted); margin: -6px 0 8px; }
+  svg.plot { width: 100%; display: block; background: var(--panel2);
+             border-radius: 10px; border: 1px solid rgba(159,176,212,0.08); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px;
+            font: 11px var(--mono); color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block;
+         margin-right: 5px; vertical-align: -1px; }
+
+  .warnbox { padding: 10px 14px; font: 12px var(--mono); color: var(--lim);
+             line-height: 1.7; display: none; }
+  .footer { margin-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+  @media (max-width: 1180px) { .kpis { grid-template-columns: 1fr 1fr; } .plots, .duo { grid-template-columns: 1fr; } }
+  @media (max-width: 920px)  { .layout { grid-template-columns: 1fr; } .inputs { position: static; max-height: none; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* ---- v3: explore sliders + scope ---- */
+  .explore { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 12px 14px; align-items: center; }
+  .explore .sl label { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--muted); margin-bottom: 4px; }
+  .explore .sl label b { color: var(--ch1); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--ch1); background: transparent; border: none; padding: 0; }
+  .scopebar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .scopebar .read { font: 11px var(--mono); color: var(--muted); }
+  .chk { font: 11px var(--mono); color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .chk input { width: auto; }
+  @media (max-width: 920px) { .explore { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="masthead">
+    <h1>PFC DC BUS CAPACITOR · SIM AGENT <span class="v">v4</span></h1>
+    <div class="src-tag" id="srcTag">package: <b>embedded example fixture</b></div>
+  </div>
+
+  <div class="layout">
+    <!-- ============ INPUTS (the injected contract; editable working copy) ============ -->
+    <div class="card inputs">
+      <div class="sec">Operating envelope (from bigger script)</div>
+      <div class="grid2">
+        <div><label>Vac min (V)</label><input id="vacmin" type="number" step="1"></div>
+        <div><label>Vac max (V)</label><input id="vacmax" type="number" step="1"></div>
+        <div><label>Pout min (W)</label><input id="pmin" type="number" step="10"></div>
+        <div><label>Pout max (W)</label><input id="pmax" type="number" step="10"></div>
+        <div><label>Power factor</label><input id="pf" type="number" step="0.001" min="0.5" max="1"></div>
+        <div><label>Efficiency (%)</label><input id="eff" type="number" step="0.1"></div>
+        <div><label>Line frequency (Hz)</label><select id="fline"><option>50</option><option>60</option></select></div>
+        <div><label>DC bus voltage (V)</label><input id="vbus" type="number" step="1"></div>
+        <div><label>Tamb min (°C)</label><input id="tambmin" type="number" step="1"></div>
+        <div><label>Tamb max (°C)</label><input id="tambmax" type="number" step="1"></div>
+        <div><label>PFC phases</label><input id="phases" type="number" step="1" min="1"></div>
+        <div><label>Switching freq (kHz)</label><input id="fsw" type="number" step="1" placeholder="optional"></div>
+        <div><label>HF current override (A)</label><input id="ihf" type="number" step="0.01" placeholder="computed"></div>
+      </div>
+
+      <div class="sec">Selected capacitor (from bigger script)</div>
+      <div class="grid2">
+        <div><label>Manufacturer</label><input id="mfr" type="text"></div>
+        <div><label>Series</label><input id="ser" type="text"></div>
+        <div><label>Qty parallel (nPar)</label><input id="npar" type="number" step="1" min="1"></div>
+        <div><label>Qty series (nSer)</label><input id="nser" type="number" step="1" min="1"></div>
+        <div><label>Capacitance (µF)</label><input id="cap" type="number" step="1"></div>
+        <div><label>Rated voltage (V)</label><input id="vrated" type="number" step="1"></div>
+        <div><label>ESR @120 Hz (Ω)</label><input id="esrlf" type="number" step="0.001" placeholder="from tan δ"></div>
+        <div><label>tan δ @120 Hz</label><input id="tand" type="number" step="0.001" placeholder="optional"></div>
+        <div><label>ESR @HF (Ω)</label><input id="esrhf" type="number" step="0.001" placeholder="=ESR@120"></div>
+        <div><label>Ripple rating @120Hz (A)</label><input id="irat" type="number" step="0.01"></div>
+        <div><label>Freq multiplier @HF</label><input id="khf" type="number" step="0.01"></div>
+        <div><label>Temp multiplier</label><input id="ktemp" type="number" step="0.01"></div>
+        <div><label>Manuf. life L0 (h)</label><input id="l0" type="number" step="100"></div>
+        <div><label>Thermal rating T0 (°C)</label><input id="t0" type="number" step="1"></div>
+        <div><label>Rθ each (°C/W)</label><input id="rth" type="number" step="0.1"></div>
+        <div><label>Tolerance (−%)</label><input id="tol" type="number" step="1"></div>
+        <div><label>EOL aging (−%)</label><input id="aging" type="number" step="1"></div>
+        <div><label>Balance R per cap (kΩ)</label><input id="rbal" type="number" step="1" placeholder="none"></div>
+        <div><label>Series imbalance (%)</label><input id="imb" type="number" step="0.5"></div>
+      </div>
+
+      <div class="sec">Acceptance — upstream limits only</div>
+      <div class="grid2 acc">
+        <div><label>Vout ripple max (Vpp)</label><input id="acc_vpp" type="number" step="0.5" placeholder="no limit"></div>
+        <div><label>Hold-up min (ms)</label><input id="acc_hold" type="number" step="0.5" placeholder="no limit"></div>
+        <div><label>Hold-up Vmin (V)</label><input id="vmin" type="number" step="1"></div>
+        <div><label>I-ripple margin min (%)</label><input id="acc_imarg" type="number" step="1" placeholder="no limit"></div>
+        <div><label>Hotspot max (°C)</label><input id="acc_thot" type="number" step="1" placeholder="no limit"></div>
+        <div><label>Lifetime min (h)</label><input id="acc_life" type="number" step="1000" placeholder="no limit"></div>
+        <div><label>V-derate max (%)</label><input id="acc_vder" type="number" step="1" placeholder="no limit"></div>
+      </div>
+      <div class="hint">Blank limit = <i>no upstream limit</i>. The verdict is judged at the worst corner of the envelope (min line · max power · max ambient); the sliders explore inside it.</div>
+
+      <div class="btns">
+        <button class="primary" id="btnReset">Reset to package</button>
+        <button id="btnLoad">Load package…</button>
+        <button id="btnExpPkg">Export package</button>
+        <button id="btnExpRes">Export results</button>
+        <input id="fileIn" type="file" accept=".json" style="display:none">
+      </div>
+    </div>
+
+    <!-- ============ RESULTS ============ -->
+    <div class="right">
+      <div class="card plate">
+        <div class="stamp nolim" id="stamp">—</div>
+        <div class="why" id="stampWhy"></div>
+      </div>
+
+      <div class="card warnbox" id="warnbox"></div>
+
+      <!-- explore point -->
+      <div class="card explore">
+        <div class="sl"><label>INPUT VOLTAGE <b id="lblVac">—</b></label><input id="sVac" type="range" step="1"></div>
+        <div class="sl"><label>OUTPUT POWER <b id="lblP">—</b></label><input id="sP" type="range" step="10"></div>
+        <div class="sl"><label>AMBIENT <b id="lblT">—</b></label><input id="sT" type="range" step="1"></div>
+      </div>
+
+      <div class="kpis">
+        <div class="card kpi"><div class="l">BUS RIPPLE · EOL</div><div class="v" id="kVpp">—</div><div class="s" id="kVppS"></div></div>
+        <div class="card kpi"><div class="l">RIPPLE-CURRENT MARGIN</div><div class="v" id="kMarg">—</div><div class="s" id="kMargS"></div></div>
+        <div class="card kpi"><div class="l">HOTSPOT → LIFETIME</div><div class="v" id="kLife">—</div><div class="s" id="kLifeS"></div></div>
+        <div class="card kpi"><div class="l">VOLTAGE DERATE</div><div class="v" id="kVder">—</div><div class="s" id="kVderS"></div></div>
+      </div>
+
+      <!-- animated scope -->
+      <div class="card plotcard">
+        <div class="scopebar">
+          <button class="primary" id="btnPlay">▶ Play</button>
+          <span class="chk"><input type="checkbox" id="chkSweep"><label for="chkSweep">sweep Vac across range</label></span>
+          <span class="read" id="scopeRead"></span>
+        </div>
+        <svg class="plot" id="scopeTop" style="height:170px"></svg>
+        <svg class="plot" id="scopeBot" style="height:130px; margin-top:6px"></svg>
+        <div class="legend"><span><span class="dot" style="background:var(--lim)"></span>v_in(t) line</span><span><span class="dot" style="background:var(--ch1)"></span>v_bus(t) + band</span><span><span class="dot" style="background:var(--ch2)"></span>i_cap LF (t)</span><span><span class="dot" style="background:rgba(95,212,242,0.5)"></span>HF switching envelope</span></div>
+        <h3 style="margin:14px 0 6px">Switching-scale zoom — through-ESR detail</h3>
+        <div class="sub">Cap current chops between i·d and −i·(1−d) at N·fsw; the ESR step + capacitive ramp is the HF voltage ripple (note the mV scale).</div>
+        <svg class="plot" id="zoomI" style="height:110px"></svg>
+        <svg class="plot" id="zoomV" style="height:130px; margin-top:6px"></svg>
+      </div>
+
+      <div class="card ledger">
+        <h3>ACCEPTANCE LEDGER — worst corner of envelope</h3>
+        <table class="checks">
+          <thead><tr><th>Check</th><th>Value</th><th>Limit</th><th>Basis</th><th>Status</th></tr></thead>
+          <tbody id="ledgerBody"></tbody>
+        </table>
+      </div>
+
+      <div class="duo">
+        <div class="card tbl"><h3 style="margin:0 0 8px;font:600 13px var(--mono)">SELECTION</h3><table id="tblBank"></table></div>
+        <div class="card tbl"><h3 style="margin:0 0 8px;font:600 13px var(--mono)">STRESS &amp; LOSS — explore point</h3><table id="tblStress"></table></div>
+      </div>
+
+      <div class="plots">
+        <div class="card plotcard">
+          <h3>Lifetime vs input voltage</h3>
+          <div class="sub">HF heating grows at low line → hotter, shorter life. At slider power/ambient.</div>
+          <svg class="plot" id="pLifeV" style="height:280px"></svg>
+        </div>
+        <div class="card plotcard">
+          <h3>Lifetime vs ambient temperature</h3>
+          <div class="sub">Arrhenius L0·2^((T0−Thot)/10) with computed self-heating. At slider Vac/power.</div>
+          <svg class="plot" id="pLifeT" style="height:280px"></svg>
+        </div>
+        <div class="card plotcard">
+          <h3>Ripple vs output power</h3>
+          <div class="sub">LF ripple is set by P, C, Vbus — note it does not depend on input voltage.</div>
+          <svg class="plot" id="pRipP" style="height:280px"></svg>
+        </div>
+        <div class="card plotcard">
+          <h3>Ripple vs total capacitance</h3>
+          <div class="sub">Sizing view at the explore point; amber = limit and required C.</div>
+          <svg class="plot" id="pRipC" style="height:280px"></svg>
+          <div class="legend"><span><span class="dot" style="background:var(--ch1)"></span>nominal C</span><span><span class="dot" style="background:var(--ch2)"></span>EOL C</span></div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Tier-1 analytic model, judged at the worst envelope corner. Vpp = P/(2π·f·C·V) + 2√2·I_LF·ESR_bank; I_LF = P/(√2·V); HF from CCM-boost closed form I²_D = 8√2·P²_in/(3π·V_ac·PF²·V_o) at the explore line voltage, interleave ÷√N (estimate), or injected override. ESR@120Hz from datasheet or derived from tan δ. Ripple, hold-up and V-derate at EOL capacitance (−tol −aging). Lifetime L0·2^((T0−Thot)/10). Switching ripple: per-phase step i(θ)=√2·P_in/(V_ac·PF·N)·|sinθ|, duty d(θ)=1−V_m|sinθ|/V_o; HF envelope = i·ESR_HF,bank + i·d(1−d)/(N·f_sw·C_EOL); the ripple check judges the LF+HF total over the cycle (LF and HF extremes occur at different phases). Heat split: I²_LF·ESR₁₂₀ + I²_HF·ESR_HF per cap. Scope animation is time-stretched; physics is unchanged. Slots for T2 (circuit-sim i_cap) and T3 (measured ESR/C) follow measured &gt; fields &gt; analytic.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== ENGINE-START (pure, DOM-free — parity surface) =====================
+   schema dcbus-1.1 — compute(pkg, point) where point = {Vac_V, Pout_W, Tamb_C};
+   point defaults to the worst corner {VacMin, PoutMax, TambMax}. */
+const DCBUS = (() => {
+  const TAU = 2 * Math.PI;
+
+  const eolFactor = cap => (1 - (cap.tol_pct || 0) / 100) * (1 - (cap.eolAging_pct || 0) / 100);
+
+  // ESR@120Hz: explicit value wins; else derived from tan δ = 2π·120·C·ESR
+  function esr120(cap, warnings) {
+    if (cap.ESR_120_ohm != null && isFinite(cap.ESR_120_ohm)) {
+      if (cap.tanDelta != null && isFinite(cap.tanDelta)) {
+        const derived = cap.tanDelta / (TAU * 120 * cap.C_uF * 1e-6);
+        if (Math.abs(derived - cap.ESR_120_ohm) / cap.ESR_120_ohm > 0.3 && warnings)
+          warnings.push(`ESR@120Hz (${cap.ESR_120_ohm} Ω) and tan δ (${cap.tanDelta} → ${derived.toFixed(3)} Ω) disagree >30% — using explicit ESR.`);
+      }
+      return { v: cap.ESR_120_ohm, src: 'datasheet ESR' };
+    }
+    if (cap.tanDelta != null && isFinite(cap.tanDelta))
+      return { v: cap.tanDelta / (TAU * 120 * cap.C_uF * 1e-6), src: 'derived from tan δ' };
+    return { v: 0, src: 'missing' };
+  }
+
+  // CCM boost PFC at the given line point; PF enters the input current: Im = √2·Pin/(Vac·PF)
+  // ID,rms² = 8√2·Pin²/(3π·Vac·PF²·Vo); cap HF² = ID² − Io² − ILF²; interleave ÷√N (T1 estimate)
+  function hfCurrent(op, pt) {
+    if (op.Ihf_A != null && isFinite(op.Ihf_A)) return { I: Math.max(0, op.Ihf_A), src: 'input' };
+    const PF = op.PF || 1;
+    const Pin = pt.Pout_W / op.eff;
+    const ID2 = 8 * Math.SQRT2 * Pin * Pin / (3 * Math.PI * pt.Vac_V * PF * PF * op.Vbus_V);
+    const Io = pt.Pout_W / op.Vbus_V;
+    const Ilf = pt.Pout_W / (Math.SQRT2 * op.Vbus_V);
+    const hf2 = Math.max(0, ID2 - Io * Io - Ilf * Ilf);
+    const N = Math.max(1, op.phases || 1);
+    return { I: Math.sqrt(hf2) / Math.sqrt(N), src: 'analytic' };
+  }
+
+  const ripplePP = (P, f, C, V) => P / (TAU * f * C * V);
+
+  function worstCorner(op) {
+    return { Vac_V: op.VacMin_V, Pout_W: op.PoutMax_W, Tamb_C: op.TambMax_C };
+  }
+
+  function compute(pkg, point) {
+    const warnings = [];
+    const op = pkg.operating, bank = pkg.bank, cap = bank.cap, acc = pkg.acceptance || {};
+    const pt = point || worstCorner(op);
+    const nP = Math.max(1, bank.nPar | 0), nS = Math.max(1, bank.nSer | 0);
+
+    const Ceach = cap.C_uF * 1e-6;
+    const Ctot = Ceach * nP / nS;
+    const kEOL = eolFactor(cap);
+    const CtotEOL = Ctot * kEOL;
+    const e120 = esr120(cap, warnings);
+    if (e120.src === 'missing') warnings.push('Neither ESR@120Hz nor tan δ supplied — copper loss = 0.');
+    const esrHF = (cap.ESR_HF_ohm != null && isFinite(cap.ESR_HF_ohm)) ? cap.ESR_HF_ohm : e120.v;
+    if (cap.ESR_HF_ohm == null && e120.v > 0) warnings.push('ESR@HF not given — using ESR@120Hz for the HF loss term (conservative).');
+    const esrLFtot = e120.v * nS / nP;
+
+    const Ilf = pt.Pout_W / (Math.SQRT2 * op.Vbus_V);
+    const hf = hfCurrent(op, pt);
+    const Ihf = hf.I;
+    const Itot = Math.hypot(Ilf, Ihf);
+    const IlfEach = Ilf / nP, IhfEach = Ihf / nP, IEach = Itot / nP;
+
+    // LF ripple: capacitive term + ESR step (small at LF; included for honesty)
+    const VppC_nom = ripplePP(pt.Pout_W, op.fLine_Hz, Ctot, op.Vbus_V);
+    const VppC_eol = ripplePP(pt.Pout_W, op.fLine_Hz, CtotEOL, op.Vbus_V);
+    const VppESR = 2 * Math.SQRT2 * Ilf * esrLFtot;
+    const VppNom = VppC_nom + VppESR, VppEOL = VppC_eol + VppESR;
+
+    // Switching-frequency ripple. Per-phase current step at line angle th:
+    //   iStep(th) = ImPh·|sin th|, ImPh = sqrt2·Pin/(Vac·PF)/N; duty d(th) = 1 − Vm|sin th|/Vo.
+    // HF voltage envelope (pk-pk) at th: ESR step + capacitive ramp at f_eff = N·fsw:
+    //   env(th) = iStep·ESRhf_bank + iStep·(1−d)·d/(f_eff·C_EOL)
+    const N = Math.max(1, op.phases || 1);
+    const PFv = op.PF || 1;
+    const Pin = pt.Pout_W / op.eff;
+    const ImPh = Math.SQRT2 * Pin / (pt.Vac_V * PFv) / N;
+    const esrHFbank = esrHF * nS / nP;
+    const fEff = (op.fsw_Hz && isFinite(op.fsw_Hz)) ? op.fsw_Hz * N : null;
+    if (!fEff) warnings.push('fsw_Hz not supplied — HF ripple voltage uses the ESR term only; switching-scale zoom disabled.');
+    const Vm = Math.SQRT2 * pt.Vac_V;
+    const hfEnvAt = th => {
+      const iStep = ImPh * Math.abs(Math.sin(th));
+      const d = Math.max(0, Math.min(1, 1 - Vm * Math.abs(Math.sin(th)) / op.Vbus_V));
+      return iStep * esrHFbank + (fEff ? iStep * (1 - d) * d / (fEff * CtotEOL) : 0);
+    };
+    const VppHF = hfEnvAt(Math.PI / 2);                       // widest at the line crest
+    // total ripple: max excursion over the line half-cycle of LF trace ± env/2
+    let vMax = -1e9, vMin = 1e9;
+    for (let i = 0; i <= 180; i++) {
+      const th = Math.PI * i / 180;
+      const lf = -(VppEOL / 2) * Math.sin(2 * th);
+      const e = hfEnvAt(th) / 2;
+      if (lf + e > vMax) vMax = lf + e;
+      if (lf - e < vMin) vMin = lf - e;
+    }
+    const VppTot = vMax - vMin;
+    const dCrest = Math.max(0, Math.min(1, 1 - Vm / op.Vbus_V));
+
+    const Khf = cap.freqMult_HF || 1, Ktp = cap.tempMult || 1;
+    const Ieq = Math.hypot(IlfEach, IhfEach / Khf);
+    const Iallow = cap.rippleRating_A * Ktp;
+    const margin = Iallow > 0 ? (Iallow - Ieq) / Iallow * 100 : NaN;
+
+    const PeachLF = IlfEach * IlfEach * e120.v;
+    const PeachHF = IhfEach * IhfEach * esrHF;
+    const PeachCu = PeachLF + PeachHF;
+    let Pbal = 0;
+    if (nS > 1 && bank.balanceR_kohm) Pbal = (op.Vbus_V * op.Vbus_V) / (nS * bank.balanceR_kohm * 1e3);
+    const Pbank = PeachCu * nP * nS + Pbal;
+
+    const dT = PeachCu * cap.Rth_CperW;
+    const Thot = pt.Tamb_C + dT;
+    const lifeH = cap.L0_h * Math.pow(2, (cap.T0_C - Thot) / 10) * (cap.voltageLifeMult || 1);
+
+    const imb = nS > 1 ? (bank.seriesImbalance_pct || 0) / 100 : 0;
+    const Vwork = (op.Vbus_V / nS) * (1 + imb) + (VppTot / 2) / nS;
+    const vDer = Vwork / cap.Vrated_V * 100;
+
+    let holdMs = 0;
+    const Vmin = acc.holdUpVmin_V || 0;
+    if (Vmin > 0 && op.Vbus_V > Vmin && pt.Pout_W > 0)
+      holdMs = 0.5 * CtotEOL * (op.Vbus_V ** 2 - Vmin ** 2) / pt.Pout_W * 1e3;
+
+    const CripNeed = acc.Vripple_max_Vpp
+      ? pt.Pout_W / (TAU * op.fLine_Hz * op.Vbus_V * Math.max(0.01, acc.Vripple_max_Vpp - VppESR)) / kEOL : null;
+    const CholdNeed = (acc.holdUp_min_ms && Vmin > 0 && op.Vbus_V > Vmin)
+      ? (2 * pt.Pout_W * acc.holdUp_min_ms / 1e3) / (op.Vbus_V ** 2 - Vmin ** 2) / kEOL : null;
+
+    const checks = [];
+    const add = (id, label, val, lim, sense, basis, vTxt, lTxt) => {
+      const has = lim != null && isFinite(lim);
+      checks.push({ id, label, value: val, valueText: vTxt, limit: has ? lim : null, limitText: has ? lTxt : null,
+                    basis, status: !has ? 'N/A' : ((sense === '<=' ? val <= lim : val >= lim) ? 'PASS' : 'FAIL') });
+    };
+    add('vpp',  'Bus ripple (LF+HF)',  VppTot, acc.Vripple_max_Vpp, '<=', 'EOL + HF env', VppTot.toFixed(1) + ' Vpp', (acc.Vripple_max_Vpp ?? 0) + ' Vpp');
+    add('hold', 'Hold-up time',        holdMs, acc.holdUp_min_ms,   '>=', 'EOL C',       holdMs.toFixed(1) + ' ms',  (acc.holdUp_min_ms ?? 0) + ' ms');
+    add('imarg','Ripple-I margin',     margin, acc.Imargin_min_pct, '>=', 'this point',  (isFinite(margin)?margin.toFixed(1):'—') + ' %', (acc.Imargin_min_pct ?? 0) + ' %');
+    add('thot', 'Hotspot temperature', Thot,   acc.Thot_max_C,      '<=', 'this point',  Thot.toFixed(1) + ' °C',    (acc.Thot_max_C ?? 0) + ' °C');
+    add('life', 'Lifetime',            lifeH,  acc.life_min_h,      '>=', 'at hotspot',  Math.round(lifeH).toLocaleString() + ' h', (acc.life_min_h ?? 0).toLocaleString() + ' h');
+    add('vder', 'Voltage derate',      vDer,   acc.Vderate_max_pct, '<=', 'EOL ripple',  vDer.toFixed(1) + ' %',     (acc.Vderate_max_pct ?? 0) + ' %');
+
+    const judged = checks.filter(c => c.status !== 'N/A');
+    const verdict = judged.length === 0 ? 'NO-LIMITS' : (judged.every(c => c.status === 'PASS') ? 'APPROVE' : 'REJECT');
+
+    return { pt, op, bank, cap, acc, nP, nS, Ctot, CtotEOL, kEOL, e120, esrHF, esrLFtot,
+             Ilf, Ihf, IhfSrc: hf.src, Itot, IlfEach, IhfEach, IEach, Ieq, Iallow, margin,
+             VppNom, VppEOL, VppESR, VppHF, VppTot, hfEnvAt, ImPh, esrHFbank, fEff, dCrest,
+             PeachLF, PeachHF, PeachCu, Pbal, Pbank, dT, Thot, lifeH, Vwork, vDer,
+             holdMs, CripNeed, CholdNeed, checks, verdict, warnings };
+  }
+
+  return { compute, ripplePP, hfCurrent, eolFactor, esr120, worstCorner };
+})();
+/* ===================== ENGINE-END ===================== */
+
+/* ===================== EXAMPLE FIXTURE (replaced by window.__DCBUS_PACKAGE__ or Load) ===== */
+const EXAMPLE_PACKAGE = {
+  schema: 'dcbus-1.2',
+  design: { name: 'example-2ph-PFC-394V (fixture)' },
+  operating: { VacMin_V: 180, VacMax_V: 264, PF: 0.99, fLine_Hz: 60, eff: 0.955,
+               PoutMin_W: 300, PoutMax_W: 1500, TambMin_C: 25, TambMax_C: 50,
+               Vbus_V: 394, phases: 2, fsw_Hz: 70000, Ihf_A: null },
+  bank: { nPar: 3, nSer: 1, balanceR_kohm: null, seriesImbalance_pct: 5,
+          cap: { manufacturer: 'ExampleCo', series: 'EX-SnapIn', C_uF: 220, Vrated_V: 450,
+                 ESR_120_ohm: 0.18, tanDelta: null, ESR_HF_ohm: 0.09,
+                 rippleRating_A: 2.8, freqMult_HF: 1.4, tempMult: 1.0,
+                 Rth_CperW: 18, tol_pct: 20, eolAging_pct: 10,
+                 L0_h: 5000, T0_C: 105, voltageLifeMult: 1 } },
+  acceptance: { Vripple_max_Vpp: 24, holdUp_min_ms: 10, holdUpVmin_V: 300,
+                Imargin_min_pct: 10, Thot_max_C: 95, life_min_h: 50000, Vderate_max_pct: 92 }
+};
+
+/* ===================== UI STATE ===================== */
+const $ = id => document.getElementById(id);
+let PKG = (typeof window !== 'undefined' && window.__DCBUS_PACKAGE__) || EXAMPLE_PACKAGE;
+let pkgSource = (typeof window !== 'undefined' && window.__DCBUS_PACKAGE__) ? 'injected (window.__DCBUS_PACKAGE__)' : 'embedded example fixture';
+const numOrNull = v => { const x = parseFloat(v); return Number.isFinite(x) ? x : null; };
+const fmt = (x, d=2) => Number.isFinite(x) ? x.toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}) : '—';
+
+function pkgToForm(p) {
+  const o = p.operating, b = p.bank, c = b.cap, a = p.acceptance || {};
+  $('vacmin').value = o.VacMin_V; $('vacmax').value = o.VacMax_V;
+  $('pmin').value = o.PoutMin_W; $('pmax').value = o.PoutMax_W;
+  $('pf').value = o.PF; $('eff').value = (o.eff * 100).toFixed(1);
+  $('fline').value = o.fLine_Hz; $('vbus').value = o.Vbus_V;
+  $('tambmin').value = o.TambMin_C; $('tambmax').value = o.TambMax_C;
+  $('phases').value = o.phases; $('fsw').value = o.fsw_Hz != null ? o.fsw_Hz / 1e3 : ''; $('ihf').value = o.Ihf_A ?? '';
+  $('mfr').value = c.manufacturer ?? ''; $('ser').value = c.series ?? '';
+  $('npar').value = b.nPar; $('nser').value = b.nSer;
+  $('rbal').value = b.balanceR_kohm ?? ''; $('imb').value = b.seriesImbalance_pct ?? 0;
+  $('cap').value = c.C_uF; $('vrated').value = c.Vrated_V;
+  $('esrlf').value = c.ESR_120_ohm ?? ''; $('tand').value = c.tanDelta ?? '';
+  $('esrhf').value = c.ESR_HF_ohm ?? '';
+  $('irat').value = c.rippleRating_A; $('khf').value = c.freqMult_HF; $('ktemp').value = c.tempMult;
+  $('rth').value = c.Rth_CperW; $('tol').value = c.tol_pct; $('aging').value = c.eolAging_pct;
+  $('l0').value = c.L0_h; $('t0').value = c.T0_C;
+  $('acc_vpp').value = a.Vripple_max_Vpp ?? ''; $('acc_hold').value = a.holdUp_min_ms ?? '';
+  $('vmin').value = a.holdUpVmin_V ?? ''; $('acc_imarg').value = a.Imargin_min_pct ?? '';
+  $('acc_thot').value = a.Thot_max_C ?? ''; $('acc_life').value = a.life_min_h ?? '';
+  $('acc_vder').value = a.Vderate_max_pct ?? '';
+  syncSliderRanges();
+}
+
+function formToPkg() {
+  return {
+    schema: 'dcbus-1.2', design: PKG.design,
+    operating: { VacMin_V: +$('vacmin').value, VacMax_V: +$('vacmax').value,
+                 PF: Math.min(1, Math.max(0.5, +$('pf').value || 1)),
+                 fLine_Hz: +$('fline').value, eff: Math.min(1, Math.max(0.01, +$('eff').value / 100)),
+                 PoutMin_W: +$('pmin').value, PoutMax_W: +$('pmax').value,
+                 TambMin_C: +$('tambmin').value, TambMax_C: +$('tambmax').value,
+                 Vbus_V: +$('vbus').value, phases: Math.max(1, +$('phases').value | 0),
+                 fsw_Hz: numOrNull($('fsw').value) != null ? +$('fsw').value * 1e3 : null,
+                 Ihf_A: numOrNull($('ihf').value) },
+    bank: { nPar: Math.max(1, +$('npar').value | 0), nSer: Math.max(1, +$('nser').value | 0),
+            balanceR_kohm: numOrNull($('rbal').value), seriesImbalance_pct: +$('imb').value || 0,
+            cap: { manufacturer: $('mfr').value || null, series: $('ser').value || null,
+                   C_uF: +$('cap').value, Vrated_V: +$('vrated').value,
+                   ESR_120_ohm: numOrNull($('esrlf').value), tanDelta: numOrNull($('tand').value),
+                   ESR_HF_ohm: numOrNull($('esrhf').value),
+                   rippleRating_A: +$('irat').value, freqMult_HF: +$('khf').value || 1,
+                   tempMult: +$('ktemp').value || 1, Rth_CperW: +$('rth').value,
+                   tol_pct: +$('tol').value || 0, eolAging_pct: +$('aging').value || 0,
+                   L0_h: +$('l0').value, T0_C: +$('t0').value, voltageLifeMult: 1 } },
+    acceptance: { Vripple_max_Vpp: numOrNull($('acc_vpp').value), holdUp_min_ms: numOrNull($('acc_hold').value),
+                  holdUpVmin_V: numOrNull($('vmin').value), Imargin_min_pct: numOrNull($('acc_imarg').value),
+                  Thot_max_C: numOrNull($('acc_thot').value), life_min_h: numOrNull($('acc_life').value),
+                  Vderate_max_pct: numOrNull($('acc_vder').value) }
+  };
+}
+
+/* explore sliders are clamped to the injected ranges */
+function syncSliderRanges() {
+  const lo = +$('vacmin').value, hi = +$('vacmax').value;
+  $('sVac').min = lo; $('sVac').max = hi;
+  if (+$('sVac').value < lo || +$('sVac').value > hi) $('sVac').value = lo;
+  $('sP').min = +$('pmin').value; $('sP').max = +$('pmax').value;
+  if (+$('sP').value > +$('pmax').value || +$('sP').value < +$('pmin').value) $('sP').value = +$('pmax').value;
+  $('sT').min = +$('tambmin').value; $('sT').max = +$('tambmax').value;
+  if (+$('sT').value > +$('tambmax').value || +$('sT').value < +$('tambmin').value) $('sT').value = +$('tambmax').value;
+}
+const explorePoint = () => ({ Vac_V: +$('sVac').value, Pout_W: +$('sP').value, Tamb_C: +$('sT').value });
+
+/* ===================== RENDER ===================== */
+function renderVerdict(rC) {
+  const st = $('stamp');
+  st.className = 'stamp ' + (rC.verdict === 'APPROVE' ? 'approve' : rC.verdict === 'REJECT' ? 'reject' : 'nolim');
+  st.textContent = rC.verdict;
+  const judged = rC.checks.filter(c => c.status !== 'N/A'), fails = judged.filter(c => c.status === 'FAIL');
+  $('stampWhy').innerHTML = (rC.verdict === 'NO-LIMITS'
+    ? 'No upstream acceptance limits supplied — informational run only.'
+    : `<b>${judged.length}</b> limit${judged.length>1?'s':''} judged at the worst corner · <b>${fails.length}</b> failing${fails.length ? ': ' + fails.map(f=>f.label).join(', ') : ''}`)
+    + `<br>corner: <b>${rC.pt.Vac_V} Vac · ${rC.pt.Pout_W} W · ${rC.pt.Tamb_C} °C</b> · HF source: <b>${rC.IhfSrc}</b> · package: ${pkgSource}`;
+}
+
+function renderLedger(rC) {
+  $('ledgerBody').innerHTML = rC.checks.map(c => `<tr>
+    <td>${c.label}</td><td>${c.valueText}</td>
+    <td>${c.limit != null ? c.limitText : '<span class="nolimit">no upstream limit</span>'}</td>
+    <td class="basis">${c.basis}</td>
+    <td><span class="chip ${c.status === 'PASS' ? 'pass' : c.status === 'FAIL' ? 'fail' : 'na'}">${c.status}</span></td></tr>`).join('');
+}
+
+function renderKpis(rN) {
+  $('kVpp').textContent = fmt(rN.VppTot,1) + ' Vpp';
+  $('kVppS').textContent = `LF ${fmt(rN.VppEOL,1)} + HF env ${fmt(rN.VppHF,2)} @ crest (${rN.fEff ? fmt(rN.fEff/1e3,0)+' kHz eff' : 'ESR only'}) · EOL C`;
+  $('kMarg').textContent = fmt(rN.margin,1) + ' %';
+  $('kMargS').textContent = `Ieq ${fmt(rN.Ieq,2)} A vs allowed ${fmt(rN.Iallow,2)} A per cap`;
+  $('kLife').textContent = rN.lifeH >= 87600 ? fmt(rN.lifeH/8760,1) + ' yr' : Math.round(rN.lifeH).toLocaleString() + ' h';
+  $('kLifeS').textContent = `hotspot ${fmt(rN.Thot,1)} °C (ΔT ${fmt(rN.dT,1)} K self-heat)`;
+  $('kVder').textContent = fmt(rN.vDer,1) + ' %';
+  $('kVderS').textContent = `Vwork ${fmt(rN.Vwork,0)} V vs rated ${fmt(rN.cap.Vrated_V,0)} V each`;
+}
+
+function renderTables(rN) {
+  const c = rN.cap;
+  $('tblBank').innerHTML = [
+    ['Capacitor', `${c.manufacturer ?? '—'} ${c.series ?? ''}`.trim()],
+    ['Selection', `${rN.nS}S·${rN.nP}P × ${fmt(c.C_uF,0)} µF / ${fmt(c.Vrated_V,0)} V`],
+    ['Total C (nom / EOL)', `${fmt(rN.Ctot*1e6,0)} / ${fmt(rN.CtotEOL*1e6,0)} µF`],
+    ['ESR@120Hz each', `${fmt(rN.e120.v*1e3,0)} mΩ (${rN.e120.src})`],
+    ['Required C — ripple / hold-up', `${rN.CripNeed?fmt(rN.CripNeed*1e6,0):'—'} / ${rN.CholdNeed?fmt(rN.CholdNeed*1e6,0):'—'} µF`],
+    ['Hold-up available (EOL)', fmt(rN.holdMs,1) + ' ms'],
+  ].map(x => `<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('');
+  $('tblStress').innerHTML = [
+    ['LF (2·f) bank RMS', fmt(rN.Ilf,2) + ' A'],
+    [`HF bank RMS (${rN.IhfSrc})`, fmt(rN.Ihf,2) + ' A'],
+    ['Per-cap RMS', fmt(rN.IEach,2) + ' A'],
+    ['Loss per cap — LF / HF', `${fmt(rN.PeachLF,3)} / ${fmt(rN.PeachHF,3)} W (${fmt(rN.PeachHF/Math.max(rN.PeachCu,1e-12)*100,0)}% HF)`],
+    ['Balance-resistor loss', rN.Pbal ? fmt(rN.Pbal,2) + ' W' : '—'],
+    ['Bank total loss', fmt(rN.Pbank,2) + ' W'],
+  ].map(x => `<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('');
+}
+
+/* ===================== PLOTTING ===================== */
+const NS = 'http://www.w3.org/2000/svg';
+function E(t, a={}) { const e = document.createElementNS(NS, t); for (const [k,v] of Object.entries(a)) e.setAttribute(k, v); return e; }
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function plot(svgId, series, o={}) {
+  const svg = $(svgId); svg.innerHTML = '';
+  const W = Math.max(380, svg.getBoundingClientRect().width || 560);
+  const H = parseFloat(svg.style.height) || 300;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const m = { l: 56, r: 14, t: 12, b: o.xlabel ? 40 : 22 };
+  const w = W - m.l - m.r, h = H - m.t - m.b;
+  const xs = series.flatMap(s => s.d.map(p => p.x)), ys = series.flatMap(s => s.d.map(p => p.y));
+  if (o.hline != null) ys.push(o.hline);
+  if (o.band) ys.push(o.band[0], o.band[1]);
+  let x0 = o.x0 ?? Math.min(...xs), x1 = o.x1 ?? Math.max(...xs);
+  let y0 = o.y0 ?? Math.min(...ys), y1 = o.y1 ?? Math.max(...ys);
+  if (x0 === x1) x1 = x0 + 1; if (y0 === y1) y1 = y0 + 1;
+  const pad = (y1 - y0) * 0.1; y1 += pad; if (o.yZero) y0 = Math.min(0, y0); else y0 -= pad;
+  const X = x => m.l + (x - x0) / (x1 - x0) * w, Y = y => m.t + h - (y - y0) / (y1 - y0) * h;
+  for (let i = 0; i <= 5; i++) {
+    const gy = m.t + h / 5 * i, gx = m.l + w / 5 * i;
+    svg.append(E('line', {x1: m.l, y1: gy, x2: m.l + w, y2: gy, stroke: 'rgba(159,176,212,0.12)'}));
+    svg.append(E('line', {x1: gx, y1: m.t, x2: gx, y2: m.t + h, stroke: 'rgba(159,176,212,0.06)'}));
+    const ty = E('text', {x: m.l - 7, y: gy + 4, fill: '#8fa0c4', 'font-size': 10, 'text-anchor': 'end', 'font-family': 'monospace'});
+    const vy = y1 - (y1 - y0) / 5 * i; ty.textContent = Math.abs(vy) >= 1000 ? (vy/1000).toFixed(1)+'k' : vy.toFixed(Math.abs(vy) >= 10 ? 0 : 1);
+    svg.append(ty);
+    if (o.xticks !== false) {
+      const tx = E('text', {x: gx, y: m.t + h + 14, fill: '#8fa0c4', 'font-size': 10, 'text-anchor': 'middle', 'font-family': 'monospace'});
+      const vx = x0 + (x1 - x0) / 5 * i; tx.textContent = Math.abs(vx) >= 1000 ? (vx/1000).toFixed(1)+'k' : vx.toFixed(Math.abs(vx) >= 10 ? 0 : 2);
+      svg.append(tx);
+    }
+  }
+  if (o.band) svg.append(E('rect', {x: m.l, y: Y(o.band[1]), width: w, height: Math.max(0, Y(o.band[0]) - Y(o.band[1])),
+                                    fill: 'rgba(255,200,87,0.10)', stroke: 'rgba(255,200,87,0.35)', 'stroke-dasharray': '3 3'}));
+  if (o.hline != null) svg.append(E('line', {x1: m.l, y1: Y(o.hline), x2: m.l + w, y2: Y(o.hline), stroke: css('--lim'), 'stroke-width': 1.6, 'stroke-dasharray': '6 4'}));
+  if (o.vline != null && o.vline >= x0 && o.vline <= x1) svg.append(E('line', {x1: X(o.vline), y1: m.t, x2: X(o.vline), y2: m.t + h, stroke: css('--lim'), 'stroke-dasharray': '6 4'}));
+  series.forEach(s => {
+    if (s.poly) {
+      svg.append(E('polygon', {points: s.d.map(p => `${X(p.x)},${Y(p.y)}`).join(' '), fill: s.c, stroke: 'none'}));
+    } else {
+      svg.append(E('polyline', {points: s.d.map(p => `${X(p.x)},${Y(p.y)}`).join(' '), fill: 'none',
+        stroke: s.c, 'stroke-width': s.w || 2.4, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-dasharray': s.dash || 'none'}));
+    }
+  });
+  if (o.cursor) svg.append(E('circle', {cx: X(o.cursor.x), cy: Y(o.cursor.y), r: 5, fill: '#fff', stroke: '#0a0f1e', 'stroke-width': 2}));
+  if (o.xlabel) { const t = E('text', {x: m.l + w/2, y: H - 6, fill: '#dfe8ff', 'font-size': 11, 'text-anchor': 'middle', 'font-family': 'monospace'}); t.textContent = o.xlabel; svg.append(t); }
+  if (o.ylabel) { const t = E('text', {x: 12, y: m.t + h/2, fill: '#dfe8ff', 'font-size': 11, 'text-anchor': 'middle', 'font-family': 'monospace', transform: `rotate(-90 12 ${m.t + h/2})`}); t.textContent = o.ylabel; svg.append(t); }
+}
+
+function renderStaticPlots(pkg, rN) {
+  const op = pkg.operating, pt = rN.pt;
+  // A) lifetime vs input voltage (at slider Tamb, Pout)
+  const Lv = [];
+  for (let i = 0; i <= 40; i++) {
+    const vac = op.VacMin_V + (op.VacMax_V - op.VacMin_V) * i / 40;
+    const r = DCBUS.compute(pkg, { Vac_V: vac, Pout_W: pt.Pout_W, Tamb_C: pt.Tamb_C });
+    Lv.push({ x: vac, y: r.lifeH / 8760 });
+  }
+  plot('pLifeV', [{d: Lv, c: css('--ch1')}],
+       {xlabel: 'input voltage (Vac)', ylabel: 'lifetime (years)',
+        hline: pkg.acceptance?.life_min_h ? pkg.acceptance.life_min_h / 8760 : null,
+        cursor: {x: pt.Vac_V, y: rN.lifeH / 8760}, yZero: true});
+  // B) lifetime vs ambient (at slider Vac, Pout)
+  const Lt = [];
+  const t0 = op.TambMin_C, t1 = Math.max(op.TambMax_C + 20, rN.cap.T0_C);
+  for (let i = 0; i <= 40; i++) {
+    const ta = t0 + (t1 - t0) * i / 40;
+    const r = DCBUS.compute(pkg, { Vac_V: pt.Vac_V, Pout_W: pt.Pout_W, Tamb_C: ta });
+    Lt.push({ x: ta, y: r.lifeH / 8760 });
+  }
+  plot('pLifeT', [{d: Lt, c: css('--ch1')}],
+       {xlabel: 'ambient (°C)', ylabel: 'lifetime (years)',
+        hline: pkg.acceptance?.life_min_h ? pkg.acceptance.life_min_h / 8760 : null,
+        cursor: {x: pt.Tamb_C, y: rN.lifeH / 8760}, yZero: true});
+  // C) ripple Vpp vs output power (nominal + EOL) across the injected power range
+  const Rn = [], Re = [];
+  for (let i = 0; i <= 40; i++) {
+    const p = op.PoutMin_W + (op.PoutMax_W - op.PoutMin_W) * i / 40;
+    const r = DCBUS.compute(pkg, { Vac_V: pt.Vac_V, Pout_W: p, Tamb_C: pt.Tamb_C });
+    Rn.push({ x: p, y: r.VppNom }); Re.push({ x: p, y: r.VppEOL });
+  }
+  plot('pRipP', [{d: Rn, c: css('--ch1')}, {d: Re, c: css('--ch2'), dash: '7 4'}],
+       {xlabel: 'output power (W)', ylabel: 'ripple (Vpp)', hline: pkg.acceptance?.Vripple_max_Vpp ?? null,
+        cursor: {x: pt.Pout_W, y: rN.VppEOL}, yZero: true});
+  // D) ripple vs total C (sizing view)
+  const c0u = rN.Ctot * 0.35e6, c1u = rN.Ctot * 2.5e6, nom = [], eol = [];
+  for (let i = 0; i <= 40; i++) {
+    const cu = c0u + (c1u - c0u) * i / 40, C = cu * 1e-6;
+    nom.push({x: cu, y: DCBUS.ripplePP(pt.Pout_W, op.fLine_Hz, C, op.Vbus_V) + rN.VppESR});
+    eol.push({x: cu, y: DCBUS.ripplePP(pt.Pout_W, op.fLine_Hz, C * rN.kEOL, op.Vbus_V) + rN.VppESR});
+  }
+  plot('pRipC', [{d: nom, c: css('--ch1')}, {d: eol, c: css('--ch2'), dash: '7 4'}],
+       {xlabel: 'total C, nominal (µF)', ylabel: 'ripple (Vpp)', hline: pkg.acceptance?.Vripple_max_Vpp ?? null,
+        vline: rN.CripNeed ? rN.CripNeed * 1e6 : null, cursor: {x: rN.Ctot * 1e6, y: rN.VppEOL}, yZero: true});
+}
+
+/* ===================== SCOPE (animated) ===================== */
+const SCOPE = { playing: false, phase: 0, last: 0, raf: 0, sweepDir: 1 };
+const SLOWDOWN = 40;           // real line cycle stretched 40× for the eye
+const SWEEP_PERIOD_S = 8;      // Vac triangle sweep period when enabled
+
+function drawScope(pkg, rN) {
+  const op = pkg.operating, pt = rN.pt;
+  const f = op.fLine_Hz, T = 1 / f, ph = SCOPE.phase;
+  const Vm = Math.SQRT2 * pt.Vac_V;
+  const Vin = [], Vb = [], Ic = [];
+  const VbT = [], VbB = [], IcT = [], IcB = [];           // HF envelope edges
+  for (let i = 0; i <= 240; i++) {
+    const t = 2 * T * i / 240;                            // 2-cycle window
+    const th = 2 * Math.PI * f * t + ph;
+    const x = t * 1e3;
+    const vb = op.Vbus_V - (rN.VppEOL / 2) * Math.sin(2 * th);
+    const ic = -Math.SQRT2 * rN.Ilf * Math.cos(2 * th);
+    const env = rN.hfEnvAt(th);                           // HF voltage envelope, pk-pk
+    const iStep = rN.ImPh * Math.abs(Math.sin(th));       // HF current excursion
+    Vin.push({ x, y: Vm * Math.sin(th) });
+    Vb.push({ x, y: vb });  VbT.push({ x, y: vb + env / 2 });  VbB.push({ x, y: vb - env / 2 });
+    Ic.push({ x, y: ic });  IcT.push({ x, y: ic + iStep / 2 }); IcB.push({ x, y: ic - iStep / 2 });
+  }
+  const polyOf = (top, bot) => ({ d: top.concat(bot.slice().reverse()), poly: true, c: 'rgba(95,212,242,0.22)' });
+  const band = pkg.acceptance?.Vripple_max_Vpp
+    ? [op.Vbus_V - pkg.acceptance.Vripple_max_Vpp / 2, op.Vbus_V + pkg.acceptance.Vripple_max_Vpp / 2] : null;
+  plot('scopeTop', [polyOf(VbT, VbB), {d: Vin, c: css('--lim'), w: 1.8}, {d: Vb, c: css('--ch1')}],
+       {ylabel: 'V', xticks: false, y0: -Vm * 1.15, y1: Math.max(op.Vbus_V + rN.VppEOL, Vm) * 1.1, band});
+  plot('scopeBot', [{ ...polyOf(IcT, IcB), c: 'rgba(180,154,245,0.20)' }, {d: Ic, c: css('--ch2')}],
+       {xlabel: 'window: 2 line cycles (ms, ×' + SLOWDOWN + ' slowed)', ylabel: 'i_cap A'});
+  drawZoom(rN);
+  $('scopeRead').textContent =
+    `Vac ${pt.Vac_V} V · Pout ${pt.Pout_W} W · Tamb ${pt.Tamb_C} °C  →  ripple ${rN.VppTot.toFixed(1)} Vpp total (LF ${rN.VppEOL.toFixed(1)} + HF ${rN.VppHF.toFixed(2)}) · hotspot ${rN.Thot.toFixed(1)} °C · life ${(rN.lifeH/8760).toFixed(1)} yr`;
+}
+
+/* switching-scale zoom at the line crest: 4 effective switching periods */
+function drawZoom(rN) {
+  const msgI = $('zoomI'), msgV = $('zoomV');
+  if (!rN.fEff) {
+    [msgI, msgV].forEach(s => { s.innerHTML = ''; const t = E('text', {x: 20, y: 30, fill: '#8fa0c4', 'font-size': 11, 'font-family': 'monospace'});
+      t.textContent = 'fsw not supplied — zoom unavailable'; s.append(t); });
+    return;
+  }
+  const Tz = 1 / rN.fEff, win = 4 * Tz;
+  const iStep = rN.ImPh, d = rN.dCrest;                   // at line crest |sin θ| = 1
+  const iHi = iStep * d, iLo = -iStep * (1 - d);          // diode-on / switch-on cap current
+  const shift = (SCOPE.phase / (2 * Math.PI)) * Tz;       // animate with the main scope
+  const I = [], V = [];
+  let vC = 0;
+  // pre-integrate one period to centre the capacitive triangle
+  const triPP = iStep * d * (1 - d) * Tz / rN.CtotEOL;
+  for (let i = 0; i <= 400; i++) {
+    const t = win * i / 400;
+    const tp = ((t + shift) % Tz) / Tz;                   // position in switching period
+    const on = tp < (1 - d);                              // diode conducting first
+    const ic = on ? iHi : iLo;
+    vC = on ? (-triPP / 2 + triPP * (tp / (1 - d))) : (triPP / 2 - triPP * ((tp - (1 - d)) / d));
+    I.push({ x: t * 1e6, y: ic });
+    V.push({ x: t * 1e6, y: (ic * rN.esrHFbank + vC) * 1e3 });   // mV
+  }
+  plot('zoomI', [{d: I, c: css('--ch2'), w: 2}], {ylabel: 'i_cap A', xticks: false});
+  plot('zoomV', [{d: V, c: css('--ch1'), w: 2}], {xlabel: 'time (µs) — 4 switching periods @ line crest', ylabel: 'v_hf mV'});
+}
+
+function tick(ts) {
+  if (!SCOPE.playing) return;
+  const dt = SCOPE.last ? (ts - SCOPE.last) / 1000 : 0;
+  SCOPE.last = ts;
+  const pkg = formToPkg();
+  SCOPE.phase = (SCOPE.phase + 2 * Math.PI * pkg.operating.fLine_Hz * dt / SLOWDOWN) % (2 * Math.PI);
+  if ($('chkSweep').checked) {                    // triangle sweep of Vac across the injected range
+    const lo = pkg.operating.VacMin_V, hi = pkg.operating.VacMax_V;
+    let v = +$('sVac').value + SCOPE.sweepDir * (hi - lo) * 2 * dt / SWEEP_PERIOD_S;
+    if (v >= hi) { v = hi; SCOPE.sweepDir = -1; } if (v <= lo) { v = lo; SCOPE.sweepDir = 1; }
+    $('sVac').value = v;
+    refreshExplore(false);                        // live update of KPIs/sensitivity while sweeping
+  } else {
+    drawScope(pkg, DCBUS.compute(pkg, explorePoint()));
+  }
+  SCOPE.raf = requestAnimationFrame(tick);
+}
+
+function setPlay(on) {
+  SCOPE.playing = on; SCOPE.last = 0;
+  $('btnPlay').textContent = on ? '⏸ Pause' : '▶ Play';
+  if (on) SCOPE.raf = requestAnimationFrame(tick); else cancelAnimationFrame(SCOPE.raf);
+}
+
+/* ===================== REFRESH PIPELINE ===================== */
+function refreshAll() {          // package-level change: re-judge corner + everything
+  syncSliderRanges();
+  const pkg = formToPkg();
+  const rCorner = DCBUS.compute(pkg);            // worst corner — the rating gate
+  renderVerdict(rCorner); renderLedger(rCorner);
+  const wb = $('warnbox');
+  wb.style.display = rCorner.warnings.length ? 'block' : 'none';
+  wb.innerHTML = rCorner.warnings.map(w => '⚠ ' + w).join('<br>');
+  refreshExplore(true);
+}
+function refreshExplore(full) {  // slider-level change: explore point only
+  const pkg = formToPkg();
+  const rN = DCBUS.compute(pkg, explorePoint());
+  $('lblVac').textContent = $('sVac').value + ' Vac';
+  $('lblP').textContent = $('sP').value + ' W';
+  $('lblT').textContent = $('sT').value + ' °C';
+  renderKpis(rN); renderTables(rN);
+  if (full !== false) renderStaticPlots(pkg, rN);
+  else renderStaticPlots(pkg, rN);               // cursors track the sweep too
+  drawScope(pkg, rN);
+}
+
+/* ===================== WIRING ===================== */
+$('btnReset').onclick = () => { pkgToForm(PKG); refreshAll(); };
+$('btnLoad').onclick = () => $('fileIn').click();
+$('fileIn').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    try { PKG = JSON.parse(t); pkgSource = 'loaded: ' + f.name;
+          $('srcTag').innerHTML = 'package: <b>' + pkgSource + '</b>'; pkgToForm(PKG); refreshAll(); }
+    catch (err) { alert('Not valid JSON: ' + err.message); }
+  });
+};
+function dl(name, obj) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], {type: 'application/json'}));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+$('btnExpPkg').onclick = () => dl('dcbus_package.json', formToPkg());
+$('btnExpRes').onclick = () => {
+  const pkg = formToPkg();
+  const rC = DCBUS.compute(pkg), rN = DCBUS.compute(pkg, explorePoint());
+  dl('dcbus_results.json', { timestamp: new Date().toISOString(), package: pkg,
+    verdict: rC.verdict, judgedAtCorner: rC.pt, checks: rC.checks, warnings: rC.warnings,
+    explorePoint: rN.pt,
+    atExplorePoint: { VppNom: rN.VppNom, VppEOL: rN.VppEOL, Ilf_A: rN.Ilf, Ihf_A: rN.Ihf, IhfSource: rN.IhfSrc,
+                      IeqPerCap_A: rN.Ieq, margin_pct: rN.margin, PeachCu_W: rN.PeachCu, Pbank_W: rN.Pbank,
+                      dT_K: rN.dT, Thot_C: rN.Thot, life_h: rN.lifeH, Vwork_V: rN.Vwork, vDerate_pct: rN.vDer,
+                      holdUp_ms: rN.holdMs } });
+};
+$('btnPlay').onclick = () => setPlay(!SCOPE.playing);
+['sVac','sP','sT'].forEach(id => $(id).addEventListener('input', () => refreshExplore()));
+document.querySelectorAll('.inputs input, .inputs select').forEach(el => el.addEventListener('input', refreshAll));
+window.addEventListener('resize', refreshAll);
+
+$('srcTag').innerHTML = 'package: <b>' + pkgSource + '</b>';
+pkgToForm(PKG);
+refreshAll();
+if (!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) setPlay(true);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+{
+  "schemaVersion": "1.0",
+  "model": {
+    "design": {
+      "Vout": 394.0,
+      "fsw": 70000.0,
+      "lineHz": 60.0,
+      "nph": 2,
+      "Prated": 3600,
+      "specLowLineMaxPct": 47.2,
+      "specHighLineMaxPct": 100.0
+    },
+    "environment": {
+      "Tamb_C": 50.0,
+      "Thot_C": 110.0
+    },
+    "winding": {
+      "N": 31,
+      "stacks": 3,
+      "build_mm": 3.8
+    },
+    "geometry": {
+      "OD_mm": 58.04,
+      "ID_mm": 34.75,
+      "HT_mm": 14.86,
+      "Ae_mm2": 144.0,
+      "Le_mm": 143.0,
+      "Ve_mm3": 20700.0,
+      "Wa_mm2": 948.0,
+      "AL_nH": 94.0,
+      "AL_tol": 0.08
+    },
+    "material": {
+      "name": "Material-A",
+      "Bsat": 1.5,
+      "steinmetz": {
+        "a": 121.47,
+        "b": 2.263,
+        "c": 1.403
+      },
+      "retention": {
+        "k0": 0.01,
+        "k1": 1.58e-09,
+        "p": 3.067
+      },
+      "lossMaxScale": 1.286,
+      "anchors": {
+        "loss": [
+          0.1,
+          100.0,
+          424.0
+        ],
+        "bias": [
+          [
+            105.0,
+            80.0
+          ]
+        ]
+      }
+    },
+    "copper": {
+      "wire": {
+        "type": "litz",
+        "strands": 800,
+        "strandDia_mm": 0.1,
+        "parallel": 2,
+        "fillFactor": 0.45
+      },
+      "RacRdc": 1.15,
+      "alphaCu": 0.00393,
+      "rho20_ohm_m": 1.724e-08,
+      "prox": {
+        "kSkin": 0.5,
+        "kProx": 0.4,
+        "kCrowd": 0.25
+      }
+    },
+    "cooling": {
+      "mode": "natural"
+    },
+    "maps": {
+      "etaByVin": {
+        "90": 0.9438,
+        "110": 0.9537,
+        "120": 0.9636,
+        "132": 0.973,
+        "180": 0.9543,
+        "200": 0.9637,
+        "220": 0.9643,
+        "230": 0.9672,
+        "264": 0.9425
+      },
+      "crestByVin": {}
+    }
+  },
+  "operating": {
+    "points": [
+      {
+        "Vin": 90,
+        "Pout": 1700,
+        "eta": 0.945,
+        "PF": 0.9987
+      },
+      {
+        "Vin": 110,
+        "Pout": 1700,
+        "eta": 0.955,
+        "PF": 0.9986
+      },
+      {
+        "Vin": 120,
+        "Pout": 1700,
+        "eta": 0.965,
+        "PF": 0.9985
+      },
+      {
+        "Vin": 132,
+        "Pout": 1700,
+        "eta": 0.975,
+        "PF": 0.998
+      },
+      {
+        "Vin": 180,
+        "Pout": 3600,
+        "eta": 0.965,
+        "PF": 0.9889
+      },
+      {
+        "Vin": 200,
+        "Pout": 3600,
+        "eta": 0.975,
+        "PF": 0.9884
+      },
+      {
+        "Vin": 220,
+        "Pout": 3600,
+        "eta": 0.985,
+        "PF": 0.979
+      },
+      {
+        "Vin": 230,
+        "Pout": 3600,
+        "eta": 0.988,
+        "PF": 0.9789
+      },
+      {
+        "Vin": 264,
+        "Pout": 3600,
+        "eta": 0.99,
+        "PF": 0.952
+      }
+    ]
+  },
+  "acceptance": {
+    "L_target_uH": 239.0,
+    "sat_margin_min": 0.43,
+    "FFcu_limit": 0.45,
+    "J_min": 3.0,
+    "J_max": 7.0
+  },
+  "meta": {
+    "units": "SI+catalog",
+    "provenance": "analytic + FEA-corrected fields (windingAC/inductance/thermal)",
+    "note": "carries operating.points (engine) AND maps+Prated+spec% (browser); copper.prox tunes the analytic R_ac stand-in"
+  },
+  "fields": {
+    "windingAC": {
+      "freq_Hz": [
+        1000.0,
+        70000.0,
+        200000.0,
+        1000000.0
+      ],
+      "RacOverRdc": [
+        1.02,
+        1.18,
+        1.6,
+        4.5
+      ],
+      "provenance": "fea"
+    },
+    "inductance": {
+      "H": [
+        0,
+        40,
+        80,
+        160,
+        240
+      ],
+      "L_uH": [
+        271,
+        266,
+        250,
+        205,
+        150
+      ],
+      "provenance": "fea"
+    },
+    "thermal": {
+      "nodes": {
+        "Rca_KperW": 6.0,
+        "Rwa_KperW": 5.0,
+        "Rcw_KperW": 2.0
+      },
+      "provenance": "fea"
+    }
+  }
+}
