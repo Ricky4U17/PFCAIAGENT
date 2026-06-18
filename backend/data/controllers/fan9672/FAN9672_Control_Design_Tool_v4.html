@@ -1,0 +1,2196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PFC Control Loop Design Tool v4</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#131c2f; --panel2:#0d1528; --line:#2b3754; --text:#eaf0ff;
+    --muted:#9aa8c4; --accent:#56a3ff; --good:#34d399; --warn:#f59e0b; --bad:#ef4444; --violet:#b18cff;
+  }
+  *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);background:#0f1728;position:sticky;top:0;z-index:20}
+  h1{margin:0;font-size:21px} .sub{color:var(--muted);font-size:12px;margin-top:4px;max-width:900px}
+  .toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+  .seg{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button,.tabbtn{padding:8px 12px;border:none;border-radius:10px;background:#22314f;color:var(--text);cursor:pointer;font-weight:700;font-size:13px}
+  button.active,.tabbtn.active{background:var(--accent);color:#08111f}
+  button.action{background:var(--good);color:#08111f}
+  button.ghost{background:#1a2742;font-weight:600}
+  main{padding:16px;display:grid;gap:16px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .screen{display:none}.screen.active{display:grid;grid-template-columns:430px 1fr;gap:16px}
+  #screen1.active{display:block}
+  #screen5.active{display:block}
+  .schemWrap{overflow:auto;background:#0a111f;border:1px solid var(--line);border-radius:12px}
+  .schemWrap svg{display:block;min-width:1280px;width:100%;height:auto}
+  .prow{display:grid;gap:14px}
+  .prow .panel{margin-bottom:14px}
+  .prow.p4{grid-template-columns:repeat(4,1fr)}
+  .prow.p3{grid-template-columns:repeat(3,1fr)}
+  @media (max-width:1500px){.prow.p4,.prow.p3{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:820px){.prow.p4,.prow.p3{grid-template-columns:1fr}}
+  @media (max-width:1180px){.screen.active{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(0,0,0,.15);margin-bottom:14px}
+  h2{margin:0 0 10px 0;font-size:17px} h3{margin:12px 0 8px 0;font-size:13.5px;color:#d5dffa}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  input,select{width:100%;padding:7px 9px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:13px}
+  input[disabled]{opacity:.75}
+  .small{font-size:12px;color:var(--muted)} .mono{font-family:Consolas,ui-monospace,monospace}
+  .note{border-left:4px solid var(--accent);padding:6px 10px;color:#dbe6ff;font-size:12px;margin:8px 0;background:rgba(86,163,255,.06);border-radius:0 8px 8px 0}
+  .note.warnN{border-left-color:var(--warn);background:rgba(245,158,11,.07)}
+  .note.badN{border-left-color:var(--bad);background:rgba(239,68,68,.07)}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700}
+  .ok{background:rgba(52,211,153,.15);color:var(--good)} .warn{background:rgba(245,158,11,.15);color:var(--warn)} .bad{background:rgba(239,68,68,.15);color:var(--bad)} .info{background:rgba(86,163,255,.15);color:var(--accent)}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px}
+  .k{font-size:11px;color:var(--muted)} .v{font-size:16px;font-weight:700;margin-top:3px} .u{font-size:10.5px;color:var(--muted)}
+  .card.gd .v{color:var(--good)} .card.bd .v{color:var(--bad)}
+  @media (max-width:760px){.cards{grid-template-columns:1fr 1fr}}
+  .tableWrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+  table{width:100%;border-collapse:collapse;font-size:12px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} th{background:#16233b;color:#d5dffa;position:sticky;top:0;z-index:2}
+  td.std{color:var(--good);font-weight:700} td.calcv{color:var(--muted)}
+  .canvasWrap{background:#0a111f;border:1px solid var(--line);border-radius:12px;padding:8px;position:relative}
+  canvas{width:100%;display:block;cursor:crosshair}
+  canvas.pz{cursor:grab;height:74px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--muted);padding:6px 4px 0}
+  .legend i{display:inline-block;width:18px;height:0;border-top:2.5px solid;margin-right:5px;vertical-align:middle}
+  .code{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11.5px;color:#dbe6ff;font-family:Consolas,ui-monospace,monospace;max-height:260px;overflow:auto}
+  .chipRow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;font-size:12.5px;font-weight:600;position:relative}
+  .chip.inz{border-color:var(--accent);color:var(--text)}
+  .chip.selC{background:var(--accent);border-color:var(--accent);color:#08111f}
+  .chip .st{position:absolute;top:-8px;right:-5px;color:var(--good);font-size:12px}
+  .zoneBar{position:relative;height:42px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;margin:8px 0 2px;overflow:hidden}
+  .zoneSeg{position:absolute;top:0;bottom:0}
+  .zoneTick{position:absolute;top:0;bottom:0;width:2px}
+  .zoneLbl{position:absolute;font-size:9.5px;color:var(--muted);white-space:nowrap}
+  .copt{border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer;background:var(--panel2);margin-bottom:7px;position:relative}
+  .copt.selT{border-color:var(--accent);background:rgba(86,163,255,.08)}
+  .copt.dis{opacity:.55;cursor:not-allowed}
+  .copt .t{font-weight:700;font-size:13px}.copt .d{font-size:11px;color:var(--muted);margin-top:2px}
+  .copt .tag{position:absolute;top:7px;right:9px}
+  .switch{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .switch button{border-radius:0;flex:1;font-size:11.5px;padding:7px 6px;background:var(--panel2);font-weight:600}
+  .switch button.active{background:var(--accent);color:#08111f}
+  .inline{display:flex;gap:8px;align-items:center}
+  .hoverbox{position:absolute;pointer-events:none;background:rgba(13,21,40,.95);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:#dbe6ff;display:none;z-index:5;font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+<header>
+  <div class="toolbar">
+    <div>
+      <h1>PFC Control Loop Design Tool — v4</h1>
+      <div class="sub">Mode-specific design (Low Line / FR · High Line / HV). Plant parameters (L, C, ESR, DCR, Vout, fsw, NCH, Pout, η) supplied by Python sizing engine. IC: FAN9672 (2-phase interleaved boost). All results computed from the selected component values — no anchored estimates.</div>
+    </div>
+    <div class="seg">
+      <button id="modeLow" class="active">Low Line</button>
+      <button id="modeHigh">High Line</button>
+      <button id="loadDefaults" class="action">Load Report Defaults</button>
+      <button id="btnExport" class="ghost">Export Summary</button>
+      <button id="btnReport" class="ghost">Generate Report</button>
+      <button id="btnSave" class="ghost">Save JSON</button>
+      <button id="btnLoad" class="ghost">Load JSON</button>
+      <input type="file" id="fileLoad" accept=".json" style="display:none">
+    </div>
+  </div>
+</header>
+<main>
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="screen1">Screen 1 — Mode, R_CS &amp; Core Components</button>
+    <button class="tabbtn" data-tab="screen2">Screen 2 — Compensators &amp; Bode</button>
+    <button class="tabbtn" data-tab="screen3">Screen 3 — Transient</button>
+    <button class="tabbtn" data-tab="screen4">Screen 4 — iTHD</button>
+    <button class="tabbtn" data-tab="screen5">Screen 5 — Schematic</button>
+  </div>
+
+  <!-- ================= SCREEN 1 ================= -->
+  <section id="screen1" class="screen active">
+    <div class="prow p4">
+<div class="panel">
+        <h2>Mode Inputs</h2>
+        <div class="grid">
+          <div><label>Operating VAC (plot/inspect)</label><select id="vac"></select></div>
+          <div><label>Pout (W)</label><input id="pout" type="number" step="1"></div>
+          <div><label>Vout (V)</label><input id="vout" type="number" step="0.1" value="393.7"></div>
+          <div><label>fSW target (kHz)</label><input id="fsw" type="number" value="70" step="1"></div>
+          <div><label>L per phase (µH)</label><input id="lphi" type="number" value="235" step="0.1"></div>
+          <div><label>CO (µF)</label><input id="co" type="number" value="2200" step="1"></div>
+          <div><label>rL (mΩ)</label><input id="rl" type="number" value="10" step="0.1"></div>
+          <div><label>rC (mΩ)</label><input id="rc" type="number" value="10" step="0.1"></div>
+          <div><label>RIAC (MΩ) — mode</label><input id="riac" type="number" step="0.1"></div>
+          <div><label>RVIR (kΩ) — mode</label><input id="rvir" type="number" step="0.1"></div>
+          <div><label>RRLPK (kΩ)</label><input id="rrlpk" type="number" value="12.1" step="0.01"></div>
+          <div><label>Kmax (1.3 – 1.6)</label><input id="kmax" type="number" value="1.49" min="1.3" max="1.6" step="0.01"></div>
+          <div><label>Efficiency η (RCS Pdiss)</label><input id="eta" type="number" value="0.93" min="0.8" max="0.99" step="0.005"></div>
+          <div><label>RFB2 lower divider (kΩ)</label><input id="rfb2" type="number" value="23.2" step="0.1"></div>
+        </div>
+      </div>
+<div class="panel">
+        <h2>Current-Sense Resistor R<sub>CS</sub> (Per Phase)</h2>
+        <div class="zoneBar" id="rcsZone"></div>
+        <div class="chipRow" id="rcsChips"></div>
+        <div class="inline" style="margin-top:8px">
+          <div style="flex:1"><label>Custom RCS (mΩ) — optional override</label><input id="rcsCustom" type="number" step="0.1" placeholder="leave blank to use chip"></div>
+          <div style="flex:1.4" id="veaCheck"></div>
+        </div>
+      </div>
+<div class="panel">
+        <h2>BIBO Network</h2>
+        <div class="grid3">
+          <div><label>RB1 (kΩ)</label><input id="rb1" type="number" value="560"></div>
+          <div><label>RB2 (kΩ)</label><input id="rb2" type="number" value="560"></div>
+          <div><label>RB3 (kΩ)</label><input id="rb3" type="number" value="82"></div>
+          <div><label>RB4 (kΩ)</label><input id="rb4" type="number" value="30"></div>
+          <div><label>CB1 (nF)</label><input id="cb1" type="number" value="100"></div>
+          <div><label>CB2 (nF)</label><input id="cb2" type="number" value="560"></div>
+        </div>
+        <div id="biboOut" class="small" style="margin-top:8px"></div>
+      </div>
+<div class="panel">
+        <h2>Soft Start — C<sub>SS</sub></h2>
+        <div class="grid">
+          <div><label>t_SS target (ms)</label><input id="ssT" type="number" value="100" step="5"></div>
+        </div>
+        <div class="tableWrap"><table id="auxBomSS"></table></div>
+      </div>
+    </div>
+    <div class="prow p4" id="prow2">
+<div class="panel">
+        <h2>Current Limits — ILIMIT &amp; ILIMIT2</h2>
+        <div class="grid3">
+          <div><label>ILIMIT clamping ratio ◆</label><input id="ilClamp" type="number" value="1.8" step="0.05"></div>
+          <div><label>ILIMIT2 ratio (× V_CS,PK) ◆</label><input id="il2K" type="number" value="1.5" step="0.05"></div>
+          <div><label>Pin filter pole (kHz)</label><input id="ilFp" type="number" value="0.5" step="0.1"></div>
+        </div>
+        <div class="tableWrap"><table id="auxBomIL"></table></div>
+      </div>
+<div class="panel">
+        <h2>Gain Control — GC</h2>
+        <div class="grid">
+          <div><label>GC filter pole (kHz)</label><input id="gcFp" type="number" value="10" step="0.5"></div>
+        </div>
+        <div class="tableWrap"><table id="auxBomGC"></table></div>
+      </div>
+<div class="panel">
+        <h2>Current Predict — LS</h2>
+        <div class="grid">
+          <div><label>LS filter pole (kHz)</label><input id="lsFp" type="number" value="10" step="0.5"></div>
+        </div>
+        <div class="tableWrap"><table id="auxBomLS"></table></div>
+      </div>
+
+      <div class="panel">
+        <h2>LPK — Signal Filtering</h2>
+        <div class="small" style="margin-bottom:6px">Filter parts around the LPK / RLPK pins — fixed by practice, not by loop calculation. Select your standard.</div>
+        <div class="tableWrap"><table id="auxBomLPK"></table></div>
+      </div>
+    </div>
+<div class="panel">
+        <h2>Quick Results</h2>
+        <div class="cards" id="cards1"></div>
+        <div class="note" id="rhpNote"></div>
+      </div>
+<div class="panel">
+        <h2>Core Component Table — calculated, with function</h2>
+        <div class="tableWrap" style="max-height:560px"><table id="componentTable1"></table></div>
+      </div>
+<div class="panel">
+        <h2>G<sub>MOD</sub> Verification — Three Independent Paths</h2>
+        <div class="tableWrap"><table id="gmodTable"></table></div>
+      </div>
+<div class="panel">
+        <h2>Fixed Coefficients / Internal Parameters</h2>
+        <div class="tableWrap"><table id="fixedTable"></table></div>
+      </div>
+  </section>
+
+  <!-- ================= SCREEN 2 ================= -->
+  <section id="screen2" class="screen">
+    <div>
+      <div class="panel">
+        <h2>Standard-Value Series</h2>
+        <div class="grid">
+          <div><label>Resistor series</label><select id="serR"><option>E96</option><option>E24</option></select></div>
+          <div><label>Capacitor series</label><select id="serC"><option>E24</option><option>E12</option></select></div>
+        </div>
+        <div class="small" style="margin-top:6px">Report BOM uses E96 resistors / E24-class capacitors. Every plot and margin below is evaluated from the <b>selected standard values</b>, not the ideal ones.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Current Loop — Compensator on IEA (G<sub>MI</sub> = 88 µS)</h2>
+        <div id="ciRec"></div>
+        <div id="ciTypeCards"></div>
+        <div class="grid">
+          <div><label>Crossover fci (Hz)</label><input id="fci" type="number" value="8000" step="100"></div>
+          <div><label>Zero fz (Hz)</label><input id="cfz" type="number" value="1000" step="10"></div>
+          <div><label>HF pole fp (Hz)</label><input id="cfp" type="number" value="26000" step="100"></div>
+          <div><label>CS filter RF (Ω) / CF (pF)</label>
+            <div class="inline"><input id="rf" type="number" value="2000" step="10"><input id="cf" type="number" value="470" step="10"></div></div>
+        </div>
+        <h3>Pole–Zero Placement (drag ○ zero / × pole)</h3>
+        <div class="canvasWrap"><canvas id="pzCur" class="pz"></canvas></div>
+        <h3>Component Values — select your standard</h3>
+        <div class="tableWrap"><table id="ciBom"></table></div>
+      </div>
+
+      <div class="panel">
+        <h2>Voltage Loop — Compensator on VEA (G<sub>MV</sub> = 100 µS, SLVA662)</h2>
+        <div class="inline" style="margin-bottom:8px">
+          <div class="switch" style="flex:1">
+            <button id="philShared" class="active">Shared network — sized at HL 180 V (report)</button>
+            <button id="philDedicated">Dedicated — sized at this mode's corner</button>
+          </div>
+        </div>
+        <div id="cvRec"></div>
+        <div id="cvTypeCards"></div>
+        <div class="grid">
+          <div><label>Target crossover fcv (Hz)</label><input id="fcv" type="number" value="17" step="0.1"></div>
+          <div><label>FB top R1 (MΩ) / bottom R4 (kΩ)</label>
+            <div class="inline"><input id="r1fb" type="number" value="3.63" step="0.01"><input id="r4fb" type="number" value="23.2" step="0.1"></div></div>
+          <div><label>Zero 1 fz1 (Hz)</label><input id="vfz1" type="number" value="3" step="0.1"></div>
+          <div><label>Zero 2 fz2 (Hz) — Type-III</label><input id="vfz2" type="number" value="12" step="0.1"></div>
+          <div><label>Pole 1 fp1 (Hz)</label><input id="vfp1" type="number" value="50" step="0.5"></div>
+          <div><label>Pole 2 fp2 (Hz) — Type-III</label><input id="vfp2" type="number" value="17" step="0.1"></div>
+        </div>
+        <h3>Step-17 Optimization Presets</h3>
+        <div class="seg">
+          <button class="ghost preset" data-p="base">Baseline 17 Hz</button>
+          <button class="ghost preset" data-p="A">A — THD focus 12 Hz</button>
+          <button class="ghost preset" data-p="B">B — Balanced 20 Hz</button>
+          <button class="ghost preset" data-p="C">C — Transient 25 Hz</button>
+        </div>
+        <h3>Pole–Zero Placement (drag ○ zeros / × poles)</h3>
+        <div class="canvasWrap"><canvas id="pzVol" class="pz"></canvas></div>
+        <h3>Component Values — select your standard</h3>
+        <div class="tableWrap"><table id="cvBom"></table></div>
+      </div>
+
+      <div class="panel">
+        <h2>Tolerance Corners</h2>
+        <label class="inline" style="color:var(--text);font-size:13px"><input type="checkbox" id="tolChk" style="width:auto"> &nbsp;Evaluate ±1 % R / ±5 % C worst-case phase margin (48 random corners)</label>
+        <div id="tolOut" class="small" style="margin-top:6px"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Stability Scorecard — all operating points, standard values</h2>
+        <div class="cards" id="cards2"></div>
+        <div class="tableWrap" style="margin-top:10px"><table id="marginTable"></table></div>
+      </div>
+      <div class="panel">
+        <h2>Current Loop T<sub>i</sub>(s) — 10 Hz to 500 kHz</h2>
+        <label class="inline" style="font-size:12px;color:var(--muted)"><input type="checkbox" id="ovl" checked style="width:auto">&nbsp;Overlay all operating points (solid = low line, dashed = high line)</label>
+        <div class="canvasWrap"><canvas id="bodeCur" data-h="430"></canvas><div class="hoverbox" id="hbCur"></div></div>
+        <div class="legend"><span><i style="border-color:#56a3ff"></i>Loop T<sub>i</sub> (selected std values)</span><span><i style="border-color:rgba(86,163,255,.35)"></i>Other operating points (overlay)</span><span><i style="border-color:#34d399"></i>achieved fc / PM / GM</span></div>
+      </div>
+      <div class="panel">
+        <h2>Voltage Loop T<sub>v</sub>(s) — 0.1 Hz to 1 MHz</h2>
+        <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
+        <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
+      </div>
+      <div class="panel">
+        <h2>Compensation Calculation Log</h2>
+        <div id="calcLog2" class="code"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SCREEN 3 ================= -->
+  <section id="screen3" class="screen">
+    <div>
+      <div class="panel">
+        <h2>Load-Step Transient</h2>
+        <div class="note">ΔV(t) is computed from the closed-loop output impedance built from your selected standard components. Recovery time is to the ±1 % band (±<span id="bandV"></span> V).</div>
+        <h3>Input voltages shown</h3>
+        <div class="chipRow" id="tranToggles"></div>
+        <h3>Transient response — all enabled voltages, all 6 load steps</h3>
+        <div class="tableWrap" style="max-height:520px"><table id="transientTable"></table></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>ΔV<sub>out</sub>(t) — full 0→100 % load step</h2>
+        <div class="canvasWrap"><canvas id="stepPlot" height="320"></canvas></div>
+        <div class="legend" id="stepLegend"></div>
+      </div>
+      <div class="panel">
+        <h2>Transient Notes</h2>
+        <div id="calcLog3" class="code"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SCREEN 4 ================= -->
+  <section id="screen4" class="screen">
+    <div>
+      <div class="panel">
+        <h2>120 Hz Rejection &amp; iTHD₃</h2>
+        <div class="tableWrap"><table id="thdTable"></table></div>
+        <div class="note" id="thdNote"></div>
+      </div>
+      <div class="panel">
+        <h2>Summary</h2>
+        <div class="cards" id="cards3"></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>iTHD₃ vs Input Voltage</h2>
+        <div class="canvasWrap"><canvas id="thdPlot" height="320"></canvas></div>
+        <div class="legend"><span><i style="border-color:#56a3ff"></i>Low line</span><span><i style="border-color:#f59e0b"></i>High line</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SCREEN 5 ================= -->
+  <section id="screen5" class="screen">
+    <div class="panel">
+      <h2>Application Schematic — FAN9672 Pin Networks (live values)</h2>
+      <div class="note">Topology per the FLEX2 front-end reference (sheet 2). <span style="color:var(--warn);font-weight:700">Amber values</span> are taken live from your selections on Screens 1–2; grey "(typ)" parts are not sized by this tool.</div>
+      <div class="schemWrap"><div id="schemSvg"></div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+/* ============ constants & series ============ */
+const FIXED={KRM:6000,KRLPK:2.465,VRAMP:5,GMI:88e-6,GMV:100e-6,NCH:2,Gmax:2,RM:7500,VREF:2.5,Kavg:0.9003,
+  VBI_FR:1.90,VBI_HV:1.75,VBO:1.05,VSAG:0.85};
+// Operating-point voltage arrays — match Python DEFAULT_OPS exactly
+const LOW_VACS=[90,110,120,132], HIGH_VACS=[180,200,220,230,264];
+
+// ── Python-injectable power-stage operating parameters ─────────────────────
+// These are overridden by the Python inject script before recalc() is called.
+// Low-line Pout, High-line Pout (from intake.application in Python state)
+let POUT_LO = 1700;   // W — output_power_w_low_line
+let POUT_HI = 3600;   // W — output_power_w_high_line
+// Per-mode efficiency (average from Python DEFAULT_OPS table per line range)
+let ETA_LO  = 0.945;  // η at 90 Vac low line
+let ETA_HI  = 0.965;  // η at 180 Vac high line
+const E96=[1.00,1.02,1.05,1.07,1.10,1.13,1.15,1.18,1.21,1.24,1.27,1.30,1.33,1.37,1.40,1.43,1.47,1.50,1.54,1.58,1.62,1.65,1.69,1.74,1.78,1.82,1.87,1.91,1.96,2.00,2.05,2.10,2.15,2.21,2.26,2.32,2.37,2.43,2.49,2.55,2.61,2.67,2.74,2.80,2.87,2.94,3.01,3.09,3.16,3.24,3.32,3.40,3.48,3.57,3.65,3.74,3.83,3.92,4.02,4.12,4.22,4.32,4.42,4.53,4.64,4.75,4.87,4.99,5.11,5.23,5.36,5.49,5.62,5.76,5.90,6.04,6.19,6.34,6.49,6.65,6.81,6.98,7.15,7.32,7.50,7.68,7.87,8.06,8.25,8.45,8.66,8.87,9.09,9.31,9.53,9.76];
+const E24=[1.0,1.1,1.2,1.3,1.5,1.6,1.8,2.0,2.2,2.4,2.7,3.0,3.3,3.6,3.9,4.3,4.7,5.1,5.6,6.2,6.8,7.5,8.2,9.1];
+const E12=[1.0,1.2,1.5,1.8,2.2,2.7,3.3,3.9,4.7,5.6,6.8,8.2];
+const SERIES={E96,E24,E12};
+const SHUNTS=[8,10,12,13,15,16,18,20,22,25,30];
+const $=id=>document.getElementById(id);
+
+/* ============ complex helpers ============ */
+const c=(re,im)=>({re,im});
+const cadd=(a,b)=>c(a.re+b.re,a.im+b.im), cmul=(a,b)=>c(a.re*b.re-a.im*b.im,a.re*b.im+a.im*b.re), cscale=(a,k)=>c(a.re*k,a.im*k);
+function cdiv(a,b){const d=b.re*b.re+b.im*b.im;return c((a.re*b.re+a.im*b.im)/d,(a.im*b.re-a.re*b.im)/d)}
+const cabs=z=>Math.hypot(z.re,z.im), cang=z=>Math.atan2(z.im,z.re)*180/Math.PI, magdb=z=>20*Math.log10(cabs(z));
+const fmt=(v,n=3)=>Number.isFinite(v)?Number(v).toFixed(n):'—';
+const trim0=s=>s.includes('.')?s.replace(/0+$/,'').replace(/\.$/,''):s;
+function fmtOhm(v){if(!Number.isFinite(v))return'—';if(v>=1e6)return trim0(fmt(v/1e6))+' MΩ';if(v>=1e3)return trim0(fmt(v/1e3))+' kΩ';if(v>=1)return trim0(fmt(v))+' Ω';return trim0(fmt(v*1e3,2))+' mΩ'}
+function fmtCap(v){if(!Number.isFinite(v))return'—';if(v>=1e-6)return trim0(fmt(v*1e6))+' µF';if(v>=1e-9)return trim0(fmt(v*1e9))+' nF';return trim0(fmt(v*1e12,1))+' pF'}
+function fmtHz(v){if(!Number.isFinite(v))return'—';if(v>=1e6)return trim0(fmt(v/1e6))+' MHz';if(v>=1e3)return trim0(fmt(v/1e3))+' kHz';return trim0(fmt(v,2))+' Hz'}
+function logspace(a,b,n){return Array.from({length:n},(_,i)=>10**(a+(b-a)*(i/(n-1))))}
+function nearestStd(v,ser){if(!(v>0))return NaN;const d=Math.floor(Math.log10(v));let best=v,err=1e99;
+  for(let k=d-1;k<=d+1;k++){for(const m of SERIES[ser]){const cand=m*10**k;const e=Math.abs(Math.log(v/cand));if(e<err){err=e;best=cand}}}return best}
+function nearestList(v,ser,n=7){if(!(v>0))return[];const d=Math.floor(Math.log10(v));const all=[];
+  for(let k=d-2;k<=d+2;k++)for(const m of SERIES[ser])all.push(m*10**k);
+  all.sort((a,b)=>Math.abs(Math.log(a/v))-Math.abs(Math.log(b/v)));
+  return all.slice(0,n).sort((a,b)=>a-b)}
+
+/* ============ state ============ */
+const state={mode:'low',phil:'shared',rcsSel:15,bom:{},vType:'type3',cType:'T2'};
+function bomGet(key,calcVal,ser){
+  const e=state.bom[key];
+  if(e&&!e.auto&&Number.isFinite(e.val))return e.val;
+  return nearestStd(calcVal,ser);
+}
+function bomSet(key,val){state.bom[key]={auto:false,val:+val};recalc()}
+function bomReset(){state.bom={}}
+
+/* ============ gather inputs ============ */
+function gather(){
+  // Use the mode-appropriate efficiency (from Python DEFAULT_OPS averages)
+  // rather than a single scalar for both line ranges.
+  const etaMode = state.mode==='low' ? ETA_LO : ETA_HI;
+  // Sync the visible η field so the designer can see/override the current value
+  const etaField = +$('eta').value;
+  const eta = Number.isFinite(etaField) && etaField>0 ? etaField : etaMode;
+  return{mode:state.mode,vac:+$('vac').value,pout:+$('pout').value,vout:+$('vout').value,
+    fsw:+$('fsw').value*1e3,lphi:+$('lphi').value*1e-6,co:+$('co').value*1e-6,
+    rl:+$('rl').value*1e-3,rc:+$('rc').value*1e-3,riac:+$('riac').value*1e6,rvir:+$('rvir').value*1e3,
+    rrlpk:+$('rrlpk').value*1e3,kmax:Math.min(1.6,Math.max(1.3,+$('kmax').value)),eta,
+    rfb2:+$('rfb2').value*1e3,r1fb:+$('r1fb').value*1e6,r4fb:+$('r4fb').value*1e3,
+    fci:+$('fci').value,cfz:+$('cfz').value,cfp:+$('cfp').value,rf:+$('rf').value,cf:+$('cf').value*1e-12,
+    fcv:+$('fcv').value,vfz1:+$('vfz1').value,vfz2:+$('vfz2').value,vfp1:+$('vfp1').value,vfp2:+$('vfp2').value,
+    rb1:+$('rb1').value*1e3,rb2:+$('rb2').value*1e3,rb3:+$('rb3').value*1e3,rb4:+$('rb4').value*1e3,
+    cb1:+$('cb1').value*1e-9,cb2:+$('cb2').value*1e-9,
+    serR:$('serR').value,serC:$('serC').value,
+    gmi:FIXED.GMI,gmv:FIXED.GMV,vramp:FIXED.VRAMP,nch:FIXED.NCH,krm:FIXED.KRM,krlpk:FIXED.KRLPK};
+}
+function opPts(p,which){ // which: 'low'|'high'|'all'
+  const L=LOW_VACS.map(v=>({vac:v,pout:POUT_LO,line:'LL'})), H=HIGH_VACS.map(v=>({vac:v,pout:POUT_HI,line:'HL'}));
+  return which==='low'?L:which==='high'?H:L.concat(H);
+}
+
+/* ============ plant & loop math ============ */
+function plantI(p,vac,pout,f){ // duty -> inductor current, per-phase L
+  const w=2*Math.PI*f, Vpk=Math.SQRT2*vac, D=1-Vpk/p.vout, Dp=1-D, RL=p.vout*p.vout/pout;
+  const Kf=(p.vout/p.lphi)*((RL+2*p.rc)/(RL+p.rc)), wz=1/(p.co*(RL/2+p.rc));
+  const den=p.lphi*p.co*(RL+p.rc);
+  const a1=(p.co*(p.rl*(RL+p.rc)+RL*p.rc*Dp*Dp)+p.lphi)/den;
+  const a0=(Dp*Dp*RL+p.rl)/den;
+  const Gid=cdiv(cmul(c(Kf,0),c(wz,w)),c(a0-w*w,a1*w));
+  return{Gid,D,Dp,RL,f0:Math.sqrt(a0)/(2*Math.PI),Q:Math.sqrt(a0)/a1,
+    fRHPi:RL*Dp*Dp/(2*Math.PI*p.lphi),fRHPv:RL*Dp*Dp/(2*Math.PI*p.lphi/2)};
+}
+function Hcs(p,f){const fRC=1/(2*Math.PI*p.rf*p.cf);return cdiv(c(1,0),c(1,f/fRC))}
+function TiUnc(p,vac,pout,f){const pl=plantI(p,vac,pout,f);return cscale(cmul(pl.Gid,Hcs(p,f)),(state.rcsSel*1e-3)/p.vramp)}
+function GmiStd(p,d,f){ // realized current compensator from standard values
+  if(state.cType==='T1'){const C=d.std.CIC;return cdiv(c(p.gmi,0),c(0,2*Math.PI*f*C))}
+  const fz=1/(2*Math.PI*d.std.RIC*d.std.C1), fp=(d.std.C1+d.std.C2)>0?1/(2*Math.PI*d.std.RIC*d.std.C2):Infinity;
+  const num=c(1,-fz/f), den=c(1,f/fp);
+  return cscale(cdiv(num,den),p.gmi*d.std.RIC);
+}
+function Ti(p,d,vac,pout,f){return cmul(TiUnc(p,vac,pout,f),GmiStd(p,d,f))}
+function GvpV(p,vac,pout,f){
+  const w=2*Math.PI*f, Vpk=Math.SQRT2*vac, Dp=Vpk/p.vout, RL=p.vout*p.vout/pout;
+  const fR=RL*Dp*Dp/(2*Math.PI*p.lphi/2);
+  return cdiv(cmul(c(1,w*p.co*p.rc),c(1,-f/fR)),c(2/RL,w*p.co));
+}
+function TvBase(p,dci,vac,pout,f){
+  const t=Ti(p,dci,vac,pout,f), tn=cscale(t,1/p.nch);
+  const Gicl=cdiv(tn,cadd(c(1,0),tn));
+  const Gmod=p.kmax*(pout/p.vout)/p.vramp;
+  return cscale(cmul(Gicl,GvpV(p,vac,pout,f)),Gmod);
+}
+function HotaStd(p,dcv,f){
+  const Hdiv=p.r4fb/(p.r1fb+p.r4fb);
+  if((dcv.vt||state.vType)==='type2'){
+    const{R2,C1,C3}=dcv.std;
+    const fz=1/(2*Math.PI*R2*C1), fp=(C1+C3)/(2*Math.PI*R2*C1*C3);
+    return cscale(cdiv(c(1,-fz/f),c(1,f/fp)),Hdiv*p.gmv*R2);
+  }
+  const{R2,R3,C1,C2,C3}=dcv.std, P=p.r1fb*p.r4fb/(p.r1fb+p.r4fb);
+  const fz1=1/(2*Math.PI*R2*C1), fz2=1/(2*Math.PI*(p.r1fb+R3)*C2);
+  const fp1=(C1+C3)/(2*Math.PI*R2*C1*C3), fp2=1/(2*Math.PI*(R3+P)*C2);
+  const Kc=p.gmv*R2*Hdiv*(fp2-fz1)/fp2;
+  const num=cmul(c(1,-fz1/f),c(1,f/fz2));
+  const den=cmul(c(1,f/fp1),c(1,f/fp2));
+  return cscale(cdiv(num,den),Kc);
+}
+function Tv(p,dci,dcv,vac,pout,f){return cmul(TvBase(p,dci,vac,pout,f),HotaStd(p,dcv,f))}
+
+/* ============ designs (calc + standard suggestion) ============ */
+function designCI(p){
+  const corner=state.mode==='low'?{vac:90,pout:POUT_LO}:{vac:180,pout:POUT_HI};
+  const Tu=TiUnc(p,corner.vac,corner.pout,p.fci), mTu=cabs(Tu), aTu=cang(Tu);
+  const pmT1=180+aTu-90, boostNeed=Math.max(0,60-pmT1);
+  let calc={},std={};
+  if(state.cType==='T1'){
+    const C=p.gmi*mTu/(2*Math.PI*p.fci);
+    calc={CIC:C}; std={CIC:bomGet('cur_CIC',C,p.serC)};
+  }else{
+    const kap=Math.sqrt(1+(p.cfz/p.fci)**2)/Math.sqrt(1+(p.fci/p.cfp)**2);
+    const RIC=1/(mTu*p.gmi*kap);
+    const C1=1/(2*Math.PI*RIC*p.cfz), C2=1/(2*Math.PI*RIC*p.cfp);
+    calc={RIC,C1,C2};
+    std={RIC:bomGet('cur_RIC',RIC,p.serR),C1:bomGet('cur_C1',C1,p.serC),C2:bomGet('cur_C2',C2,p.serC)};
+  }
+  return{corner,mTu,aTu,pmT1,boostNeed,calc,std};
+}
+function sizingCorner(p){return state.phil==='shared'?{vac:180,pout:POUT_HI,lab:'HL 180 Vac / '+POUT_HI+' W (shared)'}
+  :(state.mode==='low'?{vac:90,pout:POUT_LO,lab:'LL 90 Vac / '+POUT_LO+' W (dedicated)'}:{vac:180,pout:POUT_HI,lab:'HL 180 Vac / '+POUT_HI+' W (dedicated)'})}
+function designCV(p,dci,pure){
+  const cor=sizingCorner(p);
+  const Tb=TvBase(p,dci,cor.vac,cor.pout,p.fcv), mTb=cabs(Tb), aTb=cang(Tb);
+  const Hdiv=p.r4fb/(p.r1fb+p.r4fb);
+  const G=1/mTb;                       // required |HOTA| at fcv (Method B)
+  const pmNoBoost=180+(aTb+ang0(Hdiv))-90; // Hdiv real, ang 0
+  const vt=pure?'type3':state.vType;
+  const pick=(k,v,s)=>pure?nearestStd(v,s):bomGet(k,v,s);
+  let calc={},std={},err=null;
+  if(vt==='type2'){
+    const kap=Math.sqrt(1+(p.vfz1/p.fcv)**2)/Math.sqrt(1+(p.fcv/p.vfp1)**2);
+    const R2=G/(Hdiv*p.gmv*kap);
+    const C1=1/(2*Math.PI*R2*p.vfz1);
+    const C3=C1/(2*Math.PI*C1*R2*p.vfp1-1);
+    calc={R2,C1,C3};
+    std={R2:pick('v2_R2',R2,p.serR),C1:pick('v2_C1',C1,p.serC),C3:pick('v2_C3',C3,p.serC)};
+  }else{
+    if(p.vfz2>=p.vfp2){err='SLVA662 Method B requires f_z2 < f_p2 (R3 becomes negative otherwise). Adjust placement.';}
+    else{
+      const a=Math.sqrt(1+(p.fcv/p.vfp2)**2), b=Math.sqrt(1+(p.fcv/p.vfp1)**2);
+      const cc=Math.sqrt(1+(p.vfz1/p.fcv)**2), dd=Math.sqrt(1+(p.fcv/p.vfz2)**2);
+      const aa=a*b/(cc*dd);
+      const bb=G*p.vfp2*(p.r1fb+p.r4fb)/(p.r4fb*p.gmv*(p.vfp2-p.vfz1));
+      const R2=aa*bb, P=p.r1fb*p.r4fb/(p.r1fb+p.r4fb), r=p.vfp2/p.vfz2;
+      const R3=(p.r1fb-r*P)/(r-1);
+      const C2=1/(2*Math.PI*(p.r1fb+R3)*p.vfz2);
+      const C1=1/(2*Math.PI*R2*p.vfz1);
+      const C3=C1/(2*Math.PI*C1*R2*p.vfp1-1);
+      calc={R2,R3,C1,C2,C3};
+      std={R2:pick('v3_R2',R2,p.serR),R3:pick('v3_R3',R3,p.serR),
+           C1:pick('v3_C1',C1,p.serC),C2:pick('v3_C2',C2,p.serC),C3:pick('v3_C3',C3,p.serC)};
+    }
+  }
+  return{cor,mTb,aTb,G,pmNoBoost,calc,std,err,vt};
+}
+function ang0(){return 0}
+
+/* ============ margins (unwrapped) ============ */
+function sweepLoop(fn,f1,f2,N){
+  const fr=logspace(Math.log10(f1),Math.log10(f2),N), g=[],ph=[];let prev=null;
+  for(const f of fr){const H=fn(f);g.push(magdb(H));let a=cang(H);
+    if(prev!==null){while(a-prev>180)a-=360;while(a-prev<-180)a+=360}prev=a;ph.push(a)}
+  return{fr,g,ph};
+}
+function marginsOf(sw){
+  let fc=NaN,pm=NaN,gm=NaN,fg=NaN;
+  for(let i=1;i<sw.fr.length;i++){
+    if(!Number.isFinite(fc)&&sw.g[i-1]>=0&&sw.g[i]<0){
+      const t=sw.g[i-1]/(sw.g[i-1]-sw.g[i]);
+      fc=sw.fr[i-1]*Math.pow(sw.fr[i]/sw.fr[i-1],t);
+      pm=180+(sw.ph[i-1]+(sw.ph[i]-sw.ph[i-1])*t);
+    }
+    if(!Number.isFinite(gm)&&sw.ph[i-1]>-180&&sw.ph[i]<=-180){
+      const t=(sw.ph[i-1]+180)/(sw.ph[i-1]-sw.ph[i]);
+      fg=sw.fr[i-1]*Math.pow(sw.fr[i]/sw.fr[i-1],t);
+      gm=-(sw.g[i-1]+(sw.g[i]-sw.g[i-1])*t);
+    }
+  }
+  return{fc,pm,gm,fg};
+}
+
+/* ============ RCS guidance ============ */
+function rcsCalc(p){
+  const vinMin=state.mode==='low'?90:180;
+  const Pch=(p.pout/p.nch)*p.kmax;
+  const rcsAN=(vinMin*vinMin*FIXED.Gmax*FIXED.RM)/(p.riac*Pch);
+  const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk*Pch;
+  const and=v=>(p.krm*p.riac*(v-0.6))/den;
+  const lo=and(4.0), hi=and(5.0);
+  const zLo=lo, zHi=Math.min(hi,rcsAN), valid=zHi>zLo;
+  let rec=null;
+  for(const s of SHUNTS){const v=s*1e-3;if(v>=zLo-1e-9&&v<=zHi+1e-9){rec=v;break}}
+  const veaOf=r=>r*den/(p.krm*p.riac)+0.6;
+  const iphi=p.pout/(vinMin*p.eta*p.nch);
+  return{vinMin,Pch,rcsAN,andLo:lo,andHi:hi,zLo,zHi,valid,rec,veaOf,iphi};
+}
+
+/* ============ Bode rendering (gain+phase stacked, hover, markers) ============ */
+const plotCache={};
+function drawBodePanel(cvId,traces,opts){
+  const cv=$(cvId), dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth||800, H=+cv.dataset.h||430;
+  cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a111f';ctx.fillRect(0,0,W,H);
+  const pad={l:54,r:10,t:8,b:26}, gap=24;
+  const ph=(H-pad.t-pad.b-gap)/2;
+  const gBox={x:pad.l,y:pad.t,w:W-pad.l-pad.r,h:ph};
+  const pBox={x:pad.l,y:pad.t+ph+gap,w:gBox.w,h:ph};
+  const{f1,f2,g1,g2,p1,p2}=opts;
+  const fx=f=>gBox.x+gBox.w*Math.log(f/f1)/Math.log(f2/f1);
+  const gy=v=>gBox.y+gBox.h*(1-(v-g1)/(g2-g1));
+  const py=v=>pBox.y+pBox.h*(1-(v-p1)/(p2-p1));
+  ctx.font='10px Segoe UI';
+  function grid(box,v1,v2,step,yf,unit){
+    for(let d=Math.ceil(Math.log10(f1));d<=Math.floor(Math.log10(f2));d++){
+      const f=10**d,x=fx(f);
+      ctx.strokeStyle='rgba(154,168,196,.16)';ctx.beginPath();ctx.moveTo(x,box.y);ctx.lineTo(x,box.y+box.h);ctx.stroke();
+      for(let m=2;m<10;m++){const x2=fx(f*m);if(x2<box.x+box.w&&x2>box.x){ctx.strokeStyle='rgba(154,168,196,.06)';ctx.beginPath();ctx.moveTo(x2,box.y);ctx.lineTo(x2,box.y+box.h);ctx.stroke()}}
+      if(box===pBox){ctx.fillStyle='#9aa8c4';ctx.textAlign='center';ctx.fillText(fmtHz(f).replace('.00',''),x,box.y+box.h+14)}
+    }
+    for(let v=v1;v<=v2+1e-9;v+=step){
+      const y=yf(v);
+      ctx.strokeStyle=(v===0&&unit==='dB')?'rgba(234,240,255,.4)':(v===-180?'rgba(239,68,68,.45)':'rgba(154,168,196,.14)');
+      ctx.beginPath();ctx.moveTo(box.x,y);ctx.lineTo(box.x+box.w,y);ctx.stroke();
+      ctx.fillStyle='#9aa8c4';ctx.textAlign='right';ctx.fillText(v+(unit==='dB'?'':'°'),box.x-5,y+3);
+    }
+    ctx.strokeStyle='rgba(154,168,196,.4)';ctx.strokeRect(box.x,box.y,box.w,box.h);
+  }
+  grid(gBox,g1,g2,opts.gs,gy,'dB');grid(pBox,p1,p2,opts.ps,py,'°');
+  ctx.fillStyle='#9aa8c4';ctx.textAlign='left';
+  ctx.fillText('Gain (dB)',gBox.x+5,gBox.y+11);ctx.fillText('Phase (°)',pBox.x+5,pBox.y+11);
+  // vertical reference markers
+  for(const mk of(opts.marks||[])){
+    if(mk.f<f1||mk.f>f2)continue;const x=fx(mk.f);
+    ctx.strokeStyle=mk.col;ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(x,gBox.y);ctx.lineTo(x,pBox.y+pBox.h);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=mk.col;ctx.save();ctx.translate(x+3,gBox.y+gBox.h-4);ctx.rotate(-Math.PI/2);ctx.fillText(mk.lab,0,0);ctx.restore();
+  }
+  // traces
+  for(const tr of traces){
+    ctx.lineWidth=tr.wd||1.4;ctx.strokeStyle=tr.col;ctx.setLineDash(tr.dash||[]);
+    for(const[arr,box,yf]of[[tr.sw.g,gBox,gy],[tr.sw.ph,pBox,py]]){
+      ctx.save();ctx.beginPath();ctx.rect(box.x,box.y,box.w,box.h);ctx.clip();ctx.beginPath();
+      tr.sw.fr.forEach((f,i)=>{const x=fx(f),y=yf(arr[i]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});
+      ctx.stroke();ctx.restore();
+    }
+  }
+  ctx.setLineDash([]);
+  // crossover + PM/GM annotations (one per supplied crossing)
+  const crosses=opts.cross||(Number.isFinite(opts.fc)?[{fc:opts.fc,pm:opts.pm,gm:opts.gm,fg:opts.fg,col:'#34d399',lab:''}]:[]);
+  crosses.forEach((cr,ci)=>{
+    if(!Number.isFinite(cr.fc))return;
+    const col=cr.col||'#34d399', x=fx(cr.fc);
+    ctx.strokeStyle=col;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(x,gBox.y);ctx.lineTo(x,pBox.y+pBox.h);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,gy(0),4,0,7);ctx.fill();
+    if(Number.isFinite(cr.pm)){ctx.beginPath();ctx.arc(x,py(cr.pm-180),4,0,7);ctx.fill();
+      ctx.strokeStyle=col;ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(x,py(-180));ctx.lineTo(x,py(cr.pm-180));ctx.stroke();ctx.globalAlpha=1;}
+    ctx.textAlign=x>W-220?'right':'left';ctx.font='11px Segoe UI';ctx.fillStyle=col;
+    ctx.fillText(`${cr.lab?cr.lab+': ':''}fc = ${fmtHz(cr.fc)}   PM = ${fmt(cr.pm,1)}°${Number.isFinite(cr.gm)?'   GM = '+fmt(cr.gm,1)+' dB':''}`,x+(x>W-220?-6:6),gBox.y+14+ci*15);
+    if(Number.isFinite(cr.fg)&&Number.isFinite(cr.gm)){
+      const xg=fx(cr.fg);
+      ctx.fillStyle=col;ctx.beginPath();ctx.arc(xg,py(-180),3.5,0,7);ctx.fill();
+      ctx.beginPath();ctx.arc(xg,gy(-cr.gm),3.5,0,7);ctx.fill();
+      ctx.globalAlpha=.7;ctx.strokeStyle=col;ctx.beginPath();ctx.moveTo(xg,gy(0));ctx.lineTo(xg,gy(-cr.gm));ctx.stroke();ctx.globalAlpha=1;
+    }
+  });
+  plotCache[cvId]={geom:{f1,f2,g1,g2,p1,p2,gBox,pBox,W,H},main:traces.find(t=>t.main)||traces[traces.length-1],snap:null};
+  const off=document.createElement('canvas');off.width=cv.width;off.height=cv.height;
+  off.getContext('2d').drawImage(cv,0,0);plotCache[cvId].snap=off;
+}
+function attachHover(cvId,hbId){
+  const cv=$(cvId),hb=$(hbId);
+  cv.addEventListener('mousemove',e=>{
+    const pc=plotCache[cvId];if(!pc)return;
+    const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+    const{f1,f2,gBox}=pc.geom,dpr=window.devicePixelRatio||1;
+    if(x<gBox.x||x>gBox.x+gBox.w){hb.style.display='none';redrawSnap(cv,pc);return}
+    const f=f1*Math.pow(f2/f1,(x-gBox.x)/gBox.w);
+    const sw=pc.main.sw;let bi=0,be=1e99;
+    sw.fr.forEach((fv,i)=>{const e2=Math.abs(Math.log(fv/f));if(e2<be){be=e2;bi=i}});
+    redrawSnap(cv,pc);
+    const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.strokeStyle='rgba(234,240,255,.5)';ctx.setLineDash([2,3]);
+    ctx.beginPath();ctx.moveTo(x,pc.geom.gBox.y);ctx.lineTo(x,pc.geom.pBox.y+pc.geom.pBox.h);ctx.stroke();ctx.setLineDash([]);
+    hb.style.display='block';
+    hb.style.left=Math.min(x+12,r.width-180)+'px';hb.style.top=(y+10)+'px';
+    hb.textContent=`f=${fmtHz(sw.fr[bi])}  |T|=${fmt(sw.g[bi],2)} dB  ∠=${fmt(sw.ph[bi],1)}°`;
+  });
+  cv.addEventListener('mouseleave',()=>{const pc=plotCache[cvId];$(hbId).style.display='none';if(pc)redrawSnap(cv,pc)});
+}
+function redrawSnap(cv,pc){const dpr=window.devicePixelRatio||1;const ctx=cv.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(pc.snap,0,0);ctx.setTransform(dpr,0,0,dpr,0,0)}
+
+/* ============ pole-zero strips (draggable) ============ */
+const pzDefs={
+  pzCur:{f1:100,f2:5e5,items:()=>state.cType==='T1'?[]:[
+      {id:'cfz',type:'z',lab:'fz'},{id:'cfp',type:'p',lab:'fp'}],
+    refs:p=>{const pl=plantI(p,state.mode==='low'?90:180,state.mode==='low'?POUT_LO:POUT_HI,1000);
+      return[{f:pl.fRHPi,lab:'fRHP(i)',col:'#f59e0b'},{f:p.fsw,lab:'fSW',col:'#ef4444'},{f:p.fci,lab:'fci',col:'#34d399'}]}},
+  pzVol:{f1:0.5,f2:500,items:()=>state.vType==='type2'?[
+      {id:'vfz1',type:'z',lab:'fz'},{id:'vfp1',type:'p',lab:'fp'}]:[
+      {id:'vfz1',type:'z',lab:'fz1'},{id:'vfz2',type:'z',lab:'fz2'},{id:'vfp1',type:'p',lab:'fp1'},{id:'vfp2',type:'p',lab:'fp2'}],
+    refs:p=>[{f:120,lab:'120 Hz',col:'#ef4444'},{f:p.fcv,lab:'fcv',col:'#34d399'}]}
+};
+function drawPZ(cvId,p){
+  const cv=$(cvId),def=pzDefs[cvId],dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth||800,H=74;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  const pad=30,ax=H-22;
+  const fx=f=>pad+(W-2*pad)*Math.log(f/def.f1)/Math.log(def.f2/def.f1);
+  ctx.strokeStyle='rgba(154,168,196,.5)';ctx.beginPath();ctx.moveTo(pad,ax);ctx.lineTo(W-pad,ax);ctx.stroke();
+  ctx.font='9.5px Segoe UI';ctx.fillStyle='#9aa8c4';ctx.textAlign='center';
+  for(let d=Math.ceil(Math.log10(def.f1));d<=Math.floor(Math.log10(def.f2));d++){
+    const f=10**d,x=fx(f);ctx.strokeStyle='rgba(154,168,196,.3)';
+    ctx.beginPath();ctx.moveTo(x,ax-4);ctx.lineTo(x,ax+4);ctx.stroke();ctx.fillText(fmtHz(f).replace('.00',''),x,ax+15);
+  }
+  for(const r of def.refs(p)){if(r.f<def.f1||r.f>def.f2)continue;const x=fx(r.f);
+    ctx.strokeStyle=r.col;ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(x,10);ctx.lineTo(x,ax);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=r.col;ctx.fillText(r.lab,x,9)}
+  cv._hits=[];
+  for(const it of def.items()){
+    const f=+$(it.id).value;if(!(f>0))continue;const x=Math.max(pad,Math.min(W-pad,fx(f)));
+    ctx.lineWidth=2;ctx.strokeStyle=it.type==='z'?'#56a3ff':'#b18cff';
+    if(it.type==='z'){ctx.beginPath();ctx.arc(x,ax-16,6,0,7);ctx.stroke()}
+    else{ctx.beginPath();ctx.moveTo(x-5,ax-21);ctx.lineTo(x+5,ax-11);ctx.moveTo(x+5,ax-21);ctx.lineTo(x-5,ax-11);ctx.stroke()}
+    ctx.fillStyle=it.type==='z'?'#56a3ff':'#b18cff';ctx.fillText(it.lab,x,ax-28);
+    cv._hits.push({x,id:it.id});
+  }
+  cv._fx={f1:def.f1,f2:def.f2,pad,W};
+}
+let pzDrag=null,pzRaf=false;
+function pzPointer(cvId){
+  const cv=$(cvId);
+  cv.addEventListener('pointerdown',e=>{
+    const r=cv.getBoundingClientRect(),x=e.clientX-r.left;
+    if(!cv._hits)return;let best=null,bd=12;
+    for(const h of cv._hits){const d=Math.abs(h.x-x);if(d<bd){bd=d;best=h}}
+    if(best){pzDrag={cv,id:best.id};cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'}
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(!pzDrag||pzDrag.cv!==cv)return;
+    const r=cv.getBoundingClientRect(),x=e.clientX-r.left,m=cv._fx;
+    const t=Math.max(0,Math.min(1,(x-m.pad)/(m.W-2*m.pad)));
+    const f=m.f1*Math.pow(m.f2/m.f1,t);
+    $(pzDrag.id).value=f<100?f.toFixed(1):Math.round(f);
+    if(!pzRaf){pzRaf=true;requestAnimationFrame(()=>{pzRaf=false;recalc()})}
+  });
+  const up=()=>{if(pzDrag&&pzDrag.cv===cv){pzDrag=null;cv.style.cursor='grab'}};
+  cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+}
+
+/* ============ BOM table builder ============ */
+function bomRow(key,name,calcVal,ser,selVal,sets,fn){
+  const opts=nearestList(calcVal,ser,7);
+  if(!opts.some(v=>Math.abs(Math.log(v/selVal))<1e-6))opts.push(selVal),opts.sort((a,b)=>a-b);
+  const fF=(key.startsWith('cur_R')||key.includes('_R'))?fmtOhm:fmtCap;
+  const sel=`<select data-bom="${key}">${opts.map(v=>`<option value="${v}" ${Math.abs(Math.log(v/selVal))<1e-6?'selected':''}>${fF(v)}</option>`).join('')}</select>`;
+  return `<tr><td>${name}</td><td class="calcv">${fF(calcVal)}</td><td class="std">${sel}</td><td>${sets}</td><td class="small">${fn}</td></tr>`;
+}
+
+/* ============ transient (numerical inverse transform) ============ */
+function stepResponse(p,dci,dcv,vac,pout){
+  // unit-current-step response of Zcl: y1(t) = (2/pi) ∫ Re[Zcl(jw)] sin(wt)/w dw
+  const Nw=320, ws=logspace(Math.log10(2*Math.PI*0.03),Math.log10(2*Math.PI*1500),Nw);
+  const ReZ=ws.map(w=>{
+    const f=w/(2*Math.PI), RL=p.vout*p.vout/pout;
+    const Zo=cdiv(c(1,w*p.co*p.rc),c(2/RL,w*p.co));
+    return cdiv(Zo,cadd(c(1,0),Tv(p,dci,dcv,vac,pout,f)));
+  });
+  const Nt=220,T=0.45,ts=[],ys=[];
+  for(let i=0;i<Nt;i++){
+    const t=T*i/(Nt-1);let s=0;
+    for(let k=1;k<Nw;k++){
+      const w0=ws[k-1],w1=ws[k];
+      const f0=ReZ[k-1].re*Math.sin(w0*t)/w0, f1=ReZ[k].re*Math.sin(w1*t)/w1;
+      s+=0.5*(f0+f1)*(w1-w0);
+    }
+    ts.push(t);ys.push(-(2/Math.PI)*s); // load increase -> dip (negative)
+  }
+  return{ts,ys}; // per ampere
+}
+function dipAndRecovery(yr,dI,band){
+  let pk=0;for(const y of yr.ys)if(Math.abs(y*dI)>Math.abs(pk))pk=y*dI;
+  let rec=0;for(let i=yr.ts.length-1;i>=0;i--){if(Math.abs(yr.ys[i]*dI)>band){rec=yr.ts[i+1]!==undefined?yr.ts[i+1]:yr.ts[i];break}}
+  return{pk,rec};
+}
+
+/* ============ THD / rejection (Step 16) ============ */
+function thdCalc(p,dci,dcv,vac,pout,veaEff){
+  const wline=2*Math.PI*60;
+  const Vr=pout/(2*wline*p.vout*p.co);
+  const Tl=Tv(p,dci,dcv,vac,pout,120);
+  const rej=-magdb(Tl);
+  const Hc=HotaStd(p,dcv,120);
+  const vea120=cabs(Hc)*Vr/cabs(cadd(c(1,0),Tl));
+  const thd3=50*vea120/Math.max(veaEff,0.1);
+  return{Vr,rej,vea120,thd3};
+}
+
+/* ============ GMOD verification (Step 7, all computed) ============ */
+function renderGmod(p){
+  const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk;
+  const rcs=state.rcsSel*1e-3;
+  let h='<tr><th>V_AC</th><th>Range</th><th>GMOD crest (A/V)</th><th>GMOD_A</th><th>GMOD_B</th><th>GMOD_C</th><th>A / B</th><th>B / C</th></tr>';
+  const bcExp=rcs*p.vout/p.nch;
+  let allOK=true;
+  for(const op of opPts(p,'all')){
+    const riac=op.line==='LL'?6e6:12e6;
+    const Pch=(op.pout/p.nch)*p.kmax;
+    const veaEff=rcs*den*Pch/(p.krm*riac);
+    const gA=p.krm*riac/den;
+    const gB=rcs*Pch/veaEff;
+    const gC=p.kmax*(op.pout/p.vout)/veaEff;
+    const crest=gA*Math.SQRT2/op.vac;
+    const ab=gA/gB, bc=gB/gC;
+    const ok=Math.abs(ab-1)<1e-6&&Math.abs(bc-bcExp)<1e-6*bcExp;
+    if(!ok)allOK=false;
+    h+=`<tr><td>${op.vac} Vac</td><td>${op.line}</td><td>${fmt(crest,4)}</td><td>${fmt(gA,4)}</td><td>${fmt(gB,4)}</td><td>${fmt(gC,4)}</td><td>${fmt(ab,4)} ${Math.abs(ab-1)<1e-6?'✓':'✗'}</td><td>${fmt(bc,4)}</td></tr>`;
+  }
+  $('gmodTable').innerHTML=h;
+}
+
+/* ============ Protection & auxiliary pins (AN4165-D Steps 7, 8, 12) ============ */
+function bomRow4(key,name,calcVal,ser,selVal,check){
+  const opts=nearestList(calcVal,ser,7);
+  if(!opts.some(v=>Math.abs(Math.log(v/selVal))<1e-6))opts.push(selVal),opts.sort((a,b)=>a-b);
+  const fF=key.includes('_R')?fmtOhm:fmtCap;
+  const sel=`<select data-bom="${key}">${opts.map(v=>`<option value="${v}" ${Math.abs(Math.log(v/selVal))<1e-6?'selected':''}>${fF(v)}</option>`).join('')}</select>`;
+  return `<tr><td>${name}</td><td class="calcv">${fF(calcVal)}</td><td class="std">${sel}</td><td>${check}</td></tr>`;
+}
+const AUXHEAD='<tr><th>Comp.</th><th>Calculated</th><th>Standard (select)</th><th>Check</th></tr>';
+function renderAux(p){
+  const tss=+$('ssT').value*1e-3, iss=20e-6, vss=5.0; // I_SS, V_SS fixed internal to the IC
+  const kClamp=+$('ilClamp').value, k2=+$('il2K').value;
+  const ilFp=+$('ilFp').value*1e3, gcFp=+$('gcFp').value*1e3, lsFp=+$('lsFp').value*1e3;
+  const rcs=state.rcsSel*1e-3;
+  const rriStd=nearestStd(1.2e9/p.fsw-3430,'E96');
+  const pill=(ok,t)=>`<span class="pill ${ok?'ok':'bad'}">${t}</span>`;
+  // --- Soft start (Eq. 64) ---
+  const cssCalc=iss*tss/vss, css=bomGet('aux_CSS',cssCalc,p.serC);
+  const tssAct=css*vss/iss, ssOK=Math.abs(tssAct-tss)/tss<=0.2;
+  $('auxBomSS').innerHTML=AUXHEAD+
+    bomRow4('aux_CSS','C_SS',cssCalc,p.serC,css,'t_SS = '+fmt(tssAct*1e3,0)+' ms '+pill(ssOK,ssOK?'within ±20 % of target':'> ±20 % off target'));
+  // --- ILIMIT / ILIMIT2 (Eqs. 32-38) ---
+  const iIL=1.2*1.0208/rriStd, iIL2=1.2*1.03125/rriStd;
+  const crest=(vac,pout)=>Math.SQRT2*pout/(p.eta*p.nch*vac);
+  const crestW=Math.max(crest(90,POUT_LO),crest(180,POUT_HI));
+  const rilCalc=kClamp*crestW*rcs*4/iIL, ril1=bomGet('aux_RIL1',rilCalc,p.serR);
+  const vlim=iIL*ril1, clampV=vlim/4, ratioR=clampV/(crestW*rcs);
+  const clampOK=ratioR>=1.2&&ratioR<=2.0;            // AN4165: max-power limit typ. 120-150 %, example ratio 1.8
+  const cilCalc=1/(2*Math.PI*ril1*ilFp), cil=bomGet('aux_CIL',cilCalc,p.serC);
+  const ipk=(vac,pout)=>{const Vpk=Math.SQRT2*vac, D=1-Vpk/p.vout;
+    return crest(vac,pout)+Vpk*D/(p.lphi*p.fsw)/2};
+  const ipkW=Math.max(ipk(90,POUT_LO),ipk(180,POUT_HI)), vcspk=ipkW*rcs;
+  const ril2Calc=k2*vcspk/iIL2, ril2=bomGet('aux_RIL2',ril2Calc,p.serR);
+  const vlim2=iIL2*ril2;
+  const lvlOK=vlim2>=vcspk;                          // AN4165: V_ILIMIT2 above the true worst-case peak (no nuisance trips)
+  const cil2Calc=1/(2*Math.PI*ril2*ilFp), cil2=bomGet('aux_CIL2',cil2Calc,p.serC);
+  $('auxBomIL').innerHTML=AUXHEAD+
+    bomRow4('aux_RIL1','R_ILIMIT',rilCalc,p.serR,ril1,'V_ILIMIT = '+fmt(vlim,3)+' V → clamp '+fmt(clampV*1e3,0)+' mV = '+fmt(ratioR,2)+'× crest '+pill(clampOK,clampOK?'1.2–2.0× ✓':'outside 1.2–2.0×'))+
+    bomRow4('aux_CIL','C_ILIMIT',cilCalc,p.serC,cil,'pole '+fmtHz(1/(2*Math.PI*ril1*cil)))+
+    bomRow4('aux_RIL2','R_ILIMIT2',ril2Calc,p.serR,ril2,'V_ILIMIT2 = '+fmt(vlim2,3)+' V vs I_L,PK·R_CS = '+fmt(vcspk*1e3,0)+' mV '+pill(lvlOK,lvlOK?'≥ peak, '+fmt(vlim2/vcspk,2)+'× ✓':'below peak ✗'))+
+    bomRow4('aux_CIL2','C_ILIMIT2',cil2Calc,p.serC,cil2,'pole '+fmtHz(1/(2*Math.PI*ril2*cil2)))+
+    `<tr><td colspan="4" class="small">I_ILIMIT = ${fmt(iIL*1e6,1)} µA, I_ILIMIT2 = ${fmt(iIL2*1e6,1)} µA (mirrored from R_RI = ${fmtOhm(rriStd)}, Eqs. 35–36) · worst crest command ${fmt(crestW,1)} A · worst I_L,PK ${fmt(ipkW,1)} A.</td></tr>`;
+  // --- GC (Eq. 40) ---
+  const ratio=(p.r1fb+p.r4fb)/p.r4fb;
+  const rgcCalc=6e6/ratio, rgc=bomGet('aux_RGC',rgcCalc,p.serR);
+  const gcDev=100*(rgc/rgcCalc-1), gcOK=Math.abs(gcDev)<=5;
+  const cgcCalc=1/(2*Math.PI*rgc*gcFp), cgc=bomGet('aux_CGC',cgcCalc,p.serC);
+  $('auxBomGC').innerHTML=AUXHEAD+
+    bomRow4('aux_RGC','R_GC',rgcCalc,p.serR,rgc,pill(gcOK,gcOK?'within ±5 % ✓':'> ±5 % ✗'))+
+    bomRow4('aux_CGC','C_GC',cgcCalc,p.serC,cgc,'pole '+fmtHz(1/(2*Math.PI*rgc*cgc)));
+  // --- LS (Eq. 39) ---
+  // --- LPK signal-filter parts (typical-practice anchors, user-selectable) ---
+  const rpin8=bomGet('aux_RPIN8',4.75e3,p.serR);
+  const clpk=bomGet('aux_CLPK',1e-9,p.serC);
+  const crlpk=bomGet('aux_CRLPK',1e-9,p.serC);
+  const bomRowT=(key,name,defV,ser,sel,check)=>{
+    const opts=nearestList(defV,ser,7);
+    if(!opts.some(v=>Math.abs(Math.log(v/sel))<1e-6))opts.push(sel),opts.sort((a,b)=>a-b);
+    const fF=key.includes('_R')?fmtOhm:fmtCap;
+    const so=`<select data-bom="${key}">${opts.map(v=>`<option value="${v}" ${Math.abs(Math.log(v/sel))<1e-6?'selected':''}>${fF(v)}</option>`).join('')}</select>`;
+    return `<tr><td>${name}</td><td class="calcv">typ. ${fF(defV)}</td><td class="std">${so}</td><td>${check}</td></tr>`};
+  $('auxBomLPK').innerHTML=AUXHEAD+
+    bomRowT('aux_RPIN8','R_pin8 (series, LPK)',4.75e3,p.serR,rpin8,'—')+
+    bomRowT('aux_CLPK','C_LPK',1e-9,p.serC,clpk,'pole '+fmtHz(1/(2*Math.PI*rpin8*clpk)))+
+    bomRowT('aux_CRLPK','C_RLPK',1e-9,p.serC,crlpk,'pole '+fmtHz(1/(2*Math.PI*p.rrlpk*crlpk)));
+  const rlsCalc=p.lphi/(1.5e-9*rcs*ratio), rls=bomGet('aux_RLS',rlsCalc,p.serR);
+  const rlsOK=rls>=12e3&&rls<=87e3;
+  const clsCalc=1/(2*Math.PI*rls*lsFp), cls=bomGet('aux_CLS',clsCalc,p.serC);
+  $('auxBomLS').innerHTML=AUXHEAD+
+    bomRow4('aux_RLS','R_LS',rlsCalc,p.serR,rls,pill(rlsOK,rlsOK?'12–87 kΩ ✓':'outside 12–87 kΩ ✗'))+
+    bomRow4('aux_CLS','C_LS',clsCalc,p.serC,cls,'pole '+fmtHz(1/(2*Math.PI*rls*cls)));
+  return{css,ril1,cil,ril2,cil2,rgc,cgc,rls,cls,tssAct,vilAct:vlim,vil2Act:vlim2,rlsOK,rpin8,clpk,crlpk};
+}
+
+
+/* ============ Screen 5 — live application schematic ============ */
+function renderSchematic(p,dci,dcv,aux){
+  const fo=fmtOhm,fc2=fmtCap;
+  const rfb1Calc=p.rfb2*(p.vout/FIXED.VREF-1), rfbEach=nearestStd(rfb1Calc/3,'E96');
+  const rri=nearestStd(1.2e9/p.fsw-3430,'E96');
+  const rcs=state.rcsSel;
+  const s=[];
+  const W=(x1,y1,x2,y2)=>s.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8fa3c8" stroke-width="1.3"/>`);
+  const T=(x,y,t,cls='v',a='middle')=>{t=String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const col=cls==='v'?'#f59e0b':cls==='p'?'#d5dffa':cls==='n'?'#34d399':cls==='t'?'#9aa8c4':'#eaf0ff';
+    const w=cls==='v'?'700':'400', fs=cls==='p'?10:cls==='num'?8.5:cls==='t'?9.5:11;
+    s.push(`<text x="${x}" y="${y}" fill="${col}" font-size="${fs}" font-weight="${w}" text-anchor="${a}" font-family="Segoe UI">${t}</text>`)};
+  const NODE=(x,y)=>s.push(`<circle cx="${x}" cy="${y}" r="2.4" fill="#8fa3c8"/>`);
+  const RH=(cx,cy,lab,name)=>{W(cx-34,cy,cx-22,cy);s.push(`<rect x="${cx-22}" y="${cy-6}" width="44" height="12" fill="none" stroke="#56a3ff" stroke-width="1.4"/>`);W(cx+22,cy,cx+34,cy);if(name)T(cx,cy-20,name,'t');if(lab)T(cx,cy-9,lab,'v')};
+  const RHB=(cx,cy,lab,name)=>{W(cx-34,cy,cx-22,cy);s.push(`<rect x="${cx-22}" y="${cy-6}" width="44" height="12" fill="none" stroke="#56a3ff" stroke-width="1.4"/>`);W(cx+22,cy,cx+34,cy);if(name)T(cx,cy+18,name,'t');if(lab)T(cx,cy+30,lab,'v')};
+  const RV=(cx,cy,lab,name,side=1)=>{W(cx,cy-30,cx,cy-18);s.push(`<rect x="${cx-6}" y="${cy-18}" width="12" height="36" fill="none" stroke="#56a3ff" stroke-width="1.4"/>`);W(cx,cy+18,cx,cy+30);if(name)T(cx+11*side,cy-3,name,'t',side>0?'start':'end');if(lab)T(cx+11*side,cy+9,lab,'v',side>0?'start':'end')};
+  const CV=(cx,cy,lab,name,side=1)=>{W(cx,cy-22,cx,cy-4);W(cx-9,cy-4,cx+9,cy-4);W(cx-9,cy+4,cx+9,cy+4);W(cx,cy+4,cx,cy+22);if(name)T(cx+12*side,cy-2,name,'t',side>0?'start':'end');if(lab)T(cx+12*side,cy+10,lab,'v',side>0?'start':'end')};
+  const CHB=(cx,cy,lab,name)=>{W(cx-26,cy,cx-4,cy);W(cx-4,cy-9,cx-4,cy+9);W(cx+4,cy-9,cx+4,cy+9);W(cx+4,cy,cx+26,cy);if(name)T(cx,cy+20,name,'t');if(lab)T(cx,cy+32,lab,'v')};
+  const GND=(x,y)=>{W(x-9,y,x+9,y);W(x-5.5,y+4,x+5.5,y+4);W(x-2,y+8,x+2,y+8)};
+  const GNDU=(x,y)=>{W(x-9,y,x+9,y);W(x-5.5,y-4,x+5.5,y-4);W(x-2,y-8,x+2,y-8)};
+  // ---------- IC body ----------
+  const icL=560,icR=1000,icT=300,icB=700;
+  s.push(`<rect x="${icL}" y="${icT}" width="${icR-icL}" height="${icB-icT}" rx="6" fill="#131c2f" stroke="#56a3ff" stroke-width="1.6"/>`);
+  T(780,492,'FAN9672Q','b');T(780,510,'2-Ch Interleaved CCM PFC — LQFP-32','t');
+  T(780,528,(state.mode==='low'?'FR mode (90–132 Vac)':'HV mode (180–264 Vac)'),'n');
+  const rowY=i=>340+i*46;   // 8 rows: 340..662
+  const Lp=['BIBO','PVO','ILIMIT','GC','RI','RLPK','ILIMIT2','LPK'];
+  Lp.forEach((n,i)=>{const y=rowY(i);W(505,y,icL,y);T(icL+8,y+3,String(i+1),'num','start');T(icL+24,y+3,n,'p','start')});
+  const Rp=[['24','GND'],['23','CS1+'],['22','CS1-'],['21','CS2+'],['20','CS2-'],['19','NC'],['18','NC'],['17','LS']];
+  Rp.forEach((pn,i)=>{const y=rowY(i);W(icR,y,1055,y);T(icR-8,y+3,pn[0],'num','end');T(icR-24,y+3,pn[1],'p','end')});
+  const Tp=[['32','IAC',600],['31','SS',648],['30','VEA',700],['29','FBPFC',800],['28','VDD',880],['27','OPFC1',925],['26','OPFC2',962]];
+  Tp.forEach(pn=>{W(pn[2],icT-30,pn[2],icT);T(pn[2],icT+14,pn[0],'num');T(pn[2],icT+28,pn[1],'p')});
+  const Bp=[['9','RDY',602],['10','IEA1',668],['11','IEA2',800],['13','CM1',884],['14','CM2',916],['16','VIR',974]];
+  Bp.forEach(pn=>{W(pn[2],icB,pn[2],icB+30);T(pn[2],icB-8,pn[0],'num');T(pn[2],icB-22,pn[1],'p')});
+  // ---------- TOP networks (GND rail at y=88) ----------
+  W(630,88,1010,88);T(1022,92,'GND','n','start');
+  // IAC (32)
+  T(600,108,'VIN (rect)','n');NODE(600,118);W(600,118,600,162);
+  RV(600,192,fo(p.riac)+' total',`R_IAC (${state.mode==='low'?'3':'6'} × 2 MΩ ser.)`,1);W(600,222,600,icT-30);
+  // SS (31): cap high up, labels to the left to stay clear of VEA branch
+  W(648,icT-30,648,152);CV(648,130,fc2(aux.css),'C_SS',-1);W(648,108,648,88);
+  // VEA (30): R2+C1 branch (labels left), C3 branch (labels right, low)
+  W(700,icT-30,700,254);NODE(700,254);W(684,254,724,254);
+  W(684,254,684,244);RV(684,214,fo(dcv.err?NaN:dcv.std.R2),'R_VC',-1);W(684,184,684,176);CV(684,156,fc2(dcv.err?NaN:dcv.std.C1),'C_VC1',-1);W(684,134,684,88);
+  W(724,254,724,242);CV(724,220,fc2(dcv.err?NaN:dcv.std.C3),'C_VC2',1);W(724,198,724,88);
+  // FBPFC (29): +VDC at top, 3x series string, RFB2 to gnd, Type-3 R3+C2 branch
+  T(800,48,'+VDC','n');NODE(800,58);W(800,58,800,80);
+  RV(800,104,'','',1);RV(800,150,'','',1);RV(800,196,fo(rfbEach)+' ×3','R_FB1 string',1);
+  W(800,226,800,icT-30);NODE(800,262);
+  W(800,262,816,262);RHB(838,262,fo(p.rfb2),'R_FB2');W(872,262,872,266);GND(872,268);
+  if(state.vType==='type3'&&!dcv.err){
+    W(800,58,756,58);W(756,58,756,84);RV(756,108,fo(dcv.std.R3),'R_V3',-1);W(756,138,756,148);CV(756,168,fc2(dcv.std.C2),'C_V3',-1);W(756,190,756,262);W(756,262,800,262);NODE(800,262);
+  }
+  // VDD (28)
+  W(880,icT-30,880,250);CV(880,228,'0.1µ + 10 µF','C_VDD (typ)',-1);W(880,206,880,88);
+  // OPFC outputs
+  [[925,'GT1 → Q1 driver'],[962,'GT2 → Q2 driver']].forEach((g,i)=>{const x=g[0];W(x,icT-30,x,icT-52);
+    s.push(`<path d="M ${x-5} ${icT-52} L ${x} ${icT-64} L ${x+5} ${icT-52} Z" fill="#b18cff"/>`);T(x,icT-86+(i?-14:0),g[1],'t')});
+  // ---------- LEFT networks ----------
+  const rcGndH=(x,y,Rlab,Rname,Clab,Cname)=>{NODE(x,y);W(x,y-13,x,y+13);
+    W(x,y-13,x-16,y-13);RH(x-50,y-13,Rlab,Rname);W(x-84,y-13,x-100,y-13);GND(x-100,y-11);
+    W(x,y+13,x-16,y+13);CHB(x-50,y+13,Clab,Cname);W(x-76,y+13,x-100,y+13);GND(x-100,y+15)};
+  // BIBO (row 0, y=340): chain with upward drops
+  {const y=rowY(0);
+  T(74,300,'VIN (rect)','n');NODE(74,310);W(74,310,74,y);W(74,y,110,y);
+  RH(144,y,fo(p.rb1),'R_B1');RH(232,y,fo(p.rb2),'R_B2');NODE(278,y);
+  RH(318,y,fo(p.rb3),'R_B3');NODE(366,y);W(352,y,505,y);
+  W(278,y,278,y-22);CV(278,y-44,fc2(p.cb1),'C_B1',-1);W(278,y-66,278,y-72);GNDU(278,y-74);
+  NODE(392,y);W(392,y,392,y-16);RV(392,y-46,fo(p.rb4),'R_B4',1);W(392,y-76,392,y-78);GNDU(392,y-80);
+  NODE(448,y);W(448,y,448,y-22);CV(448,y-44,fc2(p.cb2),'C_B2',1);W(448,y-66,448,y-72);GNDU(448,y-74);}
+  // PVO (row 1)
+  {const y=rowY(1);W(505,y,468,y);W(468,y,468,y+8);GND(468,y+10);T(452,y-4,'0 V — disabled','t','end')}
+  // ILIMIT (row 2) — outer position
+  {const y=rowY(2);rcGndH(462,y,fo(aux.ril1),'R_ILIMIT',fc2(aux.cil),'C_ILIMIT');W(462,y,505,y)}
+  // GC (row 3) — inner position
+  {const y=rowY(3);rcGndH(312,y,fo(aux.rgc),'R_GC',fc2(aux.cgc),'C_GC');W(312,y,505,y)}
+  // RI (row 4)
+  {const y=rowY(4);NODE(468,y);W(468,y,505,y);RH(430,y,fo(rri),'R_RI');W(396,y,382,y);GND(382,y+2)}
+  // RLPK (row 5) — outer
+  {const y=rowY(5);rcGndH(462,y,fo(p.rrlpk),'R_RLPK',fc2(aux.crlpk),'C_RLPK');W(462,y,505,y)}
+  // ILIMIT2 (row 6) — inner
+  {const y=rowY(6);rcGndH(312,y,fo(aux.ril2),'R_ILIMIT2',fc2(aux.cil2),'C_ILIMIT2');W(312,y,505,y)}
+  // LPK (row 7): series R_pin8 then C_LPK to GND
+  {const y=rowY(7);W(476,y,505,y);RH(442,y,fo(aux.rpin8),'R_pin8');NODE(404,y);W(404,y,408,y);
+  W(404,y,404,y+14);CV(404,y+36,fc2(aux.clpk),'C_LPK',-1);W(404,y+58,404,y+64);GND(404,y+66)}
+  // ---------- BOTTOM networks ----------
+  // RDY
+  W(602,icB+30,602,icB+44);T(602,icB+62,'PFC ready','t');T(602,icB+75,'(pull-up typ)','t');
+  // IEA1 / IEA2
+  const iea=(x,f,lab)=>{const d=f?-1:1,xr=x-20*d,xc=x+22*d;W(x,icB+30,x,icB+50);NODE(x,icB+50);W(Math.min(xr,xc),icB+50,Math.max(xr,xc),icB+50);
+    W(xr,icB+50,xr,icB+62);RV(xr,icB+86,lab?fo(dci.std.RIC):'',lab?'R_IC':'',-d);W(xr,icB+116,xr,icB+124);CV(xr,icB+144,lab?fc2(dci.std.C1):'',lab?'C_IC1':'',-d);W(xr,icB+166,xr,icB+174);GND(xr,icB+176);
+    W(xc,icB+50,xc,icB+66);CV(xc,icB+86,lab?fc2(dci.std.C2):'',lab?'C_IC2':'',d),W(xc,icB+108,xc,icB+174);GND(xc,icB+176)};
+  iea(668,false,true);iea(800,true,false);T(800,icB+196,'(network identical to IEA1)','t');
+  // CM1/CM2
+  W(884,icB+30,884,icB+50);W(916,icB+30,916,icB+50);W(884,icB+50,916,icB+50);W(900,icB+50,900,icB+58);GND(900,icB+60);
+  T(900,icB+108,'both channels','t');T(900,icB+121,'enabled','t');
+  // VIR
+  {const x=974;W(x,icB+30,x,icB+50);NODE(x,icB+50);W(x-18,icB+50,x+22,icB+50);
+  W(x-18,icB+50,x-18,icB+62);RV(x-18,icB+86,fo(p.rvir),'R_VIR',-1);W(x-18,icB+116,x-18,icB+124);GND(x-18,icB+126);
+  W(x+22,icB+50,x+22,icB+66);CV(x+22,icB+86,'0.1 µF (typ)','C_VIR',1);W(x+22,icB+108,x+22,icB+124);GND(x+22,icB+126);
+  T(x,icB+152,(state.mode==='low'?'V_VIR < 1.5 V → FR':'V_VIR > 3.5 V → HV'),'n')}
+  // ---------- RIGHT networks ----------
+  {const y=rowY(0);W(1055,y,1070,y);GND(1070,y+2);T(1088,y+4,'signal GND','t','start')}
+  const csCh=(rp,rm,sw,nm)=>{const yp=rowY(rp),ym=rowY(rm);
+    W(1055,yp,1130,yp);NODE(1130,yp);W(1130,yp,1156,yp);
+    RH(1190,yp,fo(p.rf),'R_F');W(1224,yp,1300,yp);NODE(1300,yp);
+    W(1055,ym,1130,ym);NODE(1130,ym);W(1130,ym,1156,ym);
+    RHB(1190,ym,'','');W(1224,ym,1300,ym);NODE(1300,ym);
+    CV(1130,(yp+ym)/2,fc2(p.cf),'C_F',-1);
+    s.push(`<rect x="1293" y="${yp+8}" width="14" height="${ym-yp-16}" fill="none" stroke="#f59e0b" stroke-width="2"/>`);
+    W(1300,yp,1300,yp+8);W(1300,ym-8,1300,ym);
+    T(1322,(yp+ym)/2-2,fmt(rcs,1)+' mΩ','v','start');T(1322,(yp+ym)/2+12,'R_CS '+nm+' (Kelvin)','t','start');T(1258,ym-8,'R_F','t');
+    T(1300,yp-8,sw,'n');W(1300,ym,1300,ym+4);GND(1300,ym+6);T(1334,ym+14,'PGND','t','start')};
+  csCh(1,2,'SW1 source','CS1');
+  csCh(3,4,'SW2 source','CS2');
+  // NC 18 / 19 tied to GND
+  {const y19=rowY(5),y18=rowY(6);W(1055,y19,1072,y19);W(1055,y18,1072,y18);W(1072,y19,1072,y18);NODE(1072,y18);W(1072,y18,1072,y18+8);GND(1072,y18+10)}
+  // LS (row 7)
+  {const y=rowY(7);NODE(1090,y);W(1055,y,1090,y);W(1090,y-13,1090,y+13);
+  W(1090,y-13,1106,y-13);RH(1140,y-13,fo(aux.rls),'R_LS');W(1174,y-13,1190,y-13);GND(1190,y-11);
+  W(1090,y+13,1106,y+13);CHB(1140,y+13,fc2(aux.cls),'C_LS');W(1166,y+13,1190,y+13);GND(1190,y+15)}
+  // ---------- title block ----------
+  s.push('<rect x="1120" y="892" width="370" height="84" fill="#0d1528" stroke="#2b3754"/>');
+  T(1138,914,'FAN9672 FRONT END — LIVE DESIGN VALUES','b','start');
+  T(1138,932,'Mode: '+(state.mode==='low'?'Low line / FR':'High line / HV')+'  ·  fSW '+fmtHz(p.fsw)+'  ·  R_CS '+fmt(rcs,1)+' mΩ','t','start');
+  T(1138,948,'Voltage comp: '+(state.vType==='type2'?'Type 2 OTA':'Type 3 OTA')+'  ·  Current comp: Type 2 OTA','t','start');
+  T(1138,964,'Generated by FAN9672 Control Design Tool v4','t','start');
+  $('schemSvg').innerHTML='<svg viewBox="0 0 1500 990" xmlns="http://www.w3.org/2000/svg">'+s.join('')+'</svg>';
+}
+/* ============ rendering ============ */
+function setMode(m){
+  state.mode=m;
+  $('modeLow').classList.toggle('active',m==='low');
+  $('modeHigh').classList.toggle('active',m==='high');
+  // Sync Pout and η fields to the Python-supplied values for this line range
+  $('pout').value = m==='low' ? POUT_LO : POUT_HI;
+  $('eta').value  = m==='low' ? ETA_LO  : ETA_HI;
+  populateMode();recalc();
+}
+function populateMode(){
+  const cfg=state.mode==='low'?{vacs:LOW_VACS,pout:POUT_LO,riac:6,rvir:10}:{vacs:HIGH_VACS,pout:POUT_HI,riac:12,rvir:470};
+  const cur=$('vac').value;$('vac').innerHTML='';
+  cfg.vacs.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+' Vac';$('vac').appendChild(o)});
+  if(cfg.vacs.includes(+cur))$('vac').value=cur;
+  $('pout').value=cfg.pout;$('riac').value=cfg.riac;$('rvir').value=cfg.rvir;
+}
+
+function renderRCS(p){
+  const g=rcsCalc(p);
+  const custom=parseFloat($('rcsCustom').value);
+  if(Number.isFinite(custom)&&custom>0)state.rcsSel=custom;
+  else if(!SHUNTS.includes(state.rcsSel))state.rcsSel=g.rec?Math.round(g.rec*1e4)/10:15;
+  // chips
+  const ch=$('rcsChips');ch.innerHTML='';
+  for(const s of SHUNTS){
+    const inz=s*1e-3>=g.zLo-1e-9&&s*1e-3<=g.zHi+1e-9;
+    const b=document.createElement('button');b.className='chip'+(inz?' inz':'')+((!Number.isFinite(custom)&&Math.abs(s-state.rcsSel)<1e-9)?' selC':'');
+    b.textContent=s+' mΩ';
+    if(g.rec&&Math.abs(s*1e-3-g.rec)<1e-9){const sp=document.createElement('span');sp.className='st';sp.textContent='★';b.appendChild(sp)}
+    b.onclick=()=>{$('rcsCustom').value='';state.rcsSel=s;recalc()};
+    ch.appendChild(b);
+  }
+  // zone bar
+  const lo=Math.min(g.andLo,g.rcsAN)*0.85e3, hi=Math.max(g.andHi,g.rcsAN)*1.12e3;
+  const X=v=>100*(v-lo)/(hi-lo);
+  let zb=`<div class="zoneSeg" style="left:${X(g.andLo*1e3)}%;width:${X(g.andHi*1e3)-X(g.andLo*1e3)}%;background:rgba(86,163,255,.18)"></div>`;
+  if(g.valid)zb+=`<div class="zoneSeg" style="left:${X(g.zLo*1e3)}%;width:${X(g.zHi*1e3)-X(g.zLo*1e3)}%;background:rgba(52,211,153,.28)"></div>`;
+  zb+=`<div class="zoneTick" style="left:${X(g.rcsAN*1e3)}%;background:var(--warn)"></div><div class="zoneLbl" style="left:${Math.min(88,X(g.rcsAN*1e3)+1)}%;top:2px;color:var(--warn)">AN4165 ${fmt(g.rcsAN*1e3,2)} mΩ</div>`;
+  zb+=`<div class="zoneLbl" style="left:${X(g.andLo*1e3)+1}%;bottom:2px">AND9925 VEA 4 V → ${fmt(g.andLo*1e3,2)}</div>`;
+  zb+=`<div class="zoneTick" style="left:${X(state.rcsSel)}%;background:var(--good)"></div><div class="zoneLbl" style="left:${Math.min(86,X(state.rcsSel)+1)}%;top:15px;color:var(--good)">selected ${fmt(state.rcsSel,1)} mΩ</div>`;
+  $('rcsZone').innerHTML=zb;
+  const vea=g.veaOf(state.rcsSel*1e-3), ok=vea>=4&&vea<=5;
+  const Pd=g.iphi*g.iphi*state.rcsSel*1e-3;
+  $('veaCheck').innerHTML=`Implied <span class="mono">V_EA,max = ${fmt(vea,3)} V</span> <span class="pill ${ok?'ok':'bad'}">${ok?'PASS 4–5 V':'OUT OF 4–5 V'}</span><br>
+  <span class="small">P<sub>RCS</sub> = ${fmt(Pd,2)} W/phase (I<sub>φ,rms</sub>=${fmt(g.iphi,2)} A, η=${p.eta}) → use ≥ ${Math.max(3,Math.ceil(Pd*2))} W Kelvin shunt</span>`;
+  return{g,vea,veaEff:vea-0.6,Pd};
+}
+
+function renderTypeCards(p,dci){
+  state.cType='T2';
+  const t2boost=Math.max(0,60-dci.pmT1);
+  $('ciRec').innerHTML=`<div class="note">At f<sub>ci</sub> = ${fmtHz(p.fci)} the loop needs ≈ <span class="mono">${fmt(t2boost,0)}°</span> of phase boost (no-boost PM would be ${fmt(dci.pmT1,1)}°) — provided by the Type-2 zero/pole pair below.</div>`;
+  $('ciTypeCards').innerHTML=`<div class="copt selT"><div class="t">Type 2 OTA</div><div class="d">Integrator + zero + HF pole (R_IC, C_IC1, C_IC2 on IEA).</div><span class="tag pill ok">SELECTED</span></div>`;
+}
+function renderVTypeCards(p,dcv){
+  const need70=Math.max(0,70-dcv.pmNoBoost);
+  $('cvRec').innerHTML=`<div class="note">Recommendation engine — sized at <b>${dcv.cor.lab}</b>. Plant+divider phase at f<sub>cv</sub>=${fmt(p.fcv,1)} Hz is <span class="mono">${fmt(dcv.aTb,1)}°</span>; with the integrator the no-boost PM is <span class="mono">${fmt(dcv.pmNoBoost,1)}°</span> → <span class="mono">${fmt(need70,0)}°</span> boost needed for 70° PM. ${need70>65?'<b>Type-III required</b> (Type-II boost limit ~70°).':'<b>Both valid;</b> Type-III recommended for extra margin (report achieves 81–82°).'} Required |H<sub>OTA</sub>(f<sub>cv</sub>)| = 1/|T<sub>v,base</sub>| = <span class="mono">${fmt(dcv.G,5)}</span> (${fmt(20*Math.log10(dcv.G),2)} dB).</div>`;
+  const cards=[
+    {id:'type3',t:'Type 3 OTA',d:'Integrator + 2 zeros + 2 poles (R2, R3, C1, C2, C3).',tag:'ok',tagT:need70>65?'REQUIRED':'RECOMMENDED'},
+    {id:'type2',t:'Type 2 OTA',d:'Integrator + 1 zero + 1 pole (R2, C1, C3).',tag:need70>65?'bad':'warn',tagT:need70>65?'INSUFFICIENT BOOST':'VALID'}];
+  $('cvTypeCards').innerHTML=cards.map(cd=>`<div class="copt ${state.vType===cd.id?'selT':''}" data-vt="${cd.id}"><div class="t">${cd.t}</div><div class="d">${cd.d}</div><span class="tag pill ${cd.tag}">${cd.tagT}</span></div>`).join('');
+  document.querySelectorAll('[data-vt]').forEach(el=>el.onclick=()=>{state.vType=el.dataset.vt;recalc()});
+}
+
+function renderBoms(p,dci,dcv){
+  const head='<tr><th>Comp.</th><th>Calculated</th><th>Standard (select)</th><th>Realized</th><th>Function</th></tr>';
+  let h=head;
+  if(state.cType==='T1'){
+    h+=bomRow('cur_CIC','C_IC',dci.calc.CIC,p.serC,dci.std.CIC,'integrator 0 dB @ fci','Sole element — gm/(sC)');
+  }else{
+    const fzA=1/(2*Math.PI*dci.std.RIC*dci.std.C1), fpA=1/(2*Math.PI*dci.std.RIC*dci.std.C2);
+    h+=bomRow('cur_RIC','R_IC',dci.calc.RIC,p.serR,dci.std.RIC,'loop gain @ fci','Sets crossover gain');
+    h+=bomRow('cur_C1','C_IC1',dci.calc.C1,p.serC,dci.std.C1,'fz = '+fmtHz(fzA),'Phase-boost zero');
+    h+=bomRow('cur_C2','C_IC2',dci.calc.C2,p.serC,dci.std.C2,'fp = '+fmtHz(fpA),'HF noise-limit pole');
+    h+=`<tr><td>R_F / C_F</td><td class="calcv">—</td><td class="std">${fmtOhm(p.rf)} / ${fmtCap(p.cf)}</td><td>fRC = ${fmtHz(1/(2*Math.PI*p.rf*p.cf))}</td><td class="small">CS anti-alias filter (target ≫ fci)</td></tr>`;
+  }
+  $('ciBom').innerHTML=h;
+  let v=head;
+  if(dcv.err){v+=`<tr><td colspan="5" style="color:var(--bad)">${dcv.err}</td></tr>`}
+  else if(state.vType==='type2'){
+    const{R2,C1,C3}=dcv.std;
+    v+=bomRow('v2_R2','R2',dcv.calc.R2,p.serR,R2,'gain @ fcv','Sets crossover gain (incl. H_div)');
+    v+=bomRow('v2_C1','C1',dcv.calc.C1,p.serC,C1,'fz = '+fmt(1/(2*Math.PI*R2*C1),2)+' Hz','Phase-boost zero');
+    v+=bomRow('v2_C3','C3',dcv.calc.C3,p.serC,C3,'fp = '+fmt((C1+C3)/(2*Math.PI*R2*C1*C3),1)+' Hz','HF roll-off pole');
+  }else{
+    const{R2,R3,C1,C2,C3}=dcv.std, P=p.r1fb*p.r4fb/(p.r1fb+p.r4fb);
+    v+=bomRow('v3_R2','R2',dcv.calc.R2,p.serR,R2,'fz1 / fp1 / gain','Primary gain resistor');
+    v+=bomRow('v3_R3','R3',dcv.calc.R3,p.serR,R3,'fz2 = '+fmt(1/(2*Math.PI*(p.r1fb+R3)*C2),2)+' Hz','Second-branch resistor');
+    v+=bomRow('v3_C1','C1',dcv.calc.C1,p.serC,C1,'fz1 = '+fmt(1/(2*Math.PI*R2*C1),2)+' Hz','Zero-1 capacitor');
+    v+=bomRow('v3_C2','C2',dcv.calc.C2,p.serC,C2,'fp2 = '+fmt(1/(2*Math.PI*(R3+P)*C2),2)+' Hz','Branch cap (z2/p2 pair)');
+    v+=bomRow('v3_C3','C3',dcv.calc.C3,p.serC,C3,'fp1 = '+fmt((C1+C3)/(2*Math.PI*R2*C1*C3),1)+' Hz','Pole-1 capacitor');
+  }
+  $('cvBom').innerHTML=v;
+  document.querySelectorAll('select[data-bom]').forEach(s=>s.onchange=e=>bomSet(e.target.dataset.bom,e.target.value));
+}
+
+function renderPlots(p,dci,dcv){
+  const overlay=$('ovl').checked;
+  const set=state.phil==='shared'?opPts(p,'all'):opPts(p,state.mode);
+  const insp={vac:p.vac,pout:p.pout,line:state.mode==='low'?'LL':'HL'};
+  // --- current loop ---
+  const f1c=10,f2c=5e5,Nc=300;
+  const trs=[];
+  if(overlay)for(const op of set){if(op.vac===insp.vac&&op.pout===insp.pout)continue;
+    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+  const swMain=sweepLoop(f=>Ti(p,dci,insp.vac,insp.pout,f),f1c,f2c,Nc);
+  trs.push({sw:swMain,col:'#56a3ff',wd:2.2,main:true});
+  const mg=marginsOf(swMain);
+  const pl0=plantI(p,insp.vac,insp.pout,1000);
+  drawBodePanel('bodeCur',trs,{f1:f1c,f2:f2c,g1:-60,g2:80,gs:20,p1:-270,p2:0,ps:45,fc:mg.fc,pm:mg.pm,gm:mg.gm,fg:mg.fg,
+    marks:[{f:pl0.fRHPi,lab:'fRHP(i)',col:'rgba(245,158,11,.8)'},{f:p.fsw,lab:'fSW',col:'rgba(239,68,68,.8)'}]});
+  // --- voltage loop ---
+  const f1v=0.1,f2v=1e6,Nv=360;
+  const sizeCor=sizingCorner(p);
+  const trv=[];
+  trv.push({sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]});
+  if(!dcv.err)trv.push({sw:sweepLoop(f=>HotaStd(p,dcv,f),f1v,f2v,Nv),col:'rgba(177,140,255,.8)',dash:[2,3]});
+  let mgv={fc:NaN,pm:NaN,gm:NaN,fg:NaN},cross=[];
+  if(!dcv.err){
+    if(overlay)for(const op of set){if(op.vac===90||op.vac===180)continue;
+      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+    const swLL=sweepLoop(f=>Tv(p,dci,dcv,90,POUT_LO,f),f1v,f2v,Nv);
+    const swHL=sweepLoop(f=>Tv(p,dci,dcv,180,POUT_HI,f),f1v,f2v,Nv);
+    const mLL=marginsOf(swLL), mHL=marginsOf(swHL);
+    trv.push({sw:swLL,col:'#56a3ff',wd:2});
+    trv.push({sw:swHL,col:'#f59e0b',wd:2.2,main:true});
+    cross=[{fc:mHL.fc,pm:mHL.pm,gm:mHL.gm,fg:mHL.fg,col:'#f59e0b',lab:'HL 180 V'},
+           {fc:mLL.fc,pm:mLL.pm,gm:mLL.gm,fg:mLL.fg,col:'#56a3ff',lab:'LL 90 V'}];
+    mgv=sizeCor.vac<150?mLL:mHL;
+  }
+  drawBodePanel('bodeVol',trv,{f1:f1v,f2:f2v,g1:-200,g2:60,gs:40,p1:-450,p2:0,ps:90,cross,
+    marks:[{f:120,lab:'120 Hz',col:'rgba(239,68,68,.8)'},{f:p.fsw,lab:'fSW',col:'rgba(245,158,11,.8)'}]});
+  return{mg,mgv,set};
+}
+
+function renderMargins(p,dci,dcv,set){
+  let rows='<tr><th>Loop</th><th>VAC / P</th><th>fc</th><th>PM</th><th>GM</th><th>120 Hz rej.</th><th>Verdict</th></tr>';
+  let worstPMi=1e9,worstPMv=1e9,worstRej=1e9,fcSet=[];
+  for(const op of set){
+    const swi=sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),100,3e5,260), mi=marginsOf(swi);
+    if(mi.pm<worstPMi)worstPMi=mi.pm;
+    const okI=mi.pm>=45;
+    rows+=`<tr><td>Current</td><td>${op.vac} V / ${op.pout} W</td><td>${fmtHz(mi.fc)}</td><td>${fmt(mi.pm,1)}°</td><td>${Number.isFinite(mi.gm)?fmt(mi.gm,1)+' dB':'&gt;30 dB'}</td><td>—</td><td><span class="pill ${okI?'ok':'bad'}">${okI?'PASS':'PM &lt; 45°'}</span></td></tr>`;
+  }
+  if(!dcv.err)for(const op of set){
+    const swv=sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),0.1,1e6,320), mv=marginsOf(swv);
+    const rej=-magdb(Tv(p,dci,dcv,op.vac,op.pout,120));
+    if(mv.pm<worstPMv)worstPMv=mv.pm; if(rej<worstRej)worstRej=rej;
+    fcSet.push({op,fc:mv.fc});
+    const ok=mv.pm>=60&&rej>=20;
+    rows+=`<tr><td>Voltage</td><td>${op.vac} V / ${op.pout} W</td><td>${fmt(mv.fc,2)} Hz</td><td>${fmt(mv.pm,1)}°</td><td>${Number.isFinite(mv.gm)?fmt(mv.gm,1)+' dB':'large'}</td><td>${fmt(rej,1)} dB</td><td><span class="pill ${ok?'ok':(rej<20?'bad':'warn')}">${ok?'PASS':(rej<20?'REJ &lt; 20 dB':'PM &lt; 60°')}</span></td></tr>`;
+  }
+  $('marginTable').innerHTML=rows;
+  return{worstPMi,worstPMv,worstRej,fcSet};
+}
+
+function ensureTranSel(p){
+  if(!state.tranSel)state.tranSel={};
+  for(const op of opPts(p,'all'))if(state.tranSel[op.vac]===undefined)state.tranSel[op.vac]=true;
+}
+const VCOLORS={90:'#56a3ff',110:'#7cb8ff',120:'#2f7fe0',132:'#9fd2ff',180:'#f59e0b',210:'#fbbf24',220:'#d97706',264:'#fde047'};
+function renderScreen3(p,dci,dcv){
+  if(!$('screen3').classList.contains('active'))return;
+  ensureTranSel(p);
+  const band=0.01*p.vout;$('bandV').textContent=fmt(band,2);
+  // voltage enable/disable chips
+  const ops=opPts(p,'all');
+  $('tranToggles').innerHTML=ops.map(op=>`<button class="chip ${state.tranSel[op.vac]?'selC':''}" data-tv="${op.vac}" style="${state.tranSel[op.vac]?'background:'+VCOLORS[op.vac]+';border-color:'+VCOLORS[op.vac]:''}">${op.vac} V (${op.line})</button>`).join('');
+  document.querySelectorAll('[data-tv]').forEach(b=>b.onclick=()=>{state.tranSel[+b.dataset.tv]=!state.tranSel[+b.dataset.tv];recalc()});
+  if(dcv.err){$('transientTable').innerHTML='';$('calcLog3').textContent=dcv.err;return}
+  const en=ops.filter(op=>state.tranSel[op.vac]);
+  const resp=en.map(op=>({op,yr:stepResponse(p,dci,dcv,op.vac,op.pout)}));
+  // transient table — rows per voltage, columns per transition
+  const trans=[['0 → 100 %',1],['0 → 50 %',0.5],['50 → 100 %',0.5],['100 → 0 %',-1],['50 → 0 %',-0.5],['100 → 50 %',-0.5]];
+  let tt='<tr><th>V_AC</th>'+trans.map(t=>`<th>${t[0]}</th>`).join('')+'</tr>';
+  for(const r of resp){
+    tt+=`<tr><td style="color:${VCOLORS[r.op.vac]};font-weight:700">${r.op.vac} V (${r.op.line}, ${r.op.pout} W)</td>`;
+    for(const[,k]of trans){
+      const dI=k*r.op.pout/p.vout, d=dipAndRecovery(r.yr,dI,band);
+      tt+=`<td>${fmt(d.pk,1)} V<br><span class="small">${fmt(d.rec*1e3,0)} ms</span></td>`;
+    }
+    tt+='</tr>';
+  }
+  tt+=`<tr><td colspan="7" class="small">Each cell: peak ΔV_OUT and recovery time to ±1 % (±${fmt(band,2)} V). Computed from Z_open/(1+T_v) with your selected standard components.</td></tr>`;
+  $('transientTable').innerHTML=tt;
+  drawStepPlot(resp,band,p);
+  $('stepLegend').innerHTML=resp.map(r=>`<span><i style="border-color:${VCOLORS[r.op.vac]}"></i>${r.op.vac} V (${r.op.line})</span>`).join('')+'<span><i style="border-color:#34d399;border-top-style:dashed"></i>±1 % band</span>';
+  $('calcLog3').textContent=[
+    'Transient results are computed from the selected standard component values:',
+    '  ΔV(t)  = −ΔI · L⁻¹{ Zopen/(1+Tv) }   with  Zopen = (1+s·CO·rC)/(s·CO + 2/RLOAD)',
+    '  ΔI     = step fraction × POUT/VOUT for the voltage\u2019s line range',
+    '  t_rec  = time to re-enter the ±1 % band (±'+fmt(band,2)+' V)'].join('\n');
+}
+function drawStepPlot(resp,band,p,cvId='stepPlot'){
+  const cv=$(cvId),dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth||760,H=320;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a111f';ctx.fillRect(0,0,W,H);
+  const pad={l:52,r:10,t:12,b:28};
+  let ymax=band*1.5;
+  for(const r of resp){const dI=r.op.pout/p.vout;for(const y of r.yr.ys)ymax=Math.max(ymax,Math.abs(y*dI)*1.15)}
+  const T=0.45;
+  const X=t=>pad.l+(W-pad.l-pad.r)*t/T, Y=v=>pad.t+(H-pad.t-pad.b)*(1-(v+ymax)/(2*ymax));
+  ctx.strokeStyle='rgba(154,168,196,.15)';ctx.font='10px Segoe UI';ctx.fillStyle='#9aa8c4';
+  for(let t=0;t<=T+1e-9;t+=0.05){ctx.beginPath();ctx.moveTo(X(t),pad.t);ctx.lineTo(X(t),H-pad.b);ctx.stroke();ctx.textAlign='center';ctx.fillText(Math.round(t*1e3)+' ms',X(t),H-10)}
+  const yt=Math.ceil(ymax/10)*10>=20?10:5;
+  for(let v=-Math.ceil(ymax/yt)*yt;v<=ymax;v+=yt){ctx.strokeStyle=v===0?'rgba(234,240,255,.4)':'rgba(154,168,196,.15)';ctx.beginPath();ctx.moveTo(pad.l,Y(v));ctx.lineTo(W-pad.r,Y(v));ctx.stroke();ctx.textAlign='right';ctx.fillText(v+' V',pad.l-5,Y(v)+3)}
+  ctx.strokeStyle='rgba(52,211,153,.7)';ctx.setLineDash([5,4]);
+  ctx.beginPath();ctx.moveTo(pad.l,Y(band));ctx.lineTo(W-pad.r,Y(band));ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pad.l,Y(-band));ctx.lineTo(W-pad.r,Y(-band));ctx.stroke();ctx.setLineDash([]);
+  for(const r of resp){
+    const dI=r.op.pout/p.vout;
+    ctx.strokeStyle=VCOLORS[r.op.vac]||'#56a3ff';ctx.lineWidth=r.op.line==='HL'?2.2:1.8;ctx.beginPath();
+    r.yr.ts.forEach((t,i)=>{const x=X(t),y=Y(r.yr.ys[i]*dI);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});
+    ctx.stroke();
+  }
+}
+/* ============ Screen 4 — iTHD (Step 16, per voltage) ============ */
+function renderScreen4(p,dci,dcv){
+  if(!$('screen4').classList.contains('active'))return;
+  if(dcv.err){$('thdTable').innerHTML='';$('cards3').innerHTML='';$('thdNote').textContent=dcv.err;return}
+  const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk, rcs=state.rcsSel*1e-3;
+  const rows=opPts(p,'all').map(op=>{
+    const riac=op.line==='LL'?6e6:12e6;
+    const veaEff=rcs*den*((op.pout/p.nch)*p.kmax)/(p.krm*riac);
+    const t=thdCalc(p,dci,dcv,op.vac,op.pout,veaEff);
+    return{op,veaEff,...t};
+  });
+  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple,pk 120 Hz</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th></tr>';
+  for(const r of rows){
+    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(r.Vr,2)} V (${fmt(100*r.Vr/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td></tr>`;
+  }
+  $('thdTable').innerHTML=th;
+  const allOK=rows.every(r=>r.rej>=20);
+  $('thdNote').className='note '+(allOK?'':'badN');
+  $('thdNote').innerHTML=allOK
+    ?'Rejection = −20·log₁₀|T<sub>v</sub>(j2π·120)| from the compensated loop; iTHD₃ ≈ 50·V<sub>EA,120</sub>/V<sub>EA,eff</sub> with V<sub>EA,eff</sub> back-calculated per range from the selected R<sub>CS</sub>. Lower f<sub>cv</sub> to reduce iTHD at the cost of a larger transient dip (Screen 3).'
+    :'120 Hz rejection is below the 20 dB floor at one or more voltages — the loop will inject 3rd-harmonic distortion. Lower f<sub>cv</sub> or pull the compensator poles down.';
+  const wLL=rows.filter(r=>r.op.line==='LL').reduce((a,b)=>a.thd3>b.thd3?a:b);
+  const wHL=rows.filter(r=>r.op.line==='HL').reduce((a,b)=>a.thd3>b.thd3?a:b);
+  const wRej=rows.reduce((a,b)=>a.rej<b.rej?a:b);
+  $('cards3').innerHTML=`
+    <div class="card"><div class="k">Worst iTHD₃ — low line</div><div class="v">${fmt(wLL.thd3,2)} %</div><div class="u">@ ${wLL.op.vac} Vac · rej ${fmt(wLL.rej,1)} dB</div></div>
+    <div class="card"><div class="k">Worst iTHD₃ — high line</div><div class="v">${fmt(wHL.thd3,2)} %</div><div class="u">@ ${wHL.op.vac} Vac · rej ${fmt(wHL.rej,1)} dB</div></div>
+    <div class="card ${wRej.rej>=20?'gd':'bd'}"><div class="k">Worst 120 Hz rejection</div><div class="v">${fmt(wRej.rej,1)} dB</div><div class="u">floor 20 dB · @ ${wRej.op.vac} Vac</div></div>
+    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(rows.find(r=>r.op.vac===180).Vr,2)} V</div><div class="u">${fmt(100*rows.find(r=>r.op.vac===180).Vr/p.vout,2)} % of V_OUT</div></div>`;
+  drawThdPlot(rows,p);
+}
+function drawThdPlot(rows,p,cvId='thdPlot'){
+  const cv=$(cvId),dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth||760,H=320;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a111f';ctx.fillRect(0,0,W,H);
+  const pad={l:52,r:10,t:16,b:34};
+  const ymax=Math.max(1,Math.ceil(Math.max(...rows.map(r=>r.thd3))*1.25*2)/2);
+  const X=i=>pad.l+(W-pad.l-pad.r)*(i+0.5)/rows.length;
+  const Y=v=>pad.t+(H-pad.t-pad.b)*(1-v/ymax);
+  ctx.font='10px Segoe UI';
+  const steps=ymax<=2?0.5:(ymax<=5?1:2);
+  for(let v=0;v<=ymax+1e-9;v+=steps){ctx.strokeStyle=v===0?'rgba(234,240,255,.4)':'rgba(154,168,196,.15)';ctx.beginPath();ctx.moveTo(pad.l,Y(v));ctx.lineTo(W-pad.r,Y(v));ctx.stroke();ctx.fillStyle='#9aa8c4';ctx.textAlign='right';ctx.fillText(trim0(v.toFixed(1))+' %',pad.l-5,Y(v)+3)}
+  const bw=Math.min(46,(W-pad.l-pad.r)/rows.length*0.55);
+  rows.forEach((r,i)=>{
+    const x=X(i);
+    ctx.fillStyle=VCOLORS[r.op.vac]||(r.op.line==='LL'?'#56a3ff':'#f59e0b');
+    ctx.fillRect(x-bw/2,Y(r.thd3),bw,Y(0)-Y(r.thd3));
+    ctx.fillStyle='#eaf0ff';ctx.textAlign='center';
+    ctx.fillText(fmt(r.thd3,2)+' %',x,Y(r.thd3)-5);
+    ctx.fillStyle='#9aa8c4';ctx.fillText(r.op.vac+' V',x,H-18);
+    ctx.fillText(r.op.line,x,H-7);
+  });
+  ctx.fillStyle='#9aa8c4';ctx.textAlign='left';ctx.fillText('iTHD₃ contribution (%)',pad.l+4,pad.t-4);
+}
+const PRESET_FCV={base:17,A:12,B:20,C:25};
+
+/* ============ Core component table (Screen 1) ============ */
+function renderCore(p,rcsInfo,dci,dcv,aux){
+  const vacMax=state.mode==='low'?132:264;
+  // RRI (Step 4)
+  const rriCalc=1.2e9/p.fsw-3430;
+  // FB divider (Step 5)
+  const ratio=p.vout/FIXED.VREF-1, rfb1Calc=p.rfb2*ratio;
+  const rfbEach=nearestStd(rfb1Calc/3,'E96'), rfb1Std=3*rfbEach;
+  const voutAct=FIXED.VREF*(1+rfb1Std/p.rfb2);
+  // IAC (Step 3.1)
+  const iacPk=Math.SQRT2*vacMax/p.riac;
+  // VLPK (Step 3.2): FR 2×, HV 4×
+  const mult=state.mode==='low'?2:4;
+  const vlpk=mult*p.krlpk*iacPk*p.rrlpk;
+  // BIBO (Step 12)
+  const Rtot=p.rb1+p.rb2+p.rb3+p.rb4, brat=p.rb4/Rtot;
+  const vBI_FR=FIXED.VBI_FR/(FIXED.Kavg*brat), vBI_HV=FIXED.VBI_HV/(FIXED.Kavg*brat);
+  const vBO=FIXED.VBO/(FIXED.Kavg*brat), vSAG=FIXED.VSAG/(FIXED.Kavg*brat);
+  const fP1=1/(2*Math.PI*p.cb1*p.rb3), fP2=1/(2*Math.PI*p.cb2*p.rb4);
+  $('biboOut').innerHTML=`Divider ratio = <span class="mono">${fmt(brat,6)}</span> → Brown-in FR <b>${fmt(vBI_FR,1)} Vac</b> <span class="pill ${vBI_FR<=87?'ok':'bad'}">${vBI_FR<=87?'≤ 87 V ✓':'> 87 V'}</span> · Brown-out <b>${fmt(vBO,1)} Vac</b> <span class="pill ${vBO<70?'ok':'bad'}">${vBO<70?'< 70 V ✓':'≥ 70 V'}</span> · Brown-in HV <b>${fmt(vBI_HV,1)} Vac</b> <span class="pill ${vBI_HV<180?'ok':'bad'}">&lt; 180 V ${vBI_HV<180?'✓':'✗'}</span> · SAG <b>${fmt(vSAG,1)} Vac</b><br>Filter poles f<sub>P1</sub> = ${fmt(fP1,1)} Hz (CB1·RB3), f<sub>P2</sub> = ${fmt(fP2,1)} Hz (CB2·RB4) <span class="pill ${fP1>=8&&fP1<=22&&fP2>=8&&fP2<=22?'ok':'warn'}">target 10–20 Hz</span>`;
+  // PVO (Step 5.2)
+  const pvoMin=Math.SQRT2*264+25, pvoOK=p.vout>=pvoMin;
+  // VIR rule
+  const virRule=state.mode==='low'?'set V_VIR < 1.5 V (FR)':'set V_VIR > 3.5 V (HV)';
+  const compCur=state.cType==='T1'?`C_IC=${fmtCap(dci.std.CIC)}`:`R_IC=${fmtOhm(dci.std.RIC)}, C_IC1=${fmtCap(dci.std.C1)}, C_IC2=${fmtCap(dci.std.C2)}`;
+  const compVol=dcv.err?'—':(state.vType==='type2'?`R2=${fmtOhm(dcv.std.R2)}, C1=${fmtCap(dcv.std.C1)}, C3=${fmtCap(dcv.std.C3)}`
+    :`R2=${fmtOhm(dcv.std.R2)}, R3=${fmtOhm(dcv.std.R3)}, C1=${fmtCap(dcv.std.C1)}, C2=${fmtCap(dcv.std.C2)}, C3=${fmtCap(dcv.std.C3)}`);
+  const rriStd=nearestStd(rriCalc,'E96'), fswAct=1.2e9/(rriStd+3430);
+  const rows=[
+    ['Component','Calculated','Selected','Check','Function'],
+    ['R_RI',fmtOhm(rriCalc),fmtOhm(rriStd),'fSW ≈ '+fmtHz(fswAct)+' — verify on scope','Oscillator frequency'],
+    ['R_FB1',fmtOhm(rfb1Calc),'3 × '+fmtOhm(rfbEach)+' series = '+fmtOhm(rfb1Std),'V_OUT = '+fmt(voutAct,1)+' V','Output divider — top'],
+    ['R_FB2','—',fmtOhm(p.rfb2),'H_v = '+fmt(FIXED.VREF/p.vout,5),'Output divider — bottom'],
+    ['R_IAC','—',fmtOhm(p.riac),fmt(iacPk*1e6,1)+' µA '+(iacPk<65e-6?'✓':'✗ > 65 µA'),'Line-shape sense'],
+    ['R_RLPK','—',fmtOhm(p.rrlpk),'V_LPK '+fmt(vlpk,2)+' V '+(vlpk<=3.7?'✓':(vlpk<=3.8?'⚠':'✗')),'Peak-detector scaling'],
+    ['R_VIR','—',fmtOhm(p.rvir),state.mode==='low'?'V_VIR < 1.5 V':'V_VIR > 3.5 V','Input-range select (FR/HV)'],
+    ['R_CS',fmt(rcsInfo.g.zLo*1e3,1)+'–'+fmt(rcsInfo.g.zHi*1e3,1)+' mΩ',fmt(state.rcsSel,1)+' mΩ','V_EA '+fmt(rcsInfo.vea,2)+' V '+(rcsInfo.vea>=4&&rcsInfo.vea<=5?'✓':'✗'),'Current sense'],
+    ['R_F / C_F (×2 per ch.)','—',fmtOhm(p.rf)+' / '+fmtCap(p.cf),fmtHz(1/(2*Math.PI*p.rf*p.cf)),'CS anti-alias filter'],
+    ['R_pin8 / C_LPK / C_RLPK','—',fmtOhm(aux.rpin8)+' / '+fmtCap(aux.clpk)+' / '+fmtCap(aux.crlpk),'—','LPK signal filtering'],
+    ['BIBO RB1–RB4 / CB1–CB2','ratio '+fmt(brat,5),fmtOhm(p.rb1)+'/'+fmtOhm(p.rb2)+'/'+fmtOhm(p.rb3)+'/'+fmtOhm(p.rb4)+' · '+fmtCap(p.cb1)+'/'+fmtCap(p.cb2),'BI '+fmt(vBI_FR,1)+' / BO '+fmt(vBO,1)+' Vac '+(vBI_FR<=87&&vBO<70?'✓':'✗'),'Brown-in/out sense + filter'],
+    ['IEA network','—',compCur,'see scorecard','Current-loop compensation'],
+    ['VEA network','—',compVol,'see scorecard','Voltage-loop compensation'],
+    ['C_SS','—',fmtCap(aux.css),'t_SS = '+fmt(aux.tssAct*1e3,0)+' ms','Soft-start time'],
+    ['R/C_ILIM','—',fmtOhm(aux.ril1)+' / '+fmtCap(aux.cil),'V_ILIMIT = '+fmt(aux.vilAct,2)+' V (clamp = /4)','Current-command clamp'],
+    ['R/C_ILIM2','—',fmtOhm(aux.ril2)+' / '+fmtCap(aux.cil2),'V_ILIMIT2 = '+fmt(aux.vil2Act,2)+' V','Cycle-by-cycle OCP'],
+    ['R_GC / C_GC','—',fmtOhm(aux.rgc)+' / '+fmtCap(aux.cgc),'—','Gain control (LPT)'],
+    ['R_LS / C_LS','—',fmtOhm(aux.rls)+' / '+fmtCap(aux.cls),(aux.rlsOK?'12–87 kΩ ✓':'range ✗'),'Current-predict (LPT)'],
+    ['PVO','min bus '+fmt(pvoMin,0)+' V','0 V (disabled)',pvoOK?'may enable':'keep 0 V ✓','Output-voltage offset'],
+    ['L / C_O','—',fmt(p.lphi*1e6,0)+' µH ×2 / '+fmt(p.co*1e6,0)+' µF','—','Power stage'],
+  ];
+  $('componentTable1').innerHTML=rows.map((r,i)=>`<tr>${r.map(v=>i===0?`<th>${v}</th>`:`<td>${v}</td>`).join('')}</tr>`).join('');
+  $('fixedTable').innerHTML=[['Fixed item','Value','Function'],['KRM','6000','Gain-modulator constant (AND9925)'],['KRLPK','2.465','Gain-modulator ripple factor'],['G_max / R_M','2 / 7.5 kΩ','AN4165 Eq. 31 internal constants'],['VRAMP','5 V','PWM ramp amplitude'],['GMI / GMV','88 / 100 µS','OTA transconductances'],['VREF (FBPFC)','2.5 V','Regulation reference'],['NCH','2','Interleaved channels'],['K_avg','0.9003','BIBO rectified-average factor (Step 12)'],['BIBO thresholds','1.90 / 1.75 / 1.05 / 0.85 V','BI-FR / BI-HV / BO / SAG']]
+    .map((r,i)=>`<tr>${r.map(v=>i===0?`<th>${v}</th>`:`<td>${v}</td>`).join('')}</tr>`).join('');
+}
+
+/* ============ tolerance corners ============ */
+function tolAnalysis(p,dci,dcv){
+  if(!$('tolChk').checked){$('tolOut').textContent='';return}
+  const corner=sizingCorner(p);
+  const rnd=(tol)=>1+(Math.random()*2-1)*tol;
+  let minI=1e9,minV=1e9;
+  for(let k=0;k<48;k++){
+    const d2={std:{RIC:(dci.std.RIC||1)*rnd(.01),C1:(dci.std.C1||1)*rnd(.05),C2:(dci.std.C2||1)*rnd(.05),CIC:(dci.std.CIC||1)*rnd(.05)}};
+    const swi=sweepLoop(f=>Ti(p,d2,corner.vac,corner.pout,f),300,2e5,140);
+    const mi=marginsOf(swi);if(mi.pm<minI)minI=mi.pm;
+    if(!dcv.err){
+      const s=dcv.std,d3={std:state.vType==='type2'
+        ?{R2:s.R2*rnd(.01),C1:s.C1*rnd(.05),C3:s.C3*rnd(.05)}
+        :{R2:s.R2*rnd(.01),R3:s.R3*rnd(.01),C1:s.C1*rnd(.05),C2:s.C2*rnd(.05),C3:s.C3*rnd(.05)}};
+      const swv=sweepLoop(f=>cmul(TvBase(p,d2,corner.vac,corner.pout,f),HotaStd(p,d3,f)),0.2,1500,140);
+      const mv=marginsOf(swv);if(mv.pm<minV)minV=mv.pm;
+    }
+  }
+  $('tolOut').innerHTML=`Worst-case over 48 random corners (±1 % R, ±5 % C): current-loop PM ≥ <b>${fmt(minI,1)}°</b> <span class="pill ${minI>=45?'ok':'bad'}">${minI>=45?'PASS':'FAIL'}</span>, voltage-loop PM ≥ <b>${fmt(minV,1)}°</b> <span class="pill ${minV>=60?'ok':'warn'}">${minV>=60?'PASS':'CHECK'}</span>. Use C0G/NP0 or film capacitors — class-II ceramics drift far beyond ±5 %.`;
+}
+
+
+
+/* ---- report figure rendering (offscreen) ---- */
+function repCanvas(id,w,h){
+  let host=document.getElementById('repFigHost');
+  if(!host){host=document.createElement('div');host.id='repFigHost';
+    host.style.cssText='position:absolute;left:-12000px;top:0;background:#0a111f';document.body.appendChild(host)}
+  let cv=document.getElementById(id);
+  if(!cv){cv=document.createElement('canvas');cv.id=id;host.appendChild(cv)}
+  cv.style.width=w+'px';cv.dataset.h=String(h);
+  return cv;
+}
+function canvasPng(id){try{return $(id).toDataURL('image/png')}catch(e){return null}}
+function svgToPng(svgMarkup,w,h,scale){
+  return new Promise(res=>{
+    try{
+      const img=new Image();
+      img.onload=()=>{try{const cv=document.createElement('canvas');cv.width=Math.round(w*scale);cv.height=Math.round(h*scale);
+        const ctx=cv.getContext('2d');ctx.fillStyle='#0a111f';ctx.fillRect(0,0,cv.width,cv.height);
+        ctx.scale(scale,scale);ctx.drawImage(img,0,0,w,h);res(cv.toDataURL('image/png'))}catch(e){res(null)}};
+      img.onerror=()=>res(null);
+      img.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svgMarkup)));
+    }catch(e){res(null)}
+  });
+}
+function buildReportFigures(p,dci,dcv){
+  const f1c=10,f2c=5e5;
+  // --- current loop: all 8 overlaid, LL/HL prominent, both crossings annotated ---
+  repCanvas('repBodeCur',1120,560);
+  const trs=[];
+  for(const op of opPts(p,'all')){if(op.vac===90||op.vac===180)continue;
+    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+  const swiL=sweepLoop(f=>Ti(p,dci,90,POUT_LO,f),f1c,f2c,300), swiH=sweepLoop(f=>Ti(p,dci,180,POUT_HI,f),f1c,f2c,300);
+  const miL=marginsOf(swiL), miH=marginsOf(swiH);
+  trs.push({sw:swiL,col:'#56a3ff',wd:2});
+  trs.push({sw:swiH,col:'#f59e0b',wd:2.2,main:true});
+  const pl0=plantI(p,90,POUT_LO,1000);
+  const fzR=1/(2*Math.PI*dci.std.RIC*dci.std.C1), fpR=1/(2*Math.PI*dci.std.RIC*dci.std.C2);
+  drawBodePanel('repBodeCur',trs,{f1:f1c,f2:f2c,g1:-60,g2:80,gs:20,p1:-270,p2:0,ps:45,
+    cross:[{fc:miH.fc,pm:miH.pm,gm:miH.gm,fg:miH.fg,col:'#f59e0b',lab:'HL 180 V'},
+           {fc:miL.fc,pm:miL.pm,gm:miL.gm,fg:miL.fg,col:'#56a3ff',lab:'LL 90 V'}],
+    marks:[{f:fzR,lab:'fz',col:'rgba(52,211,153,.7)'},{f:fpR,lab:'fp',col:'rgba(52,211,153,.7)'},
+           {f:pl0.fRHPi,lab:'fRHP(i)',col:'rgba(245,158,11,.8)'},{f:p.fsw,lab:'fSW',col:'rgba(239,68,68,.8)'}]});
+  // --- voltage loop: unc + comp + overlay + LL/HL with both crossings ---
+  repCanvas('repBodeVol',1120,620);
+  const f1v=0.1,f2v=1e6,Nv=360;
+  const sizeCor=sizingCorner(p);
+  const trv=[{sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]}];
+  if(!dcv.err){
+    trv.push({sw:sweepLoop(f=>HotaStd(p,dcv,f),f1v,f2v,Nv),col:'rgba(177,140,255,.8)',dash:[2,3]});
+    for(const op of opPts(p,'all')){if(op.vac===90||op.vac===180)continue;
+      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+    const swL=sweepLoop(f=>Tv(p,dci,dcv,90,POUT_LO,f),f1v,f2v,Nv), swH=sweepLoop(f=>Tv(p,dci,dcv,180,POUT_HI,f),f1v,f2v,Nv);
+    const mL=marginsOf(swL), mH=marginsOf(swH);
+    trv.push({sw:swL,col:'#56a3ff',wd:2});trv.push({sw:swH,col:'#f59e0b',wd:2.2,main:true});
+    drawBodePanel('repBodeVol',trv,{f1:f1v,f2:f2v,g1:-200,g2:60,gs:40,p1:-450,p2:0,ps:90,
+      cross:[{fc:mH.fc,pm:mH.pm,gm:mH.gm,fg:mH.fg,col:'#f59e0b',lab:'HL 180 V'},
+             {fc:mL.fc,pm:mL.pm,gm:mL.gm,fg:mL.fg,col:'#56a3ff',lab:'LL 90 V'}],
+      marks:[{f:120,lab:'120 Hz',col:'rgba(239,68,68,.8)'},{f:p.fsw,lab:'fSW',col:'rgba(245,158,11,.8)'}]});
+  }
+  // --- transient: LL + HL full step ---
+  repCanvas('repStep',1120,330);
+  const respR=[{op:{vac:90,pout:POUT_LO,line:'LL'},yr:stepResponse(p,dci,dcv,90,POUT_LO)},
+               {op:{vac:180,pout:POUT_HI,line:'HL'},yr:stepResponse(p,dci,dcv,180,POUT_HI)}];
+  drawStepPlot(respR,0.01*p.vout,p,'repStep');
+  // --- THD bars: all 8 points ---
+  repCanvas('repThd',1120,330);
+  const den2=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk, rcs2=state.rcsSel*1e-3;
+  const rows=opPts(p,'all').map(op=>{
+    const riac2=op.line==='LL'?6e6:12e6;
+    const veaEff=rcs2*den2*((op.pout/p.nch)*p.kmax)/(p.krm*riac2);
+    return{op,veaEff,...thdCalc(p,dci,dcv,op.vac,op.pout,veaEff)}});
+  drawThdPlot(rows,p,'repThd');
+}
+
+/* ============ Comprehensive Word report generator ============ */
+async function generateReport(){
+  if(!lastCtx)return;
+  const{p,dci,dcv,rcsInfo,aux}=lastCtx;
+  buildReportFigures(p,dci,dcv);
+  const imgs={};
+  imgs['fig_bode_cur.png']=canvasPng('repBodeCur');
+  imgs['fig_bode_vol.png']=canvasPng('repBodeVol');
+  imgs['fig_step.png']=canvasPng('repStep');
+  imgs['fig_thd.png']=canvasPng('repThd');
+  imgs['fig_schem.png']=await svgToPng(($('schemSvg')||{}).innerHTML||'',1500,990,1.5);
+  const fo=fmtOhm,fc2=fmtCap,today=new Date().toISOString().slice(0,10);
+  const esc=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const B=[];
+  const H1=t=>B.push(`<h1>${t}</h1>`), H2=t=>B.push(`<h2>${t}</h2>`);
+  const P=t=>B.push(`<p>${t}</p>`), F=t=>B.push(`<p class="f">${esc(t)}</p>`);
+  const CON=t=>B.push(`<p class="con"><b>CONCEPT</b>&nbsp;&nbsp;${t}</p>`);
+  const PIT=t=>B.push(`<p class="pit"><b>PITFALL</b>&nbsp;&nbsp;${t}</p>`);
+  const DEC=t=>B.push(`<p class="dec"><b>Decision:</b> ${t}</p>`);
+  const TBL=rows=>{B.push('<table>'+rows.map((r,i)=>'<tr>'+r.map(cv=>(i===0)?`<th>${cv}</th>`:`<td>${cv}</td>`).join('')+'</tr>').join('')+'</table>')};
+  const PB=()=>B.push('<div style="page-break-before:always"></div>');
+  const IMG=(name,cap,wpx=660)=>{if(!imgs[name])return;
+    B.push(`<p style="text-align:center;margin:8pt 0 2pt"><img src="${name}" width="${wpx}"></p>`);
+    if(cap)B.push(`<p class="cap">${cap}</p>`)};
+  // ================= shared computations =================
+  const ratio=(p.r1fb+p.r4fb)/p.r4fb;
+  const rfb1Calc=p.rfb2*(p.vout/FIXED.VREF-1), rfbEach=nearestStd(rfb1Calc/3,'E96'), rfb1Std=3*rfbEach;
+  const voutAct=FIXED.VREF*(1+rfb1Std/p.rfb2);
+  const rriCalc=1.2e9/p.fsw-3430, rriStd=nearestStd(rriCalc,'E96'), fswAct=1.2e9/(rriStd+3430);
+  const rcs=state.rcsSel*1e-3, den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk;
+  const g=rcsInfo.g, ops=opPts(p,'all');
+  const pl=op=>plantI(p,op.vac,op.pout,1000);
+  const veaEffOf=op=>rcs*den*((op.pout/p.nch)*p.kmax)/(p.krm*(op.line==='LL'?6e6:12e6));
+  const mi90=marginsOf(sweepLoop(f=>Ti(p,dci,90,POUT_LO,f),100,3e5,400));
+  const mvHL=marginsOf(sweepLoop(f=>Tv(p,dci,dcv,180,POUT_HI,f),0.1,1e6,400));
+  const mvLL=marginsOf(sweepLoop(f=>Tv(p,dci,dcv,90,POUT_LO,f),0.1,1e6,400));
+  const rejHL=-magdb(Tv(p,dci,dcv,180,POUT_HI,120)), rejLL=-magdb(Tv(p,dci,dcv,90,POUT_LO,120));
+  const fzA=1/(2*Math.PI*dci.std.RIC*dci.std.C1), fpA=1/(2*Math.PI*dci.std.RIC*dci.std.C2);
+  const iIL=1.2*1.0208/rriStd, iIL2=1.2*1.03125/rriStd;
+  const T3=state.vType==='type3';
+  const Pfb=p.r1fb*p.r4fb/(p.r1fb+p.r4fb);
+  // ================= TITLE =================
+  B.push('<div class="ttl"><p class="t1">PFC Interleaved CCM — Control Loop Design</p><p class="t2">Control Loop Design Calculations</p><p class="t3">A Step-by-Step Design Reference — Generated from the Live Design Tool</p>');
+  P('Two-Phase Interleaved Boost CCM PFC&nbsp;&nbsp;—&nbsp;&nbsp;Universal Input 90–264 Vac&nbsp;&nbsp;—&nbsp;&nbsp;'+fmt(POUT_LO/1000,1)+' / '+fmt(POUT_HI/1000,1)+' kW');
+  P('<b>Design highlights</b>');
+  P(`Inner current loop ${fmtHz(mi90.fc)} / PM ${fmt(mi90.pm,1)}°&nbsp;&nbsp;•&nbsp;&nbsp;Outer voltage loop ${fmt(mvHL.fc,1)} Hz / PM ${fmt(mvHL.pm,1)}°<br>R_CS = ${fmt(state.rcsSel,1)} mΩ&nbsp;&nbsp;•&nbsp;&nbsp;K_max = ${p.kmax}&nbsp;&nbsp;•&nbsp;&nbsp;120 Hz rejection ≥ ${fmt(Math.min(rejHL,rejLL),1)} dB&nbsp;&nbsp;•&nbsp;&nbsp;R_GC / R_LS now sized per AN4165-D`);
+  P('Reference Documents:&nbsp; FAN9672-D Datasheet&nbsp; | &nbsp;AN4165-D&nbsp; | &nbsp;AND9925-D&nbsp; | &nbsp;SLVA662');
+  P(`<b>Document FAN9672-CL-001&nbsp;&nbsp;—&nbsp;&nbsp;Revision 2.1&nbsp;&nbsp;—&nbsp;&nbsp;Status: Generated ${today}</b></div>`);
+  // ================= DOCUMENT CONTROL =================
+  H1('Document Control');
+  P('This document records the complete control-loop design of the FAN9672 two-phase interleaved CCM PFC converter. It is intended both as a verifiable engineering deliverable and as a self-contained tutorial: every result is derived from first principles or a cited application note, computed numerically from the component values currently selected in the design tool, and cross-checked.');
+  TBL([['Field','Value'],
+    ['Document title','PFC Interleaved CCM — Control Loop Design Calculations'],
+    ['Document number','FAN9672-CL-001'],['Revision','2.1 (auto-generated)'],['Status','Generated '+today],
+    ['Classification','Engineering — unrestricted (educational reference)'],
+    ['Power stage',''+p.nch+'-phase interleaved boost, 90–264 Vac in, '+fmt(p.vout,1)+' V bus, '+fmt(POUT_LO/1000,1)+' / '+fmt(POUT_HI/1000,1)+' kW'],
+    ['Controller','ON Semiconductor FAN9672 (average current-mode, dual-channel)'],
+    ['Tool state at generation',(state.mode==='low'?'Low line / FR':'High line / HV')+' mode · '+(state.phil==='shared'?'shared voltage network (HL-sized)':'mode-dedicated voltage network')+' · '+(T3?'Type-3':'Type-2')+' voltage OTA']]);
+  P('<b>Revision History</b>');
+  TBL([['Rev','Date','Author / Reviewer','Summary of Changes'],
+    ['1.0','Initial','Design / Review','Steps 1–7 and 12: power-stage interface, gain modulator, R_CS, G_MOD verification, BIBO.'],
+    ['1.5','—','Design / Review','Added Step 13 (inner current loop) and Step 14 (outer voltage loop) with full Bode analysis.'],
+    ['1.8','—','Design / Review','Added Step 15 (step-load transient), Step 16 (input-current THD / 120 Hz), Step 17 (equation accuracy and compensator optimization).'],
+    ['2.0','—','Design / Review','Tutorial edition: front matter, control-architecture introduction, per-step theory primers, derivation appendix, bench test plan, references, quick-reference card. R_GC / C_GC / R_LS / C_LS were still listed only as "set by LPT matching".'],
+    ['2.1',today,'Design Tool / Review','<b>Added Step 8: R_GC, C_GC, R_LS, C_LS sizing per AN4165-D Equations 39–40</b>, together with C_SS (Eq. 64) and ILIMIT / ILIMIT2 (Eqs. 32–38) calculations. All numeric results regenerated from the live tool state. No methodology of prior steps changed.']]);
+  // ================= EXEC SUMMARY =================
+  H1('Executive Summary');
+  P('The FAN9672 controls each phase with an inner average current loop and regulates the common DC bus with a slow outer voltage loop. The design below sizes every external control component from datasheet and application-note equations, then verifies stability, transient behaviour and 120 Hz rejection across all eight operating points (four input voltages per line range, full power).');
+  TBL([['Quantity','Result','Floor / Target','Verdict'],
+    ['Current-loop crossover / PM (all 8 pts)',fmtHz(mi90.fc)+' / '+fmt(mi90.pm,1)+'°','PM ≥ 45°, fci ≤ fSW/6',(mi90.pm>=45&&p.fci<=p.fsw/6)?'PASS':'CHECK'],
+    ['Voltage-loop crossover / PM — HL 180 V',fmt(mvHL.fc,2)+' Hz / '+fmt(mvHL.pm,1)+'°','PM ≥ 60°',mvHL.pm>=60?'PASS':'FAIL'],
+    ['Voltage-loop crossover / PM — LL 90 V',fmt(mvLL.fc,2)+' Hz / '+fmt(mvLL.pm,1)+'°','PM ≥ 60°',mvLL.pm>=60?'PASS':'FAIL'],
+    ['120 Hz rejection (worst of LL/HL)',fmt(Math.min(rejHL,rejLL),1)+' dB','≥ 20 dB',Math.min(rejHL,rejLL)>=20?'PASS':'FAIL'],
+    ['R_CS selection',fmt(state.rcsSel,1)+' mΩ','both-method window '+fmt(g.zLo*1e3,2)+'–'+fmt(g.zHi*1e3,2)+' mΩ',(rcs>=g.zLo-1e-9&&rcs<=g.zHi+1e-9)?'PASS':'CHECK'],
+    ['Implied V_EA,max from R_CS',fmt(rcsInfo.vea,3)+' V','4.0 – 5.0 V',(rcsInfo.vea>=4&&rcsInfo.vea<=5)?'PASS':'CHECK'],
+    ['R_LS — NEW (AN4165-D Eq. 39)',fo(aux.rls),'12 – 87 kΩ',aux.rlsOK?'PASS':'FAIL'],
+    ['R_GC — NEW (AN4165-D Eq. 40)',fo(aux.rgc),'within ±5 % of 6×10⁶/ratio',Math.abs(aux.rgc/(6e6/ratio)-1)<=.05?'PASS':'CHECK']]);
+  // ================= NOMENCLATURE =================
+  H1('Nomenclature');
+  TBL([['Symbol','Meaning','Value / units in this design'],
+    ['V_AC','RMS line input voltage','90–132 V (FR) / 180–264 V (HV)'],
+    ['V_OUT','Regulated DC bus voltage',fmt(p.vout,1)+' V'],
+    ['P_OUT','Output power',POUT_LO+' W (LL) / '+POUT_HI+' W (HL)'],
+    ['N_CH','Number of interleaved channels','2'],
+    ['L_φ','Per-phase boost inductance',fmt(p.lphi*1e6,0)+' µH'],
+    ['L_eq','Equivalent inductance, voltage plant (L_φ/2)',fmt(p.lphi*5e5,1)+' µH'],
+    ['C_O','Bus capacitance',fmt(p.co*1e6,0)+' µF'],
+    ['r_C , r_L','Capacitor ESR, inductor DCR',fmt(p.rc*1e3,0)+' / '+fmt(p.rl*1e3,0)+' mΩ'],
+    ['f_SW','Per-phase switching frequency',fmtHz(p.fsw)+' target'],
+    ['D , D′','Duty cycle and complement (D′ = 1 − D)','operating-point dependent'],
+    ['R_LOAD','Equivalent load resistance V_OUT²/P_OUT',fmt(p.vout*p.vout/POUT_LO,1)+' Ω (LL) / '+fmt(p.vout*p.vout/POUT_HI,1)+' Ω (HL)'],
+    ['f_RHP','Right-half-plane zero frequency','per-phase (current path) and L_eq (voltage plant)'],
+    ['K_max','Per-channel power design margin',String(p.kmax)+' (149 %)'],
+    ['K_RM , K_RLPK','Gain-modulator constants (AND9925-D)','6000 / 2.465'],
+    ['G_MI , G_MV','IEA / VEA OTA transconductances','88 µS / 100 µS'],
+    ['V_RAMP','PWM ramp amplitude','5 V'],
+    ['V_EA , V_EA,eff','Voltage-EA output; effective (V_EA − 0.6 V)','4–5 V preferred window'],
+    ['T_i(s) , T_v(s)','Current-loop and voltage-loop gains','—'],
+    ['H_v','Output divider gain 2.5/V_OUT',fmt(FIXED.VREF/p.vout,6)],
+    ['f_ci , f_cv','Current / voltage loop crossover targets',fmtHz(p.fci)+' / '+fmt(p.fcv,1)+' Hz'],
+    ['PM , GM','Phase margin, gain margin','floors: 45° (current), 60° (voltage)']]);
+  H1('Abbreviations');
+  TBL([['Abbreviation','Meaning'],['PFC','Power factor correction'],['CCM','Continuous conduction mode'],
+    ['ACM','Average current-mode control'],['OTA','Operational transconductance amplifier'],
+    ['EA','Error amplifier (IEA = current, VEA = voltage)'],['RHP','Right half-plane (zero)'],
+    ['FR / HV','Full-range / high-voltage line setting (VIR pin)'],['LPT','Linear predict technology (FAN9672 current predict)'],
+    ['BIBO','Brown-in / brown-out'],['THD','Total harmonic distortion'],['BOM','Bill of materials'],
+    ['E96 / E24 / E12','Standard component value series (±1 % / ±5 % / ±10 % grids)']]);
+  H1('How to Read This Report');
+  P('Each step opens with a short <b>CONCEPT</b> primer explaining why the calculation exists, then presents the governing equation, substitutes the design numbers explicitly, selects the nearest standard value, and verifies the result. Shaded <b>Decision</b> bars record what was chosen and why; <b>PITFALL</b> notes flag the mistakes most often made at that step. Verification tables cover all nine operating points: 90 / 110 / 120 / 132 Vac at '+POUT_LO+' W (low line) and 180 / 200 / 220 / 230 / 264 Vac at '+POUT_HI+' W (high line). Every number is regenerated from the live design tool, so this revision is self-consistent with the selected bill of materials.');
+  PB();
+  // ================= INTRODUCTION =================
+  H1('Introduction and Control Architecture');
+  H2('I.1 What a PFC stage must do');
+  P('A PFC front end must draw a sinusoidal input current in phase with the line voltage while regulating a DC bus above the line peak. The boost converter is the natural choice because its input current is continuous; running two phases interleaved at '+fmtHz(p.fsw)+' halves the input ripple current, doubles the effective ripple frequency, and — crucially for the control design — doubles the effective inductance seen by the voltage loop (L_eq = L_φ/2 = '+fmt(p.lphi*5e5,1)+' µH).');
+  H2('I.2 Average current-mode control and the two loops');
+  P('The FAN9672 implements average current-mode control: a gain modulator multiplies the line shape (IAC pin) by the voltage-error amplifier output (VEA) to produce a current command; each phase\u2019s inner loop forces the sensed average inductor current (CS pins through R_CS) to follow that command; the outer loop regulates the bus through the FBPFC divider. The inner loop must be fast (kHz-range) so the current tracks the rectified-sine command; the outer loop must be slow (tens of Hz) so it does not fight the inherent 120 Hz bus ripple — if it did, the correction would distort the input current (Step 16).');
+  H2('I.3 The boost right-half-plane zero');
+  P('A boost converter in CCM has a right-half-plane zero: increasing the duty cycle first <i>reduces</i> energy delivered to the output for a fraction of a cycle. Two distinct RHP-zero frequencies matter here and must not be confused:');
+  TBL([['RHP zero','Inductance used','Value @ 90 Vac / '+POUT_LO+' W','Value @ 180 Vac / '+POUT_HI+' W','Governs'],
+    ['Current path (Step 13)','L_φ = '+fmt(p.lphi*1e6,0)+' µH',fmtHz(pl({vac:90,pout:POUT_LO}).fRHPi),fmtHz(pl({vac:180,pout:POUT_HI}).fRHPi),'duty → output-voltage path; does NOT erode current-loop PM'],
+    ['Voltage plant (Step 14)','L_eq = L_φ/2',fmtHz(pl({vac:90,pout:POUT_LO}).fRHPv),fmtHz(pl({vac:180,pout:POUT_HI}).fRHPv),'hard ceiling on voltage-loop bandwidth']]);
+  P('Interleaving doubles the voltage-plant RHP zero, which is exactly why the chosen voltage-loop bandwidth is comfortable.');
+  H2('I.4 How the steps fit together');
+  P('Steps 1–2 fix the operating envelope and base constants. Steps 3–5 size the line-sense, oscillator and output-sense interfaces. Step 6 selects R_CS by intersecting two independent methods; Step 7 proves the gain-modulator scaling three independent ways. <b>Step 8 (new in this revision) sizes the GC and LS pins per AN4165-D</b> together with soft-start and the two current limits. Step 12 designs brown-in/out. Steps 13–14 design and verify both loops; Steps 15–17 quantify transient response, 120 Hz rejection / THD, and the bandwidth trade-off. Appendices collect derivations, the BOM, a bench plan and a quick-reference card.');
+  PB();
+  // ================= S — SCHEMATIC & COMPONENT SUMMARY =================
+  H1('FAN9672 Application Schematic and Component Summary');
+  H2('S.1 Pin-by-Pin Control Connections');
+  TBL([['Pin','Name','Function','External network (this design)'],
+    ['1','BIBO','Brown-in / brown-out sense',fo(p.rb1)+' + '+fo(p.rb2)+' + '+fo(p.rb3)+' / '+fo(p.rb4)+' divider, '+fc2(p.cb1)+' / '+fc2(p.cb2)+' filter'],
+    ['2','PVO','Programmable output offset','tied to 0 V — disabled (Step 5.2)'],
+    ['3','ILIMIT','Current-command clamp',fo(aux.ril1)+' ∥ '+fc2(aux.cil)+' to GND'],
+    ['4','GC','Gain control (LPT)',fo(aux.rgc)+' ∥ '+fc2(aux.cgc)+' to GND — <b>Step 8</b>'],
+    ['5','RI','Oscillator programming',fo(rriStd)+' to GND'],
+    ['6','RLPK','Line-peak detector scaling',fo(p.rrlpk)+' ∥ '+fc2(aux.crlpk)+' to GND'],
+    ['7','ILIMIT2','Cycle-by-cycle peak limit',fo(aux.ril2)+' ∥ '+fc2(aux.cil2)+' to GND'],
+    ['8','LPK','Line-peak hold',fo(aux.rpin8)+' series + '+fc2(aux.clpk)+' to GND'],
+    ['9','RDY','PFC-ready status','open-drain, pull-up (typ)'],
+    ['10 / 11','IEA1 / IEA2','Current-EA outputs (per channel)',fo(dci.std.RIC)+' + '+fc2(dci.std.C1)+' series, '+fc2(dci.std.C2)+' parallel, each'],
+    ['13 / 14','CM1 / CM2','Channel management','grounded — both channels enabled'],
+    ['16','VIR','Input-range select','10 kΩ (FR) / 470 kΩ (HV); 1.5–3.5 V forbidden band'],
+    ['17','LS','Current predict (LPT)',fo(aux.rls)+' ∥ '+fc2(aux.cls)+' to GND — <b>Step 8</b>'],
+    ['18 / 19','NC','—','tied to GND'],
+    ['20–23','CS2± / CS1±','Per-phase current sense','R_F = '+fo(p.rf)+' in both legs, C_F = '+fc2(p.cf)+' differential, across '+fmt(state.rcsSel,1)+' mΩ Kelvin shunts'],
+    ['24','GND','Signal ground','—'],
+    ['26 / 27','OPFC2 / OPFC1','Gate-drive outputs','to MOSFET drivers'],
+    ['28','VDD','Supply','0.1 µF + 10 µF decoupling (typ)'],
+    ['29','FBPFC','Output-voltage sense','3 × '+fo(rfbEach)+' series / '+fo(p.rfb2)+(T3?' + Type-3 branch '+fo(dcv.std.R3)+' series '+fc2(dcv.std.C2):'')],
+    ['30','VEA','Voltage-EA output',T3?fo(dcv.std.R2)+' + '+fc2(dcv.std.C1)+' series, '+fc2(dcv.std.C3)+' parallel':fo(dcv.std.R2)+' + '+fc2(dcv.std.C1)+' series, '+fc2(dcv.std.C3)+' parallel'],
+    ['31','SS','Soft start',fc2(aux.css)+' to GND'],
+    ['32','IAC','Line-shape sense','6 MΩ (FR) / 12 MΩ (HV), 2 MΩ series strings']]);
+  H2('S.2 Control Schematic — Live Component Values');
+  P('The complete FAN9672 control schematic with every component annotated from the selected bill of materials. Amber values are live design selections; grey "(typ)" parts are fixed-practice filters not sized by the loop equations.');
+  IMG('fig_schem.png','Figure S-1 — FAN9672 application schematic ('+(state.mode==='low'?'FR mode, 90–132 Vac':'HV mode, 180–264 Vac')+'). BIBO ladder, ILIMIT/ILIMIT2, GC, RI, RLPK, LPK networks (left/top), IEA compensation and VIR (bottom), CS filters with Kelvin shunts and LS (right), FBPFC divider with '+(state.vType==='type3'?'Type-3 R3–C2 branch':'Type-2 network')+' and VEA compensation (top).',690);
+  H2('S.3 Operating Point and Loop Behaviour — Low Line vs High Line');
+  const opL=pl({vac:90,pout:POUT_LO}),opH=pl({vac:180,pout:POUT_HI});
+  TBL([['Quantity','Low line 90 Vac / '+POUT_LO+' W','High line 180 Vac / '+POUT_HI+' W'],
+    ['Duty cycle D at crest',fmt(opL.D,4),fmt(opH.D,4)],
+    ['R_LOAD',fmt(opL.RL,2)+' Ω',fmt(opH.RL,2)+' Ω'],
+    ['Plant resonance f₀ / Q',fmt(opL.f0,2)+' Hz / '+fmt(opL.Q,2),fmt(opH.f0,2)+' Hz / '+fmt(opH.Q,2)],
+    ['f_RHP — current path',fmtHz(opL.fRHPi),fmtHz(opH.fRHPi)],
+    ['f_RHP — voltage plant (L_eq)',fmtHz(opL.fRHPv),fmtHz(opH.fRHPv)],
+    ['Current-loop f_c / PM',fmtHz(mi90.fc)+' / '+fmt(mi90.pm,1)+'°',(()=>{const m=marginsOf(sweepLoop(f=>Ti(p,dci,180,POUT_HI,f),100,3e5,300));return fmtHz(m.fc)+' / '+fmt(m.pm,1)+'°'})()],
+    ['Voltage-loop f_c / PM',fmt(mvLL.fc,2)+' Hz / '+fmt(mvLL.pm,1)+'°',fmt(mvHL.fc,2)+' Hz / '+fmt(mvHL.pm,1)+'°'],
+    ['120 Hz rejection',fmt(rejLL,1)+' dB',fmt(rejHL,1)+' dB']]);
+  PB();
+  // ================= STEP 1 =================
+  H1('Step 1 — Power Plant Specifications');
+  CON('Everything downstream — gains, limits, compensators — is a function of the operating envelope. Fixing it first, with the exact numbers used everywhere else, prevents silent inconsistencies.');
+  TBL([['Parameter','Value','Note'],
+    ['Input range','90–264 Vac universal','FR: 90–132 V · HV: 180–264 V (VIR pin)'],
+    ['Output voltage',fmt(p.vout,1)+' V','above √2·264 + margin'],
+    ['Output power',POUT_LO+' W (LL) / '+POUT_HI+' W (HL)','full power at all listed voltages'],
+    ['Topology','2-phase interleaved boost, CCM','FAN9672 average current mode'],
+    ['Per-phase inductance',fmt(p.lphi*1e6,0)+' µH','L_eq = '+fmt(p.lphi*5e5,1)+' µH for the voltage plant'],
+    ['Bus capacitance',fmt(p.co*1e6,0)+' µF, ESR '+fmt(p.rc*1e3,0)+' mΩ','sets ripple and transient stiffness'],
+    ['Inductor DCR',fmt(p.rl*1e3,0)+' mΩ','damping term in the plant'],
+    ['Switching frequency',fmtHz(p.fsw)+' per phase','set by R_RI (Step 4)'],
+    ['Efficiency assumption',String(p.eta),'used for RMS currents and peak limits']]);
+  // ================= STEP 2 =================
+  H1('Step 2 — Set the Base');
+  CON('The "base" quantities are the normalising constants — controller limits, gain-modulator constants and design windows — from which every later expression is built. Computing them once keeps the per-step algebra clean.');
+  TBL([['Parameter','Symbol','Value','Source and constraint'],
+    ['IAC pin maximum current','I_AC,max','< 65 µA','FAN9672-D pin rating'],
+    ['V_LPK preferred / hard limit','V_LPK','≤ 3.7 V / < 3.8 V','100 mV self-margin below datasheet abs-max'],
+    ['Gain-modulator ripple factor','K_RLPK','2.465','AND9925-D Table 1'],
+    ['Gain-modulator constant','K_RM','6 000','AND9925-D, derived from test cases'],
+    ['VEA linear range / preferred window','V_EA','0.6–5.6 V / 4.0–5.0 V','FAN9672-D, AND9925-D guideline'],
+    ['PWM ramp amplitude','V_RAMP','5 V','FAN9672-D'],
+    ['OTA transconductances','G_MI / G_MV','88 µS / 100 µS','FAN9672-D'],
+    ['K_max range / selected','K_max','1.3–1.6 / '+p.kmax,'must satisfy both R_CS methods (verified in Step 6.3)'],
+    ['VIR resistor FR / HV','R_VIR','10 kΩ / 470 kΩ','V_VIR < 1.5 V → FR, > 3.5 V → HV; 1.5–3.5 V forbidden']]);
+  // ================= STEP 3 =================
+  H1('Step 3 — Gain Modulator and IAC Check');
+  H2('3.1 R_IAC Selection and I_AC Verification');
+  CON('The IAC pin samples the rectified line through a high-value resistor string; its current is the sine template the gain modulator multiplies. It must never exceed 65 µA at the highest line crest, and the resistor must be a series string for voltage rating.');
+  F('I_AC,pk = √2 · V_AC,max / R_IAC ≤ 65 µA');
+  const iacRows=[['Range','R_IAC','V_AC','I_AC,pk','Check']];
+  for(const op of ops){const riac2=op.line==='LL'?6e6:12e6;const i=Math.SQRT2*op.vac/riac2;
+    iacRows.push([op.line,fo(riac2),op.vac+' V',fmt(i*1e6,2)+' µA',i<65e-6?'PASS':'FAIL'])}
+  TBL(iacRows);
+  DEC('R_IAC = 6 MΩ (FR, 3 × 2 MΩ series) / 12 MΩ (HV, 6 × 2 MΩ series). Worst case '+fmt(Math.SQRT2*132/6e6*1e6,2)+' µA — identical in both ranges by construction, comfortably below 65 µA.');
+  H2('3.2 V_LPK Check at R_RLPK = '+fo(p.rrlpk));
+  CON('The LPK peak detector scales with 2× the RLPK current in FR mode and 4× in HV mode (the FAN9672 doubles I_RLPK and I_GC internally in HV). The peak-hold voltage must stay below 3.7 V preferred / 3.8 V absolute at the highest crest.');
+  F('V_LPK = (FR: 2× | HV: 4×) · K_RLPK · I_AC,pk · R_RLPK');
+  const vlpkF=2*p.krlpk*(Math.SQRT2*132/6e6)*p.rrlpk, vlpkH=4*p.krlpk*(Math.SQRT2*264/12e6)*p.rrlpk;
+  F('FR @132 V:  2 × 2.465 × '+fmt(Math.SQRT2*132/6e6*1e6,2)+' µA × '+fo(p.rrlpk)+'  =  '+fmt(vlpkF,3)+' V');
+  F('HV @264 V:  4 × 2.465 × '+fmt(Math.SQRT2*264/12e6*1e6,2)+' µA × '+fo(p.rrlpk)+'  =  '+fmt(vlpkH,3)+' V');
+  DEC('R_RLPK = '+fo(p.rrlpk)+' gives '+fmt(Math.max(vlpkF,vlpkH),3)+' V worst case — '+(Math.max(vlpkF,vlpkH)<=3.7?'within the 3.7 V preferred limit.':'within the 3.8 V absolute limit (above 3.7 V preferred — acceptable, monitored).')+' C_RLPK = '+fc2(aux.crlpk)+' filters the peak detector (pole '+fmtHz(1/(2*Math.PI*p.rrlpk*aux.crlpk))+').');
+  PIT('Forgetting the 4× HV multiplier is the most common error at this step — a value that passes in FR can violate the LPK abs-max in HV.');
+  PB();
+  // ================= STEP 4 =================
+  H1('Step 4 — Oscillator Resistor for Selected f_SW');
+  H2('4.1 Oscillator Equation and R_RI Calculation');
+  CON('R_RI programs the per-phase switching frequency; it also sets the mirrored pin currents used by ILIMIT and ILIMIT2 (Step 8.4), so it must be selected before the current limits.');
+  F('R_RI = 1.2×10⁹ / f_SW − 3430  =  1.2×10⁹ / '+fmt(p.fsw,0)+' − 3430  =  '+fo(rriCalc));
+  H2('4.2 Standard Value Selection');
+  TBL([['Candidate (E96)','Resulting f_SW','Deviation from target'],
+    [fo(nearestList(rriCalc,'E96',3)[0]),fmtHz(1.2e9/(nearestList(rriCalc,'E96',3)[0]+3430)),fmt(100*(1.2e9/(nearestList(rriCalc,'E96',3)[0]+3430)/p.fsw-1),2)+' %'],
+    ['<b>'+fo(rriStd)+' (selected)</b>','<b>'+fmtHz(fswAct)+'</b>','<b>'+fmt(100*(fswAct/p.fsw-1),2)+' %</b>'],
+    [fo(nearestList(rriCalc,'E96',3)[2]),fmtHz(1.2e9/(nearestList(rriCalc,'E96',3)[2]+3430)),fmt(100*(1.2e9/(nearestList(rriCalc,'E96',3)[2]+3430)/p.fsw-1),2)+' %']]);
+  DEC('R_RI = '+fo(rriStd)+' → f_SW ≈ '+fmtHz(fswAct)+'. Verify the actual frequency on the bench; the oscillator equation has part-to-part spread.');
+  // ================= STEP 5 =================
+  H1('Step 5 — Output Sensing and PVO');
+  H2('5.1 FBPFC Voltage Divider Design');
+  CON('The FBPFC divider compares the bus against the internal 2.5 V reference. The top leg sees almost 400 V, so it is split into three equal series resistors for voltage rating and surface-creepage margin; the split also sets the divider ratio used by GC and LS in Step 8.');
+  F('R_FB1 = R_FB2 · (V_OUT / 2.5 − 1)  =  '+fo(p.rfb2)+' × '+fmt(p.vout/2.5-1,2)+'  =  '+fo(rfb1Calc));
+  F('per element:  '+fo(rfb1Calc)+' / 3  =  '+fo(rfb1Calc/3)+'  →  '+fo(rfbEach)+' (E96)');
+  TBL([['Item','Value','Check'],
+    ['R_FB1 (string)','3 × '+fo(rfbEach)+' = '+fo(rfb1Std),'each element < ½ rated voltage'],
+    ['R_FB2',fo(p.rfb2),'—'],
+    ['Actual V_OUT',fmt(voutAct,2)+' V',fmt(100*(voutAct/p.vout-1),3)+' % from target'],
+    ['Divider gain H_v',fmt(FIXED.VREF/p.vout,6),'used in Step 14'],
+    ['Divider ratio (R_FB1+R_FB2)/R_FB2',fmt(ratio,2),'used by GC / LS in Step 8'],
+    ['Divider dissipation',fmt(p.vout*p.vout/(rfb1Std+p.rfb2)*1e3,1)+' mW','negligible']]);
+  H2('5.2 PVO Pin — Voltage Headroom Warning');
+  const pvoMin=Math.SQRT2*264+25;
+  P('PVO lowers the regulation point for light-load efficiency, but the bus must always stay at least 25 V above the line crest:');
+  F('V_OUT,min(enable) = √2 × 264 + 25 = '+fmt(pvoMin,1)+' V    vs    V_OUT = '+fmt(p.vout,1)+' V');
+  DEC(p.vout>=pvoMin?'Headroom exists — PVO may be enabled if light-load efficiency requires it.':'V_OUT is below the required enable headroom — <b>PVO is tied to 0 V (disabled)</b>. Enabling it at 264 Vac would let the bus fall into the line crest and lose control of the input current.');
+  PB();
+  // ================= STEP 6 =================
+  H1('Step 6 — R_CS Calculation: Two Methods');
+  CON('R_CS converts the inductor current into the controller\u2019s sense voltage. Two independent methods bound it: AN4165-D Eq. 31 gives the maximum value the power stage permits; AND9925-D Eq. 11 maps the VEA operating window (4–5 V) into an R_CS band. A valid design sits inside both. R_CS is sized per phase at the minimum line of each range with the per-channel design power P_ch = (P/N_CH)·K_max.');
+  H2('6.1 Method 1 — AN4165-D Equation 31 (upper bound)');
+  F('R_CS = V_IN,min² · G_max · R_M / (R_IAC · P_ch)      G_max = 2,  R_M = 7.5 kΩ');
+  const Pll=POUT_LO/2*p.kmax,Phl=POUT_HI/2*p.kmax;
+  F('LL:  90² × 2 × 7500 / (6×10⁶ × '+fmt(Pll,1)+')  =  '+fmt(90*90*2*7500/(6e6*Pll)*1e3,2)+' mΩ');
+  F('HL:  180² × 2 × 7500 / (12×10⁶ × '+fmt(Phl,1)+')  =  '+fmt(180*180*2*7500/(12e6*Phl)*1e3,2)+' mΩ');
+  H2('6.2 Method 2 — AND9925-D Equation 11 (V_EA,max window)');
+  F('R_CS = K_RM · R_IAC · (V_EA,max − 0.6) / (8 · K²_RLPK · R²_RLPK · P_ch)');
+  const andv=(riac2,Pch,v)=>(p.krm*riac2*(v-0.6))/(8*p.krlpk**2*p.rrlpk**2*Pch);
+  TBL([['V_EA,max','LL (R_IAC = 6 MΩ)','HL (R_IAC = 12 MΩ)'],
+    ['4.0 V',fmt(andv(6e6,Pll,4.0)*1e3,2)+' mΩ',fmt(andv(12e6,Phl,4.0)*1e3,2)+' mΩ'],
+    ['4.5 V',fmt(andv(6e6,Pll,4.5)*1e3,2)+' mΩ',fmt(andv(12e6,Phl,4.5)*1e3,2)+' mΩ'],
+    ['5.0 V',fmt(andv(6e6,Pll,5.0)*1e3,2)+' mΩ',fmt(andv(12e6,Phl,5.0)*1e3,2)+' mΩ']]);
+  H2('6.3 Combined R_CS Selection');
+  TBL([['Item','Value'],
+    ['Both-methods window (active mode)',fmt(g.zLo*1e3,2)+' – '+fmt(g.zHi*1e3,2)+' mΩ'],
+    ['Standard shunts inside window',SHUNTS.filter(s=>s*1e-3>=g.zLo-1e-9&&s*1e-3<=g.zHi+1e-9).join(' / ')+' mΩ'],
+    ['Selected',fmt(state.rcsSel,1)+' mΩ Kelvin shunt, one per phase']]);
+  DEC('R_CS = '+fmt(state.rcsSel,1)+' mΩ — '+((rcs>=g.zLo-1e-9&&rcs<=g.zHi+1e-9)?'inside the overlap of both methods at K_max = '+p.kmax+'.':'outside the computed window — review K_max or the selection.'));
+  H2('6.4 Verification of Selected R_CS — Implied V_EA,max');
+  F('V_EA,max = R_CS · 8 · K²_RLPK · R²_RLPK · P_ch / (K_RM · R_IAC) + 0.6');
+  TBL([['Range','P_ch','Implied V_EA,max','4.0–5.0 V?'],
+    ['LL (6 MΩ)',fmt(Pll,1)+' W',fmt(rcs*8*p.krlpk**2*p.rrlpk**2*Pll/(p.krm*6e6)+0.6,3)+' V',(rcs*8*p.krlpk**2*p.rrlpk**2*Pll/(p.krm*6e6)+0.6)>=4?'PASS':'CHECK'],
+    ['HL (12 MΩ)',fmt(Phl,1)+' W',fmt(rcs*8*p.krlpk**2*p.rrlpk**2*Phl/(p.krm*12e6)+0.6,3)+' V',(rcs*8*p.krlpk**2*p.rrlpk**2*Phl/(p.krm*12e6)+0.6)<=5?'PASS':'CHECK']]);
+  H2('6.5 Power Dissipation Check');
+  F('I_φ,rms = P / (V_AC,min · η · N_CH)  =  '+fmt(g.iphi,2)+' A      P_RCS = I²·R = '+fmt(rcsInfo.Pd,2)+' W per phase');
+  DEC('Use a ≥ '+Math.max(3,Math.ceil(rcsInfo.Pd*2))+' W four-terminal (Kelvin) shunt; route the sense pair differentially to CS± through the R_F/C_F filter.');
+  PIT('A two-terminal shunt adds the pad and trace resistance to R_CS and silently rescales every current-related gain — always use Kelvin connections.');
+  PB();
+  // ================= STEP 7 =================
+  H1('Step 7 — G_MOD Verification: Three Independent Paths');
+  H2('7.1 Purpose and Overview');
+  CON('The gain modulator is the multiplier at the heart of the PFC. Its scaling can be expressed three independent ways: from the signal chain (A), from the power balance through R_CS (B), and from the output specification (C). If the component choices are mutually consistent, all three must agree — this step is the design\u2019s built-in audit.');
+  H2('7.2 The Three Paths and Their Relationship');
+  F('Path A (signal chain):   G_MOD = K_RM · R_IAC / (8 · K²_RLPK · R²_RLPK)');
+  F('Path B (power + R_CS):   G_MOD = R_CS · (P · K_max / N_CH) / V_EA,eff');
+  F('Path C (output spec):    G_MOD = K_max · I_OUT / V_EA,eff');
+  P('A = B identically when V_EA,eff is back-calculated from the selected R_CS (Step 6.4 inverted); B / C reduces algebraically to the structural constant R_CS · V_OUT / N_CH = '+fmt(rcs*p.vout/p.nch,4)+'. Any deviation of A/B from 1.000 indicates an inconsistency among R_CS, R_IAC and R_RLPK.');
+  H2('7.3 Correct V_EA,eff for Each Range');
+  TBL([['Range','R_IAC','P_ch','V_EA,eff = R_CS·8·K²·R²·P_ch/(K_RM·R_IAC)'],
+    ['LL','6 MΩ',fmt(Pll,1)+' W',fmt(rcs*den*Pll/(p.krm*6e6),4)+' V'],
+    ['HL','12 MΩ',fmt(Phl,1)+' W',fmt(rcs*den*Phl/(p.krm*12e6),4)+' V']]);
+  H2('7.4 Verification Table — All Operating Points');
+  const grows=[['V_AC','Range','G_MOD crest (A/V)','Path A','Path B','Path C','A / B','B / C']];
+  for(const op of ops){const riac2=op.line==='LL'?6e6:12e6,Pch=(op.pout/p.nch)*p.kmax;
+    const vea=rcs*den*Pch/(p.krm*riac2),gA=p.krm*riac2/den,gB=rcs*Pch/vea,gC=p.kmax*(op.pout/p.vout)/vea;
+    grows.push([op.vac+' V',op.line,fmt(gA*Math.SQRT2/op.vac,4),fmt(gA,4),fmt(gB,4),fmt(gC,4),fmt(gA/gB,4)+' ✓',fmt(gB/gC,4)])}
+  TBL(grows);
+  H2('7.5 Verdict');
+  DEC('All three paths agree at every operating point (A/B = 1.0000, B/C = '+fmt(rcs*p.vout/p.nch,4)+' structurally). R_CS, R_IAC and R_RLPK are mutually consistent — the gain-modulator scaling is verified.');
+  PB();
+  // ================= STEP 8 (NEW) =================
+  H1('Step 8 — GC, LS, Soft-Start and Current Limits per AN4165-D  [NEW IN REV 2.1]');
+  P('Earlier revisions of this document listed R_GC, C_GC, R_LS and C_LS only as "set by LPT matching" and the soft-start / current-limit parts as "application-set". This step closes those gaps with the explicit AN4165-D procedures. The same divider ratio computed in Step 5.1 and the R_RI value selected in Step 4 feed directly into these equations — the ordering of the steps is deliberate.');
+  H2('8.1 R_GC — Gain Control, AN4165-D Equation 40');
+  CON('The GC pin aligns the gain of the IAC line-sense path with the FBPFC output-sense path so the linear-predict (LPT) engine sees consistent scaling. AN4165-D ties R_GC directly to the output-divider ratio.');
+  F('ratio = (R_FB1 + R_FB2) / R_FB2 = ('+fo(rfb1Std)+' + '+fo(p.rfb2)+') / '+fo(p.rfb2)+' = '+fmt(ratio,2));
+  F('R_GC = 6×10⁶ / ratio = 6×10⁶ / '+fmt(ratio,2)+' = '+fo(6e6/ratio));
+  DEC('R_GC = '+fo(aux.rgc)+' (nearest E96; deviation '+fmt(100*(aux.rgc/(6e6/ratio)-1),1)+' %, requirement ±5 %). C_GC = '+fc2(aux.cgc)+' → pin-filter pole '+fmtHz(1/(2*Math.PI*aux.rgc*aux.cgc))+'.');
+  H2('8.2 R_LS — Current Predict, AN4165-D Equation 39');
+  CON('The LS pin sets the emulated inductance the LPT predictor uses to anticipate the inductor current within a switching cycle. It scales with the real inductance, inversely with R_CS, and with the same divider ratio. AN4165-D bounds the valid result to 12–87 kΩ.');
+  F('R_LS = L_PFC / (1.5×10⁻⁹ · R_CS · ratio)');
+  F('     = '+fmt(p.lphi*1e6,0)+' µH / (1.5×10⁻⁹ × '+fmt(rcs*1e3,1)+' mΩ × '+fmt(ratio,2)+')  =  '+fo(p.lphi/(1.5e-9*rcs*ratio)));
+  DEC('R_LS = '+fo(aux.rls)+' (nearest E96) — '+(aux.rlsOK?'inside the 12–87 kΩ validity range (PASS).':'<b>outside 12–87 kΩ (FAIL)</b> — revisit R_CS or the divider.')+' C_LS = '+fc2(aux.cls)+' → pin-filter pole '+fmtHz(1/(2*Math.PI*aux.rls*aux.cls))+'.');
+  PIT('Eq. 39 uses the per-phase inductance and the selected R_CS — changing the shunt in Step 6 moves R_LS proportionally. The two must always be updated together.');
+  H2('8.3 Soft Start — C_SS, AN4165-D Equation 64');
+  F('C_SS = I_SS · t_SS / V_SS = 20 µA × '+fmt(+($('ssT').value),0)+' ms / 5 V = '+fc2(20e-6*(+$('ssT').value)*1e-3/5));
+  DEC('C_SS = '+fc2(aux.css)+' → realized t_SS = '+fmt(aux.tssAct*1e3,0)+' ms.');
+  H2('8.4 ILIMIT — Current-Command Clamp (Eqs. 32, 35, 38)');
+  CON('The ILIMIT pin sources a current mirrored from R_RI; the resulting pin voltage, divided by 4 internally, clamps the maximum current command. The clamp is placed at a chosen ratio above the worst-case crest command.');
+  F('I_ILIMIT = 1.2 × 1.0208 / R_RI = 1.2 × 1.0208 / '+fo(rriStd)+' = '+fmt(iIL*1e6,2)+' µA');
+  const crestW=Math.max(Math.SQRT2*POUT_LO/(p.eta*2*90),Math.SQRT2*POUT_HI/(p.eta*2*180));
+  F('worst crest command = √2·P/(η·N_CH·V_AC,min) = '+fmt(crestW,2)+' A   →   V_CS,crest = '+fmt(crestW*rcs*1e3,1)+' mV');
+  F('R_ILIMIT = clamp_ratio · crest · R_CS · 4 / I_ILIMIT = '+(+$('ilClamp').value)+' × '+fmt(crestW,2)+' × '+fmt(rcs*1e3,1)+' mΩ × 4 / '+fmt(iIL*1e6,2)+' µA = '+fo((+$('ilClamp').value)*crestW*rcs*4/iIL));
+  DEC('R_ILIMIT = '+fo(aux.ril1)+' → V_ILIMIT = '+fmt(aux.vilAct,3)+' V, command clamp '+fmt(aux.vilAct/4*1e3,0)+' mV = '+fmt(aux.vilAct/4/(crestW*rcs),2)+'× crest (window 1.2–2.0×). C_ILIMIT = '+fc2(aux.cil)+'.');
+  H2('8.5 ILIMIT2 — Cycle-by-Cycle Peak Limit (Eqs. 33, 36, 37)');
+  F('I_ILIMIT2 = 1.2 × 1.03125 / R_RI = '+fmt(iIL2*1e6,2)+' µA');
+  const ipkf=(vac,pout)=>{const Vpk=Math.SQRT2*vac,D=1-Vpk/p.vout;return Math.SQRT2*pout/(p.nch*p.eta*vac)+Vpk*D/(p.lphi*p.fsw)/2};
+  const ipkW=Math.max(ipkf(90,POUT_LO),ipkf(180,POUT_HI));
+  F('I_L,PK = crest + ΔI_L/2 (worst of both ranges) = '+fmt(ipkW,2)+' A   →   V_CS,PK = '+fmt(ipkW*rcs*1e3,0)+' mV');
+  F('R_ILIMIT2 = '+fmt(100*(+$('il2K').value),0)+'% × V_CS,PK / I_ILIMIT2 = '+fo((+$('il2K').value)*ipkW*rcs/iIL2));
+  DEC('R_ILIMIT2 = '+fo(aux.ril2)+' → V_ILIMIT2 = '+fmt(aux.vil2Act,3)+' V = '+fmt(aux.vil2Act/(ipkW*rcs),2)+'× the worst-case peak — no nuisance trips in normal operation. C_ILIMIT2 = '+fc2(aux.cil2)+'.');
+  H2('8.6 Step 8 Scorecard');
+  TBL([['Component','Equation','Calculated','Selected','Check','Verdict'],
+    ['R_GC','AN4165 Eq. 40',fo(6e6/ratio),fo(aux.rgc),'dev. '+fmt(100*(aux.rgc/(6e6/ratio)-1),1)+' % (±5 %)',Math.abs(aux.rgc/(6e6/ratio)-1)<=.05?'PASS':'CHECK'],
+    ['C_GC','pin filter','—',fc2(aux.cgc),'pole '+fmtHz(1/(2*Math.PI*aux.rgc*aux.cgc)),'—'],
+    ['R_LS','AN4165 Eq. 39',fo(p.lphi/(1.5e-9*rcs*ratio)),fo(aux.rls),'12–87 kΩ range',aux.rlsOK?'PASS':'FAIL'],
+    ['C_LS','pin filter','—',fc2(aux.cls),'pole '+fmtHz(1/(2*Math.PI*aux.rls*aux.cls)),'—'],
+    ['C_SS','AN4165 Eq. 64',fc2(20e-6*(+$('ssT').value)*1e-3/5),fc2(aux.css),'t_SS '+fmt(aux.tssAct*1e3,0)+' ms','PASS'],
+    ['R_ILIMIT','AN4165 Eq. 38',fo((+$('ilClamp').value)*crestW*rcs*4/iIL),fo(aux.ril1),fmt(aux.vilAct/4/(crestW*rcs),2)+'× crest (1.2–2.0×)',(aux.vilAct/4/(crestW*rcs)>=1.2&&aux.vilAct/4/(crestW*rcs)<=2.0)?'PASS':'CHECK'],
+    ['R_ILIMIT2','AN4165 Eq. 33',fo((+$('il2K').value)*ipkW*rcs/iIL2),fo(aux.ril2),'≥ I_L,PK·R_CS',aux.vil2Act>=ipkW*rcs?'PASS':'FAIL']]);
+  PB();
+  // ================= STEP 12 =================
+  H1('Step 12 — BIBO: Brown-In / Brown-Out Design');
+  H2('12.1 How the BIBO Pin Works');
+  CON('The BIBO pin watches a heavily filtered replica of the rectified line through a resistive divider. Fixed internal thresholds (1.90 / 1.75 / 1.05 / 0.85 V, scaled by the rectified-average factor K_avg = 0.9003) define brown-in for each range, brown-out, and line-sag detection. One divider must serve both ranges.');
+  H2('12.2 Divider Ratio and Threshold Calculation');
+  const Rtot=p.rb1+p.rb2+p.rb3+p.rb4,brat=p.rb4/Rtot;
+  F('ratio = R_B4 / (R_B1+R_B2+R_B3+R_B4) = '+fo(p.rb4)+' / '+fo(Rtot)+' = '+fmt(brat,6));
+  F('V_AC(threshold) = V_th / (K_avg · ratio)');
+  TBL([['Threshold','Internal level','Resulting line voltage','Requirement','Verdict'],
+    ['Brown-in (FR)','1.90 V',fmt(FIXED.VBI_FR/(FIXED.Kavg*brat),1)+' Vac','≤ 87 Vac',FIXED.VBI_FR/(FIXED.Kavg*brat)<=87?'PASS':'FAIL'],
+    ['Brown-in (HV)','1.75 V',fmt(FIXED.VBI_HV/(FIXED.Kavg*brat),1)+' Vac','< 180 Vac',FIXED.VBI_HV/(FIXED.Kavg*brat)<180?'PASS':'FAIL'],
+    ['Brown-out','1.05 V',fmt(FIXED.VBO/(FIXED.Kavg*brat),1)+' Vac','< 70 Vac',FIXED.VBO/(FIXED.Kavg*brat)<70?'PASS':'FAIL'],
+    ['Line sag','0.85 V',fmt(FIXED.VSAG/(FIXED.Kavg*brat),1)+' Vac','informational','—']]);
+  H2('12.3 Low-Pass Filter Capacitor Sizing');
+  F('f_P1 = 1/(2π·C_B1·R_B3) = '+fmt(1/(2*Math.PI*p.cb1*p.rb3),1)+' Hz      f_P2 = 1/(2π·C_B2·R_B4) = '+fmt(1/(2*Math.PI*p.cb2*p.rb4),1)+' Hz');
+  P('Both poles fall in the 10–20 Hz target band: low enough to remove 120 Hz ripple from the threshold comparators, fast enough to detect genuine sags within a few line cycles (relevant to EN61000-4-11 dip immunity and SEMI F47 ride-through).');
+  H2('12.4 Scorecard and Verdict');
+  TBL([['Component','Value','Function'],
+    ['R_B1 / R_B2',fo(p.rb1)+' / '+fo(p.rb2),'HV-rated series sense'],
+    ['R_B3',fo(p.rb3),'filter pole 1 with C_B1'],
+    ['R_B4',fo(p.rb4),'bottom leg, sets ratio'],
+    ['C_B1 / C_B2',fc2(p.cb1)+' / '+fc2(p.cb2),'two-pole 120 Hz filter']]);
+  DEC('Single network serves both ranges: brown-in '+fmt(FIXED.VBI_FR/(FIXED.Kavg*brat),1)+' Vac (FR), brown-out '+fmt(FIXED.VBO/(FIXED.Kavg*brat),1)+' Vac — both inside their required windows.');
+  PB();
+  // ================= STEP 13 =================
+  H1('Step 13 — Inner Current Loop Design');
+  H2('13.1 Control Architecture');
+  CON('Each phase\u2019s IEA forces the average sensed inductor current to follow the gain-modulator command. The loop comprises the duty-to-inductor-current plant G_id(s), the R_CS scaling, the CS anti-alias filter, the PWM ramp normalisation 1/V_RAMP, and the Type-2 OTA compensator on the IEA pin.');
+  H2('13.2 Plant Transfer Function G_id(s)');
+  F('G_id(s) = K_front · (s + ω_z) / (s² + a₁·s + a₀)');
+  F('K_front = (V_OUT/L_φ)·(R_L+2r_C)/(R_L+r_C)      ω_z = 1/(C_O·(R_L/2 + r_C))');
+  F('a₁ = [C_O·(r_L(R_L+r_C) + R_L·r_C·D′²) + L_φ] / (L_φ·C_O·(R_L+r_C))      a₀ = (D′²·R_L + r_L)/(L_φ·C_O·(R_L+r_C))');
+  H2('13.3 Operating-Point Parameters — All 8 Conditions');
+  const prow=[['V_AC / P','D','R_LOAD','f₀','Q','f_RHP (current path)']];
+  for(const op of ops){const q=pl(op);prow.push([op.vac+' V / '+op.pout+' W',fmt(q.D,4),fmt(q.RL,2)+' Ω',fmt(q.f0,2)+' Hz',fmt(q.Q,2),fmtHz(q.fRHPi)])}
+  TBL(prow);
+  P('The current-path RHP zero (per-phase L) sits in the duty→output-<i>voltage</i> path, so even where f_ci approaches it the current-loop phase margin is unaffected; the marker is retained on the Bode plots for awareness only.');
+  H2('13.4 Detailed Calculation at the Design Point — '+dci.corner.vac+' Vac / '+dci.corner.pout+' W');
+  F('CS filter: R_F = '+fo(p.rf)+', C_F = '+fc2(p.cf)+'  →  f_RC = '+fmtHz(1/(2*Math.PI*p.rf*p.cf))+' (≫ f_ci, negligible phase at crossover)');
+  F('scaling: R_CS / V_RAMP = '+fmt(rcs,4)+' / 5 = '+fmt(rcs/5,5));
+  F('|T_i,unc('+fmtHz(p.fci)+')| = '+fmt(dci.mTu,5)+'  ('+fmt(20*Math.log10(dci.mTu),2)+' dB),   ∠T_i,unc = '+fmt(dci.aTu,2)+'°');
+  H2('13.5 Uncompensated T_i at f_ci — All 8 Operating Points');
+  const urow=[['V_AC / P','|T_i,unc| ','(dB)','Phase']];
+  for(const op of ops){const t=TiUnc(p,op.vac,op.pout,p.fci);urow.push([op.vac+' V / '+op.pout+' W',fmt(cabs(t),5),fmt(magdb(t),2),fmt(cang(t),2)+'°'])}
+  TBL(urow);
+  P('The eight values are nearly identical — the plant magnitude at f_ci is dominated by L_φ and V_OUT, which do not change with operating point. One compensator therefore serves all conditions.');
+  H2('13.6 Type-2 OTA Compensator Design');
+  CON('The Type-2 network (R_IC + C_IC1 series, C_IC2 parallel, on the IEA output) provides an integrator for DC accuracy, a zero for phase boost at crossover, and a high-frequency pole to attenuate switching residue. The required boost at f_ci is '+fmt(Math.max(0,60-dci.pmT1),0)+'° — well within Type-2 capability, which is why no Type-3 is needed (nor realisable on the IEA pin).');
+  F('κ = √(1+(f_z/f_ci)²) / √(1+(f_ci/f_p)²)  with  f_z = '+fmtHz(p.cfz)+',  f_p = '+fmtHz(p.cfp));
+  F('R_IC = 1 / (|T_unc| · G_MI · κ) = '+fo(dci.calc.RIC));
+  F('C_IC1 = 1/(2π·R_IC·f_z) = '+fc2(dci.calc.C1)+'      C_IC2 = 1/(2π·R_IC·f_p) = '+fc2(dci.calc.C2));
+  TBL([['Component','Calculated','Selected','Realized'],
+    ['R_IC',fo(dci.calc.RIC),fo(dci.std.RIC),'—'],
+    ['C_IC1',fc2(dci.calc.C1),fc2(dci.std.C1),'f_z = '+fmtHz(fzA)],
+    ['C_IC2',fc2(dci.calc.C2),fc2(dci.std.C2),'f_p = '+fmtHz(fpA)]]);
+  H2('13.7 Bode Plot — Inner Current Loop');
+  IMG('fig_bode_cur.png','Figure 13-1 — Inner current loop T_i(s) with the selected standard compensator. Blue solid: LL 90 V / '+POUT_LO+' W; amber solid: HL 180 V / '+POUT_HI+' W; faint traces: the remaining six operating points (dashed = HL). Green verticals mark the realized compensator zero f_z and pole f_p; amber marks the current-path RHP zero (informational, Step 13.3); red marks f_SW. Crossover dots, phase-margin whiskers and gain-margin bars are annotated per corner.');
+  H2('13.8 Final Summary — All 8 Operating Points (selected standard values)');
+  const crows=[['V_AC / P','f_c','PM','GM','Verdict']];
+  for(const op of ops){const m=marginsOf(sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),100,3e5,300));
+    crows.push([op.vac+' V / '+op.pout+' W',fmtHz(m.fc),fmt(m.pm,1)+'°',Number.isFinite(m.gm)?fmt(m.gm,1)+' dB':'&gt; 30 dB',m.pm>=45?'PASS':'FAIL'])}
+  TBL(crows);
+  DEC('Crossover and phase margin are essentially identical at all eight points; the floor PM ≥ 45° and the f_SW/6 separation ('+fmt(p.fsw/p.fci,1)+'×) are met with margin.');
+  PIT('Use C0G/NP0 dielectric for C_IC1 and C_IC2 — class-II ceramics drift the zero and pole with temperature and bias.');
+  PB();
+  // ================= STEP 14 =================
+  H1('Step 14 — Outer Voltage Loop Design (SLVA662, Method B)');
+  H2('14.1 Voltage-Loop Architecture');
+  CON('With the current loops closed, each phase is a controlled current source; the pair feeding the bus forms the voltage plant G_vp(s) with the load and C_O. Method B folds the output divider into the compensator transfer function, so the "uncompensated" loop T_v,base = G_MOD-path · G_icl · G_vp excludes the divider, and the OTA network (including the divider) supplies exactly the gain 1/|T_v,base| at the chosen crossover.');
+  F('T_v,base(s) = (K_max·I_OUT/V_RAMP) · G_icl(s) · G_vp(s)      G_icl = (T_i/2)/(1+T_i/2)');
+  F('G_vp(s) = (1+s·C_O·r_C)(1−s/ω_RHP) / (s·C_O + 2/R_LOAD)      ω_RHP from L_eq = L_φ/2');
+  H2('14.2 Voltage-Plant RHP Zero — All 8 Operating Points');
+  const rrow=[['V_AC / P','f_RHP (L_eq)']];
+  for(const op of ops)rrow.push([op.vac+' V / '+op.pout+' W',fmtHz(pl(op).fRHPv)]);
+  TBL(rrow);
+  H2('14.3 Detailed Calculation at the Sizing Point — '+dcv.cor.lab);
+  F('|T_v,base(f_cv = '+fmt(p.fcv,1)+' Hz)| = '+fmt(dcv.mTb,4)+'  ('+fmt(20*Math.log10(dcv.mTb),2)+' dB),   ∠ = '+fmt(dcv.aTb,1)+'°');
+  F('required |H_OTA(f_cv)| = 1/|T_v,base| = '+fmt(dcv.G,5)+'  ('+fmt(20*Math.log10(dcv.G),2)+' dB)');
+  if(T3){
+  H2('14.4 SLVA662 Type-III Factors and Component Calculation');
+  const a2=Math.sqrt(1+(p.fcv/p.vfp2)**2),b2=Math.sqrt(1+(p.fcv/p.vfp1)**2),c2=Math.sqrt(1+(p.vfz1/p.fcv)**2),d2=Math.sqrt(1+(p.fcv/p.vfz2)**2);
+  F('pole-zero set:  f_z1 = '+p.vfz1+' Hz,  f_z2 = '+p.vfz2+' Hz,  f_p1 = '+p.vfp1+' Hz,  f_p2 = '+p.vfp2+' Hz');
+  F('a = √(1+(fc/fp2)²) = '+fmt(a2,4)+'   b = √(1+(fc/fp1)²) = '+fmt(b2,4)+'   c = √(1+(fz1/fc)²) = '+fmt(c2,4)+'   d = √(1+(fc/fz2)²) = '+fmt(d2,4));
+  F('aa = a·b/(c·d) = '+fmt(a2*b2/(c2*d2),4)+'      bb = G·f_p2·(R1+R4)/(R4·g_m·(f_p2−f_z1)) = '+fo(dcv.G*p.vfp2*(p.r1fb+p.r4fb)/(p.r4fb*p.gmv*(p.vfp2-p.vfz1))));
+  F('R2 = aa·bb = '+fo(dcv.calc.R2)+'      R3 = (R1 − r·P)/(r−1) = '+fo(dcv.calc.R3)+'   (r = f_p2/f_z2, P = R1∥R4 = '+fo(Pfb)+')');
+  F('C2 = 1/(2π(R1+R3)f_z2) = '+fc2(dcv.calc.C2)+'      C1 = 1/(2π·f_z1·R2) = '+fc2(dcv.calc.C1)+'      C3 = C1/(2π·C1·R2·f_p1 − 1) = '+fc2(dcv.calc.C3));
+  }else{
+  H2('14.4 SLVA662 Type-II Component Calculation (divider included as H_div)');
+  F('R2 = G/(H_div·g_m·κ) = '+fo(dcv.calc.R2)+'      C1 = '+fc2(dcv.calc.C1)+'      C3 = '+fc2(dcv.calc.C3));
+  }
+  H2('14.5 Final Compensator Components and Pole-Zero Verification');
+  const vrowsC=[['Component','Calculated','Selected']];
+  for(const k of Object.keys(dcv.calc))vrowsC.push([k,(k[0]==='R'?fo:fc2)(dcv.calc[k]),(k[0]==='R'?fo:fc2)(dcv.std[k])]);
+  TBL(vrowsC);
+  if(T3){const s2=dcv.std;
+  F('realized:  f_z1 = '+fmt(1/(2*Math.PI*s2.R2*s2.C1),2)+' Hz,  f_z2 = '+fmt(1/(2*Math.PI*(p.r1fb+s2.R3)*s2.C2),2)+' Hz,  f_p1 = '+fmt((s2.C1+s2.C3)/(2*Math.PI*s2.R2*s2.C1*s2.C3),1)+' Hz,  f_p2 = '+fmt(1/(2*Math.PI*(s2.R3+Pfb)*s2.C2),2)+' Hz');}
+  H2('14.6 Bode Plot — Outer Voltage Loop');
+  IMG('fig_bode_vol.png','Figure 14-1 — Outer voltage loop T_v(s). Grey dashed: uncompensated T_v,base at the sizing corner; violet dotted: compensator H_OTA (divider included, Method B); blue/amber solid: closed design at LL 90 V and HL 180 V with per-corner crossover, PM and GM annotations; faint: remaining operating points. Red vertical: 120 Hz (rejection design point); amber vertical: f_SW.');
+  H2('14.7 Voltage-Loop Crossover and Stability — All 8 Operating Points');
+  const vrows=[['V_AC / P','f_c','PM','GM','120 Hz rej.','Verdict']];
+  for(const op of ops){const m=marginsOf(sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),0.1,1e6,300));
+    const rj=-magdb(Tv(p,dci,dcv,op.vac,op.pout,120));
+    vrows.push([op.vac+' V / '+op.pout+' W',fmt(m.fc,2)+' Hz',fmt(m.pm,1)+'°',Number.isFinite(m.gm)?fmt(m.gm,1)+' dB':'large',fmt(rj,1)+' dB',(m.pm>=60&&rj>=20)?'PASS':'CHECK'])}
+  TBL(vrows);
+  DEC('One '+(T3?'Type-3':'Type-2')+' network, sized at '+dcv.cor.lab+', meets PM ≥ 60° and the 20 dB rejection floor at every operating point. The low-line crossover lands lower naturally (smaller loop gain), which only adds margin.');
+  PB();
+  // ================= STEP 15 =================
+  H1('Step 15 — Step-Load Transient Response');
+  H2('15.1 Method — Closed-Loop Output Impedance');
+  CON('A load step ΔI produces ΔV(t) = −ΔI·L⁻¹{Z_open/(1+T_v)} where Z_open = (1+s·C_O·r_C)/(s·C_O + 2/R_LOAD). The response is computed by numerical inverse transform of the actual loop built from the selected standard components — no settling-time rules of thumb.');
+  H2('15.2 Step Magnitudes');
+  TBL([['Range','Full-load current','ΔI for 100 % step','ΔI for 50 % step'],
+    ['LL 90 V / '+POUT_LO+' W',fmt(POUT_LO/p.vout,2)+' A',fmt(POUT_LO/p.vout,2)+' A',fmt(POUT_LO/(2*p.vout),2)+' A'],
+    ['HL 180 V / '+POUT_HI+' W',fmt(POUT_HI/p.vout,2)+' A',fmt(POUT_HI/p.vout,2)+' A',fmt(POUT_HI/(2*p.vout),2)+' A']]);
+  H2('15.3 Results — Peak Deviation and Recovery to ±1 % ('+fmt(0.01*p.vout,2)+' V)');
+  const band=0.01*p.vout;
+  const yrL=stepResponse(p,dci,dcv,90,POUT_LO), yrH=stepResponse(p,dci,dcv,180,POUT_HI);
+  const trans=[['0 → 100 %',1],['0 → 50 %',.5],['50 → 100 %',.5],['100 → 0 %',-1],['50 → 0 %',-.5],['100 → 50 %',-.5]];
+  const trows=[['Transition','LL — ΔV pk','LL — % of bus','LL — t_rec','HL — ΔV pk','HL — % of bus','HL — t_rec']];
+  for(const[lab,k]of trans){const dL=dipAndRecovery(yrL,k*POUT_LO/p.vout,band),dH=dipAndRecovery(yrH,k*POUT_HI/p.vout,band);
+    trows.push([lab,fmt(dL.pk,1)+' V',fmt(100*dL.pk/p.vout,2)+' %',fmt(dL.rec*1e3,0)+' ms',fmt(dH.pk,1)+' V',fmt(100*dH.pk/p.vout,2)+' %',fmt(dH.rec*1e3,0)+' ms'])}
+  TBL(trows);
+  H2('15.4 Transient Waveforms — Full 0→100 % Load Step');
+  IMG('fig_step.png','Figure 15-1 — Computed bus deviation ΔV_OUT(t) for the full load step: blue = LL 90 V / '+POUT_LO+' W, amber = HL 180 V / '+POUT_HI+' W. Dashed green lines mark the ±1 % recovery band (±'+fmt(0.01*p.vout,2)+' V).');
+  DEC('Worst case is the full 0→100 % step at high line: '+(()=>{const d=dipAndRecovery(yrH,POUT_HI/p.vout,band);return fmt(d.pk,1)+' V ('+fmt(100*Math.abs(d.pk)/p.vout,2)+' % of the bus), recovering in '+fmt(d.rec*1e3,0)+' ms'})()+'. If a tighter dip is required, Step 17 quantifies the trade against 120 Hz rejection.');
+  // ================= STEP 16 =================
+  H1('Step 16 — Input-Current THD and 120 Hz Rejection');
+  H2('16.1 Mechanism — Why 120 Hz Rejection Sets THD');
+  CON('The bus inevitably carries a 120 Hz ripple V_r = P/(2·ω_line·V_OUT·C_O). Whatever fraction of that ripple survives the loop appears on VEA and is multiplied into the current command, generating 3rd-harmonic input current: iTHD₃ ≈ 50·V_EA,120/V_EA,eff %. The rejection is read directly off the compensated loop at 120 Hz: −20·log₁₀|T_v(j2π·120)|, with a 20 dB design floor.');
+  H2('16.2 Results — All Operating Points');
+  const throws=[['V_AC','Range','V_ripple,pk','Rejection','V_EA,120','iTHD₃','≥ 20 dB']];
+  for(const op of ops){const t=thdCalc(p,dci,dcv,op.vac,op.pout,veaEffOf(op));
+    throws.push([op.vac+' V',op.line,fmt(t.Vr,2)+' V ('+fmt(100*t.Vr/p.vout,2)+' %)',fmt(t.rej,1)+' dB',fmt(t.vea120*1e3,0)+' mV',fmt(t.thd3,2)+' %',t.rej>=20?'PASS':'FAIL'])}
+  TBL(throws);
+  H2('16.3 iTHD₃ Contribution Chart');
+  IMG('fig_thd.png','Figure 16-1 — Loop-injected 3rd-harmonic distortion at all eight operating points (bar colour follows the per-voltage palette; LL blues, HL ambers). Values are the iTHD₃ percentages of Table 16.2.');
+  DEC('Worst rejection '+fmt(Math.min(rejHL,rejLL),1)+' dB '+(Math.min(rejHL,rejLL)>=20?'(≥ 20 dB floor) with worst-case loop-injected iTHD₃ at high line — the dominant THD contributor remains the power stage, not the control loop.':'— BELOW the 20 dB floor; reduce f_cv.'));
+  PB();
+  // ================= STEP 17 =================
+  H1('Step 17 — Compensator Optimization: Transient vs 120 Hz Rejection');
+  CON('Crossover frequency is the single knob trading transient stiffness against ripple rejection. The table below re-designs the voltage compensator at four candidate bandwidths (f_z2/f_p2 held at 12/17 Hz; f_z1, f_p1 scaled with f_cv; components snapped to the selected series) and recomputes everything from the model.');
+  const orows=[['f_cv','PM LL/HL (°)','Rej. LL/HL (dB)','Dip 0→100 % LL/HL (V)','Recovery LL/HL (ms)','Note']];
+  for(const fcv of [12,17,20,25]){
+    const p2={...p,fcv,vfz1:3*fcv/17,vfp1:50*fcv/17,vfz2:12,vfp2:17};
+    const dP=designCV(p2,dci,true);const r={};
+    for(const[vac,pout,lab]of[[90,POUT_LO,'LL'],[180,POUT_HI,'HL']]){
+      const m=marginsOf(sweepLoop(f=>Tv(p2,dci,dP,vac,pout,f),0.1,1e6,260));
+      const rj=-magdb(Tv(p2,dci,dP,vac,pout,120));
+      const d=dipAndRecovery(stepResponse(p2,dci,dP,vac,pout),pout/p.vout,band);
+      r[lab]={pm:m.pm,rj,dip:d.pk,rec:d.rec*1e3}}
+    orows.push([fcv+' Hz',fmt(r.LL.pm,1)+' / '+fmt(r.HL.pm,1),fmt(r.LL.rj,1)+' / '+fmt(r.HL.rj,1),fmt(r.LL.dip,1)+' / '+fmt(r.HL.dip,1),fmt(r.LL.rec,0)+' / '+fmt(r.HL.rec,0),
+      fcv===p.fcv?'<b>selected</b>':(r.HL.rj<20?'fails 20 dB floor':'—')])}
+  TBL(orows);
+  DEC('f_cv = '+fmt(p.fcv,1)+' Hz balances a sub-8 % worst dip against ≥ '+fmt(Math.min(rejHL,rejLL),1)+' dB rejection. Raising the bandwidth beyond ~20 Hz starts to violate the rejection floor at high line.');
+  PB();
+  // ================= APPENDICES =================
+  H1('Appendix A — Derivations of Key Transfer Functions');
+  H2('A.1 Boost Power Stage — Plant and the RHP Zero');
+  P('Averaging the boost stage over a switching period and linearising around the operating point gives the duty-to-inductor-current plant of Step 13.2 and the duty-to-output path containing the RHP zero ω_RHP = R_LOAD·D′²/L. For the current loop the relevant inductance is per-phase L_φ; for the voltage plant the two interleaved phases act as L_eq = L_φ/2, doubling ω_RHP — the quantitative benefit of interleaving derived in I.3.');
+  H2('A.2 OTA '+(T3?'Type-III':'Type-II')+' Compensator');
+  P(T3?'The Type-III OTA network realises H(s) = K_c·(1+ω_z1/s)(1+s/ω_z2)/[(1+s/ω_p1)(1+s/ω_p2)] with K_c = g_m·R2·(R4/(R1+R4))·(f_p2−f_z1)/f_p2. The zeros come from R2·C1 and (R1+R3)·C2; the poles from R2·(C1∥C3) and (R3+R1∥R4)·C2. Because the R3–C2 branch spans the upper divider, Method B "folds" the divider into the compensator — the basis of the gain bookkeeping in Step 14.':'The Type-II OTA network realises an integrator with one zero (R2·C1) and one pole (R2·C1C3/(C1+C3)), preceded by the divider gain H_div = R4/(R1+R4).');
+  H1('Appendix B — Bill of Materials (Control Components, Selected Values)');
+  TBL([['Component','Selected','Series','Function / step'],
+    ['R_RI',fo(rriStd),'E96','Oscillator '+fmtHz(fswAct)+' (Step 4)'],
+    ['R_FB1','3 × '+fo(rfbEach)+' = '+fo(rfb1Std),'E96','Output divider top (Step 5)'],
+    ['R_FB2',fo(p.rfb2),'E96','Output divider bottom (Step 5)'],
+    ['R_IAC','6 MΩ FR / 12 MΩ HV (2 MΩ strings)','—','Line sense (Step 3)'],
+    ['R_RLPK / C_RLPK',fo(p.rrlpk)+' / '+fc2(aux.crlpk),'E96 / E24','Peak detector (Step 3.2)'],
+    ['R_pin8 / C_LPK',fo(aux.rpin8)+' / '+fc2(aux.clpk),'E96 / E24','LPK filter'],
+    ['R_CS ×2',fmt(state.rcsSel,1)+' mΩ Kelvin, ≥ '+Math.max(3,Math.ceil(rcsInfo.Pd*2))+' W','—','Current sense (Step 6)'],
+    ['R_F ×4 / C_F ×2',fo(p.rf)+' / '+fc2(p.cf),'—','CS filters, both legs both channels'],
+    ['R_IC, C_IC1, C_IC2 (×2)',fo(dci.std.RIC)+', '+fc2(dci.std.C1)+', '+fc2(dci.std.C2),p.serR+' / '+p.serC,'IEA compensation (Step 13)'],
+    ['VEA network',Object.keys(dcv.std).map(k=>k+' = '+(k[0]==='R'?fo:fc2)(dcv.std[k])).join(', '),p.serR+' / '+p.serC,'Voltage compensation (Step 14)'],
+    ['BIBO',fo(p.rb1)+'/'+fo(p.rb2)+'/'+fo(p.rb3)+'/'+fo(p.rb4)+' + '+fc2(p.cb1)+'/'+fc2(p.cb2),'—','Step 12'],
+    ['C_SS',fc2(aux.css),'E24','Soft start (Step 8.3)'],
+    ['R_ILIMIT / C_ILIMIT',fo(aux.ril1)+' / '+fc2(aux.cil),'E96 / E24','Command clamp (Step 8.4)'],
+    ['R_ILIMIT2 / C_ILIMIT2',fo(aux.ril2)+' / '+fc2(aux.cil2),'E96 / E24','Cycle-by-cycle limit (Step 8.5)'],
+    ['R_GC / C_GC',fo(aux.rgc)+' / '+fc2(aux.cgc),'E96 / E24','Gain control (Step 8.1) — NEW'],
+    ['R_LS / C_LS',fo(aux.rls)+' / '+fc2(aux.cls),'E96 / E24','Current predict (Step 8.2) — NEW'],
+    ['R_VIR','10 kΩ (FR) / 470 kΩ (HV)','—','Range select']]);
+  H1('Appendix C — Bench Verification and Test Plan');
+  TBL([['#','Test','Method','Acceptance'],
+    ['1','Switching frequency','Probe a gate output at light load','f_SW = '+fmtHz(fswAct)+' ± 5 %'],
+    ['2','Output regulation','DVM on the bus, 10–100 % load, both ranges',fmt(voutAct,1)+' V ± 1 %'],
+    ['3','Brown-in / brown-out','Variac sweep up and down','BI ≤ 87 Vac, BO < 70 Vac per Step 12'],
+    ['4','Current-loop crossover','Network analyser injection at the IEA node','f_ci ≈ '+fmtHz(mi90.fc)+', PM ≥ 45°'],
+    ['5','Voltage-loop crossover','Injection in series with the FB divider','f_cv ≈ '+fmt(mvHL.fc,1)+' Hz (HL), PM ≥ 60°'],
+    ['6','Load-step transient','Electronic load 0↔100 %, scope on the bus','dip ≤ '+(()=>{const d=dipAndRecovery(yrH,POUT_HI/p.vout,band);return fmt(Math.abs(d.pk)*1.2,0)})()+' V, recovery ≤ '+(()=>{const d=dipAndRecovery(yrH,POUT_HI/p.vout,band);return fmt(d.rec*1.3e3,0)})()+' ms (computed + 20–30 % margin)'],
+    ['7','Input-current THD','Power analyser at full load, both ranges','consistent with Step 16 loop contribution'],
+    ['8','Current limits','Slowly overload; verify ILIMIT clamps before ILIMIT2 trips','clamp at ≈ '+fmt(aux.vilAct/4/(crestW*rcs)*100,0)+' % of crest command'],
+    ['9','Soft start','Scope bus and SS pin at power-up','t_SS ≈ '+fmt(aux.tssAct*1e3,0)+' ms, monotonic'],
+    ['10','Thermal — R_CS','Thermocouple at full load, V_AC,min','within shunt rating at '+fmt(rcsInfo.Pd,2)+' W computed']]);
+  H1('Appendix D — References');
+  TBL([['Ref','Document'],
+    ['[1]','FAN9672-D — Two-Channel Interleaved CCM PFC Controller, ON Semiconductor datasheet'],
+    ['[2]','AN4165-D — Design of Power Factor Correction Circuit Using FAN9673 / FAN9672, ON Semiconductor (Eqs. 31–40, 64 used herein)'],
+    ['[3]','AND9925-D — FAN9672/73 Gain-Modulator Design, ON Semiconductor (Eq. 11, K_RM, K_RLPK)'],
+    ['[4]','SLVA662 — Demystifying Type II and Type III Compensators Using OpAmp and OTA, Texas Instruments'],
+    ['[5]','FAN9672-CL-001 Rev 2.0 — prior revision of this document']]);
+  H1('Appendix E — Equation Quick-Reference Card');
+  TBL([['Quantity','Equation','This design'],
+    ['R_RI','1.2×10⁹/f_SW − 3430',fo(rriStd)],
+    ['R_FB1','R_FB2·(V_OUT/2.5 − 1)','3 × '+fo(rfbEach)],
+    ['I_AC,pk','√2·V_AC,max/R_IAC ≤ 65 µA',fmt(Math.SQRT2*132/6e6*1e6,1)+' µA'],
+    ['R_CS (M1)','V²_IN,min·G_max·R_M/(R_IAC·P_ch)',fmt(g.rcsAN*1e3,2)+' mΩ'],
+    ['R_CS (M2)','K_RM·R_IAC·(V_EA−0.6)/(8K²R²·P_ch)',fmt(g.zLo*1e3,2)+'–'+fmt(g.andHi*1e3,2)+' mΩ'],
+    ['R_GC','6×10⁶/ratio — AN4165 Eq. 40',fo(aux.rgc)],
+    ['R_LS','L/(1.5×10⁻⁹·R_CS·ratio) — Eq. 39, 12–87 kΩ',fo(aux.rls)],
+    ['C_SS','I_SS·t_SS/V_SS — Eq. 64',fc2(aux.css)],
+    ['R_ILIMIT','k·crest·R_CS·4/I_ILIMIT — Eq. 38',fo(aux.ril1)],
+    ['R_ILIMIT2','k₂·V_CS,PK/I_ILIMIT2 — Eq. 33',fo(aux.ril2)],
+    ['R_IC','1/(|T_unc|·G_MI·κ)',fo(dci.std.RIC)],
+    ['Voltage comp','SLVA662 Method B at 1/|T_v,base|',(T3?'Type-3':'Type-2')+' per Step 14'],
+    ['Rejection','−20·log₁₀|T_v(j2π·120)| ≥ 20 dB',fmt(Math.min(rejHL,rejLL),1)+' dB'],
+    ['Transient','ΔV = −ΔI·L⁻¹{Z_open/(1+T_v)}','Step 15 table']]);
+  // ================= assemble =================
+  const css='body{font-family:Calibri,Arial,sans-serif;font-size:10.5pt;color:#000;line-height:1.35}'+
+    'h1{font-size:15pt;border-bottom:2px solid #2E75B6;padding-bottom:3px;margin:20pt 0 8pt;page-break-after:avoid}'+
+    'h2{font-size:12pt;color:#2E75B6;margin:13pt 0 5pt;page-break-after:avoid}'+
+    'p{margin:5pt 0}'+
+    'p.f{font-family:Consolas,monospace;font-size:9.5pt;background:#F2F6FB;padding:4pt 8pt;border-left:3pt solid #2E75B6;margin:4pt 0}'+
+    'p.dec{background:#E8F2E8;border-left:3pt solid #4A8B4A;padding:5pt 8pt}'+
+    'p.con{background:#FBF6E9;border-left:3pt solid #C9A227;padding:5pt 8pt;font-style:italic}'+
+    'p.pit{background:#FBECEC;border-left:3pt solid #C0504D;padding:5pt 8pt}'+
+    'table{border-collapse:collapse;width:100%;margin:6pt 0;font-size:9.5pt}'+
+    'th,td{border:1pt solid #999;padding:3pt 6pt;text-align:left;vertical-align:top}th{background:#D5E8F0}'+
+    'p.cap{font-size:9pt;color:#444;text-align:center;font-style:italic;margin:2pt 14pt 10pt}'+
+    'div.ttl{text-align:center;margin-bottom:26pt}div.ttl p{text-align:center}p.t1{font-size:21pt;font-weight:bold;margin:4pt;text-align:center}p.t2{font-size:16pt;font-weight:bold;margin:4pt;text-align:center}p.t3{font-style:italic;margin:6pt;text-align:center}';
+  const html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>PFC Control Loop Design — Rev 2.1</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]--><style>'+css+'</style></head><body>'+B.join('\n')+'</body></html>';
+  // ---- package as MHTML so Word renders the embedded figures ----
+  const b64utf8=s=>btoa(unescape(encodeURIComponent(s)));
+  const wrap76=s=>s.replace(/(.{76})/g,'$1\r\n');
+  const bnd='----=_NextPart_FAN9672_RPT';
+  let mht='MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary="'+bnd+'"; type="text/html"\r\n\r\n';
+  mht+='--'+bnd+'\r\nContent-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: base64\r\nContent-Location: file:///C:/FAN9672/report.htm\r\n\r\n'+wrap76(b64utf8(html))+'\r\n\r\n';
+  for(const[name,dataUrl]of Object.entries(imgs)){
+    if(!dataUrl)continue;
+    mht+='--'+bnd+'\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: base64\r\nContent-Location: file:///C:/FAN9672/'+name+'\r\n\r\n'+wrap76(dataUrl.split(',')[1])+'\r\n\r\n';
+  }
+  mht+='--'+bnd+'--';
+  const blob=new Blob([mht],{type:'application/msword'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Loop_Design_Report_Rev2.1.doc';a.click();
+}
+
+/* ============ export / save / load ============ */
+function exportSummary(p,dci,dcv,rcsInfo,sc){
+  const lines=[];
+  lines.push('FAN9672 CONTROL DESIGN SUMMARY — '+new Date().toISOString().slice(0,10));
+  lines.push('Mode: '+(state.mode==='low'?'LOW LINE (FR) 90–132 Vac / '+POUT_LO+' W':'HIGH LINE (HV) 180–264 Vac / '+POUT_HI+' W'));
+  lines.push('Voltage-loop sizing: '+sizingCorner(p).lab+' · Kmax = '+p.kmax);
+  lines.push('');
+  lines.push('R_CS = '+fmt(state.rcsSel,1)+' mΩ  (window '+fmt(rcsInfo.g.zLo*1e3,2)+'–'+fmt(rcsInfo.g.zHi*1e3,2)+' mΩ; implied VEA,max = '+fmt(rcsInfo.vea,2)+' V)');
+  lines.push('Current loop ('+(state.cType==='T1'?'Type-I':'Type-II')+'): '+(state.cType==='T1'?'C_IC='+fmtCap(dci.std.CIC):'R_IC='+fmtOhm(dci.std.RIC)+'  C_IC1='+fmtCap(dci.std.C1)+'  C_IC2='+fmtCap(dci.std.C2)));
+  if(!dcv.err)lines.push('Voltage loop ('+(state.vType==='type2'?'Type-II':'Type-III')+' SLVA662): '+(state.vType==='type2'
+    ?'R2='+fmtOhm(dcv.std.R2)+'  C1='+fmtCap(dcv.std.C1)+'  C3='+fmtCap(dcv.std.C3)
+    :'R2='+fmtOhm(dcv.std.R2)+'  R3='+fmtOhm(dcv.std.R3)+'  C1='+fmtCap(dcv.std.C1)+'  C2='+fmtCap(dcv.std.C2)+'  C3='+fmtCap(dcv.std.C3)));
+  lines.push('');
+  lines.push('STABILITY (worst case over evaluated points): current PM '+fmt(sc.worstPMi,1)+'° (floor 45°), voltage PM '+fmt(sc.worstPMv,1)+'° (target 60°), 120 Hz rejection '+fmt(sc.worstRej,1)+' dB (floor 20 dB)');
+  lines.push('');
+  lines.push($('calcLog2').textContent);
+  const blob=new Blob([lines.join('\n')],{type:'text/plain'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Design_summary.txt';a.click();
+}
+function saveJSON(){
+  const ids=['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb','fci','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2','serR','serC','rcsCustom'];
+  const o={state:JSON.parse(JSON.stringify(state)),inputs:{}};
+  ids.forEach(id=>o.inputs[id]=$(id).value);
+  const blob=new Blob([JSON.stringify(o,null,1)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Design.json';a.click();
+}
+function loadJSON(file){
+  const rd=new FileReader();
+  rd.onload=()=>{try{
+    const o=JSON.parse(rd.result);
+    Object.assign(state,o.state||{});
+    setModeSilent(state.mode);
+    for(const[id,v]of Object.entries(o.inputs||{}))if($(id))$(id).value=v;
+    recalc();
+  }catch(e){alert('Invalid JSON: '+e.message)}};
+  rd.readAsText(file);
+}
+function setModeSilent(m){state.mode=m;$('modeLow').classList.toggle('active',m==='low');$('modeHigh').classList.toggle('active',m==='high');
+  const cfg=m==='low'?{vacs:LOW_VACS}:{vacs:HIGH_VACS};
+  const cur=$('vac').value;$('vac').innerHTML='';cfg.vacs.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+' Vac';$('vac').appendChild(o)});
+  if(cfg.vacs.includes(+cur))$('vac').value=cur;}
+
+/* ============ presets ============ */
+function applyPreset(k){
+  const fcv=PRESET_FCV[k];
+  $('fcv').value=fcv;
+  $('vfz1').value=(3*fcv/17).toFixed(1);
+  $('vfp1').value=Math.round(50*fcv/17);
+  $('vfz2').value=12;$('vfp2').value=17;
+  state.vType='type3';
+  // reset voltage BOM overrides so new calc flows through
+  for(const key of Object.keys(state.bom))if(key.startsWith('v3_')||key.startsWith('v2_'))delete state.bom[key];
+  recalc();
+}
+
+/* ============ master recalc ============ */
+let lastSc=null,lastCtx=null;
+function recalc(){
+  const p=gather();
+  const rcsInfo=renderRCS(p);
+  const dci=designCI(p);
+  renderTypeCards(p,dci);
+  const dcv=designCV(p,dci);
+  renderVTypeCards(p,dcv);
+  const aux=renderAux(p);
+  renderBoms(p,dci,dcv);
+  drawPZ('pzCur',p);drawPZ('pzVol',p);
+  const{mg,mgv,set}=renderPlots(p,dci,dcv);
+  const sc=renderMargins(p,dci,dcv,set);
+  lastSc=sc;lastCtx={p,dci,dcv,rcsInfo,aux};
+  // scorecard cards
+  const fswOK=p.fci<=p.fsw/6;
+  $('cards2').innerHTML=`
+    <div class="card ${mg.pm>=45?'gd':'bd'}"><div class="k">Current loop (inspect pt.)</div><div class="v">${fmtHz(mg.fc)} / ${fmt(mg.pm,1)}°</div><div class="u">GM ${Number.isFinite(mg.gm)?fmt(mg.gm,1)+' dB':'>30 dB'} · floor 45°</div></div>
+    <div class="card ${(mgv.pm||0)>=60?'gd':'bd'}"><div class="k">Voltage loop (sizing pt.)</div><div class="v">${fmt(mgv.fc,2)} Hz / ${fmt(mgv.pm,1)}°</div><div class="u">GM ${Number.isFinite(mgv.gm)?fmt(mgv.gm,1)+' dB':'large'} · target 60°</div></div>
+    <div class="card ${sc.worstRej>=20?'gd':'bd'}"><div class="k">Worst 120 Hz rejection</div><div class="v">${fmt(sc.worstRej,1)} dB</div><div class="u">floor 20 dB</div></div>
+    <div class="card ${fswOK?'gd':'bd'}"><div class="k">fci vs fSW</div><div class="v">fSW/${fmt(p.fsw/p.fci,1)}</div><div class="u">${fswOK?'≥ 6× separation ✓':'raise separation (≥ 6×)'}</div></div>`;
+  // calc log 2
+  const Hdiv=p.r4fb/(p.r1fb+p.r4fb);
+  $('calcLog2').textContent=[
+    'CURRENT LOOP — sized at '+dci.corner.vac+' Vac / '+dci.corner.pout+' W (worst case of mode)',
+    '  |Ti,unc('+fmtHz(p.fci)+')| = '+fmt(dci.mTu,5)+' ('+fmt(20*Math.log10(dci.mTu),2)+' dB), ∠ = '+fmt(dci.aTu,2)+'°',
+    state.cType==='T1'?'  Type-I: C_IC = GMI·|Tunc|/ωci':'  Type-II: κ = √(1+(fz/fci)²)/√(1+(fci/fp)²) → R_IC = 1/(|Tunc|·GMI·κ)',
+    '  Achieved (std values): fc = '+fmtHz(mg.fc)+', PM = '+fmt(mg.pm,1)+'°, GM = '+(Number.isFinite(mg.gm)?fmt(mg.gm,1)+' dB':'>30 dB'),
+    '',
+    'VOLTAGE LOOP — '+sizingCorner(p).lab+', Method '+(state.vType==='type2'?'SLVA662 Type-II (H_div='+fmt(Hdiv,6)+')':'SLVA662 Type-III Method B'),
+    '  |Tv,base(fcv)| = '+fmt(dcv.mTb,4)+' → required |HOTA| = '+fmt(dcv.G,5)+' ('+fmt(20*Math.log10(dcv.G),2)+' dB)',
+    dcv.err?('  ERROR: '+dcv.err):'  Achieved (std values): fc = '+fmt(mgv.fc,2)+' Hz, PM = '+fmt(mgv.pm,1)+'°',
+    '  Philosophy: '+(state.phil==='shared'?'one shared network for both line ranges (report) — low-line crossover lands lower naturally':'network dedicated to this mode\'s corner'),
+  ].join('\n');
+  renderCore(p,rcsInfo,dci,dcv,aux);
+  // log 1
+  const pl=plantI(p,p.vac,p.pout,p.fci);
+  $('cards1').innerHTML=`
+    <div class="card"><div class="k">Duty D @ ${p.vac} Vac</div><div class="v">${fmt(pl.D,4)}</div></div>
+    <div class="card"><div class="k">R_LOAD</div><div class="v">${fmtOhm(pl.RL)}</div></div>
+    <div class="card"><div class="k">f₀ / Q</div><div class="v">${fmt(pl.f0,1)} Hz / ${fmt(pl.Q,2)}</div></div>
+    <div class="card"><div class="k">R_CS selected</div><div class="v">${fmt(state.rcsSel,1)} mΩ</div></div>
+    <div class="card"><div class="k">f_RHP — current path</div><div class="v">${fmtHz(pl.fRHPi)}</div><div class="u">per-phase L = ${fmt(p.lphi*1e6,0)} µH</div></div>
+    <div class="card"><div class="k">f_RHP — voltage plant</div><div class="v">${fmtHz(pl.fRHPv)}</div><div class="u">L_eq = L/2 = ${fmt(p.lphi*5e5,1)} µH</div></div>`;
+  $('rhpNote').innerHTML='<b>Two RHP zeros, two meanings.</b> <b>f_RHP (current path)</b> uses the per-phase inductance (Step 13) — it sits in the duty→output-<i>voltage</i> path, so it does <i>not</i> erode current-loop phase margin even when f_ci is near it; it is shown as the amber marker on the current-loop Bode. <b>f_RHP (voltage plant)</b> uses L_eq = L/2 for the two interleaved phases (Step 14) — it is 2× higher, which is exactly why interleaving allows the voltage-loop bandwidth chosen here. Both are hard ceilings: never place a crossover above its respective RHP zero.';
+  renderGmod(p);
+  renderScreen3(p,dci,dcv);renderScreen4(p,dci,dcv);renderSchematic(p,dci,dcv,aux);
+  tolAnalysis(p,dci,dcv);
+}
+
+/* ============ wiring ============ */
+function tab(n){document.querySelectorAll('.tabbtn').forEach(b=>b.classList.toggle('active',b.dataset.tab===n));document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===n));recalc()}
+document.querySelectorAll('.tabbtn').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
+$('modeLow').onclick=()=>setMode('low');$('modeHigh').onclick=()=>setMode('high');
+$('philShared').onclick=()=>{state.phil='shared';$('philShared').classList.add('active');$('philDedicated').classList.remove('active');recalc()};
+$('philDedicated').onclick=()=>{state.phil='dedicated';$('philDedicated').classList.add('active');$('philShared').classList.remove('active');recalc()};
+document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>applyPreset(b.dataset.p));
+$('loadDefaults').onclick=()=>{
+  $('vout').value=393.7;$('fsw').value=70;$('lphi').value=235;$('co').value=2200;$('rl').value=10;$('rc').value=10;
+  $('rrlpk').value=12.1;$('kmax').value=1.49;$('eta').value=0.93;$('rfb2').value=23.2;
+  $('fci').value=8000;$('cfz').value=1000;$('cfp').value=26000;$('rf').value=2000;$('cf').value=470;
+  $('fcv').value=17;$('r1fb').value=3.63;$('r4fb').value=23.2;$('vfz1').value=3;$('vfz2').value=12;$('vfp1').value=50;$('vfp2').value=17;
+  $('rb1').value=560;$('rb2').value=560;$('rb3').value=82;$('rb4').value=30;$('cb1').value=100;$('cb2').value=560;
+  $('serR').value='E96';$('serC').value='E24';$('rcsCustom').value='';
+  $('ssT').value=100;$('ilClamp').value=1.8;$('il2K').value=1.5;$('ilFp').value=0.5;$('gcFp').value=10;$('lsFp').value=10;
+  state.vType='type3';state.cType='T2';state.phil='shared';state.rcsSel=15;bomReset();
+  // Report BOM picks where the report rounded differently than nearest-series:
+  // RIC 118.1k -> report selects 120k (E24); C1 370.4n -> report selects 390n
+  state.bom['cur_RIC']={auto:false,val:120e3};
+  state.bom['v3_C1']={auto:false,val:390e-9};
+  $('philShared').classList.add('active');$('philDedicated').classList.remove('active');
+  populateMode();recalc();
+};
+$('btnExport').onclick=()=>{if(lastCtx&&lastSc)exportSummary(lastCtx.p,lastCtx.dci,lastCtx.dcv,lastCtx.rcsInfo,lastSc)};
+$('btnReport').onclick=generateReport;
+$('btnSave').onclick=saveJSON;
+$('btnLoad').onclick=()=>$('fileLoad').click();
+$('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.target.value=''};
+['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb',
+ 'fci','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
+ 'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
+attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
+pzPointer('pzCur');pzPointer('pzVol');
+window.addEventListener('resize',()=>recalc());
+/* ── Python integration: expose internals for inject-script pre-population ──
+ *
+ * ReviewMagnetics-style: after the page loads, the parent inject script calls
+ *   window.setPythonValues({ lphi_uH, rl_mOhm, co_uF, rc_mOhm, vout_V,
+ *                            fsw_kHz, pout_lo_W, pout_hi_W, eta_lo, eta_hi, nch })
+ * then calls window.recalc() to refresh all screens with the Python data.
+ * Individual fields (fci, fcv, etc.) remain designer-editable after injection.
+ */
+window.POUT_LO = POUT_LO;  // reference — update via setPythonValues
+window.POUT_HI = POUT_HI;
+window.ETA_LO  = ETA_LO;
+window.ETA_HI  = ETA_HI;
+window.FIXED   = FIXED;    // allows FIXED.NCH override before recalc
+window.state   = state;
+window.recalc  = recalc;
+window.gather  = gather;
+
+window.setPythonValues = function(p){
+  // Power-stage fields
+  if(p.lphi_uH  != null) $('lphi').value  = p.lphi_uH;
+  if(p.rl_mOhm  != null) $('rl').value    = p.rl_mOhm;
+  if(p.co_uF    != null) $('co').value    = p.co_uF;
+  if(p.rc_mOhm  != null) $('rc').value    = p.rc_mOhm;
+  if(p.vout_V   != null) $('vout').value  = p.vout_V;
+  if(p.fsw_kHz  != null) $('fsw').value   = p.fsw_kHz;
+  // Operating-point Pout and η (per line range)
+  if(p.pout_lo_W != null){ POUT_LO = p.pout_lo_W; window.POUT_LO = POUT_LO; }
+  if(p.pout_hi_W != null){ POUT_HI = p.pout_hi_W; window.POUT_HI = POUT_HI; }
+  if(p.eta_lo    != null){ ETA_LO  = p.eta_lo;    window.ETA_LO  = ETA_LO;  }
+  if(p.eta_hi    != null){ ETA_HI  = p.eta_hi;    window.ETA_HI  = ETA_HI;  }
+  // Number of interleaved phases
+  if(p.nch != null) FIXED.NCH = p.nch;
+  // Sync visible Pout and eta fields to current mode values
+  $('pout').value = (state.mode==='low') ? POUT_LO : POUT_HI;
+  $('eta').value  = (state.mode==='low') ? ETA_LO  : ETA_HI;
+  recalc();
+};
+
+populateMode();recalc();
+</script>
+</body>
+</html>

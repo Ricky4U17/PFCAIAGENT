@@ -1,0 +1,123 @@
+{
+  "schema": "controller-reference-db-1.0",
+  "description": "Local reference-document database for analog PFC controllers. One folder per controller under controllers/<id>/. General control-loop / compensator design theory (controller-agnostic) lives under _common/. A database agent should resolve a controller id, read its 'documents', and also consult the relevant 'common' collections.",
+  "updated": "2026-06-14",
+  "root": "backend/data/controllers",
+  "controllers": {
+    "fan9672": {
+      "name": "onsemi FAN9672",
+      "summary": "Two-Channel Interleaved CCM PFC Controller — analog, average-current-mode. Primary analog controller targeted by this project's control-design step (Step 16).",
+      "folder": "fan9672",
+      "common_collections": ["control_loop_design"],
+      "documents": [
+        {
+          "file": "FAN9672-D.PDF",
+          "doc_no": "FAN9672-D",
+          "type": "datasheet",
+          "title": "FAN9672 — Two-Channel Interleaved CCM PFC Controller",
+          "publisher": "onsemi",
+          "rev": "Rev. 6, June 2023",
+          "pages": 26,
+          "primary": true,
+          "use_for": "Pin functions, electrical characteristics, internal blocks (VEAO/IEAO, multiplier, current sense, gain constants), application schematic — the authoritative part reference."
+        },
+        {
+          "file": "AN4165-D.PDF",
+          "doc_no": "AN4165-D",
+          "type": "application_note",
+          "title": "Design Guideline for 3-Channel Interleaved CCM PFC Using the FAN9673 5 kW CCM PFC Controller",
+          "publisher": "onsemi",
+          "rev": "Rev. 5, March 2023",
+          "pages": 14,
+          "note": "Written for the sibling part FAN9673 (3-channel). The interleaved-CCM-PFC design methodology (power-stage sizing, current/voltage loop compensation) applies directly to the FAN9672 (2-channel).",
+          "use_for": "Step-by-step interleaved CCM PFC power-stage and control-loop design worked example."
+        },
+        {
+          "file": "AN5257.pdf",
+          "doc_no": "AN5257",
+          "type": "application_note",
+          "title": "Average Current Mode Interleaved PFC Control — Theory of Operation and Control-Loop Design",
+          "publisher": "Freescale / NXP",
+          "author": "Petr Frgal",
+          "pages": 13,
+          "use_for": "Average-current-mode interleaved PFC theory, current and voltage loop transfer functions and compensator derivation."
+        },
+        {
+          "file": "AND9925-D.PDF",
+          "doc_no": "AND9925-D",
+          "type": "application_note",
+          "title": "AND9925 — FAN9672/FAN9673 Tips and Tricks",
+          "publisher": "onsemi",
+          "rev": "Rev. 3, May 2024",
+          "pages": 11,
+          "use_for": "Practical design tips for the FAN9672/9673 — R_CS Method-2 (Eq. 11), gain-modulator (GMOD) checks, and operating-point verification used in Steps 6–7."
+        },
+        {
+          "file": "FAN9672_Control_Loop_Design_Report_Rev2.1.doc",
+          "doc_no": null,
+          "type": "design_report",
+          "title": "FAN9672 Control Loop Design Report (Rev 2.1)",
+          "publisher": "project (internal)",
+          "use_for": "Worked control-loop design example for this project's FAN9672 application — derived component values and design rationale the agent can cite/replicate."
+        },
+        {
+          "file": "FAN9672_Control_Design_Tool_v4.html",
+          "doc_no": null,
+          "type": "design_tool",
+          "title": "FAN9672 Control Design Tool v4",
+          "publisher": "project (internal)",
+          "use_for": "Interactive FAN9672 control-design calculator (same engine served at /control_design.html). Reference for the implemented design equations and component-selection logic."
+        }
+      ],
+      "missing": []
+    }
+  },
+  "common": {
+    "control_loop_design": {
+      "summary": "Controller-agnostic control-loop / compensator design theory. Applicable to any analog controller's voltage/current loop design.",
+      "folder": "_common/control_loop_design",
+      "documents": [
+        {
+          "file": "slua079.pdf",
+          "doc_no": "SLUA079",
+          "type": "application_note",
+          "title": "Average Current Mode Control of Switching Power Supplies",
+          "publisher": "TI (Unitrode)",
+          "author": "Lloyd Dixon",
+          "pages": 15,
+          "use_for": "Foundational average-current-mode control theory and loop design."
+        },
+        {
+          "file": "slup098.pdf",
+          "doc_no": "SLUP098",
+          "type": "seminar_topic",
+          "title": "Control Loop Design (Power Supply Design Seminar 800, Topic 7)",
+          "publisher": "TI (Unitrode)",
+          "pages": 12,
+          "use_for": "General control-loop design seminar — poles/zeros, crossover, phase margin."
+        },
+        {
+          "file": "slva662.pdf",
+          "doc_no": "SLVA662",
+          "type": "application_report",
+          "title": "Demystifying Type II and Type III Compensators Using Op-Amp and OTA for DC/DC Converters",
+          "publisher": "TI",
+          "author": "SW Lee",
+          "rev": "July 2014",
+          "pages": 16,
+          "use_for": "Type-II / Type-III compensator topologies and component-value equations (op-amp and OTA)."
+        },
+        {
+          "file": "Practical-Feedback-Loop-Design-Buck.pdf",
+          "doc_no": null,
+          "type": "seminar_paper",
+          "title": "Practical Feedback Loop Design Considerations for Switched Mode Power Supplies",
+          "publisher": "Fairchild Semiconductor Power Seminar 2010-2011",
+          "author": "Hangseok Choi, Ph.D.",
+          "pages": 14,
+          "use_for": "Practical feedback-loop design considerations, measurement and stability margins."
+        }
+      ]
+    }
+  }
+}
