@@ -14,6 +14,9 @@ frontend/.vite/
 Thumbs.db
 # Office temporary lock files
 ~$*
+
+# Backend scratch / preview images (e.g. _t45.png, _fig*_preview.png)
+backend/_*.png
 .vscode/
 .idea/
 
