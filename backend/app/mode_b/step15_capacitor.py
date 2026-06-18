@@ -104,7 +104,7 @@ def verify_configuration(
     db       = _load_db()
     ser_db   = db.get(supplier, {}).get(series, {})
     esr_db   = ser_db.get("ESR_mohm", {})
-    temp_rating = int(ser_db.get("temp_rating_C", 85))
+    temp_rating = int(ser_db.get("temp_rating_C") or ser_db.get("op_temp_max_C") or 105)
     T_amb       = 50.0
     is_snap  = any(kw in series.lower() for kw in ["snap","screw","380lx","lx"])
     Rth_ca   = 10.0 if is_snap else 15.0
@@ -388,7 +388,7 @@ def calculate_thermal_table(
     db       = _load_db()
     ser_db   = db.get(supplier, {}).get(series, {})
     esr_db   = ser_db.get("ESR_mohm", {})
-    temp_rating = int(ser_db.get("temp_rating_C", 85))
+    temp_rating = int(ser_db.get("temp_rating_C") or ser_db.get("op_temp_max_C") or 105)
 
     # Snap-in / screw → lower Rth; radial aluminium → higher
     is_snap = any(kw in series.lower() for kw in ["snap", "screw", "380lx", "lx"])

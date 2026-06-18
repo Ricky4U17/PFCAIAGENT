@@ -284,6 +284,11 @@ def get_cap_table(
         rip_pass  = (I_per_cap <= rated_rip) if rated_rip else None
         headroom  = round((rated_rip - I_per_cap) / rated_rip * 100, 1) if rated_rip else None
 
+        # Case-to-ambient thermal resistance by package type (same model as
+        # verify_configuration): snap-in / screw cans run cooler than radial leaded.
+        pkg_txt = (str(r.get('package') or '') + ' ' + str(r.get('mounting') or '')).lower()
+        Rth_ca  = 10.0 if any(k in pkg_txt for k in ('snap', 'screw')) else 15.0
+
         rows.append({
             'manufacturer':    r['manufacturer'],
             'series':          r['series'],
@@ -297,10 +302,14 @@ def get_cap_table(
             'V_esr_pk_V':      V_esr_pk,
             'I_rms_per_cap_A': round(I_per_cap, 3),
             'I_rated_120hz_A': rated_rip,
+            'ripple_hf_A':     r.get('ripple_hf_A'),       # rated ripple at HF (for freq multiplier)
             'ripple_pass':     rip_pass,
             'ripple_headroom_pct': headroom,
             'lifetime':        r['lifetime_raw'],
+            'lifetime_temp_C': r.get('lifetime_temp_C'),   # temp the rated endurance L0 is specified at
             'op_temp':         r['op_temp_raw'],
+            'op_temp_max_C':   r.get('op_temp_max_C'),     # numeric rated max temp (e.g. 105)
+            'Rth_ca_CW':       Rth_ca,                     # case-to-ambient thermal resistance estimate
             'lead_spacing_mm': r['lead_spacing_mm'],
             'diameter_mm':     r['diameter_mm'],
             'height_mm':       r['height_mm'],

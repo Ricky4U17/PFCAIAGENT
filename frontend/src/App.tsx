@@ -13,9 +13,10 @@ import { DonePanel } from './components/DonePanel'
 import { Step7Wizard } from './components/Step7Wizard'
 import { Step15Wizard } from './components/Step15Wizard'
 import { ControlDesign } from './components/ControlDesign'
+import { CapacitorSimAgent } from './components/CapacitorSimAgent'
 import type { CapacitorResult } from './components/Step15Capacitor'
 
-type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'step16'
+type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'capsim'|'step16'
 
 interface AppState {
   step: Step; loading: boolean; error: string|null; backendStatus: 'ok'|'error'|'checking'
@@ -56,7 +57,7 @@ const SS: Record<Step,string> = {
   intake:'mode-a / intake',topology:'mode-a / topology-hitl',controller:'mode-a / controller-hitl',
   channels:'mode-a / channel-selection',mini:'mode-a / mini-intake',done:'mode-a / complete',
   step7:'mode-b / step-7-magnetic-design', step15:'mode-b / step-15-capacitor',
-  step16:'mode-b / step-16-control-design',
+  capsim:'mode-b / dc-bus-cap-simulation', step16:'mode-b / step-16-control-design',
 }
 
 export default function App() {
@@ -168,7 +169,9 @@ export default function App() {
   }
 
   const handleStep15Approve = (cap: CapacitorResult) => {
-    setS(p => ({...p, step:'step16', approvedCapacitorDesign:cap}))
+    // Approving the capacitor now routes through the DC-bus simulation check
+    // before Control Design (Step 16).
+    setS(p => ({...p, step:'capsim', approvedCapacitorDesign:cap}))
   }
 
   const restart = () => setS({...INIT, backendStatus:s.backendStatus})
@@ -258,11 +261,17 @@ export default function App() {
           onBack={() => setS(p=>({...p, step:'step7'}))}
           onRestart={restart}
           onApprove={handleStep15Approve} />}
+        {s.step==='capsim' && s.graphState && s.approvedCapacitorDesign && <CapacitorSimAgent
+          confirmedState={s.graphState as Record<string,unknown>}
+          result={s.approvedCapacitorDesign}
+          onBack={() => setS(p=>({...p, step:'step15'}))}
+          onApprove={() => setS(p=>({...p, step:'step16'}))}
+          onRestart={restart} />}
         {s.step==='step16' && s.graphState && s.approvedInductorDesign && <ControlDesign
           confirmedState={s.graphState as Record<string,unknown>}
           approvedInductorDesign={s.approvedInductorDesign}
           approvedCapacitorDesign={s.approvedCapacitorDesign}
-          onBack={() => setS(p=>({...p, step:'step15'}))}
+          onBack={() => setS(p=>({...p, step:'capsim'}))}
           onRestart={restart} />}
 
         {s.loading && (

@@ -35,6 +35,7 @@ export interface CapacitorResult {
     value_uF: number; qty: number; part_number: string
     lifetime: string; op_temp: string
     ESR_each_mohm: number; I_rated_A: number | null; temp_rating_C: number
+    ripple_hf_A?: number | null; lifetime_temp_C?: number | null; Rth_ca_CW?: number | null
   }
 }
 
@@ -229,11 +230,14 @@ export const Step15Capacitor: React.FC<Props> = ({
         qty:              selectedQty,
         part_number:      chosenPart.part_number  ?? '',
         lifetime:         chosenPart.lifetime     ?? '—',
-        op_temp:          chosenPart.temp_rating_C != null
-                            ? `${chosenPart.temp_rating_C}°C` : '—',
+        op_temp:          chosenPart.op_temp_max_C != null
+                            ? `${chosenPart.op_temp_max_C}°C` : (chosenPart.op_temp ?? '—'),
         ESR_each_mohm:    (chosenPart.esr_each_ohm ?? 0) * 1000,
         I_rated_A:        chosenPart.I_rated_120hz_A ?? null,
-        temp_rating_C:    chosenPart.temp_rating_C  ?? 85,
+        temp_rating_C:    chosenPart.op_temp_max_C ?? 105,
+        ripple_hf_A:      chosenPart.ripple_hf_A ?? null,
+        lifetime_temp_C:  chosenPart.lifetime_temp_C ?? null,
+        Rth_ca_CW:        chosenPart.Rth_ca_CW ?? null,
       } : null
 
       const blob = await docGenerateReport({
@@ -895,14 +899,17 @@ export const Step15Capacitor: React.FC<Props> = ({
               qty:              selectedQty,
               part_number:      chosenPart.part_number  ?? '',
               lifetime:         chosenPart.lifetime     ?? '—',
-              op_temp:          chosenPart.temp_rating_C != null
-                                  ? `${chosenPart.temp_rating_C}°C` : '—',
+              op_temp:          chosenPart.op_temp_max_C != null
+                                  ? `${chosenPart.op_temp_max_C}°C` : (chosenPart.op_temp ?? '—'),
               ESR_each_mohm:    (chosenPart.esr_each_ohm ?? 0) * 1000,
               I_rated_A:        chosenPart.I_rated_120hz_A ?? null,
-              temp_rating_C:    chosenPart.temp_rating_C  ?? 85,
+              temp_rating_C:    chosenPart.op_temp_max_C ?? 105,
+              ripple_hf_A:      chosenPart.ripple_hf_A ?? null,
+              lifetime_temp_C:  chosenPart.lifetime_temp_C ?? null,
+              Rth_ca_CW:        chosenPart.Rth_ca_CW ?? null,
             } : undefined,
           })}>
-          ✓ Approve &amp; Go to Control Design
+          ✓ Approve &amp; Go to Simulation
         </Btn>
       </div>
     </div>
