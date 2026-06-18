@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PFC Control Loop Design Tool v4</title>
+<title>Control Loop Design</title>
 <style>
   :root{
     --bg:#0b1220; --panel:#131c2f; --panel2:#0d1528; --line:#2b3754; --text:#eaf0ff;
@@ -38,6 +38,9 @@
   label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
   input,select{width:100%;padding:7px 9px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:13px}
   input[disabled]{opacity:.75}
+  /* predefined / controller-fixed values shown read-only as constants */
+  input[readonly]{background:rgba(127,142,178,.10);border-style:dashed;color:var(--muted);cursor:default}
+  input[readonly]:focus{outline:none;border-color:var(--line)}
   .small{font-size:12px;color:var(--muted)} .mono{font-family:Consolas,ui-monospace,monospace}
   .note{border-left:4px solid var(--accent);padding:6px 10px;color:#dbe6ff;font-size:12px;margin:8px 0;background:rgba(86,163,255,.06);border-radius:0 8px 8px 0}
   .note.warnN{border-left-color:var(--warn);background:rgba(245,158,11,.07)}
@@ -83,17 +86,16 @@
 <header>
   <div class="toolbar">
     <div>
-      <h1>PFC Control Loop Design Tool — v4</h1>
-      <div class="sub">Mode-specific design (Low Line / FR · High Line / HV). Plant parameters (L, C, ESR, DCR, Vout, fsw, NCH, Pout, η) supplied by Python sizing engine. IC: FAN9672 (2-phase interleaved boost). All results computed from the selected component values — no anchored estimates.</div>
+      <h1>Control Loop Design</h1>
     </div>
     <div class="seg">
       <button id="modeLow" class="active">Low Line</button>
       <button id="modeHigh">High Line</button>
-      <button id="loadDefaults" class="action">Load Report Defaults</button>
-      <button id="btnExport" class="ghost">Export Summary</button>
-      <button id="btnReport" class="ghost">Generate Report</button>
-      <button id="btnSave" class="ghost">Save JSON</button>
-      <button id="btnLoad" class="ghost">Load JSON</button>
+      <button id="loadDefaults" class="action" style="display:none">Load Report Defaults</button>
+      <button id="btnExport" class="ghost" style="display:none">Export Summary</button>
+      <button id="btnReport" class="ghost" style="display:none">Generate Report</button>
+      <button id="btnSave" class="ghost" style="display:none">Save JSON</button>
+      <button id="btnLoad" class="ghost" style="display:none">Load JSON</button>
       <input type="file" id="fileLoad" accept=".json" style="display:none">
     </div>
   </div>
@@ -115,18 +117,24 @@
         <div class="grid">
           <div><label>Operating VAC (plot/inspect)</label><select id="vac"></select></div>
           <div><label>Pout (W)</label><input id="pout" type="number" step="1"></div>
-          <div><label>Vout (V)</label><input id="vout" type="number" step="0.1" value="393.7"></div>
-          <div><label>fSW target (kHz)</label><input id="fsw" type="number" value="70" step="1"></div>
-          <div><label>L per phase (µH)</label><input id="lphi" type="number" value="235" step="0.1"></div>
-          <div><label>CO (µF)</label><input id="co" type="number" value="2200" step="1"></div>
-          <div><label>rL (mΩ)</label><input id="rl" type="number" value="10" step="0.1"></div>
-          <div><label>rC (mΩ)</label><input id="rc" type="number" value="10" step="0.1"></div>
-          <div><label>RIAC (MΩ) — mode</label><input id="riac" type="number" step="0.1"></div>
-          <div><label>RVIR (kΩ) — mode</label><input id="rvir" type="number" step="0.1"></div>
-          <div><label>RRLPK (kΩ)</label><input id="rrlpk" type="number" value="12.1" step="0.01"></div>
+          <div><label>Vout (V)</label><input id="vout" type="number" step="0.1" value="393.7" readonly title="Predefined from previous steps"></div>
+          <div><label>fSW target (kHz)</label><input id="fsw" type="number" value="70" step="1" readonly title="Predefined from previous steps"></div>
+          <div><label>L per phase (µH)</label><input id="lphi" type="number" value="235" step="0.1" readonly title="Predefined from previous steps"></div>
+          <div><label>CO (µF)</label><input id="co" type="number" value="2200" step="1" readonly title="Predefined from previous steps"></div>
+          <div><label>rL (mΩ)</label><input id="rl" type="number" value="10" step="0.1" readonly title="Predefined from previous steps"></div>
+          <div><label>rC (mΩ)</label><input id="rc" type="number" value="10" step="0.1" readonly title="Predefined from previous steps"></div>
+          <div><label>Efficiency η (RCS Pdiss)</label><input id="eta" type="number" value="0.93" min="0.8" max="0.99" step="0.005" readonly title="Predefined from previous steps"></div>
           <div><label>Kmax (1.3 – 1.6)</label><input id="kmax" type="number" value="1.49" min="1.3" max="1.6" step="0.01"></div>
-          <div><label>Efficiency η (RCS Pdiss)</label><input id="eta" type="number" value="0.93" min="0.8" max="0.99" step="0.005"></div>
           <div><label>RFB2 lower divider (kΩ)</label><input id="rfb2" type="number" value="23.2" step="0.1"></div>
+        </div>
+      </div>
+<div class="panel">
+        <h2>Components Fixed by Controller</h2>
+        <div class="small" style="margin-bottom:8px;color:var(--muted)">Set by the FAN9672 and the mode — not user-adjustable.</div>
+        <div class="grid">
+          <div><label>RIAC (MΩ) — mode</label><input id="riac" type="number" step="0.1" readonly title="Fixed by controller / mode"></div>
+          <div><label>RVIR (kΩ) — mode</label><input id="rvir" type="number" step="0.1" readonly title="Fixed by controller / mode"></div>
+          <div><label>RRLPK (kΩ)</label><input id="rrlpk" type="number" value="12.1" step="0.01" readonly title="Fixed by controller"></div>
         </div>
       </div>
 <div class="panel">
@@ -811,6 +819,12 @@ function bomRow4(key,name,calcVal,ser,selVal,check){
   return `<tr><td>${name}</td><td class="calcv">${fF(calcVal)}</td><td class="std">${sel}</td><td>${check}</td></tr>`;
 }
 const AUXHEAD='<tr><th>Comp.</th><th>Calculated</th><th>Standard (select)</th><th>Check</th></tr>';
+const AUXHEAD_SUGGEST='<tr><th>Comp.</th><th>Calculated</th><th>Standard (suggested)</th><th>Check</th></tr>';
+// Static BOM row — shows the suggested standard value (read-only, no override dropdown)
+function bomRow4Static(key,name,calcVal,ser,selVal,check){
+  const fF=key.includes('_R')?fmtOhm:fmtCap;
+  return `<tr><td>${name}</td><td class="calcv">${fF(calcVal)}</td><td class="std">${fF(selVal)}</td><td>${check}</td></tr>`;
+}
 function renderAux(p){
   const tss=+$('ssT').value*1e-3, iss=20e-6, vss=5.0; // I_SS, V_SS fixed internal to the IC
   const kClamp=+$('ilClamp').value, k2=+$('il2K').value;
@@ -819,10 +833,11 @@ function renderAux(p){
   const rriStd=nearestStd(1.2e9/p.fsw-3430,'E96');
   const pill=(ok,t)=>`<span class="pill ${ok?'ok':'bad'}">${t}</span>`;
   // --- Soft start (Eq. 64) ---
-  const cssCalc=iss*tss/vss, css=bomGet('aux_CSS',cssCalc,p.serC);
+  // C_SS: only t_SS is user-adjustable; the standard cap is suggested (read-only), not selectable.
+  const cssCalc=iss*tss/vss, css=nearestStd(cssCalc,p.serC);
   const tssAct=css*vss/iss, ssOK=Math.abs(tssAct-tss)/tss<=0.2;
-  $('auxBomSS').innerHTML=AUXHEAD+
-    bomRow4('aux_CSS','C_SS',cssCalc,p.serC,css,'t_SS = '+fmt(tssAct*1e3,0)+' ms '+pill(ssOK,ssOK?'within ±20 % of target':'> ±20 % off target'));
+  $('auxBomSS').innerHTML=AUXHEAD_SUGGEST+
+    bomRow4Static('aux_CSS','C_SS',cssCalc,p.serC,css,'t_SS = '+fmt(tssAct*1e3,0)+' ms '+pill(ssOK,ssOK?'within ±20 % of target':'> ±20 % off target'));
   // --- ILIMIT / ILIMIT2 (Eqs. 32-38) ---
   const iIL=1.2*1.0208/rriStd, iIL2=1.2*1.03125/rriStd;
   const crest=(vac,pout)=>Math.SQRT2*pout/(p.eta*p.nch*vac);
@@ -2193,13 +2208,27 @@ window.setPythonValues = function(p){
 populateMode();recalc();
 
 /* postMessage bridge — receives Python plant parameters; returns design state on request */
+// Report document height to the parent so the embedding iframe can auto-size to
+// its content — no inner scrollbar, the host page uses a single browser scrollbar.
+function postH(){
+  try{
+    var h=Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    if(h>0) parent.postMessage({type:'docHeight',height:h},'*');
+  }catch(_e){}
+}
+window.addEventListener('load',postH);
+window.addEventListener('resize',postH);
+if('ResizeObserver' in window){ try{ new ResizeObserver(postH).observe(document.body); }catch(_e){} }
+setTimeout(postH,300); setTimeout(postH,1200);
+
 window.addEventListener('message',function(e){
   if(!e.data) return;
   if(e.data.type==='setPythonValues'&&typeof window.setPythonValues==='function'){
     window.setPythonValues(e.data.params);
+    setTimeout(postH,50);
   }
   if(e.data.type==='getDesignState'){
-    if(!lastCtx){e.source.postMessage({type:'designState',data:null},'*');return;}
+    if(!lastCtx){e.source.postMessage({type:'designState',data:null},'*');postH();return;}
     const{p,dci,dcv}=lastCtx;
     e.source.postMessage({type:'designState',data:{
       vType:state.vType,
@@ -2207,6 +2236,13 @@ window.addEventListener('message',function(e){
       mode:state.mode,
       fci_Hz:p.fci,
       fcv_Hz:p.fcv,
+      cfz_Hz:p.cfz,
+      cfp_Hz:p.cfp,
+      vfz1_Hz:p.vfz1,
+      vfz2_Hz:p.vfz2,
+      vfp1_Hz:p.vfp1,
+      vfp2_Hz:p.vfp2,
+      gmv_S:p.gmv,
       r1fb:p.r1fb,
       r4fb:p.r4fb,
       rf:p.rf,

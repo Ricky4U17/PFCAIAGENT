@@ -17,3 +17,9 @@ Thumbs.db
 
 # Generated sample / verification report PDFs
 PFC_Report_VERIFY_*.pdf
+
+# Generated control-design chapter PDFs (regenerated from the report builders)
+PFC_Chapter6_*.pdf
+
+# Controller reference DB — derived BM25 index cache (rebuilt from the PDFs/manifest)
+backend/data/controllers/.index.json

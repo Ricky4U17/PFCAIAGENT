@@ -80,6 +80,7 @@ ANN = {
     "PITFALL":  {"bg": colors.HexColor("#FEE2E2"), "border": colors.HexColor("#991B1B")},
     "DECISION": {"bg": colors.HexColor("#E8EDF5"), "border": colors.HexColor("#1F3B63")},  # navy
     "INSIGHT":  {"bg": colors.HexColor("#FEF3C7"), "border": colors.HexColor("#B45309")},  # amber
+    "NOTE":     {"bg": colors.HexColor("#F1F5F9"), "border": colors.HexColor("#475569")},  # neutral slate
 }
 
 VAC_LIST = [90, 110, 120, 132, 180, 200, 220, 230, 264]
@@ -3635,7 +3636,7 @@ def _ch5(story, state, s15):
 def _ch6(story, state, s16):
     chapter_splash(story, 6, "Control Scheme",
         "How do we close the loops stably across all conditions?",
-        ["6.1 Control architecture — ACM two-loop, GMOD block",
+        ["6.1 Control architecture and loop-equation derivation (inner current + outer voltage)",
          "6.2 Plant analysis — RHP zero, LC double pole, bandwidth targets",
          "6.3 FAN9672 pin configuration — pin map and operating envelope",
          "6.4 Current loop design — Type-II compensator, pole-zero placement",
@@ -3644,7 +3645,7 @@ def _ch6(story, state, s16):
          "6.7 Soft-start and protection — C_SS, current clamp, brown-out",
          "6.8 Control network bill of materials"])
 
-    step_h(story, "6.1", "Control Architecture Overview", 6)
+    step_h(story, "6.1", "Control Architecture and Loop-Equation Derivation", 6)
     annotation(story, "CONCEPT",
         "Average Current Mode (ACM) PFC uses a two-loop structure. "
         "The inner current loop (bandwidth ≈ f<sub>sw</sub>/10) forces the inductor "
@@ -3721,6 +3722,9 @@ def _ch6(story, state, s16):
     def _pm(v): return f"{v:.1f}°"   if isinstance(v, (int, float)) and math.isfinite(v) else "—"
     def _gm(v): return f"{v:.1f} dB" if isinstance(v, (int, float)) and math.isfinite(v) else "—"
     def _ge(v, t): return isinstance(v, (int, float)) and math.isfinite(v) and v >= t
+
+    # ── 6.1.1–6.1.3 Loop-equation derivation (theory, from the derivation docs) ──
+    _ch6_loop_derivation(story, res)
 
     # ── 6.2 Plant analysis — critical frequencies ─────────────────────────────
     if "f_lc_Hz" in res:
@@ -3959,6 +3963,267 @@ def _ch6(story, state, s16):
             "loops verified in Section 6.6.",
             ["Reference", "Value", "Function"],
             bom, col_widths=[CW*0.18, CW*0.22, CW*0.60], ch=6)
+
+        # ── §6.9 References — auto-retrieved from the local controller reference DB ──
+        _ch6_references(story, controller_id="fan9672")
+
+
+def _ch6_loop_derivation(story, res):
+    """§6.1.1–6.1.3 — step-by-step derivation of the inner current-loop and outer
+    voltage-loop equations from the averaged boost-PFC small-signal model. Theory
+    follows the project derivation documents (Inner_Current_Loop_Theory_Derivation,
+    Outer_Voltage_Loop_Theory_Derivation) and the control-loop references in the
+    local reference database. First pass — the algebraic backbone and the final
+    equations; numerical compensator design is in §6.4–6.6."""
+    # ── operating values (from step16, with the design's reference values as fallback) ──
+    Vout = float(res.get("Vout_V", 393));  Co_uF = float(res.get("C_uF", 2200))
+    rC_m = float(res.get("ESR_mOhm", 10)); rL_m = float(res.get("DCR_mOhm", 10))
+    L_uH = float(res.get("L_uH", 235));    fsw  = float(res.get("fsw_Hz", 70000))
+    Nch  = int(res.get("nch", 2));         Plo  = float(res.get("Pout_lo_W", 1700))
+    Phi  = float(res.get("Pout_hi_W", 3600))
+    fci  = float(res.get("fci_Hz", 8000)); fcv  = float(res.get("fcv_Hz", 17))
+    RCS_m, VRAMP, Kmax, GMV_uS, VFB = 15.0, 5.0, 1.4, 100.0, 2.5   # FAN9672 / design constants
+    Rf, Cf = 2000.0, 470e-12
+    import math as _m
+    fRC   = 1.0 / (2 * _m.pi * Rf * Cf)
+    fESR  = 1.0 / (2 * _m.pi * Co_uF * 1e-6 * rC_m * 1e-3)
+    Ilo, Ihi = Plo / Vout, Phi / Vout
+    Gmlo, Gmhi = Kmax * Ilo / 5.0, Kmax * Ihi / 5.0
+    Hv   = VFB / Vout
+
+    # ───────────────────────────── 6.1.1 structure ─────────────────────────────
+    sub_h(story, "6.1.1", "Loop Structure and Signal Flow", 6)
+    body(story,
+        "Average-current-mode (ACM) PFC is a nested two-loop system. The fast inner "
+        "loop forces each phase's inductor current to follow a rectified-sine command; "
+        "the slow outer loop trims the command amplitude to hold the DC bus. Each loop "
+        "gain is the product of a power-stage plant, the sensing/feedback gain, the PWM "
+        "or multiplier gain, and the compensator. The two open-loop gains are:", 6)
+    eq_box(story, [
+        r"T_i(s) = G_{id}(s)\cdot R_{CS}\cdot G_{mi}(s)\cdot F_m\cdot H_{CS}(s),\quad F_m=\dfrac{1}{V_{RAMP}}",
+        r"T_v(s) = G_{MOD}\cdot G_{i,cl}(s)\cdot G_{vp}(s)\cdot H_v\cdot G_{mv}(s)",
+    ], heading="Inner / outer open-loop gain", number="6.1", ch=6)
+    body(story,
+        "A loop equation cannot be written with zero modelling assumptions — every "
+        "transfer function already presumes a model. The derivations below keep the full "
+        "CCM averaged-boost model (inductor DCR r<sub>L</sub>, capacitor ESR r<sub>C</sub>, "
+        "finite load R<sub>LOAD</sub>, L and C) and drop no term inside it: no high-frequency "
+        "pole, ESR zero, load damping or duty-dependent term is removed.", 6)
+
+    # ───────────────────────── 6.1.2 inner current loop ─────────────────────────
+    sub_h(story, "6.1.2", "Inner Current-Loop Equation — Step-by-Step Derivation", 6)
+    body(story,
+        "<b>Step 1 — what it controls.</b> Per phase, the inner loop controls the boost "
+        "inductor current. The duty perturbation drives the current, the current is sensed "
+        "through R<sub>CS</sub> and a filter, the current error amplifier sets the PWM "
+        "command, and the modulator turns command voltage into duty:", 6)
+    eq_box(story, [
+        r"\hat{v}_{CS}=R_{CS}\,H_{CS}(s)\,\hat{i}_L,\quad \hat{v}_c=G_{mi}(s)\,\hat{v}_{err},\quad \hat{d}=F_m\,\hat{v}_c",
+    ], ch=6)
+    body(story,
+        "<b>Step 2 — averaged boost model (one phase).</b> Duty-cycle averaging of the "
+        "switch ON/OFF states, with D′ = 1−D, gives the large-signal inductor, output-current "
+        "and ESR-corrected output-voltage relations:", 6)
+    eq_box(story, [
+        r"L\,\dfrac{di_L}{dt}=v_{in}-r_L\,i_L-D'\,v_o",
+        r"C(R+r_C)\,\dfrac{dv_C}{dt}=R\,D'\,i_L-v_C",
+        r"v_o=\dfrac{R}{R+r_C}\,v_C+\dfrac{R\,r_C}{R+r_C}\,D'\,i_L",
+    ], heading="Averaged large-signal model", number="6.2", ch=6)
+    body(story,
+        "<b>Step 3 — small-signal perturbation.</b> Perturbing each variable about its "
+        "operating point and dropping the second-order product gives the key linearised term:", 6)
+    eq_box(story, r"\widehat{D' i_L}=D'\,\hat{i}_L-I_L\,\hat{d}", ch=6)
+    body(story,
+        "<b>Step 4 — output voltage in terms of current and duty.</b> Solving the small-signal "
+        "capacitor and output equations (Laplace) and combining yields the ESR-zero factor:", 6)
+    eq_box(story, r"\hat{v}_o(s)=R\,\dfrac{1+sC r_C}{1+sC(R+r_C)}\,(D'\,\hat{i}_L-I_L\,\hat{d})", ch=6)
+    body(story,
+        "<b>Step 5 — inductor equation (set v̂<sub>in</sub>=0 for the control-to-current "
+        "transfer) and substitute.</b> Collecting î<sub>L</sub> and d̂ gives the general "
+        "duty-to-current plant before steady-state substitution:", 6)
+    eq_box(story,
+        r"G_{id}(s)=\dfrac{\hat{i}_L}{\hat{d}}=\dfrac{V_o\,[1+sC(R+r_C)]+D'^2 R\,I_L\,(1+sC r_C)}"
+        r"{(Ls+r_L)[1+sC(R+r_C)]+D'^2 R\,(1+sC r_C)}", ch=6)
+    body(story,
+        "<b>Step 6 — apply the boost steady-state relations.</b> With V<sub>o</sub>=V<sub>in</sub>/D′ "
+        "and the average diode current D′I<sub>L</sub>=I<sub>o</sub>=V<sub>o</sub>/R, so "
+        "D′R·I<sub>L</sub>=V<sub>o</sub>, the numerator collapses to a single zero — which is "
+        "<i>not</i> the ESR zero, because it carries R<sub>LOAD</sub>/2:", 6)
+    eq_box(story, [
+        r"\omega_z=\dfrac{1}{C\,(R_{LOAD}/2+r_C)}\quad\neq\quad \omega_{ESR}=\dfrac{1}{C\,r_C}",
+    ], heading="Numerator zero (not the ESR zero)", number="6.3", ch=6)
+    body(story,
+        "<b>Step 7 — full duty-to-current plant.</b> Normalising numerator and denominator:", 6)
+    eq_box(story, [
+        r"G_{id}(s)=\dfrac{V_{OUT}}{L}\cdot\dfrac{R_{LOAD}+2r_C}{R_{LOAD}+r_C}\cdot\dfrac{s+\omega_z}{s^2+a_1 s+a_0}",
+        r"a_1=\dfrac{C[r_L(R+r_C)+R r_C(1-D)^2]+L}{L\,C\,(R+r_C)},\quad a_0=\dfrac{(1-D)^2 R+r_L}{L\,C\,(R+r_C)}",
+    ], heading="Control-to-inductor-current plant", number="6.4", ch=6)
+    body(story,
+        "<b>Step 8 — close the loop.</b> Add current sensing R<sub>CS</sub>, the sense filter "
+        "H<sub>CS</sub>, the Type-II OTA compensator G<sub>mi</sub>, and the PWM gain F<sub>m</sub>=1/V<sub>RAMP</sub>. "
+        "The controller compares <i>voltages</i>, so the attenuation R<sub>CS</sub>/V<sub>RAMP</sub> appears in "
+        "the loop and the OTA must restore gain:", 6)
+    eq_box(story, [
+        r"T_i(s)=G_{id}(s)\cdot\dfrac{R_{CS}}{V_{RAMP}}\cdot G_{mi}(s)\cdot\dfrac{1}{1+s/\omega_{RC}},"
+        r"\quad \omega_{RC}=\dfrac{1}{R_f C_f}",
+    ], heading="Inner current-loop open-loop gain", number="6.5", ch=6)
+    body(story,
+        f"For this design R<sub>CS</sub>/V<sub>RAMP</sub> = {RCS_m:.0f} mΩ / {VRAMP:.0f} V = "
+        f"{RCS_m*1e-3/VRAMP:.3f} (strong attenuation, restored by the OTA); the sense-filter "
+        f"pole f<sub>RC</sub> = 1/(2π·R<sub>f</sub>C<sub>f</sub>) ≈ {fRC/1e3:.0f} kHz "
+        f"(R<sub>f</sub>={Rf/1e3:.0f} kΩ, C<sub>f</sub>={Cf*1e12:.0f} pF). The Type-II "
+        f"compensator places a zero at ≈1 kHz and a pole at ≈26 kHz for a current-loop "
+        f"crossover near f<sub>ci</sub> ≈ {fci/1e3:.1f} kHz.", 6)
+
+    # ───────────────────────── 6.1.3 outer voltage loop ─────────────────────────
+    sub_h(story, "6.1.3", "Outer Voltage-Loop Equation — Step-by-Step Derivation", 6)
+    body(story,
+        "<b>Step 1 — what it controls, and why it is slow.</b> The outer loop regulates the "
+        "DC bus by setting the current-command amplitude I<sub>cmd</sub> — it must not react "
+        "strongly at twice-line frequency (120 Hz for a 60 Hz line) or it would modulate the "
+        f"command and distort the input current. Hence the crossover is placed low, f<sub>cv</sub> ≈ "
+        f"{fcv:.0f} Hz ≪ 120 Hz.", 6)
+    body(story,
+        "<b>Step 2 — output-capacitor energy balance.</b> The PFC outer loop is modelled from "
+        "<i>power balance</i>, not simple capacitor-current injection, because the command sets "
+        "input power. Linearising the energy equation (the load-power derivative dP/dV = 2V/R is "
+        "the origin of the factor 2):", 6)
+    eq_box(story, [
+        r"C_O V_o\,\dfrac{dv_o}{dt}=p_{in}-\dfrac{v_o^2}{R_{LOAD}}",
+        r"\Rightarrow\ (C_O\,s+2/R_{LOAD})\,\hat{v}_o(s)=\dfrac{\hat{p}_{in}(s)}{V_{OUT}}",
+    ], heading="Energy-balance plant (note the factor 2)", number="6.6", ch=6)
+    body(story,
+        "<b>Step 3 — add the ESR zero and the boost RHP zero.</b> The capacitor terminal voltage "
+        "v<sub>o</sub>=v<sub>C</sub>+r<sub>C</sub>i<sub>C</sub> adds a left-half-plane ESR zero "
+        "(1+sC<sub>O</sub>r<sub>C</sub>); the boost non-minimum-phase behaviour adds a "
+        "right-half-plane zero (1−s/ω<sub>RHP</sub>) that subtracts phase:", 6)
+    eq_box(story, [
+        r"G_{vp}(s)=\dfrac{(1+sC_O r_C)\,(1-s/\omega_{RHP})}{C_O s+2/R_{LOAD}},"
+        r"\quad \omega_{RHP}=\dfrac{R_{LOAD}(1-D)^2}{L}",
+    ], heading="Output power-stage plant", number="6.7", ch=6)
+    body(story,
+        "<b>Step 4 — the remaining blocks.</b> The command passes through the closed inner "
+        "current loop (tracking term), the multiplier/modulator gain, the output-voltage divider, "
+        "and the Type-III voltage OTA compensator:", 6)
+    eq_box(story, [
+        r"G_{i,cl}(s)=\dfrac{T_i(s)/N_{CH}}{1+T_i(s)/N_{CH}},\quad "
+        r"G_{MOD}=\dfrac{K_{MAX}\,I_{OUT}}{5},\quad H_v=\dfrac{V_{FBPFC}}{V_{OUT}},\quad "
+        r"G_{mv}(s)=G_{MV}\,Z_{comp}(s)",
+    ], ch=6)
+    body(story,
+        "<b>Step 5 — assemble the outer voltage-loop gain.</b> Multiplying the five blocks:", 6)
+    eq_box(story, [
+        r"T_v(s)=\dfrac{K_{MAX}I_{OUT}}{5}\cdot\dfrac{V_{FBPFC}}{V_{OUT}}\cdot"
+        r"\dfrac{T_i(s)/N_{CH}}{1+T_i(s)/N_{CH}}\cdot"
+        r"\dfrac{(1+sC_O r_C)(1-s/\omega_{RHP})}{C_O s+2/R_{LOAD}}\cdot G_{MV}Z_{comp}(s)",
+    ], heading="Outer voltage-loop open-loop gain", number="6.8", ch=6)
+    body(story,
+        f"With the design values (K<sub>MAX</sub>={Kmax}, V<sub>FBPFC</sub>={VFB} V, "
+        f"V<sub>OUT</sub>={Vout:.0f} V, C<sub>O</sub>={Co_uF:.0f} µF, r<sub>C</sub>={rC_m:.0f} mΩ, "
+        f"N<sub>CH</sub>={Nch}, G<sub>MV</sub>={GMV_uS:.0f} µS): the divider gain "
+        f"H<sub>v</sub>=V<sub>FBPFC</sub>/V<sub>OUT</sub> = {Hv:.5f}; the multiplier gain "
+        f"G<sub>MOD</sub>=K<sub>MAX</sub>I<sub>OUT</sub>/5 rises with power, "
+        f"≈{Gmlo:.2f} A/V at {Plo:.0f} W and ≈{Gmhi:.2f} A/V at {Phi:.0f} W; the ESR zero "
+        f"f<sub>ESR</sub> ≈ {fESR/1e3:.1f} kHz and the RHP zero both sit well above the "
+        f"{fcv:.0f} Hz crossover. R<sub>LOAD</sub>=V<sub>OUT</sub>²/P<sub>OUT</sub> ranges "
+        f"≈{Vout**2/Phi:.0f} Ω (high power) to ≈{Vout**2/Plo:.0f} Ω (low power), so the loop "
+        f"gain is power-dependent — a compensator sized at {Phi:.0f} W gives a lower crossover "
+        f"at {Plo:.0f} W. At f<sub>cv</sub> the current-loop tracking term G<sub>i,cl</sub> ≈ 1 "
+        f"but is retained for accuracy. A Type-III network (zeros ≈3/12 Hz, poles ≈17/50 Hz) sets "
+        f"the crossover, phase margin and 120 Hz rejection.", 6)
+    annotation(story, "THEORY",
+        "Both loop equations are derived in full in the project theory documents "
+        "<i>Inner_Current_Loop_Theory_Derivation</i> and "
+        "<i>Outer_Voltage_Loop_Theory_Derivation</i>, and rest on the average-current-mode and "
+        "compensator theory in the control-loop references (SLUA079, SLUP098, SLVA662, and the "
+        "FAN9672 / FAN9673 application notes — see §6.9). This first pass gives the algebraic "
+        "backbone and the final symbolic equations; the numerical compensator values, "
+        "per-operating-point gains and stability margins follow in §6.4–§6.6.", 6)
+
+
+def _ch6_references(story, controller_id="fan9672"):
+    """Append §6.9 — a bibliography + per-design-aspect citations pulled from the
+    controller reference database (app/reference_agent). Fully guarded: any failure
+    (missing manifest, PyMuPDF, etc.) is swallowed so the report still builds."""
+    try:
+        from app.reference_agent import get_agent
+        agent = get_agent()
+        src = agent.sources(controller_id)
+    except Exception:
+        return          # reference DB unavailable → skip the section, still build the report
+    if not src:
+        return
+
+    cinfo = (src.get("controllers") or {}).get(controller_id, {})
+    cname = cinfo.get("name") or controller_id.upper()
+
+    step_h(story, "6.9", "Reference Documentation", 6)
+    annotation(story, "INSIGHT",
+        "The compensator topology and design equations in this chapter follow the "
+        "manufacturer datasheet, application notes and control-loop-design theory listed "
+        "below. These citations are retrieved automatically from the project's local "
+        "controller reference database for the selected analog controller "
+        "(<b>" + cname + "</b>), so the design is traceable to its sources.", 6)
+
+    # 6.9.1 — bibliography (controller docs + shared control-loop theory)
+    biblio = []
+    for d in cinfo.get("documents", []):
+        biblio.append([d.get("doc_no") or d.get("file") or "—",
+                       d.get("title") or "—",
+                       (d.get("type") or "").replace("_", " ")])
+    for coll in (src.get("common") or {}).values():
+        for d in coll.get("documents", []):
+            biblio.append([d.get("doc_no") or d.get("file") or "—",
+                           d.get("title") or "—",
+                           (d.get("type") or "").replace("_", " ")])
+    if biblio:
+        data_table(story, "6.9.1", "Reference Documents",
+            "Datasheet, application notes and control-loop-design theory held in the local "
+            "reference database for this controller and the shared control-loop collection.",
+            ["Reference", "Title", "Type"],
+            biblio, col_widths=[CW*0.16, CW*0.60, CW*0.24], ch=6)
+
+    # 6.9.2 — grounded, cited summary per design aspect. When an LLM is configured
+    # (ANTHROPIC_API_KEY) each aspect gets a short paragraph written strictly from the
+    # retrieved excerpts with inline citations; otherwise it falls back to a citation table.
+    aspects = [
+        ("Control architecture (ACM)", "average current mode interleaved PFC control architecture inner current outer voltage loop"),
+        ("Current loop design",        "current loop crossover frequency RIC Type-II compensator current sense gain"),
+        ("Voltage loop design",        "voltage error amplifier loop compensation bandwidth Type-III RHP zero"),
+        ("Compensator equations",      "Type II and Type III compensator transfer function component value equations"),
+        ("FAN9672 pin configuration",  "FAN9672 pin functions external component connections"),
+    ]
+    _esc = lambda s: (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    rows, blocks, used_llm_any = [], [], False
+    for label, q in aspects:
+        try:
+            r = agent.query(q, controller=controller_id, k=3, synthesize=True)
+        except Exception:
+            continue
+        ps = r.get("passages") or []
+        if not ps:
+            continue
+        rows.append([label, ps[0].get("citation") or "—", ps[0].get("title") or "—"])
+        if r.get("used_llm") and (r.get("answer") or "").strip():
+            used_llm_any = True
+            cites = ", ".join(dict.fromkeys(p.get("citation") for p in ps if p.get("citation")))
+            blocks.append((label, r["answer"].strip(), cites))
+
+    if used_llm_any:
+        sub_h(story, "6.9.2", "Grounded Reference Summary by Design Aspect", 6)
+        annotation(story, "INSIGHT",
+            "Each summary below is written strictly from the retrieved reference excerpts and "
+            "cites them inline — no claim extends beyond the cited sources. Generated by the "
+            "controller reference agent at report time.", 6)
+        for label, answer, cites in blocks:
+            body(story, "<b>" + _esc(label) + ".</b> " + _esc(answer) +
+                 ("  <i>[Sources: " + _esc(cites) + "]</i>" if cites else ""), 6)
+    elif rows:
+        data_table(story, "6.9.2", "Key References by Design Aspect",
+            "The most relevant source passage for each control-design aspect, retrieved from "
+            "the reference database (BM25 ranking over the indexed documents).",
+            ["Design aspect", "Citation", "Source document"],
+            rows, col_widths=[CW*0.28, CW*0.18, CW*0.54], ch=6)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

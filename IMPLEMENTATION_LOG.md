@@ -2533,3 +2533,435 @@ confirmed (flux band + the double-hump signature). The full report is regenerate
 PFC_Report_VERIFY_Steps1_16.pdf for review.
 
 All 12 v11 quantities (E1–E54 task-3 list) are now part of the report.
+
+---
+
+## Session 2026-06-14 (cont'd) — Embedded-iframe scrollbars + DC-bus capacitor simulation step
+
+### A. Single browser scrollbar on the studio pages (Review / Sim Agent / Control Design)
+Removed the "double scrollbar" (inner iframe scroll stacked next to the page scroll).
+Each embedded studio iframe now auto-grows to its full content height so only the
+browser scrollbar moves the page.
+- `ReviewMagnetics.tsx`, `SimulationAgent.tsx` (same-origin srcDoc): neutralise the
+  studio's internal `min-height:100vh` (`.replace('min-height:100vh','min-height:0')`),
+  drop the fixed `height: calc(100vh-…)`, add `scrolling="no"`, and on load measure
+  `document.body.scrollHeight` → set iframe height; a `ResizeObserver` on `body` keeps it
+  synced across tab/slider changes.
+- `ControlDesign.tsx` (cross-origin, no allow-same-origin): can't read the iframe DOM, so
+  `public/control_design.html` now posts `{type:'docHeight',height}` to the parent (on load,
+  resize, ResizeObserver, and after `setPythonValues`); the component listens and sets the
+  iframe height.
+- Internal scroll regions that are meant to scroll (studio sidebars `.side{overflow:auto}`,
+  `.table-wrap{max-height:360px}`) are untouched.
+
+### B. New DC-bus capacitor simulation step (between Step 15 and Step 16)
+After the designer approves the capacitor, the flow now routes through a simulation check
+before Control Design.
+- Embeds `specs/Capacitor/pfc_dcbus_agent_v4.html` (copied to
+  `frontend/src/assets/pfc_dcbus_agent_v4.html`). Tool boots from
+  `window.__DCBUS_PACKAGE__` (schema `dcbus-1.2`).
+- New `frontend/src/components/CapacitorSimAgent.tsx`:
+  - Fetches the authoritative envelope via `step15CapacitorDesign({state})` (same source as
+    the Step-15 page: `design.inputs.{Vout_V,f_line_Hz,Vdc_ripple_V,Vdc_min_V,t_hold_ms}`),
+    combines it with `confirmedState.intake.{application,thermal}` (Vac min/max, PF, eff,
+    ambient, phases via `selected_channels`, fsw via `topology_specific_inputs`) and the
+    approved `result.selected_cap` (manufacturer/series/C_uF/Vrated/ESR/I_rated/T0/L0).
+  - Injects `window.__DCBUS_PACKAGE__` in `<head>`; a lock script before `</body>` disables
+    every `.inputs` field (predefined → read-only), hides the package load/reset/export
+    buttons, and disables the ambient slider `sT`. Only the INPUT VOLTAGE (`sVac`) and
+    OUTPUT POWER (`sP`) sliders stay interactive → live ripple / ripple-I margin /
+    hotspot-lifetime / V-derate / scope.
+  - Same iframe auto-resize pattern (with a >2px threshold guard, since the tool listens to
+    `window.resize → refreshAll`, to avoid a set→resize→set thrash).
+  - Acceptance limits mirror upstream: Vripple/holdup/Vmin from `design.inputs`,
+    `Imargin_min_pct = 0` (N/A if the part has no I_rated), `Thot_max_C = T0`,
+    `life_min_h = 15×8760`, `Vderate_max_pct = 90`.
+- `App.tsx`: added `'capsim'` to `Step`, `SS` label map; `handleStep15Approve` now goes to
+  `capsim`; new render block (`onApprove → step16`, `onBack → step15`); `ControlDesign`
+  `onBack` now returns to `capsim`.
+- `Step15Capacitor.tsx`: approve button relabelled "Approve & Go to Simulation".
+
+Verified: `tsc --noEmit` clean; `vite build` succeeds (50 modules).
+
+### B2 — DC-bus sim corrections (false REJECT + two-power-band model)
+The first cut judged the verdict at the tool's default corner `{VacMin, PoutMax}` = **90 V /
+3600 W** — an impossible operating point (at 90 V low line the rated power is only 1700 W).
+That over-stressed the HF current term → false REJECT. Step 15 actually sizes the worst case
+at **180 V / 3600 W** (high line). Fixes:
+- **Engine made band-aware** (`frontend/src/assets/pfc_dcbus_agent_v4.html`): added `_opAt(op,
+  Vac)` (per-band eff/PF/Pout, low line ≤150 V vs high line) used in `hfCurrent` + `compute`;
+  `worstCorner` now returns the high-line band min-voltage at rated power; `formToPkg` carries
+  `bands`/`lineBreak_V` through each refresh.
+- **Two-band package** (`CapacitorSimAgent.tsx`, schema `dcbus-2.0`): `operating.bands.{low,high}`
+  with `{VacMin,VacMax,Pout_W,PF,eff}` (low 1700 W @ eff .945, high 3600 W @ eff .965),
+  `lineBreak_V:150`. Capacitance at **nominal** (`tol_pct=eolAging_pct=0`) to match how Step 15
+  sized `C_required`. Lifetime gate set to `null` (informational) — owned upstream by Step 15's
+  3-method model; the tool's single-point Arrhenius would falsely fail an already-validated part.
+- **GUI per the spec**: PF, efficiency, fsw, phases are no longer shown — applied automatically
+  in the engine per operating point. DC bus voltage, line frequency, ambient range and the
+  selected-capacitor data are shown as read-only constant **tiles** (lock script rebuilds the
+  left panel; the original form fields stay hidden in the DOM so the engine still reads them).
+  The OUTPUT-POWER slider is **coupled to the line band** (low→1700, high→3600) selected by
+  INPUT VOLTAGE; **AMBIENT is now adjustable** too (Vac / Pout / Tamb sliders).
+- Verified headless via the tool's pure engine: worst corner = `{180,3600,50}` → **APPROVE**
+  (ripple 11.8/20 Vpp, hold-up 23/20 ms, ripple-I margin 32 %, hotspot 68/105 °C, derate
+  88.6/90 %); the impossible 90 V/3600 W corner gave only 6 % ripple-I margin (the false-reject
+  driver). `tsc`/`vite build` clean; lock-script IIFE `node --check` OK.
+
+### B3 — line split 180 V, auto-play band coupling, plots, scope ripple view
+- **Line split moved to 180 Vac** (was 150): `lineBreak_V=180`, boundary comparison `<` in both
+  the engine `_opAt` and the React band logic so 180 V itself is high line (the worst corner).
+- **Power-band coupling made native** in the tool (`coupleBandPower()` called at the top of
+  `refreshExplore`) so the auto-play "sweep Vac across range" now switches OUTPUT POWER to the
+  high-line rated power past 180 V (the old React `input`-listener coupling never fired on the
+  sweep's programmatic `.value` writes). Removed the duplicate coupling from the React lock script.
+- **Plots reconnected to the band model**: exposed `DCBUS._opAt`; "Lifetime vs input voltage"
+  now uses each band's rated power per Vac (real curve with a step at 180 V instead of the
+  impossible low-V/high-P collapse); "Ripple vs output power" sweeps 0→band-rated power at the
+  current line. Lifetime-vs-ambient and ripple-vs-C already ran at the (band-consistent) explore
+  point.
+- **Scope shows the capacitor total ripple**: removed the amber `v_in(t)` line trace (it spanned
+  ±√2·Vac and flattened the few-volt bus ripple) and zoomed the top scope onto `v_bus` ±
+  max(ripple-limit, VppTot)·1.35 so the total LF+HF pk-pk swing is visible against the ripple-limit
+  band; updated the readout ("v_bus total ripple … Vpp pk-pk") and legend.
+- Verified headless: worst corner still `{180,3600}`→APPROVE; band split @90/179→1700, @180/230→3600;
+  Lifetime-vs-Vin = 13.6→19.3 yr (low line) stepping to 7.5 yr at 180 V then 12 yr at 264 V.
+  `tsc`/`vite build` clean.
+
+### B4 — scope tight-fit, fixed plot axes, lifetime calibration
+- **Scope auto-fits tightly to the bus ripple**: `scopeTop` y-range is now the actual min/max of
+  the `v_bus` envelope (`VbB`/`VbT`) ± 15 %, with the wide ripple-limit band removed (it was
+  forcing the scale). The total LF+HF pk-pk fills the view; legend updated.
+- **Fixed plot axes (cursor moves, not the scale)**: `renderStaticPlots` precomputes stable bounds
+  from the worst/best design case — ripple-axis top `yRip` (full high-line power), `yRipC` (min-C),
+  lifetime-axis top `yLife`. Applied to **Ripple-vs-output-power** (x 0→high-line rated, y 0→yRip),
+  **Ripple-vs-total-C** (x/y fixed), **Lifetime-vs-ambient** (y 0→yLife). Dragging sliders now moves
+  the cursor within a stable frame.
+- **Lifetime calibrated to Step 15**: the tool's single-point Arrhenius (`L0·2^((T0−Thot)/10)`) was
+  off (~7.5 yr with a default L0=5000 h) vs Step 15's 3-method 25.4/18.4/74.6 yr. The component now
+  fetches `step15CapLifetime` (at the worst-corner ambient) and passes `bank.cap.lifeAnchor_h =
+  governing×8760`; the tool's `calibrateLife()` back-computes a constant `voltageLifeMult` so the
+  worst-corner life equals the governing figure, and all explore/plot lifetimes scale physically
+  around it. `formToPkg` carries the multiplier. A tile shows the Step-15 3-method numbers + anchor.
+- Verified headless: anchor 18.4 yr → mult 2.465 → calibrated corner life 18.40 yr (APPROVE);
+  explore points 38 yr (low line, hot) … 84 yr (high line, cool). `tsc`/`vite build` clean.
+
+---
+
+## Session 2026-06-14 (cont'd) — Controller reference database + database agent
+
+### C1 — Local reference DB (`backend/data/controllers/`)
+One folder per controller + shared theory, with a machine-readable `manifest.json` and `README.md`.
+- `fan9672/` — FAN9672-D (datasheet), AN4165-D (FAN9673 sibling interleaved-CCM-PFC guideline,
+  same method), AN5257 (avg-current-mode interleaved PFC theory), plus the project's worked
+  `FAN9672_Control_Loop_Design_Report_Rev2.1.doc` and `FAN9672_Control_Design_Tool_v4.html`.
+- `_common/control_loop_design/` — SLUA079, SLUP098, SLVA662, Practical-Feedback-Loop-Design-Buck
+  (controller-agnostic compensator theory).
+- Copied from `specs/Controller/{FAN9672 Reference Documents, Control Loop Design Reference documents}`.
+- **Known gap:** designer named AND9925-D for FAN9672 but the source folder had AN5257 instead;
+  recorded under `missing` in the manifest/README — drop the PDF in to add it.
+
+### C2 — Database agent (`backend/app/reference_agent.py`)
+Self-contained retrieval agent, **no new dependencies** (PyMuPDF + stdlib only):
+- Reads `manifest.json`; extracts text from **PDFs** (per page) and **HTML/MHTML** incl. the
+  HTML-based Word `.doc` export (per ~1800-char window). Binary OLE `.doc` is skipped.
+- **Pure-Python BM25** ranker (k1=1.5, b=0.75) over page/section chunks; tokenizer keeps technical
+  tokens like `fan9672`. Index cached to `data/controllers/.index.json` (mtime/size signature →
+  auto-rebuild; gitignored).
+- Controller-scoped retrieval: `query(question, controller="fan9672")` searches that controller's
+  docs + its `common_collections`. Returns ranked passages with citations (`DOC p.N` / `DOC §N`) +
+  snippets. Optional `synthesize=True` → grounded, cited Claude answer (`claude-sonnet-4-6`,
+  `ANTHROPIC_API_KEY`); **gracefully degrades to retrieval-only** when no key (current state).
+- Endpoints in `main.py`: `POST /controller-db/query`, `GET /controller-db/sources`.
+- Verified: index = 134 chunks / 9 files; queries return correct top hits (RIC/crossover → AN4165-D
+  pp.6-7; compensators → SLVA662; FAN9672 comp values → the report `.doc` + design tool). API 200
+  via TestClient. CLI: `python -m app.reference_agent "<question>"`.
+
+### C3 — Step-16 hook + GUI removals
+- **Reference agent hooked into Step 16**: new `frontend/src/components/ControllerReferences.tsx`
+  (collapsible "📚 Controller references" panel) rendered in `ControlDesign.tsx` between the iframe
+  and the action bar. Auto-loads a starter set on mount, has a free-text search box + topic chips
+  (Voltage loop / Current loop / Multiplier-gain / Type II-III / Pin functions), and shows ranked
+  cited passages (citation badge + title + snippet). Client fn `controllerDbQuery` + types
+  `RefPassage`/`RefQueryResult` added to `client.ts`. Retrieval-only until an `ANTHROPIC_API_KEY`
+  is set (then `synthesize` can add a cited answer).
+- **GUI removals (per designer):**
+  - `DonePanel.tsx` — removed the "Mode B — 25-step engineering sequence" card + its `MB_STEPS` data.
+  - `Step7Wizard.tsx` — removed the wire-page note "Both modes apply the same pass/fail gates …".
+  - `ReviewMagnetics.tsx` inject — removed the top "Reviewing <part> …" banner and the
+    "Pre-loaded from approved design …" footer; now also `hideSection('3D view controls')` and
+    `hideSection('Summary + export')` in the studio sidebar. Header comment updated.
+- Verified: `tsc` + `vite build` clean; live `POST /controller-db/query` returns cited passages.
+
+### C4 — report citations + Review turns-mismatch fix
+- **Step-16 report citations**: new `_ch6_references()` in `doc_report_builder.py` appends **§6.9
+  Reference Documentation** to Ch.6 — §6.9.1 bibliography (controller docs + shared control-loop
+  theory, from `reference_agent.sources()`) and §6.9.2 per-design-aspect references. Fully guarded
+  (try/except) so a missing DB never breaks the report. Verified: renders §6.9/6.9.1/6.9.2 with all
+  six docs + aspect citations.
+- **§6.9.2 grounded cited paragraphs**: each aspect (control architecture, current/voltage loop,
+  compensator equations, pin config) now queries the agent with `synthesize=True, k=3`; when an LLM
+  is configured it renders a short paragraph written strictly from the retrieved excerpts with
+  inline citations + a `[Sources: …]` line (`body()`), under sub-heading "Grounded Reference
+  Summary by Design Aspect". Falls back to the §6.9.2 citation table when no/failed LLM. Answer text
+  is HTML-escaped (`<`,`&`,`>`) before going into ReportLab Paragraphs. Verified both paths
+  (live key is set but out of credits → graceful table fallback; monkeypatched LLM → grounded
+  paragraphs render, inline cites kept, escaping correct).
+- **Review-page turns mismatch (recurring) — root cause + guardrail**: the studio's `N` control is
+  `<input type="range" max="52">` (stacks max=4). A range input **clamps `.value` to [min,max]**, so
+  injecting an approved `PY.N`=71 silently truncated the FORM field to 52. The JSON-island summary
+  showed the real 71, but `drawWindowBuild` (`passes = i.N×nParallel`), fill %, and the canvas
+  overlay read the clamped form value → fewer turns drawn. **Guardrail** (`ReviewMagnetics.tsx`
+  overrides loop): before assigning any override, if the target is a `type="range"`, widen its
+  `min`/`max` to include the value, then set `.value` (and sync the `*Val` label). Now no hardcoded
+  slider bound can truncate an injected value. Also fixed the hardcoded "2 × N" label in
+  `review_magnetics.html` to use `cfg.nParallel`. Documented as recurring bug #5 in memory
+  `review_page_recurring_bugs`.
+- `tsc` + `vite build` clean; `_ch6_references` renders standalone (3 pp).
+
+### C5 — more Review / DC-bus GUI removals
+- **Review page** (`ReviewMagnetics.tsx` inject block 5b — elements HIDDEN not removed, so the
+  studio's onclick wiring never hits null): hide all `.toolbar` + `.export-grid` (every "Export …
+  PNG", Export JSON/CSV, "Generate design review summary", "Refresh summary", "Copy summary"),
+  hide `#reviewStatus` (the "Press \"Generate…\"" line), and hide the captions "Titles deliberately
+  match report style…" (`.tiny`) and the h3 "Generate design review summary". Removed the React
+  "engine fed our DB physics · tiers …" line from the shadow cross-check panel.
+- **Simulation Agent** (`pfc_sim_agent_v14.html`): `noteBox` no longer prints the "All design data …
+  model fallbacks" blurb (keeps only the validation-error text when present).
+- **DC-bus simulation** (`CapacitorSimAgent.tsx` lock): removed the "These specs are predefined …
+  output power follows the selected line range" tile note; the masthead `srcTag` ("package:
+  injected (window.__DCBUS_PACKAGE__)") is now `display:none`.
+- Verified: phrases gone from source; dcbus lock IIFE `node --check` OK; `tsc`/`vite build` clean.
+
+### C6 — Voltage-sweep dual y-axis + iGSE note removal
+- **Dual y-axis** on Review → Voltage sweep → "Flux Density and Inductance Vs Input Voltage"
+  (`review_magnetics.html`): extended `drawPlot()` to support a right axis — any series tagged
+  `axis:'right'` auto-scales against a separate right scale with right-side tick labels, reserved
+  right margin (`m.r` 58 when present), and an optional `rlabel`. Fully backward-compatible (no
+  right-axis series → identical to before, used by all the other charts). Updated the `sweepPlot2`
+  call: orange **Bac,pk** stays on the LEFT in true Tesla (`ylabel` "Flux density Bac,pk (T)"),
+  green **Lfull** moves to the RIGHT axis in true **µH** — the old `Lfull/4000` display hack is
+  removed (legend now "Lfull (µH)", `rlabel` "Inductance Lfull (µH)"). Green now reads actual
+  inductance and matches the `Lfull (µH)` table column.
+- **Removed the iGSE banner row** "Python iGSE — N design points · sweep charts remain analytical"
+  that `ReviewMagnetics.tsx` block H prepended to the sweep table; the table starts at data rows.
+- Verified: `tsc`/`vite build` clean; `review_magnetics.html` script `node --check` OK.
+
+### C7 — Design Review Summary tab: fit table + read-only justified summary
+- **Audit table fits, no inner scroll**: scoped CSS `#review .table-wrap{max-height:none;overflow:visible}`
+  (global `.table-wrap` 360px scroll unchanged for the other tabs).
+- **Summary box** (`#summaryOut`): made **read-only** (`readonly` attr), **justified**
+  (`text-align:justify`), no inner scrollbar (`resize:none;overflow:hidden`), and **auto-grows to
+  content** via new global `fitSummary()` (sets height = scrollHeight). Called at the end of the
+  studio `renderAll()`, after the React inject's block-G summary rewrite, and on every tab switch
+  (so it sizes correctly once the hidden Review tab becomes visible). The existing iframe
+  ResizeObserver then grows the page to fit → single browser scrollbar, no clipping.
+- Verified: `tsc`/`vite build` clean; studio `node --check` OK.
+
+### C8 — DC-bus sim: heading text + Vwork from design
+- Tile section headings (`CapacitorSimAgent.tsx`): "Fixed operating conditions" → "Operating
+  conditions"; "Selected capacitor (fixed)" → "Selected capacitor"; lifetime note
+  "Lifetime — Step 15 (3-method, @N °C):" → "Lifetime 3-method, @N °C:".
+- Removed "· package: injected (window.__DCBUS_PACKAGE__)" from the verdict `stampWhy` text
+  (`pfc_dcbus_agent_v4.html` renderVerdict); the masthead `srcTag` was already hidden (C5).
+- **Vwork now equals the design DC bus voltage**: was `Vbus/nS·(1+imb) + VppTot/2/nS` → showed
+  397 V (393 bus + ~4 V half-ripple). Changed to `Vbus/nS·(1+imb)` so the working voltage is the
+  upstream design bus voltage (e.g. 393 V); ripple is no longer added to the derate basis. Verified
+  headless: Vwork 393.0 V, vDer 87.3 %, verdict APPROVE.
+- `tsc`/`vite build` clean; dcbus engine `eval`/compute smoke OK.
+
+### C9 — DC-bus sim: part number, temp-rating fix, lifetime gate, footer removal
+1. **Part number tile** added to "Selected capacitor"; `bank.cap.part_number` now carried in the
+   package (from `selected_cap.part_number`).
+2. **Temp-rating fix** (no 85 °C parts exist): the cap-table rows never exposed a numeric temp, so
+   `chosenPart.temp_rating_C` was `undefined` → fell back to **85**. Added `op_temp_max_C` to the
+   `get_cap_table` rows (`step15_cap_db.py`); `Step15Capacitor.tsx` now sets `selected_cap`
+   `op_temp`/`temp_rating_C` from `chosenPart.op_temp_max_C ?? 105` (both report + onConfirm paths).
+   Backend `run_capacitor_design`/`verify_configuration` fallback changed `…get("temp_rating_C",85)`
+   → `get("temp_rating_C") or get("op_temp_max_C") or 105`. (Re-approve Step 15 to refresh an
+   already-stored cap.)
+3. **Lifetime gate** in the acceptance ledger: `life_min_h` null → `15×8760`; ledger Lifetime row now
+   shows years (value/limit "18.4 yr" / "15 yr"). PASS/FAIL is consistent with Step 15 because the
+   sim life is calibrated to its governing value. Verified headless: 18.4 yr ≥ 15 yr → PASS, verdict
+   APPROVE.
+4. **Removed the footer blurb** "Tier-1 analytic model, judged at … follow measured > fields >
+   analytic." (`pfc_dcbus_agent_v4.html`).
+- `tsc`/`vite build` clean; backend ast/import OK; dcbus engine compute smoke OK.
+
+### C10 — remove remaining hardcoded/stale values in cap selection
+Audit found three more values the DC-bus sim hardcoded instead of sourcing from the DB (same
+root cause as the temp bug — `get_cap_table` under-exposed DB columns). Fixed:
+- **Cap-table now exposes** `ripple_hf_A`, `lifetime_temp_C`, and a package-based `Rth_ca_CW`
+  (`step15_cap_db.py`: 10 °C/W snap-in/screw, else 15 — same model as `verify_configuration`).
+  Carried into `selected_cap` (`Step15Capacitor.tsx`, both report + onConfirm; type extended).
+- **`CapacitorSimAgent.tsx`** now uses real values instead of guesses:
+  - `freqMult_HF` = `ripple_hf_A / I_rated_120hz_A` (was hardcoded 1.4).
+  - `Rth_CperW` = `Rth_ca_CW` (was hardcoded 18 → now 10 for the snap-in; hotspot 62.9→57.2 °C,
+    consistent with Step 15).
+  - Arrhenius reference `T0_C` = `lifetime_temp_C`; new `temp_max_C` = `op_temp_max_C` drives the
+    "Temp rating" tile and the `Thot_max_C` hotspot limit (previously conflated into one `T0`).
+- Verified headless: cap-table exposes ripple_hf 2.996 / lifetime_temp 105 / op_temp_max 105 /
+  Rth 10; freqMult 1.4; Rth 10 → hotspot 57.2 °C, life 18.4 yr (anchored), verdict APPROVE.
+  `tsc`/`vite build` clean; backend ast OK. (Re-approve Step 15 to refresh an already-stored cap.)
+
+### C11 — Control Design page improvements ("Improvments and Corrections.docx")
+All in `frontend/public/control_design.html` (mirrored to `src/assets/`), cross-origin so edited
+directly; buttons HIDDEN (not deleted) to keep their JS handlers from hitting null:
+1. Title "PFC Control Loop Design Tool — v4" → **"Control Loop Design"** (`<h1>` + `<title>`).
+2. Removed the "Mode-specific design … no anchored estimates" subtitle blurb.
+3. Hid the toolbar buttons: Load Report Defaults, Export Summary, Generate Report, Save JSON,
+   Load JSON (kept Low Line / High Line). The React Steps-1–16 report button is unaffected.
+4. **Mode Inputs**: Vout, fSW, L per phase, CO, rL, rC, η are now `readonly` constants (dashed,
+   muted styling via `input[readonly]`); values still injected by `setPythonValues` which ends in
+   `recalc()`.
+5. **New "Components Fixed by Controller" panel** holding RIAC, RVIR, RRLPK (moved out of Mode
+   Inputs, read-only — set by the FAN9672 / mode).
+6. Removed the **Controller References** panel from `ControlDesign.tsx` (dropped import + render).
+7. **Soft Start C_SS**: only `t_SS` stays editable; the standard cap is now a read-only *suggested*
+   value (new `bomRow4Static` + `AUXHEAD_SUGGEST`, `css = nearestStd(...)`) instead of a selectable
+   dropdown.
+- Verified: app script `node --check` OK; `tsc`/`vite build` clean. (Cross-origin iframe served
+  from `public/`.)
+
+### C12 — Documentation agent: control-loop equation derivation (Ch.6)
+Added a step-by-step theory/derivation of the inner current-loop and outer voltage-loop equations
+to the Control Scheme chapter, from the two new derivation docs
+(`Inner_Current_Loop_Theory_Derivation.docx`, `Outer_Voltage_Loop_Theory_Derivation.docx`) +
+the DB control-loop references.
+- New `_ch6_loop_derivation(story, res)` in `doc_report_builder.py`, rendered as **§6.1.1 Loop
+  Structure**, **§6.1.2 Inner Current-Loop Derivation** (8 steps: averaged boost model →
+  small-signal → Gid(s) with the R_LOAD/2 numerator zero ≠ ESR zero → full T_i(s) with
+  R_CS/V_RAMP, H_CS, Type-II OTA), **§6.1.3 Outer Voltage-Loop Derivation** (energy-balance plant
+  with the factor-2 denominator → ESR + RHP zeros → G_i,cl tracking, G_MOD, H_v, Type-III →
+  full T_v(s)). Equations via `eq_box` (matplotlib mathtext) with worked numbers (R_CS/V_RAMP=0.003,
+  f_RC≈169 kHz, H_v≈0.00636, G_MOD≈1.21/2.56 A/V, f_ESR≈7.2 kHz) + a THEORY box citing the docs/§6.9.
+- **No renumbering**: placed as subsections of §6.1 (rendered before §6.2), so §6.2–§6.9 are
+  untouched — avoids the documented renumbering-cascade risk.
+- §6.1 heading → "Control Architecture and Loop-Equation Derivation"; chapter-splash bullet updated.
+- Fixed two unsupported mathtext tokens (`\big(`/`\Big(` → plain parens).
+- Verified: `_ch6_loop_derivation` renders (3 pp standalone); full `_ch6` builds 15 pp with clean
+  6.1→6.1.3→6.2→…→6.9 numbering and all existing sections intact. Backend ast/import OK.
+  ("Later we will add more details" — this is the first pass: algebraic backbone + final equations.)
+
+### C13 — Control-design report replication, Phase 1 (Steps 1–8) + AND9925-D in DB
+Target: replicate `FAN9672_Control_Loop_Design_Combined_with_Thesis_Derivation.docx` (69 tables, 14
+figures) as our Control Design chapter at equal quality/detail. Phase 1 = calc agent + report for
+Steps 1–8 (review iteration).
+- **AND9925-D added** to `data/controllers/fan9672/` + manifest (title "FAN9672/9673 Tips and
+  Tricks", Rev 3); reference index rebuilt; README `missing` cleared.
+- **Calc agent `step16_steps1_8.py`** (`compute_steps_1_8`): Steps 1 (spec inputs) · 2 (base
+  constants) · 3 (IAC + V_LPK, 8 pts) · 4 (oscillator R_RI candidates) · 5 (FBPFC divider + PVO) ·
+  6 (R_CS Method-1 AN4165 Eq31 + Method-2 AND9925 Eq11 sweep + verify + power) · 7 (GMOD 3-path
+  A/B/C across 8 pts + scorecard) · 8 (R_GC/R_LS/C_SS/ILIMIT/ILIMIT2). Reverse-derived formulas
+  verified to reproduce the doc: R_CS M1 15.99/15.10 mΩ, V_EA,max 4.356/4.577 V, GMOD A
+  5.0583/10.1167, C 1.7131/3.4262, B/C 2.9527, R_GC 38.10 kΩ, R_LS 66.32 kΩ, C_SS 400 nF.
+- **Report `report_steps1_8.py`** (`build_steps_1_8` / `make_pdf`) renders the block via
+  doc_report_builder helpers (step_h/sub_h/body/eq_box/data_table/annotation) → 12-page review PDF
+  `PFC_Chapter6_Steps1_8_Control_Design.pdf` (our font/alignment, callout boxes, typeset equations).
+- **Designer resolutions (2026-06-16):** (1) R_RI now **computed from f_SW** via the FAN9672-D
+  oscillator relation `R_RI = 1.2e9/f_SW − 3430` → 13.71 kΩ → E96 13.7 kΩ (70.05 kHz); candidate
+  table is computed from E96 neighbours, not hardcoded. (2) ILIMIT crest current uses the
+  **standard formula** √2·P/(η·N·V_min) = 14.13 A → R_ILIMIT 17.07 kΩ, R_ILIMIT2 4.02 kΩ.
+  (3) V_LPK@264 Vac = 3.71 V accepted. Review PDF regenerated (12 pp).
+- **Schematic plan agreed:** SchemDraw (Type-II/III networks + architecture block diagrams,
+  auto-labelled from the calc agent) + KiCad (board schematic Fig S-1); Bode/transient via
+  matplotlib in Phase 2. SchemDraw is a new dependency — to add on confirmation.
+
+### C13b — Steps 1–8 expanded to FULL document detail (pages 17–31)
+Designer flagged the first cut abbreviated the steps. Re-extracted the docx INCLUDING OMML math
+(`m:oMath`) to capture every worked equation, then rebuilt to reproduce pages 17–31 verbatim —
+only font/text/alignment changed to our style.
+- Calc agent (`step16_steps1_8.py`) now also emits all worked intermediates: Method-1 num/den per
+  range; §6.4 V_EA back-calc num/den; §7.4/7.5 Path A/B/C step values (LL & HL); and the §7.6
+  **V_RM × V_LPK invariant** table — derived exact formulas FR `K_RM·V_EA,eff/(2·K_RLPK·R_RLPK)` =
+  0.37775 and HV `…/(K_RLPK·R_RLPK)` = 0.79995, V_RM@90FR = 0.299 (matches doc).
+- Report (`report_steps1_8.py`) rewritten: every sub-step rendered as label + equation with the
+  substituted numbers (e.g. "Step 2 Numerator: 90²×2×7500 = 8100×15000 = 1.215×10⁸"), both LL and
+  HL, every description/THEORY/CONCEPT/INSIGHT/PITFALL/DECISION verbatim, every table full
+  (3.1/3.2/6.1/6.2a/6.2b/6.3/6.4/7.1/7.2/7.5/7.6/7.7/8.6). Review PDF now **21 pp** (was 12).
+- Verified rendering of worked pages; numbers match the document throughout.
+
+### C13c — Steps 1–8 designer corrections (10 items)
+1. **Crossover freqs configurable** — `fci`/`fcv` are now inputs (default 8 kHz/17 Hz, GUI-selected);
+   Step 4 concept references f<sub>ci</sub> dynamically, not hardcoded 8 kHz.
+2. **R_FB1 fixed series** — R_FB1 = 3 × 1.21 MΩ = 3.63 MΩ (fixed); R_FB2 is the designer-adjustable
+   lower resistor, computed from target V_OUT (`rfb2 = rfb1/(Vout/Vref−1)` → 23.2 kΩ). Step 5 reworked.
+3. **6.2 note added** — "V_EA,eff = V_EA,max − 0.6 V … AND9925-D recommends V_EA,max 4–5 V."
+4. **Sci-notation fixed** — body text now uses Unicode superscripts (`9.014 × 10¹²`) via new `_sct()`
+   instead of raw `\times10^{}` leaking as literal text.
+5. **R_CS selection clarified** — NOTE: 15 mΩ is the common-ground of both methods; GUI presents the
+   overlap range and the designer's pick is carried downstream.
+6. **§7.2 verbatim** — full Path A/B/C derivations + "Why A=B" / "Why B≠C" reproduced word-for-word.
+7. **§7.3 verbatim** — back-calc intro + worked Step 1–4 (LL & HL) for V_EA,eff added.
+8. **ILIMIT crest / I_L,pk worst-of-both-corners** — crest evaluated at 90 V and 180 V (worst 14.66 A
+   @180 HL); I_L,pk = max(I_φ,pk@90, I_φ,pk@180) = 17.51 A @180 HL. R_ILIMIT/R_ILIMIT2 use the worst.
+9. **8.6 scorecard** — C_GC (430 pF, pole 9.664 kHz) and C_LS (240 pF, pole 9.972 kHz) rows added;
+   designer-selectable cap values set the filter pole.
+10. Added "NOTE" annotation style (neutral slate). Review PDF now **22 pp**; numbers verified vs doc.
+
+
+## C14 — Control report Steps 9 & 10 (reference Steps 12 & 13), + 7.7/7.8 fixes
+- Step 7.7 scorecard expanded 9->18 rows (added GMOD_B LL/HL, Path A/B split, VRM max LL/HL, V_LPK max LL/HL, VRM×V_LPK invariant FR/HV) to match reference exactly. Step 7.8 verdict reproduced word-for-word (DESIGN PASS + 6 numbered points + GMOD_C handoff). Fixed glyph boxes: 1×10⁻⁴ via <super>, ⚠ -> ! in 3.2/7.6 tables.
+- Step 9 (BIBO, ref Step 12): new step16_step9_bibo.py (calc) + report_step9.py. Subsections 9.1-9.10 word-for-word; divider ratio/resistors/caps/V_BIBO sweep/EN61000-4-11+SEMI F47 compliance all COMPUTED & verified vs doc.
+- Step 10 (Inner Current Loop, ref Step 13): new step16_step10_iloop.py (calc) + report_step10.py. Boost plant G_id(s) DCR-damped; full 90Vac worked calc, 8-point tables, Type-2 OTA compensator (R_IC 120k/C_IC1 1.3n/C_IC2 51p), crossover 8.12kHz PM 62.8°. ALL values sourced from prior steps (V_OUT<-S5, R_CS<-S6, Lφ/C_O/f_ci<-S1/S4) — not hard-coded. Two Bode figures (open & closed loop) rendered live from the transfer functions. Fig 10A schematic deferred to SchemDraw pass.
+- Unicode subscripts (Tᵢ,F₀) replaced with ASCII in headings/table-headers per CLAUDE.md rule 7.
+- Combined report now Steps 1-10: PFC_Chapter6_Steps1_10_Control_Design.pdf (49 pp, 0 glyph boxes). Standalone: PFC_Chapter6_Step9_BIBO.pdf (12 pp), PFC_Chapter6_Step10_InnerLoop.pdf (14 pp).
+
+
+## C15 — SchemDraw schematics setup (Fig 10A)
+- Installed schemdraw 0.23, added to backend/requirements.txt.
+- New app/mode_b/schematics.py: SchemDraw->PNG->ReportLab Image helper (matplotlib backend). type2_ota_compensator() draws the inner-loop Type-II OTA network (OTA + R_IC/C_IC1 series branch ∥ C_IC2), values injected from the calc agent.
+- report_step10.py Fig 10A placeholder replaced with the live schematic + caption.
+- Step 10 standalone -> 15 pp; combined Steps 1-10 -> 50 pp; 0 glyph boxes. schematics.py is the shared entry point for all future report schematics (Steps 11-14, board schematic S-1).
+
+
+## C16 — Control report Step 11 (Outer Voltage Loop, ref Step 14) + Type-III schematic
+- New step16_step11_vloop.py (calc) + report_step11.py. Subsections 11.1-11.9 word-for-word (Method B / SLVA662).
+- Consumes Step 10 inner loop: rebuilds compensated T_i(s) from s10 plant objects to form G_i,cl(s). Voltage plant G_vp(s) uses L_eq=L/2.
+- ALL values computed from prior steps + DESIGNER-SELECTED freqs (per instruction): f_cv, f_z1/f_z2/f_p1/f_p2 are DEFAULT_INPUTS, not hard-coded. CS-filter pole stays designer-set in Step 10. Verified vs doc: Hv 0.006350, Tvbase 11.3246 (21.08dB), G 0.088303, aa 0.8483, R2 143.23k/R3 8.6336M/C1 370.4n/C2 1.0815n/C3 23.64n (calc) -> 143k/8.66M/390n/1.1n/24n (std); 14.8 PZ exactly 3/12/50/17 Hz; 14.9 HL 17.00Hz/PM82.4, LL 7.80Hz/PM80.9.
+- comp_type selector: 'type3' (default, reproduces doc) | 'type2'. CURRENT loop always Type-2; VOLTAGE loop designer-selectable (type2 path verified functional, HL PM 72.3). NOTE box added to report stating this.
+- schematics.py: added type3_ota_compensator() (Fig 14A) — R1/R4 divider, R3-C2 feedforward ∥ R1, OTA, C3∥(R2+C1) output. Visually verified layout. Snapping: R->E96, integrator cap C1->E12, precision caps C2/C3->E24 (matches doc std column).
+- Figs 3 (open-loop Tv) & 4 (closed-loop Tv) rendered live. Fixed ∥ (U+2225) glyph box in prose -> ||.
+- Step 11 standalone 11pp; combined Steps 1-11 -> PFC_Chapter6_Steps1_11_Control_Design.pdf (61pp, 0 glyph boxes).
+
+
+## C17 — Control report Steps 12 & 13 (ref Steps 15 & 16)
+- Verification gate confirmed to user first (re-ran step9/10/11 __main__ harnesses; engine==doc==report by construction; disclosed only 4th-5th sig-fig rounding deviations).
+- Step 12 (Step Load Transient, ref Step 15): new step16_step12_transient.py (calc) + report_step12.py. Closed-loop output impedance Z_cl=Z_open/(1+T_v) step response via scipy.signal.step; G_i,cl=1 at this timescale. Subsections 12.1-12.3 word-for-word. VERIFIED vs doc 15.3: HL 0->100 -28.9V/152ms, LL -25.9V/154ms, all 6 transitions match. Figure 5 (2x3 grid, LL/HL, ±1% band) live.
+- Step 13 (Input THD & 120Hz Rejection, ref Step 16): new step16_step13_thd.py (calc) + report_step13.py. Subsections 13.1-13.3 word-for-word incl 16.3 optimization sweep (re-designs at 12/17/20/25 Hz, recomputes PM/rej/dip/recovery). VERIFIED vs doc 16.2: Vrip 2.60/5.51V, rej 30.1/23.6dB; THD3 1.43/2.95% using per-range V_EA,eff sourced from Step6 vee_ll/vee_hl. Sweep: rej & dip match doc; 25Hz HL 18.4dB fails 20dB floor (matches). Figure 6 (closed-loop attenuation + rejection bars) live.
+- Fixes: literal %% in format strings (0->100%, ±1% band); THD3 subscript glyph -> <sub>3</sub>/THD3 (rule 7).
+- Cross-refs renumbered: doc Step14->our 11, doc Step17->our 14.
+- Combined Steps 1-13 -> PFC_Chapter6_Steps1_13_Control_Design.pdf (69pp, 0 glyph boxes). Standalone S12 4pp, S13 4pp.
+- Remaining: doc Step 17 -> our Step 14 (Loop Equation Accuracy & Compensator Optimization).
+
+
+## C18 — Control report Step 14 (ref Step 17) + Appendices A-E
+- Step 14 (Compensator Optimization, ref Step 17): new report_step14.py. Per instruction PITFALL and 17.1 (incl Figure 7) OMITTED; only 17.2 reproduced, placed after INSIGHT as 14.1. Four trade-off designs (Baseline 17 / A 12 / B 20 / C 25 Hz) COMPUTED via the Step 13 optimization sweep (extended to return per-design R2/C1/C3 + HL bode/transient curves). Verified vs doc 17.2: comp values 143k/390n/24n @17Hz exact; off-baseline within E-series snap. Figure 8 (open-loop, transient, rejection bars for 4 designs) live.
+- Appendices A-E (new appendices.py), word-to-word: A (A.1-A.7 thesis-level boost plant + OTA Type-III derivations, ~70 eqs reconstructed as mathtext), B BOM (step refs renumbered 13->10,14->11), C bench test plan, D references, E quick-reference (3 tables). Stated example constants reproduced verbatim (incl A.7.8 GMOD with KMAX=1.4 -> 1.209/2.561, and A.7.9 fp1/fp2 ordering as doc gives).
+- mathtext fixes: ig*->plain parens, 	frac->rac. Glyph fixes: prose combining-hat (U+0302)->\<super>^\</super>, ≫->&gt;&gt;, ć->c.
+- Combined Steps 1-14 + Appendices A-E -> PFC_Chapter6_Steps1_14_Control_Design.pdf (89pp, 0 glyph boxes). Standalone: Step14 3pp, Appendices 16pp.
+- CONTROL CHAPTER COMPLETE: all 17 reference steps (renumbered 1-14) + appendices reproduced; every calc engine verified vs doc.
+
+
+## C19 - Full combined report + GUI generation path
+- Refactored report_steps1_8.py: build_story(inp) computes prior=compute_steps_1_8(inp) ONCE and threads it through steps 9-13 (fixed: steps 10-13 previously recomputed prior WITHOUT inp). Added build_control_report(inp)->bytes alongside make_pdf(path,inp).
+- Backend main.py: GET /mode-b/control-report/defaults and POST /mode-b/control-report (inputs -> Steps 1-14 + Appendices PDF). Verified via uvicorn+curl: 200 application/pdf 3.87MB %PDF.
+- Frontend: client.ts controlReport()/controlReportDefaults(); ControlDesign.tsx handleControlReport maps params+iframe state -> inputs, downloads FAN9672_Control_Loop_Design_Report.pdf. New primary button beside Steps 1-16 button. tsc clean.
+- Generated+opened PFC_Chapter6_Steps1_14_Control_Design.pdf (89pp).
+
+
+## C20 - Exact designState mapping (control_design.html -> control report)
+- control_design.html getDesignState payload documented. Existing fields: vType('type2'|'type3'), cType('T1'|'T2'), mode, fci_Hz, fcv_Hz, r1fb, r4fb, rf, cf, dci_std, dcv_std, dcv_calc, dcv_cor, dcv_err.
+- Added missing designer pole/zero TARGETS to the payload (public/ + src/assets/ copies): cfz_Hz, cfp_Hz (current zero/pole), vfz1_Hz/vfz2_Hz/vfp1_Hz/vfp2_Hz (voltage), gmv_S.
+- ControlDesign.tsx handleControlReport now maps EXACT keys -> engine inputs: fci_Hz->fci, fcv_Hz->fcv, cfz/cfp->f_z/f_p, vfz1..vfp2->fz1..fp2, gmv_S->gmv, rf->r_m, cf->c_m, r1fb->rfb1_unit(+rfb1_count=1), vType->comp_type. Removed defensive guessing.
+- Verified end-to-end: all keys propagate through prior->step10->step11 (fci 9000, fcv 18, f_rc 169.3k, fz_act 1113, gmv 100u, comp type3, rfb1 3.63M); PDF builds. tsc clean.
+- Note: dist/control_design.html is build output (regenerated on npm build); public/ + src/assets/ updated.
+
+
+## C21 - Frontend rebuilt + GUI button tested (Playwright)
+- npm run build OK; dist/control_design.html confirmed carrying new designState fields (cfz_Hz/cfp_Hz/vfz1..vfp2_Hz/gmv_S).
+- Playwright (chromium) drove the real built tool against live backend (uvicorn :8077) + static dist (:5199):
+  (1) tool emits full designState: vType type3, fci 8000, fcv 17, cfz 1000, cfp 26000, vfz1/2 3/12, vfp1/2 50/17, gmv 1e-4, rf 2000, cf 4.7e-10, r1fb 3.63e6.
+  (2) button mapping -> POST /mode-b/control-report -> 200 application/pdf 3.87MB %PDF; 0 console errors.
+  (3) designer edit (fcv 17->20, fci 8000->9500, vfz1 3->4) propagates to report inputs exactly (fci 9500/fcv 20/fz1 4), valid PDF.
+- Test files removed; servers stopped. GUI report generation verified end-to-end.

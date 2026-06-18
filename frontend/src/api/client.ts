@@ -167,6 +167,21 @@ export const step15CapLifetime = (req: {
   state: object; part_number: string; qty: number; Tamb_C?: number
 }) => post('/mode-b/step15/cap-lifetime', req)
 
+// ── Controller reference database agent ──────────────────────────────────────
+export interface RefPassage {
+  rank: number; score: number
+  controller: string | null; collection: string | null
+  file: string; doc_no: string | null; title: string | null
+  loc: string; citation: string; snippet: string
+}
+export interface RefQueryResult {
+  question: string; controller: string | null; scope_pages: number
+  passages: RefPassage[]; answer: string | null; used_llm: boolean
+}
+export const controllerDbQuery = (req: {
+  question: string; controller?: string; k?: number; synthesize?: boolean
+}) => post('/controller-db/query', req) as Promise<RefQueryResult>
+
 export const step15HvcapCapTable = (req: {
   state: object; capacitance_uF: number; n_parallel?: number
   voltage_V?: number; op_temp?: string; lifetime?: string; tolerance?: string
@@ -233,6 +248,22 @@ export const docGenerateReport = (req: {
     return res.blob()
   })
 
+// ── Control-loop design report (Steps 1–14 + Appendices A–E) ─────────────────
+// Generates the full FAN9672 control-loop design report from designer specs.
+// Any omitted input falls back to the verified calc-engine defaults.
+export const controlReportDefaults = (): Promise<Record<string, Record<string, unknown>>> =>
+  fetch(`${BASE}/mode-b/control-report/defaults`).then(r => r.json())
+
+export const controlReport = (inputs: Record<string, unknown>): Promise<Blob> =>
+  fetch(`${BASE}/mode-b/control-report`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ inputs }),
+  }).then(async res => {
+    if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
+    return res.blob()
+  })
+
 // ── Step 7: Generate combined report (Steps 1–14) ────────────────────────────
 export const step7GenerateReport = (payload: {
   state:           Record<string, unknown>
@@ -246,3 +277,46 @@ export const step7GenerateReport = (payload: {
     if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
     return res.blob()
   })
+
+// ── Step 7: Simulation-Agent shadow cross-check (Phase 1) ─────────────────────
+export interface SimCrossCheckRow {
+  quantity: string; ours: string | number | null; sim: string | number | null
+  delta_pct: number | null; band_pct: number; within: boolean | null
+  note?: string
+}
+export interface SimCrossCheck {
+  status: string; ok?: boolean; verdict?: string
+  tiers?: Record<string, string>
+  validation?: { ok: boolean; errors: string[]; warnings: string[] }
+  statics?: Record<string, number>
+  worst?: Record<string, unknown>
+  crosscheck?: { rows: SimCrossCheckRow[]; all_within_band: boolean | null; n_checked: number }
+  package?: Record<string, unknown>   // the exact package the engine used (Phase 2 viewer)
+  errors?: string[]; warnings?: string[]
+}
+export const simulateCrossCheck = (
+  state: Record<string, unknown>,
+  approved_design: Record<string, unknown>,
+  wire_type = 'litz',
+): Promise<SimCrossCheck> =>
+  post<SimCrossCheck>('/mode-b/step7/simulate', { state, approved_design, wire_type })
+
+// ── Phase B: step7 view contract (single render payload for all screens) ──────
+export interface ViewContract {
+  scalars: Record<string, number | string | null>
+  waveform: Record<string, number[]>   // t_ms, Vin, D, Iavg, H_Oe, Bdc, Bac_pk, Bmax, Ihf, Pcore, Pcu, Ptot
+  waveforms_by_vin?: Record<string, Record<string, number[]>>  // per-Vin explorer waveforms
+  sweep: Array<Record<string, number>>  // per-Vin: Vin, Icrest, Lfull, H_Oe, k_bias, Bac, Pcore, Pcu, Ptot
+  L_vs_Vin: Array<Record<string, number>>
+  acceptance?: {
+    verdict: string; passed: boolean; reasons: string[]
+    rows: Array<{ name: string; val: string; ok: boolean | null; limTxt: string }>
+  }
+  meta: { Vout_V: number; fsw_Hz: number; vin_design: number; source: string; vins?: number[] }
+}
+export const getViewContract = (
+  state: Record<string, unknown>,
+  approved_design: Record<string, unknown>,
+): Promise<{ status: string; contract: ViewContract }> =>
+  post<{ status: string; contract: ViewContract }>('/mode-b/step7/view-contract',
+    { state, approved_design })

@@ -103,6 +103,34 @@ class ReportReq(BaseModel):
 @app.get("/health")
 def health(): return {"status":"ok","version":"2.0.0"}
 
+# ── Controller Reference Database agent ──────────────────────────────────────
+class _RefQueryReq(BaseModel):
+    question:   str
+    controller: Optional[str] = None     # e.g. "fan9672"; None = search all
+    k:          int  = 6                 # number of passages to return
+    synthesize: bool = False             # also produce a cited LLM answer (needs ANTHROPIC_API_KEY)
+
+@app.post("/controller-db/query", tags=["controller-db"])
+def controller_db_query(req: _RefQueryReq):
+    """Retrieve the most relevant reference passages (BM25 over the indexed PDFs),
+    optionally with a grounded, cited LLM answer."""
+    from app.reference_agent import get_agent
+    try:
+        return get_agent().query(req.question, controller=req.controller,
+                                  k=req.k, synthesize=req.synthesize)
+    except Exception as exc:
+        log.exception("controller-db query failed")
+        raise HTTPException(500, detail=str(exc))
+
+@app.get("/controller-db/sources", tags=["controller-db"])
+def controller_db_sources(controller: Optional[str] = None):
+    """List the controllers and reference documents in the local database."""
+    from app.reference_agent import get_agent
+    try:
+        return get_agent().sources(controller)
+    except Exception as exc:
+        raise HTTPException(500, detail=str(exc))
+
 @app.post("/mode-a/start", tags=["mode-a"])
 def start(req: StartReq):
     try:
@@ -193,6 +221,44 @@ def gen_report(req: ReportReq):
                         headers={"Content-Disposition":"attachment; filename=PFC_Design_Report_Steps1_12.pdf"})
     except Exception as e:
         log.exception("report gen"); raise HTTPException(500, str(e))
+
+
+class ControlReportReq(BaseModel):
+    # Designer specs — all optional; any omitted field falls back to the
+    # verified DEFAULT_INPUTS of the control-design calc engine.
+    inputs: Optional[Dict[str, Any]] = None
+
+@app.get("/mode-b/control-report/defaults", tags=["mode-b"])
+def control_report_defaults():
+    """Return the designer-editable control-design inputs and their defaults,
+    so the GUI can render a spec form and round-trip them to /control-report."""
+    from app.mode_b.step16_steps1_8 import DEFAULT_INPUTS as S18
+    from app.mode_b.step16_step10_iloop import DEFAULT_INPUTS as S10
+    from app.mode_b.step16_step11_vloop import DEFAULT_INPUTS as S11
+    return {
+        "power_stage": {k: S18[k] for k in
+                        ("vout", "fsw", "lphi_uH", "nch", "cout_uF",
+                         "pout_lo", "pout_hi", "eta_lo", "eta_hi")},
+        "crossovers": {"fci": S18["fci"], "fcv": S18["fcv"]},
+        "current_loop": {k: S10[k] for k in ("r_l", "r_c", "v_ramp", "g_mi",
+                                             "r_m", "c_m", "f_z", "f_p")},
+        "voltage_loop": {k: S11[k] for k in ("comp_type", "gmv",
+                                             "fz1", "fz2", "fp1", "fp2", "fz", "fp")},
+    }
+
+@app.post("/mode-b/control-report", tags=["mode-b"])
+def control_report(req: ControlReportReq):
+    """Generate the full FAN9672 control-loop design report (Steps 1–14 +
+    Appendices A–E) from designer specs. Returns a PDF."""
+    try:
+        from app.mode_b.report_steps1_8 import build_control_report
+        from fastapi.responses import Response
+        pdf = build_control_report(req.inputs or None)
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=FAN9672_Control_Loop_Design_Report.pdf"})
+    except Exception as e:
+        log.exception("control report gen"); raise HTTPException(500, str(e))
 
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
@@ -859,6 +925,73 @@ def step7_run_sizing(req: _SizingReq):
     except HTTPException: raise
     except Exception as e:
         log.exception("step7_run_sizing"); raise HTTPException(500, str(e))
+
+
+# ── Simulation-Agent SHADOW endpoint (Phase 1) ───────────────────────────────
+#   Additive cross-check only. Builds the sim-agent package from the SELECTED
+#   candidate + state, runs the headless engine (fed our DB physics via fields),
+#   and compares its numbers to our step7 figures. Does NOT touch run-sizing,
+#   Result, or Review. Safe to remove (route + import) with zero side effects.
+class _SimReq(BaseModel):
+    state: dict                # confirmed Mode A/B state
+    approved_design: dict      # one serialized DesignResult (the core sent to Review)
+    wire_type: str = 'litz'    # designer's wire-type selection
+    line_Hz: float = 60.0
+
+
+def _sim_crosscheck(result: dict, sim: dict) -> dict:
+    """Step-7 vs field-engine comparison via the single shared definition
+    (sim_agent.adapter.crosscheck_rows) — apples-to-apples on a common basis."""
+    from app.sim_agent import adapter
+    rows = adapter.crosscheck_rows(result, sim)
+    checkable = [r for r in rows if r["within"] is not None]
+    return {"rows": rows,
+            "all_within_band": (all(r["within"] for r in checkable) if checkable else None),
+            "n_checked": len(checkable)}
+
+
+@app.post("/mode-b/step7/simulate", tags=["mode-b"])
+def step7_simulate(req: _SimReq):
+    """Phase-1 shadow: validate+compute the sim-agent package and cross-check vs step7.
+    Never throws on bad input (returns ok:false); 500 only on unexpected server error."""
+    from app.sim_agent import adapter
+    from app.sim_agent import pfc_inductor_engine as _eng
+    try:
+        result = req.approved_design or {}
+        pkg, vr = adapter.build_and_validate(result, req.state,
+                                             wire_type=req.wire_type, lineHz=req.line_Hz)
+        if not vr.ok:
+            return {"status": "invalid_package", "ok": False,
+                    "errors": vr.errors, "warnings": vr.warnings}
+        sim = _eng.compute(pkg)
+        return {
+            "status": "ok", "ok": True,
+            "verdict": sim["verdict"],
+            "tiers": sim["tier"],
+            "validation": vr.as_dict(),
+            "statics": sim["statics"],
+            "worst": sim["worst"],
+            "crosscheck": _sim_crosscheck(result, sim),
+            "package": pkg,   # SAME object the engine used → viewer parity (Phase 2)
+        }
+    except _eng.SpecError as e:
+        return {"status": "invalid_package", "ok": False, "errors": e.errors}
+    except Exception as e:
+        log.exception("step7_simulate"); raise HTTPException(500, str(e))
+
+
+# ── Phase B: step7 view contract (single render payload for all screens) ──────
+@app.post("/mode-b/step7/view-contract", tags=["mode-b"])
+def step7_view_contract(req: _SimReq):
+    """Authoritative render payload from step7: scalars + 90 Vac per-θ waveforms +
+    9-point sweep. Result / Review / Simulation all RENDER this (no recompute) so they
+    show identical values. Additive/read-only."""
+    from app.mode_b.step7_magnetic_calc import build_view_contract
+    try:
+        return {"status": "ok",
+                "contract": build_view_contract(req.approved_design or {}, req.state or {})}
+    except Exception as e:
+        log.exception("step7_view_contract"); raise HTTPException(500, str(e))
 
 
 # ── STEP 8: Time-domain core-loss modeling (Reference Step 14) ────────────────
