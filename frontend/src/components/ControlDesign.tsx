@@ -16,7 +16,7 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { C, Btn } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { docGenerateReport, controlReport } from '../api/client'
+import { docGenerateReport } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -24,17 +24,16 @@ interface Props {
   approvedCapacitorDesign: CapacitorResult | null
   onBack:    () => void
   onRestart: () => void
+  onSelectSemiconductors: () => void
 }
 
 export const ControlDesign: React.FC<Props> = ({
   confirmedState, approvedInductorDesign, approvedCapacitorDesign,
-  onBack, onRestart,
+  onBack, onRestart, onSelectSemiconductors,
 }) => {
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string|null>(null)
-  const [ctrlLoading, setCtrlLoad] = useState(false)
-  const [ctrlError,   setCtrlError] = useState<string|null>(null)
   const injectedRef = useRef(false)
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
@@ -146,62 +145,6 @@ export const ControlDesign: React.FC<Props> = ({
     } finally { setRptLoad(false) }
   }
 
-  // ── Control-loop design report (Steps 1–14 + Appendices) from designer specs ──
-  // Maps the power-stage params and the iframe's chosen control specs (crossovers,
-  // compensator type, pole/zeros) into the calc-engine inputs. Missing fields fall
-  // back to the verified engine defaults.
-  const handleControlReport = async () => {
-    setCtrlLoad(true); setCtrlError(null)
-    try {
-      const js = (await getJsDesignState()) as any | null
-      const num = (v: unknown) => (v == null || v === '' || isNaN(Number(v)) ? undefined : Number(v))
-
-      const inputs: Record<string, unknown> = {
-        // power stage (from approved inductor/cap + intake spec)
-        vout:     params.vout_V,
-        fsw:      params.fsw_kHz * 1000,
-        lphi_uH:  params.lphi_uH,
-        cout_uF:  params.co_uF,
-        nch:      params.nch,
-        pout_lo:  params.pout_lo_W,
-        pout_hi:  params.pout_hi_W,
-        eta_lo:   params.eta_lo,
-        eta_hi:   params.eta_hi,
-        r_l:      params.rl_mOhm / 1000,
-        r_c:      params.rc_mOhm / 1000,
-      }
-      // designer-selected control specs from the FAN9672 tool — EXACT designState keys
-      // (control_design.html getDesignState payload). Missing values fall back to defaults.
-      const map: Record<string, unknown> = {
-        fci:  num(js?.fci_Hz),   // current-loop crossover
-        fcv:  num(js?.fcv_Hz),   // voltage-loop crossover
-        f_z:  num(js?.cfz_Hz),   // current-loop comp zero
-        f_p:  num(js?.cfp_Hz),   // current-loop comp HF pole
-        fz1:  num(js?.vfz1_Hz),  // voltage Type-III zero 1
-        fz2:  num(js?.vfz2_Hz),  // voltage Type-III zero 2
-        fp1:  num(js?.vfp1_Hz),  // voltage Type-III pole 1
-        fp2:  num(js?.vfp2_Hz),  // voltage Type-III pole 2
-        gmv:  num(js?.gmv_S),    // voltage OTA transconductance
-        r_m:  num(js?.rf),       // CS anti-alias filter R
-        c_m:  num(js?.cf),       // CS anti-alias filter C
-        rfb1_unit: num(js?.r1fb),// FB divider top (used as single series resistor)
-      }
-      for (const [k, v] of Object.entries(map)) if (v !== undefined) inputs[k] = v
-      if (map.rfb1_unit !== undefined) inputs.rfb1_count = 1
-      // voltage compensator type — designState.vType is exactly 'type2' | 'type3'
-      if (js?.vType === 'type2' || js?.vType === 'type3') inputs.comp_type = js.vType
-
-      const blob = await controlReport(inputs)
-      const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href     = url
-      a.download = 'FAN9672_Control_Loop_Design_Report.pdf'
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
-    } catch(e) {
-      setCtrlError((e as Error).message ?? String(e))
-    } finally { setCtrlLoad(false) }
-  }
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
@@ -242,21 +185,12 @@ export const ControlDesign: React.FC<Props> = ({
               ⚠ Report failed: {rptError}
             </div>
           )}
-          {ctrlError && (
-            <div style={{ fontSize:11, color:'#c0392b', background:'#fdf2f2',
-              border:'1px solid #e8b4b8', borderRadius:6, padding:'4px 10px' }}>
-              ⚠ Control report failed: {ctrlError}
-            </div>
-          )}
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-            <span style={{ fontSize:10, color:C.hint, fontFamily:'IBM Plex Mono,monospace' }}>
-              Word doc ↓ &amp; JSON save inside the tool
-            </span>
-            <Btn variant="primary" disabled={ctrlLoading} onClick={handleControlReport}>
-              {ctrlLoading ? '⏳ Generating…' : '📘 Control-Loop Report (Steps 1–14 + Appendices)'}
-            </Btn>
             <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
-              {rptLoading ? '⏳ Generating…' : '📄 Generate & Download Report (Steps 1–16)'}
+              {rptLoading ? '⏳ Generating…' : '📄 Generate Full Report (Chapters 1–6 + Appendices)'}
+            </Btn>
+            <Btn variant="primary" onClick={onSelectSemiconductors}>
+              Select Semiconductors →
             </Btn>
           </div>
         </div>

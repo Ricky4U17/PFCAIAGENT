@@ -57,8 +57,8 @@ async function testWorkflow(browser) {
   await ctx.close();
 }
 
-async function testReportButton(browser) {
-  console.log('\n=== Test B: real Control Design page + report button (live backend) ===');
+async function testControlDesignButtons(browser) {
+  console.log('\n=== Test B: Control Design buttons (full report + Select Semiconductors) ===');
   const ctx = await browser.newContext({ acceptDownloads: true });
   await ctx.addInitScript(() => { window.__E2E_CONTROL__ = true; });
   const page = await ctx.newPage();
@@ -67,26 +67,26 @@ async function testReportButton(browser) {
   page.on('pageerror', e => errs.push(String(e)));
   await page.goto(APP, { waitUntil: 'load' });
 
-  // the real ControlDesign component renders the FAN9672 tool iframe + the button
+  // the real ControlDesign component renders the FAN9672 tool iframe + two buttons
   const iframe = page.locator('iframe').first();
   ok(await iframe.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false),
      'Control Design iframe (FAN9672 tool) rendered');
 
-  const btn = page.getByRole('button', { name: /Control-Loop Report/i }).first();
-  ok(await btn.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),
-     'Control-Loop Report button present');
+  const reportBtn = page.getByRole('button', { name: /Generate Full Report/i }).first();
+  ok(await reportBtn.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),
+     'single "Generate Full Report (Chapters 1–6 + Appendices)" button present');
+  ok(await page.getByRole('button', { name: /Control-Loop Report/i }).count() === 0,
+     'old standalone "Control-Loop Report" button removed');
 
-  const dl = page.waitForEvent('download', { timeout: 90000 });
-  await btn.click();
-  const download = await dl;
-  const path = await download.path();
-  const buf = fs.readFileSync(path);
-  const magic = buf.slice(0, 5).toString('latin1');
-  ok(download.suggestedFilename().endsWith('.pdf'), 'download filename is a .pdf: ' + download.suggestedFilename());
-  ok(magic === '%PDF-', 'downloaded file is a real PDF (magic ' + JSON.stringify(magic) + ')');
-  ok(buf.length > 500000, 'PDF is substantial (' + buf.length + ' bytes)');
-  const errText = await page.getByText(/Control report failed/i).count();
-  ok(errText === 0, 'no "Control report failed" banner');
+  const semiBtn = page.getByRole('button', { name: /Select Semiconductors/i }).first();
+  ok(await semiBtn.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     '"Select Semiconductors →" button present');
+
+  // clicking it advances to the Chapter 7 page
+  await semiBtn.click();
+  const ch7 = await page.getByText(/Chapter 7 — Semiconductor Selection/i).first()
+    .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+  ok(ch7, 'Select Semiconductors → navigates to the Chapter 7 page');
   ok(errs.length === 0, 'no console/page errors' + (errs.length ? ': ' + errs.slice(0,2).join(' | ') : ''));
   await ctx.close();
 }
@@ -94,7 +94,7 @@ async function testReportButton(browser) {
 (async () => {
   const browser = await chromium.launch();
   try { await testWorkflow(browser); } catch (e) { ok(false, 'Test A threw: ' + e.message); }
-  try { await testReportButton(browser); } catch (e) { ok(false, 'Test B threw: ' + e.message); }
+  try { await testControlDesignButtons(browser); } catch (e) { ok(false, 'Test B threw: ' + e.message); }
   await browser.close();
   console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
   process.exit(failures === 0 ? 0 : 1);
