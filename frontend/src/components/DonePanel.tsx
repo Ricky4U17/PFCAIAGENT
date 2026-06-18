@@ -17,22 +17,6 @@ const TOPO_LABEL: Record<string,string> = {
 }
 const ML: Record<string,string> = {ccm:'CCM',crcm:'CrCM',dcm:'DCM'}
 
-const MB_STEPS = [
-  ['input_processing','Steps 1-12 PDF ✓'],['duty_and_ripple','Steps 1-12 PDF ✓'],
-  ['inductor_sizing','Steps 1-12 PDF ✓'],['worst_case_angle','Steps 1-12 PDF ✓'],
-  ['waveform_reconstruction','Steps 1-12 PDF ✓'],['magnetic_design','Step 6 API ✓'],
-  ['magnetic_design_v2_advisory','Step 7 ✓ — HITL Magnetic Design (Step 13)'],['magnetic_fea_advisory','Step 8 ✓ — Time-Domain Pcore(t) (Step 14)'],
-  ['protection_compliance','Queued'],['emi_filter','Queued'],
-  ['layout_parasitics_advisory','Queued'],['control_loops','Queued'],
-  ['state_space_analysis','Queued'],['guardrail_v2_advisory','Queued'],
-  ['bidirectional_thermal','Queued'],['cad_thermal_integration_advisory','Queued'],
-  ['vendor_scout','Queued'],['supply_chain_advisory','Queued'],
-  ['reliability_mtbf_advisory','Queued'],['design_graphs','Queued'],
-  ['simulation_export','Queued'],['closed_loop_simulation_advisory','Queued'],
-  ['firmware_generation_advisory','Queued'],['pcb_floorplanning_advisory','Queued'],
-  ['altium_export','Queued'],
-]
-
 interface Props {
   summary: Summary
   onRestart: () => void
@@ -115,27 +99,6 @@ export const DonePanel: React.FC<Props> = ({summary, onRestart, onGenerateReport
               <div style={{fontWeight:600,fontSize:14,color:C.text}}>{v}</div>
             </div>
           ))}
-        </div>
-      </Card>
-
-      <Card>
-        <SecHead icon="🔄" label="Mode B — 25-step engineering sequence" />
-        <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:10}}>
-          {MB_STEPS.map(([s,status],i) => (
-            <div key={s} style={{padding:'3px 9px',borderRadius:5,fontSize:11,
-              background:status.includes('✓')?C.greenL:C.bg4,
-              border:`0.5px solid ${status.includes('✓')?C.green:C.border}`,
-              color:status.includes('✓')?C.green:C.hint}}>
-              {i+1}. {s.replace(/_/g,' ')} {status.includes('✓')?'✓':''}
-            </div>
-          ))}
-        </div>
-        <div style={{fontSize:12,color:C.hint,lineHeight:1.5}}>
-          Steps 1–5 (green): covered by this report. Step 6 magnetic_design: available via{' '}
-          <code style={{background:C.bg4,padding:'1px 5px',borderRadius:3}}>POST /mode-b/step6-magnetic-design</code>.
-          Steps 7–25: queued — each will pause at{' '}
-          <code style={{background:C.bg4,padding:'1px 5px',borderRadius:3}}>mode_b_hitl</code>{' '}
-          for designer approval.
         </div>
       </Card>
 

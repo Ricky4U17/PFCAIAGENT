@@ -1,7 +1,65 @@
-# PFC AI Design Agent — Documentation-Agent Work · Session Handoff
+# PFC AI Design Agent — Session Handoff
 
-**Resume point for the report / documentation-agent improvement work.** Last updated 2026-06-14.
-Detailed blow-by-blow is in `IMPLEMENTATION_LOG.md`; this file is the concise "start here".
+**Concise "start here" resume point.** Last updated 2026-06-14.
+Detailed blow-by-blow is in `IMPLEMENTATION_LOG.md` (newest sections at the bottom: B → B4).
+
+---
+
+## ▶ LATEST SESSION (2026-06-14) — Frontend studios + DC-bus capacitor simulation
+
+**Status: complete & verified (`tsc` + `vite build` clean; engine math validated headless).**
+This is the current resume point. App runs: backend `uvicorn app.main:app --port 8000` (venv),
+frontend `npm run dev` (was on :5174). Flow to reach the new page: intake → … → Step 7 (approve)
+→ Step 15 capacitor (pick part, approve) → **DC Bus Cap Simulation** (new) → Control Design.
+
+### What was built/changed
+1. **Single browser scrollbar on the studio iframes** (Review / Sim Agent / Control Design):
+   each iframe auto-grows to content height; no inner scrollbar. Same-origin ones measure
+   `body.scrollHeight` + `ResizeObserver`; `control_design.html` posts `{type:'docHeight'}`.
+2. **New DC-bus capacitor simulation step** between Step 15 and Step 16:
+   - `frontend/src/components/CapacitorSimAgent.tsx` — embeds
+     `frontend/src/assets/pfc_dcbus_agent_v4.html` (copied from `specs/Capacitor/`), injects
+     `window.__DCBUS_PACKAGE__` (schema `dcbus-2.0`).
+   - `App.tsx`: new `'capsim'` step; `handleStep15Approve` → `capsim`; Control Design back → `capsim`.
+     Step-15 button relabelled "Approve & Go to Simulation".
+   - Left panel = read-only **tiles** (DC bus V, line freq, ambient, cap data + Step-15 lifetime
+     note). PF / efficiency / Fsw / phases are NOT shown — applied in the engine per band.
+   - Sliders: **Input Voltage · Output Power · Ambient**.
+
+### Key model decisions (so the sim agrees with Step 15 — DON'T regress these)
+- **Two line bands, split at 180 Vac** (`lineBreak_V=180`, boundary `<`): low line <180 → 1700 W
+  @ η0.945; high line ≥180 → 3600 W @ η0.965. OUTPUT POWER follows the band selected by INPUT
+  VOLTAGE (native `coupleBandPower()` in the tool, so the auto-play Vac sweep follows it too).
+- **Worst-corner verdict = high-line {180 V, 3600 W, Tamb_max}** (matches Step-15 sizing). The
+  old bug judged the impossible `{VacMin, PoutMax}` = 90 V/3600 W → false REJECT.
+- **Capacitance at nominal** (`tol_pct=eolAging_pct=0`) — consistent with Step-15's C_required.
+- **Lifetime calibrated to Step 15**: fetch `step15CapLifetime`, pass `bank.cap.lifeAnchor_h`
+  (governing×8760); tool's `calibrateLife()` back-computes `voltageLifeMult` so worst-corner life
+  == Step-15 governing. Hard life gate is `null` (informational — owned upstream).
+- **Scope** (`drawScope`): the amber `v_in(t)` trace is removed; top scope auto-fits tightly to
+  the `v_bus` ripple envelope → shows capacitor total LF+HF pk-pk.
+- **Plots** (`renderStaticPlots`): fixed axes (worst/best-case bounds) on Lifetime-vs-ambient,
+  Ripple-vs-power, Ripple-vs-C so sliders move the cursor, not the scale. Lifetime-vs-Vin uses
+  per-band power.
+
+### Files touched this session
+`frontend/src/components/CapacitorSimAgent.tsx` (new), `App.tsx`, `Step15Capacitor.tsx`,
+`ReviewMagnetics.tsx`, `SimulationAgent.tsx`, `ControlDesign.tsx`,
+`frontend/public/control_design.html`, `frontend/src/assets/pfc_dcbus_agent_v4.html`.
+
+### Open / possible next tweaks (none blocking)
+- Lifetime anchor uses the **governing (min)** method at **Tamb_max**; could switch to a specific
+  method or the Step-15 page's ambient if asked.
+- Band edges (180 Vac split, high-line worst voltage 180) are hardcoded sensibly — revisit if a
+  design uses a different universal-input gap.
+- The DC-bus tool's part-level defaults (HF freq-mult 1.4, Rθ 18 °C/W, etc.) are standard
+  Al-electrolytic estimates, shown locked — wire to datasheet data if it becomes available.
+
+---
+
+## Documentation-Agent Work (earlier track — still valid)
+
+**Resume point for the report / documentation-agent improvement work.**
 
 ## Where things stand
 - Branch `master`. Latest relevant commits (newest first):
