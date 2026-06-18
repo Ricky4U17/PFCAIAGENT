@@ -50,6 +50,11 @@ IGSE_B  = 2.106
 IGSE_IC = 3.5435
 IGSE_K  = (2 ** IGSE_C) / ((2 * math.pi) ** (IGSE_C - 1) * IGSE_IC)
 
+# Harmonic AC-excess factor for the triangular switching ripple (n = 1,3,5,…).
+# Amplifies ONLY the AC excess (Rac/Rdc − 1) of the HF copper loss — the ripple's
+# higher harmonics see a higher Rac. ≈1.213 (adopted from the simulation-agent engine).
+K_HARM = 1.213
+
 
 # ── v10 proximity model constants (Dowell-like, calibrated) ──────────────
 # Source: pfc_sim_agent_v10.html model.copper.prox
@@ -130,6 +135,7 @@ class DesignResult:
     kreq_max:       float = 0.0
     AT_design:      float = 0.0
     H_Oe_design:    float = 0.0
+    I_phi_avg_crest_A: float = 0.0   # crest-avg per-phase current used for the 90 V waveform
     I_dc_worst_A:   float = 0.0
     H_Oe_worst:     float = 0.0
     k_bias_worst:   float = 0.0
@@ -198,6 +204,8 @@ class DesignResult:
     J_A_mm2:        float = 0.0
     P_unc_lo_W:     float = 0.0
     P_unc_hi_W:     float = 0.0
+    Lfull_min_at_peak_uH: float = 0.0   # min-L guarantee at worst INSTANTANEOUS peak bias
+    dcm_fraction:         float = 0.0   # fraction of half-cycle in DCM (i_avg < ΔIpp/2)
 
     # Loss vs Vin tables
     loss_table_25C:  list = field(default_factory=list)
@@ -426,9 +434,20 @@ def _half_cycle_averages(
     pCorePk  = 0.0
     pCuPk    = 0.0
     pTotPk   = 0.0
+    dcm_count = 0                      # half-cycle points where i_avg < ΔIpp/2 (DCM)
     series_theta = [] if return_series else None
     series_Bac   = [] if return_series else None
     series_Pcore = [] if return_series else None
+    series_t_ms  = [] if return_series else None
+    series_Vin   = [] if return_series else None
+    series_D     = [] if return_series else None
+    series_Iavg  = [] if return_series else None
+    series_H     = [] if return_series else None
+    series_Bdc   = [] if return_series else None
+    series_Bmax  = [] if return_series else None
+    series_Ihf   = [] if return_series else None
+    series_Pcu   = [] if return_series else None
+    series_Ptot  = [] if return_series else None
 
     for n in range(M):
         theta = (n + 0.5) * math.pi / M
@@ -440,7 +459,10 @@ def _half_cycle_averages(
         if core_type == "powder":
             Le_cm = Le_s * 100.0
             H_Oe  = 0.4 * math.pi * N * Iavg / Le_cm
-            k_b   = _retention_edge(H_Oe)
+            # Material-specific DC-bias curve from the MagneticsDB for the SELECTED material —
+            # never an EDGE-hardcoded fallback. (Fixes wrong k(H)/Bmax for non-EDGE materials
+            # and makes step7's biased flux match the field-engine, which reads the same DB curve.)
+            k_b   = _db().get_k_bias(material_key, H_Oe)
         else:
             k_b = 1.0
         Lth = max(L0_nom_H * k_b, 1e-9)
@@ -456,8 +478,12 @@ def _half_cycle_averages(
 
         dIpp  = Vin * D / max(Lth * fsw_Hz, 1e-12)
         Ihf   = dIpp / (2.0 * math.sqrt(3.0))
+        if Iavg < dIpp / 2.0:          # inductor current rings to zero → DCM at this angle
+            dcm_count += 1
 
-        Pcu_i  = Rdc * Iavg ** 2 + Rac * Ihf ** 2
+        # HF copper loss: DC-resistance part + AC excess (Rac−Rdc) amplified by the
+        # triangular-ripple harmonic factor K_HARM (K_HARM=1 ⇒ original Rac·Ihf²).
+        Pcu_i  = Rdc * Iavg ** 2 + Ihf ** 2 * (Rdc + (Rac - Rdc) * K_HARM)
         Ptot_i = Pcore_i + Pcu_i
 
         pCoreAcc += Pcore_i
@@ -473,11 +499,21 @@ def _half_cycle_averages(
             series_theta.append(theta)
             series_Bac.append(BacPk)
             series_Pcore.append(Pcore_i)
+            series_t_ms.append(theta / math.pi * 1000.0 / (2.0 * f_line_Hz))
+            series_Vin.append(Vin)
+            series_D.append(D)
+            series_Iavg.append(Iavg)
+            series_H.append(0.4 * math.pi * N * Iavg / (Le_s * 100.0))
+            series_Bdc.append(Bdc)
+            series_Bmax.append(Bmx)
+            series_Ihf.append(Ihf)
+            series_Pcu.append(Pcu_i)
+            series_Ptot.append(Ptot_i)
 
     Pcore_avg = pCoreAcc / M
     Irms      = math.sqrt(i2 / M)
     IhfRms    = math.sqrt(r2 / M)
-    Pac       = IhfRms ** 2 * Rac
+    Pac       = IhfRms ** 2 * (Rdc + (Rac - Rdc) * K_HARM)
     Pcu_avg   = Irms ** 2 * Rdc + Pac
 
     return {
@@ -492,8 +528,13 @@ def _half_cycle_averages(
         "Pcore_pk_W":   pCorePk,
         "Pcu_pk_W":     pCuPk,
         "Ptot_pk_W":    pTotPk,
+        "dcm_fraction": dcm_count / M,
         **({"theta_rad": series_theta, "Bac_pk_T_series": series_Bac,
-            "Pcore_W_series": series_Pcore} if return_series else {}),
+            "Pcore_W_series": series_Pcore,
+            "t_ms": series_t_ms, "Vin": series_Vin, "D": series_D, "Iavg": series_Iavg,
+            "H_Oe": series_H, "Bdc": series_Bdc, "Bac_pk": series_Bac, "Bmax": series_Bmax,
+            "Ihf": series_Ihf, "Pcore": series_Pcore, "Pcu": series_Pcu, "Ptot": series_Ptot}
+           if return_series else {}),
     }
 
 
@@ -565,6 +606,7 @@ def design_one_core(
 
     Vout_V = 393.0
     I_phi_avg_crest = max(Ipk_A - dIL_pp_A / 2.0, Irms_A * 0.9)
+    res.I_phi_avg_crest_A = round(I_phi_avg_crest, 4)
 
     # ── Step 13.3: Turns ────────────────────────────────────────────────────
     if res.core_type == "powder":
@@ -823,13 +865,29 @@ def design_one_core(
     Cu_per_cond = float(wire.get("Cu_area_mm2", 1.0)) / max(n_parallel, 1)
     res.J_A_mm2 = round(wf["Irms_A"] / max(Cu_per_cond, 0.001), 3)
 
-    Pcu_final_100 = wf["Irms_A"]**2 * DCR_100 + wf["IhfRms_A"]**2 * DCR_100 * Rac_Rdc
-    Pcu_final_25  = wf["Irms_A"]**2 * DCR_25  + wf["IhfRms_A"]**2 * DCR_25  * Rac_Rdc
+    # HF copper loss: AC excess (Rac/Rdc − 1) amplified by the harmonic factor K_HARM
+    _hf = (1.0 + (Rac_Rdc - 1.0) * K_HARM)
+    Pcu_final_100 = wf["Irms_A"]**2 * DCR_100 + wf["IhfRms_A"]**2 * DCR_100 * _hf
+    Pcu_final_25  = wf["Irms_A"]**2 * DCR_25  + wf["IhfRms_A"]**2 * DCR_25  * _hf
+    res.dcm_fraction = round(wf.get("dcm_fraction", 0.0), 4)
 
     res.Ptotal_25C_W  = round(Pcu_final_25  + Pcore_avg + res.P_fringing_W, 4)
     res.Ptotal_100C_W = round(Pcu_final_100 + Pcore_avg + res.P_fringing_W, 4)
     res.P_unc_lo_W = round(Pcu_final_100 + 1.05 * Pcore_avg, 4)
     res.P_unc_hi_W = round(Pcu_final_100 + 1.20 * Pcore_avg, 4)
+
+    # Min-L guarantee at the worst INSTANTANEOUS peak bias (i_avg,crest + ΔIpp/2) using the
+    # SELECTED material's DB curve — more conservative than crest-average bias. Informational:
+    # turns selection / pass-fail are unchanged (adopted from the simulation-agent engine).
+    if res.core_type == "powder":
+        try:
+            _ipk = I_phi_avg_crest + dIL_pp_A / 2.0
+            _Hpk = (N * _ipk / Le_s) / 79.577
+            res.Lfull_min_at_peak_uH = round(L0_min * _db().get_k_bias(material_key, _Hpk) * 1e6, 3)
+        except Exception:
+            res.Lfull_min_at_peak_uH = res.L0_min_uH
+    else:
+        res.Lfull_min_at_peak_uH = res.L0_min_uH
 
     res.Pcu_25C_W  = round(Pcu_final_25,  4)
     res.Pcu_100C_W = round(Pcu_final_100, 4)
@@ -1143,3 +1201,131 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
                 break
 
     return output
+
+
+# ── Phase B: step7 "view contract" — single source every screen renders ──────────
+def build_view_contract(result: dict, state: dict) -> dict:
+    """Authoritative render payload for Result / Review / Simulation screens.
+
+    Returns step7's scalars + the design-point (90 Vac) per-θ waveforms + the 9-point
+    sweep, ALL from step7's own physics (re-runs `_half_cycle_averages` with the stored
+    design so the arrays carry the exact converged numbers). Screens RENDER this; they do
+    not recompute — guaranteeing identical values across all three. Additive/read-only.
+    """
+    R   = result or {}
+    tsi = (state or {}).get("topology_specific_inputs", {}) or {}
+    fsw = float(tsi.get("recommended_frequency_hz", 70000) or 70000)
+    Vout = 393.0                                   # matches step7 design_one_core internal Vout
+    N        = int(R.get("N", 0) or 0)
+    core_type= str(R.get("core_type", "powder")).lower()
+    mat_key  = str(R.get("material_key", ""))
+    Ae_m2    = float(R.get("Ae_total_mm2", 0) or 0) * 1e-6
+    Ve_m3    = float(R.get("Ve_total_cm3", 0) or 0) * 1e-6
+    Le_s     = float(R.get("Le_single_mm", 0) or 0) * 1e-3
+    L0_nom_H = float(R.get("L0_nom_uH", 0) or 0) * 1e-6
+    Icrest   = float(R.get("I_phi_avg_crest_A", 0) or 0)
+    T_core   = float(R.get("T_core_C", 0) or 0) or 100.0
+    DCR25    = float(R.get("DCR_25C_mOhm", 0) or 0) * 1e-3
+    Rac_Rdc  = float(R.get("Rac_Rdc", 1.0) or 1.0)
+    # All view-contract waveforms use the 100 °C copper resistance so their Pcu equals the
+    # reported result.Pcu_100C_W (the basis the readouts and anchored sweep use). Core loss is
+    # temperature-independent; the studios apply their own T scaling for exploration.
+    Rdc_100 = float(R.get("DCR_100C_mOhm", 0) or 0) * 1e-3
+    Rac_100 = Rdc_100 * Rac_Rdc
+
+    waveform = {}
+    if N > 0 and Ae_m2 > 0 and Le_s > 0 and Icrest > 0:
+        wf = _half_cycle_averages(
+            material_key=mat_key, core_type=core_type, N=N, Ae_m2=Ae_m2, Ve_m3=Ve_m3,
+            Le_s=Le_s, L0_nom_H=L0_nom_H, Icrest_A=Icrest, Vout_V=Vout,
+            Vin_pk_V=90.0 * math.sqrt(2), fsw_Hz=fsw, Rdc=Rdc_100, Rac=Rac_100,
+            T_core_C=T_core, f_line_Hz=60.0, M=360, return_series=True)
+        waveform = {k: wf[k] for k in
+                    ("t_ms", "Vin", "D", "Iavg", "H_Oe", "Bdc", "Bac_pk", "Bmax",
+                     "Ihf", "Pcore", "Pcu", "Ptot") if k in wf}
+
+    # 9-point sweep: join the loss table with the L-vs-Vin table (both already in result)
+    loss = R.get("loss_table_100C", []) or []
+    lvt  = R.get("L_vs_Vin_table", []) or []
+    def _lv(vin):
+        for r in lvt:
+            if abs(float(r.get("Vin_rms", -1)) - vin) < 0.5:
+                return r
+        return {}
+    # design-Vin reference crest (the L-vs-Vin sweep current at 90 V) — used to anchor the per-Vin
+    # waveform crest to I_phi_avg_crest so peaks equal H_Oe_design / Bmax_FL_T at the design corner.
+    _ref_ic = next((float(r.get("Iavg_crest", 0) or 0) for r in lvt
+                    if abs(float(r.get("Vin_rms", 0) or 0) - 90) < 1.0), 0.0)
+    # Anchor the per-Vin loss table to the authoritative DESIGN values at 90 V — the SAME anchor
+    # the Review page applies — so the sweep's anchored loss equals Result/Review at every Vin.
+    _lt90 = next((r for r in loss if abs(float(r.get("Vin_rms", 0) or 0) - 90) < 1.0), {})
+    _pc90 = float(_lt90.get("Pcore_W", 0) or 0); _pu90 = float(_lt90.get("Pcu_W", 0) or 0)
+    _pcoreAnc = (float(R.get("Pcore_W", 0) or 0) / _pc90) if _pc90 > 0 else 1.0
+    _pcuAnc   = (float(R.get("Pcu_100C_W", 0) or 0) / _pu90) if _pu90 > 0 else 1.0
+    sweep = []
+    for row in loss:
+        vin = float(row.get("Vin_rms", 0)); lv = _lv(vin)
+        _pc = float(row.get("Pcore_W", 0) or 0); _pu = float(row.get("Pcu_W", 0) or 0)
+        sweep.append(dict(
+            Vin=vin, Icrest=float(lv.get("Iavg_crest", 0) or 0),
+            Lfull=float(lv.get("L_full_nom_uH", 0) or 0), H_Oe=float(lv.get("H_Oe", 0) or 0),
+            k_bias=float(lv.get("k_bias", 1) or 1), Bac=float(row.get("Bac_pk", 0) or 0),
+            Pcore=_pc, Pcu=_pu, Ptot=float(row.get("Ptotal_W", 0) or 0),
+            Pcore_anc=round(_pc * _pcoreAnc, 4), Pcu_anc=round(_pu * _pcuAnc, 4),
+            Ptot_anc=round(_pc * _pcoreAnc + _pu * _pcuAnc, 4)))
+
+    # Per-Vin waveforms for the studio's Vin EXPLORER — step7-exact at each OPS point
+    # (M=180 keeps the payload light; the studio interpolates between OPS Vins).
+    waveforms_by_vin = {}
+    if N > 0 and Ae_m2 > 0 and Le_s > 0:
+        for lv in lvt:
+            vin = float(lv.get("Vin_rms", 0) or 0)
+            ic  = float(lv.get("Iavg_crest", 0) or 0)
+            if vin <= 0 or ic <= 0:
+                continue
+            # anchor to I_phi_avg_crest (so the design corner equals the readouts) while following
+            # the per-Vin sweep-current shape; use the 100 °C copper resistance for Pcu consistency.
+            ic = Icrest * (ic / _ref_ic) if (Icrest > 0 and _ref_ic > 0) else ic
+            w = _half_cycle_averages(
+                material_key=mat_key, core_type=core_type, N=N, Ae_m2=Ae_m2, Ve_m3=Ve_m3,
+                Le_s=Le_s, L0_nom_H=L0_nom_H, Icrest_A=ic, Vout_V=Vout,
+                Vin_pk_V=vin * math.sqrt(2), fsw_Hz=fsw, Rdc=Rdc_100, Rac=Rac_100,
+                T_core_C=T_core, f_line_Hz=60.0, M=180, return_series=True)
+            waveforms_by_vin[str(int(round(vin)))] = {k: w[k] for k in
+                ("t_ms", "Vin", "D", "Iavg", "H_Oe", "Bdc", "Bac_pk", "Bmax",
+                 "Ihf", "Pcore", "Pcu", "Ptot") if k in w}
+
+    scalar_keys = ("N", "stacks", "part_number", "material_key", "L0_nom_uH", "L_full_load_uH",
+                   "Bmax_FL_T", "Bmax_inner_FL_T", "Bac_pk_T", "H_Oe_design", "DCR_100C_mOhm",
+                   "Pcore_W", "Pcu_100C_W", "Ptotal_100C_W", "dT_rise_C", "dT_hotspot_C",
+                   "T_hotspot_C", "J_A_mm2", "FFcu", "Ku", "sat_margin_pct", "Rac_Rdc",
+                   "Lfull_min_at_peak_uH", "dcm_fraction")
+    # step7's AUTHORITATIVE design verdict for the viewer's acceptance panel
+    def _f(k): return float(R.get(k, 0) or 0)
+    _bsat, _bmax = _f("Bsat_at_Tcore"), _f("Bmax_FL_T")
+    _ku, _j = _f("Ku"), _f("J_A_mm2")
+    _dths = _f("dT_hotspot_C") or _f("dT_rise_C")
+    _dtb = _f("dT_budget_C") or 60.0
+    _lf, _ltgt = _f("L_full_load_uH"), _f("L_target_uH")
+    acc_rows = []
+    if _bsat > 0 and _bmax > 0:
+        acc_rows.append(dict(name="B_max", val=f"{_bmax:.3f} T", ok=(_bmax < _bsat), limTxt=f"< {_bsat:.2f} T (Bsat)"))
+    if _ku > 0:
+        acc_rows.append(dict(name="window K_u", val=f"{_ku*100:.0f}%", ok=(_ku <= 0.6), limTxt="<= 60%"))
+    if _dths > 0:
+        acc_rows.append(dict(name="dT", val=f"{_dths:.0f} K", ok=(_dths <= _dtb), limTxt=f"<= {_dtb:.0f} K"))
+    if _j > 0:
+        acc_rows.append(dict(name="J", val=f"{_j:.2f} A/mm2", ok=None, limTxt="design metric"))
+    if _lf > 0 and _ltgt > 0:
+        acc_rows.append(dict(name="L_guarantee", val=f"{_lf:.0f} uH", ok=(_lf >= _ltgt), limTxt=f">= {_ltgt:.0f} uH"))
+    _passed = bool(R.get("passed", True))
+    acceptance = dict(verdict=("APPROVE" if _passed else "REJECT"), passed=_passed,
+                      reasons=list(R.get("fail_reasons", []) or []), rows=acc_rows)
+
+    return dict(
+        scalars={k: R.get(k) for k in scalar_keys},
+        waveform=waveform, waveforms_by_vin=waveforms_by_vin, sweep=sweep, L_vs_Vin=lvt,
+        acceptance=acceptance,
+        meta=dict(Vout_V=Vout, fsw_Hz=fsw, vin_design=90.0,
+                  vins=sorted(int(k) for k in waveforms_by_vin), source="step7"),
+    )

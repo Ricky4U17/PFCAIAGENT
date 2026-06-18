@@ -17,15 +17,16 @@
  * ──────────────────────────────
  * Fixed (hidden from sidebar, pre-populated only):
  *   N, stacks, Icrest (auto-follows Vin), Vout, fsw,
- *   Winding build parameters, Thermal envelope, Live equations sections
+ *   Winding build parameters, Thermal envelope, Live equations,
+ *   3D view controls, Summary + export sections
  * Interactive (kept visible):
- *   Input voltage (Vin), Temperature, Exploded stack gap, Preset, Loss anchor,
- *   3D view controls, Summary + export
+ *   Input voltage (Vin), Temperature, Preset, Loss anchor
  */
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import rawHtml from '../assets/review_magnetics.html?raw'
 import { C, Btn } from './ui'
-import { docGenerateReport } from '../api/client'
+import { docGenerateReport, simulateCrossCheck, getViewContract,
+         type SimCrossCheck, type ViewContract } from '../api/client'
 
 // OPS table: [Vin_rms, eta, PF] — standard 9-point operating matrix
 // Low-line rows use Pout_low; high-line rows use Pout_high
@@ -52,15 +53,24 @@ interface Props {
   step8:          any
   onBack:         () => void
   onRestart:      () => void
+  onSimAgent?:    () => void
   onApprove?:     (design: Record<string, unknown>) => void
 }
 
 export const ReviewMagnetics: React.FC<Props> = ({
   result, confirmedState, matType, selMaterial, selGrade,
-  allCandidates, winding, step8, onBack, onRestart, onApprove,
+  allCandidates, winding, step8, onBack, onRestart, onSimAgent, onApprove,
 }) => {
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string | null>(null)
+  const [simLoading, setSimLoad] = useState(false)
+  const [simError,   setSimError] = useState<string | null>(null)
+  const [simResult,  setSimResult] = useState<SimCrossCheck | null>(null)
+  // Phase C: step7 per-Vin waveform contract, posted into the studio so its charts render
+  // step7's authoritative arrays (gated in the studio → no effect if this never arrives).
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
+  const [contract, setContract] = useState<ViewContract | null>(null)
 
   const iframeHtml = useMemo(() => {
     // ── Extract confirmed design values ────────────────────────────────────
@@ -70,6 +80,7 @@ export const ReviewMagnetics: React.FC<Props> = ({
 
     const N          = result.N              ?? 32
     const stacks     = result.stacks         ?? 2
+
     const Vout       = Number(app.output_bus_voltage_v        ?? 393)
     const fsw        = Number(tsi.recommended_frequency_hz    ?? 70000)
     const fswkHz     = Math.round(fsw / 1000)
@@ -137,15 +148,15 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const pyMLT_v10_mm   = Number(result.MLT_v10_mm              ?? 0)
     const pyLeadMm       = Number(result.lead_length_mm          ?? 150)
     const pyCuArea_mm2   = Number(result.Cu_area_mm2             ?? 3.14)
+    // ── Additional Python-authoritative values for overview table overrides ──
+    const pyCuLen_m      = Number(result.Cu_length_m             ?? 0)
+    const pyIhf_rms_A    = Number(result.Ihf_rms_A               ?? 0)
+    const pyPac_W        = Number(result.Pac_W                   ?? 0)
+    const pyJ_A_mm2      = Number(result.J_A_mm2                 ?? 0)
+    const pyKu           = Number(result.Ku                      ?? 0)
+    const pyPuncLo_W     = Number(result.P_unc_lo_W              ?? 0)
+    const pyPuncHi_W     = Number(result.P_unc_hi_W              ?? 0)
 
-    // ── Compute currentMap from actual OPS table ───────────────────────────
-    // Icrest_phase = √2 × (Pout/eta) / (Vin × PF) / n_phases
-    // Low-line rows (90–132 Vac) use Pout_low; high-line (180–264) use Pout_high
-    const currentMapEntries = OPS_ROWS.map(([vin, eta, pf]) => {
-      const pout   = vin <= 132 ? Pout_low : Pout_high
-      const icrest = Math.sqrt(2) * (pout / eta) / (vin * pf) / n_phases
-      return `${vin}:${icrest.toFixed(4)}`
-    }).join(',')
 
     // Initial crest current at 90 Vac
     const [, eta90, pf90] = OPS_ROWS[0]
@@ -176,7 +187,20 @@ export const ReviewMagnetics: React.FC<Props> = ({
         if (isFinite(a_row) && a_row > 0) { a_sum += a_row; a_count++ }
       }
     }
-    const a_effective = a_count > 0 ? +(a_sum / a_count).toFixed(3) : 86.7
+    // ── Anchor the analytical loss model to the rigorous waveform result ─────
+    // _build_loss_table (sweepData) and the JS Steinmetz model are single-point
+    // analytical estimates; the Result page Pcore_W / Pcu_100C_W come from the
+    // 360-point time-domain waveform model (the authoritative numbers). Anchor
+    // both the KPI/overlay/sweep losses AND the JS chart 'a' coefficient so the
+    // design point (90 V / 100 °C) equals the Result page exactly, with the
+    // per-Vin shape following the analytical table.
+    const lossAt90    = loss100.find((r: any) => Math.abs(Number(r.Vin_rms) - 90) < 1) ?? loss100[0]
+    const ltPcore90   = lossAt90 ? Number(lossAt90.Pcore_W) : 0
+    const ltPcu90     = lossAt90 ? Number(lossAt90.Pcu_W)   : 0
+    const pcoreAnchor = (ltPcore90 > 0 && result.Pcore_W)    ? (result.Pcore_W    / ltPcore90) : 1
+    const pcuAnchor   = (ltPcu90   > 0 && result.Pcu_100C_W) ? (result.Pcu_100C_W / ltPcu90)   : 1
+
+    const a_effective = a_count > 0 ? +((a_sum / a_count) * pcoreAnchor).toFixed(3) : 86.7
     const a_typ       = +(a_effective * 0.85).toFixed(3)   // ~typical = 85% of calibrated max
 
     // ── Mismatch 1: build k(H) lookup from Python DB (material-specific) ────
@@ -192,14 +216,73 @@ export const ReviewMagnetics: React.FC<Props> = ({
     }
     // Sort ascending by H and deduplicate
     kPairs.sort((a, b) => a[0] - b[0])
-    const kTableStr = JSON.stringify(kPairs)
+
+    // ── Build Python iGSE sweep data for sweep-table override ────────────────
+    // Joins loss_table_100C with L_vs_Vin_table (by Vin_rms) to produce one
+    // authoritative row per operating point — replaces JS Steinmetz sweep table.
+    const sweepRows = loss100.map((row: any) => {
+      const vin = Number(row.Vin_rms ?? 0)
+      const lvtRow = lvt.find((r: any) => Math.abs(Number(r.Vin_rms) - vin) < 0.5)
+      return {
+        Vin:    vin,
+        Icrest: Number(lvtRow?.Iavg_crest ?? lvtRow?.Ipk_line ?? 0),
+        Lfull:  Number(lvtRow?.L_full_nom_uH ?? 0),
+        H:      Number(lvtRow?.H_Oe   ?? 0),     // per-Vin magnetizing force (Python)
+        k:      Number(lvtRow?.k_bias ?? 1),     // per-Vin retention k(H)  (Python)
+        Bac:    Number(row.Bac_pk   ?? 0),
+        Pcore:  Number(row.Pcore_W  ?? 0),
+        Pcu:    Number(row.Pcu_W    ?? 0),
+        Ptot:   Number(row.Ptotal_W ?? 0),
+      }
+    })
+
+    // ── Per-Vin current map as a plain object (for the data island) ──────────
+    const currentMapObj: Record<string, number> = {}
+    OPS_ROWS.forEach(([vin, eta, pf]) => {
+      const pout = vin <= 132 ? Pout_low : Pout_high
+      currentMapObj[String(vin)] = +(Math.sqrt(2) * (pout / eta) / (vin * pf) / n_phases).toFixed(4)
+    })
+
+    // ── Single Python-authoritative payload ─────────────────────────────────
+    // Every value the inject needs crosses the TS→iframe boundary through ONE
+    // JSON.stringify (guaranteed-valid JS). The inject script reads PY.* only;
+    // NO value is ever substituted into executable JS, so a value can never
+    // produce a SyntaxError. (Root-cause fix for the recurring about:srcdoc
+    // "Invalid or unexpected token" error.)
+    const PY = {
+      N, stacks, Vout, fsw, fswkHz, Icrest90, alTotal, ffcu,
+      partNumber, wireLabel,
+      AL_single, Ae_single, Le_mm, Ve_single, Wa_single, HT_mm, coreW_mm,
+      coreR_mm, OD_mm, ID_mm, Rprime20, RacRatio, satT, pyLeadMm, pyCuArea_mm2,
+      pyNpar, boreID, bundleOD, woundOD, holeID, htBuild,
+      a_typ, a_effective, pcoreAnchor, pcuAnchor,
+      pyL0_uH, pyLfull_uH, pyH_Oe, pyK, pyBacPk_T, pyDCR_100_mOhm, pyPcore_W,
+      pyPtot_100_W, pyDT_C, pyBmax_T, pyT_hotspot_C, pyDT_core_C, pyDT_wdg_C,
+      pyBmax_inner, pySatInner_pct, pyMLT_v10_mm, pyCuLen_m, pyIhf_rms_A,
+      pyPac_W, pyJ_A_mm2, pyKu, pyPuncLo_W, pyPuncHi_W,
+      kTable: kPairs, sweepData: sweepRows, currentMap: currentMapObj,
+    }
+
+    // Data island: guaranteed-valid JSON; '<' escaped so a string value can
+    // never close the <script> early.
+    const dataIsland =
+      '<script type="application/json" id="pyReviewData">' +
+      JSON.stringify(PY).replace(/</g, '\\u003c') +
+      '<\/script>'
 
     // ── Inject script ──────────────────────────────────────────────────────
     // Runs after the IIFE finishes. cfg, currentMap, renderAll are now on
     // window (see the patch at the end of review_magnetics.html).
     const inject = `
+${dataIsland}
 <script>
+var PY = JSON.parse(document.getElementById('pyReviewData').textContent);
+console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPcore_W.toFixed(3) + "W L0=" + PY.pyL0_uH.toFixed(1) + "uH");
 (function () {
+  /* Safe string variables — JSON.stringify escapes quotes, newlines, backslashes */
+  var _pn = PY.partNumber;
+  var _wl = PY.wireLabel;
+
 
   /* 1 ── Narrower sidebar so main canvases fill the screen ──────────────── */
   var layout = document.querySelector('.layout');
@@ -209,7 +292,7 @@ export const ReviewMagnetics: React.FC<Props> = ({
   var subDiv = document.querySelector('aside .sub');
   if (subDiv) subDiv.style.display = 'none';
 
-  /* 3 ── Compact read-only "Approved Design" summary ───────────────────── */
+  /* 3b ── Compact read-only "Approved Design" summary ───────────────────── */
   var h1el = document.querySelector('aside h1');
   if (h1el) {
     var sd = document.createElement('div');
@@ -221,17 +304,17 @@ export const ReviewMagnetics: React.FC<Props> = ({
       '<div style="color:#38bdf8;font-size:9px;text-transform:uppercase;' +
         'letter-spacing:.06em;font-weight:700;margin-bottom:6px">Approved Design</div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">Core</span>' +
-        '<b>${partNumber}</b> &times;${stacks}</div>' +
+        '<b>' + _pn + '</b> &times;' + PY.stacks + '</div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">Turns</span>' +
-        'N&nbsp;=&nbsp;<b>${N}</b></div>' +
+        'N&nbsp;=&nbsp;<b>' + PY.N + '</b></div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">Wire</span>' +
-        '${wireLabel}</div>' +
+        _wl + '</div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">AL total</span>' +
-        '${alTotal}&nbsp;nH/T&sup2;</div>' +
+        PY.alTotal + '&nbsp;nH/T&sup2;</div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">FF<sub>cu</sub></span>' +
-        '${ffcu}%</div>' +
+        PY.ffcu + '%</div>' +
       '<div><span style="color:#9ca3af;display:inline-block;width:82px">Vout&nbsp;/&nbsp;fsw</span>' +
-        '${Vout}&nbsp;V &middot; ${fswkHz}&nbsp;kHz</div>';
+        PY.Vout + '&nbsp;V &middot; ' + PY.fswkHz + '&nbsp;kHz</div>';
     h1el.insertAdjacentElement('afterend', sd);
   }
 
@@ -266,19 +349,31 @@ export const ReviewMagnetics: React.FC<Props> = ({
   hideSection('Winding build parameters');
   hideSection('Thermal envelope');
   hideSection('Live equations');
+  hideSection('3D view controls');
+  hideSection('Summary + export');
 
-  /* 6 ── Update footer text ─────────────────────────────────────────────── */
+  /* 5b ── Remove export/summary toolbars, captions and the status line (designer) ──
+     Elements are HIDDEN (not removed) so the studio's onclick wiring never hits a null. */
+  ['.toolbar', '.export-grid'].forEach(function (sel) {
+    Array.prototype.forEach.call(document.querySelectorAll(sel), function (el) { el.style.display = 'none'; });
+  });
+  var _rs = document.getElementById('reviewStatus'); if (_rs) _rs.style.display = 'none';
+  Array.prototype.forEach.call(document.querySelectorAll('.tiny, h3'), function (el) {
+    var t = (el.textContent || '');
+    if (t.indexOf('Titles deliberately match') >= 0 || t.trim() === 'Generate design review summary')
+      el.style.display = 'none';
+  });
+
+  /* 6 ── Remove the footer note ─────────────────────────────────────────── */
   var footEl = document.querySelector('aside .foot');
-  if (footEl) footEl.textContent =
-    'Pre-loaded from approved design (${partNumber}, N=${N}\\xd7${stacks} stack). ' +
-    'Shaded band = +5\\u202120\\u2009% core-loss uncertainty.';
+  if (footEl) footEl.style.display = 'none';
 
   /* 7a ── Override retention(H) with Python DB k(H) curve (Mismatch 1) ─────
      The original JS uses a single empirical formula calibrated to EDGE 75µ.
      We replace it with material-specific k(H) from the Python sizing DB
      (linear interpolation over the 9 operating points from L_vs_Vin_table).
      window.retention is now the live function — all compute() calls use it.  */
-  var kTable_db = ${kTableStr};
+  var kTable_db = PY.kTable;
   window.retention = function (H) {
     H = Math.max(0, H);
     if (kTable_db.length === 0) return 1.0;
@@ -300,41 +395,41 @@ export const ReviewMagnetics: React.FC<Props> = ({
      consistent with what the sizing engine calculated.                       */
   var lossEl = document.getElementById('lossAnchor');
   if (lossEl && lossEl.options.length >= 2) {
-    lossEl.options[0].value   = '${a_typ}';
-    lossEl.options[0].text    = 'Typical (DB) a = ${a_typ}';
-    lossEl.options[1].value   = '${a_effective}';
-    lossEl.options[1].text    = 'Max (DB) a = ${a_effective}';
-    lossEl.value              = '${a_effective}';   // select the calibrated max
+    lossEl.options[0].value   = String(PY.a_typ);
+    lossEl.options[0].text    = 'Typical (DB) a = ' + PY.a_typ;
+    lossEl.options[1].value   = String(PY.a_effective);
+    lossEl.options[1].text    = 'Max (DB) a = ' + PY.a_effective;
+    lossEl.value              = String(PY.a_effective);   // select the calibrated max
   }
   /* Also update cfg so any code that reads cfg.aTyp / cfg.aMax is consistent */
-  cfg.aTyp = ${a_typ};
-  cfg.aMax = ${a_effective};
+  cfg.aTyp = PY.a_typ;
+  cfg.aMax = PY.a_effective;
 
   /* 7 ── Override cfg with selected-design values (now on window) ─────────
      NOTE: cfg is window.cfg thanks to the patch at the end of the IIFE.    */
-  cfg.AL_single_nH  = ${AL_single.toFixed(3)};
-  cfg.Ae_single_mm2 = ${Ae_single.toFixed(2)};
-  cfg.Le_mm         = ${Le_mm.toFixed(2)};
-  cfg.Ve_single_mm3 = ${Ve_single.toFixed(1)};
-  cfg.Wa_mm2        = ${Wa_single.toFixed(1)};
-  cfg.coreHeight_mm = ${HT_mm.toFixed(3)};
-  cfg.coreW_mm      = ${coreW_mm.toFixed(3)};
-  cfg.coreR_mm      = ${coreR_mm.toFixed(3)};    // mean radius for 3D ring
-  cfg.coreOD_mm     = ${OD_mm.toFixed(2)};       // for label text
-  cfg.coreID_mm     = ${ID_mm.toFixed(2)};       // for label text
-  cfg.coreLabel     = '${partNumber}';           // for stack & label text
-  cfg.Rprime20      = ${Rprime20.toFixed(6)};
-  cfg.RacRatio      = ${RacRatio.toFixed(4)};
-  cfg.Vout          = ${Vout};
-  cfg.fsw           = ${fsw};
-  cfg.satT          = ${satT.toFixed(3)};
-  cfg.leadMm        = ${pyLeadMm};
-  cfg.CuArea_mm2    = ${pyCuArea_mm2.toFixed(4)};
-  cfg.nParallel     = ${pyNpar};
+  cfg.AL_single_nH  = PY.AL_single;
+  cfg.Ae_single_mm2 = PY.Ae_single;
+  cfg.Le_mm         = PY.Le_mm;
+  cfg.Ve_single_mm3 = PY.Ve_single;
+  cfg.Wa_mm2        = PY.Wa_single;
+  cfg.coreHeight_mm = PY.HT_mm;
+  cfg.coreW_mm      = PY.coreW_mm;
+  cfg.coreR_mm      = PY.coreR_mm;    // mean radius for 3D ring
+  cfg.coreOD_mm     = PY.OD_mm;       // for label text
+  cfg.coreID_mm     = PY.ID_mm;       // for label text
+  cfg.coreLabel     = _pn;            // for stack & label text
+  cfg.Rprime20      = PY.Rprime20;
+  cfg.RacRatio      = PY.RacRatio;
+  cfg.Vout          = PY.Vout;
+  cfg.fsw           = PY.fsw;
+  cfg.satT          = PY.satT;
+  cfg.leadMm        = PY.pyLeadMm;
+  cfg.CuArea_mm2    = PY.pyCuArea_mm2;
+  cfg.nParallel     = PY.pyNpar;
 
   /* 8 ── Replace currentMap with actual operating-point currents ──────────
      currentMap[Vin] = per-phase Icrest = √2×(Pout/η)/(Vin×PF)/n_phases    */
-  var newMap = {${currentMapEntries}};
+  var newMap = PY.currentMap;
   Object.keys(newMap).forEach(function (k) { currentMap[+k] = newMap[+k]; });
 
   /* 9 ── Vin slider: auto-sync Icrest via crestCurrent() ─────────────────
@@ -369,22 +464,38 @@ export const ReviewMagnetics: React.FC<Props> = ({
 
   /* 11 ── Pre-populate all inputs and re-render ───────────────────────── */
   var overrides = {
-    N:        ${N},
-    stacks:   ${stacks},
+    N:        PY.N,
+    stacks:   PY.stacks,
     vin:      90,
-    Icrest:   ${Icrest90},
-    Vout:     ${Vout},
-    fsw:      ${fsw},
+    Icrest:   PY.Icrest90,
+    Vout:     PY.Vout,
+    fsw:      PY.fsw,
     tempC:    100,
-    boreID:   ${boreID.toFixed(2)},
-    bundleOD: ${bundleOD.toFixed(3)},
-    woundOD:  ${woundOD.toFixed(1)},
-    holeID:   ${holeID.toFixed(1)},
-    htBuild:  ${htBuild.toFixed(1)},
+    boreID:   PY.boreID,
+    bundleOD: PY.bundleOD,
+    woundOD:  PY.woundOD,
+    holeID:   PY.holeID,
+    htBuild:  PY.htBuild,
   };
   Object.keys(overrides).forEach(function (k) {
     var el = document.getElementById(k);
-    if (el) el.value = overrides[k];
+    if (!el) return;
+    var v = overrides[k];
+    /* GUARDRAIL ── a <input type="range"> CLAMPS .value to [min,max]. The studio's
+       N slider is max=52 / stacks max=4, but approved designs can exceed those
+       (e.g. N=71), so the clamp silently truncated the value and any code reading
+       the FORM field (drawWindowBuild passes = N×nParallel, fill %) drew the wrong
+       turn count while the JSON-island summary showed the real N — a recurring
+       mismatch. Widen the slider's own min/max to include v BEFORE assigning, so
+       the form value always equals PY.* regardless of the hardcoded bounds.        */
+    if (el.tagName === 'INPUT' && el.type === 'range' && isFinite(+v)) {
+      if (+v < +el.min) el.min = String(v);
+      if (+v > +el.max) el.max = String(v);
+    }
+    el.value = v;
+    /* keep the slider's printed label (id+'Val') in sync with the widened value */
+    var lbl = document.getElementById(k + 'Val');
+    if (lbl) lbl.textContent = v;
   });
 
   /* 12 ── Re-render with all corrected values ───────────────────────── */
@@ -396,55 +507,113 @@ export const ReviewMagnetics: React.FC<Props> = ({
      and the review-summary textarea (Inductance/Flux/Loss/Build lines +
      recommended talking points re-evaluated with Python thresholds).      */
   (function () {
-    var pyL0    = ${pyL0_uH.toFixed(4)};
-    var pyLfull = ${pyLfull_uH.toFixed(4)};
-    var pyH     = ${pyH_Oe.toFixed(4)};
-    var pyK     = ${pyK.toFixed(6)};
-    var pyBac   = ${pyBacPk_T.toFixed(6)};
-    var pyDCR   = ${pyDCR_100_mOhm.toFixed(4)};
-    var pyPcore = ${pyPcore_W.toFixed(6)};
-    var pyPtot  = ${pyPtot_100_W.toFixed(6)};
-    var pyDT    = ${pyDT_C.toFixed(4)};
-    var pyBmax  = ${pyBmax_T.toFixed(6)};
+    var pyL0    = PY.pyL0_uH;
+    var pyLfull = PY.pyLfull_uH;
+    var pyH     = PY.pyH_Oe;
+    var pyK     = PY.pyK;
+    var pyBac   = PY.pyBacPk_T;
+    var pyDCR   = PY.pyDCR_100_mOhm;
+    var pyPcore = PY.pyPcore_W;
+    var pyPtot  = PY.pyPtot_100_W;
+    var pyDT    = PY.pyDT_C;
+    var pyBmax  = PY.pyBmax_T;
     // v10 new fields
-    var pyThotspot  = ${pyT_hotspot_C.toFixed(4)};
-    var pyDTcore    = ${pyDT_core_C.toFixed(4)};
-    var pyDTwdg     = ${pyDT_wdg_C.toFixed(4)};
-    var pyBinner    = ${pyBmax_inner.toFixed(6)};
-    var pySatInner  = ${pySatInner_pct.toFixed(1)};
-    var pyMLTv10    = ${pyMLT_v10_mm.toFixed(2)};
+    var pyThotspot  = PY.pyT_hotspot_C;
+    var pyDTcore    = PY.pyDT_core_C;
+    var pyDTwdg     = PY.pyDT_wdg_C;
+    var pyBinner    = PY.pyBmax_inner;
+    var pySatInner  = PY.pySatInner_pct;
+    var pyMLTv10    = PY.pyMLT_v10_mm;
+    // overview + sweep overrides
+    var pyCuLen     = PY.pyCuLen_m;
+    var pyIhf       = PY.pyIhf_rms_A;
+    var pyPacW      = PY.pyPac_W;
+    var pyJA        = PY.pyJ_A_mm2;
+    var pyKuPct     = (PY.pyKu * 100).toFixed(2);
+    var pyPuncLo    = PY.pyPuncLo_W;
+    var pyPuncHi    = PY.pyPuncHi_W;
+    var pySweepData = PY.sweepData;
+
+    // Interpolate Python per-operating-point data (sweepData) at an arbitrary
+    // Vin — keeps the live 3D-model overlay Python-authoritative as Vin moves.
+    var _swSorted = (pySweepData || []).slice().sort(function (a, b) { return a.Vin - b.Vin; });
+    function pyAtVin(vin) {
+      var sd = _swSorted;
+      if (!sd.length) return null;
+      if (vin <= sd[0].Vin) return sd[0];
+      if (vin >= sd[sd.length - 1].Vin) return sd[sd.length - 1];
+      for (var i = 0; i < sd.length - 1; i++) {
+        var a = sd[i], b = sd[i + 1];
+        if (vin >= a.Vin && vin <= b.Vin) {
+          var t = (b.Vin - a.Vin) > 0 ? (vin - a.Vin) / (b.Vin - a.Vin) : 0;
+          var lerp = function (key) { return a[key] + t * (b[key] - a[key]); };
+          return { Vin: vin, Lfull: lerp('Lfull'), Bac: lerp('Bac'),
+                   Pcore: lerp('Pcore'), Pcu: lerp('Pcu'), Ptot: lerp('Ptot'),
+                   Icrest: lerp('Icrest'), H: lerp('H'), k: lerp('k') };
+        }
+      }
+      return sd[sd.length - 1];
+    }
 
     function applyPyOverrides() {
       var d = document;
       function setEl(id, txt) { var e = d.getElementById(id); if (e) e.textContent = txt; }
 
-      /* A ── KPI cards ──────────────────────────────────────────────────── */
-      setEl('kpiL0',    pyL0.toFixed(1)    + ' µH');
-      setEl('kpiLfull', pyLfull.toFixed(1) + ' µH');
-      setEl('kpiH',     pyH.toFixed(1)     + ' Oe');
-      setEl('kpiK',     pyK.toFixed(3));
-      setEl('kpiBpk',   pyBac.toFixed(3)   + ' T');
-      setEl('kpiDCR',   pyDCR.toFixed(1)   + ' mΩ');
-      setEl('kpiPcore', pyPcore.toFixed(2) + ' W');
-      setEl('kpiPtot',  pyPtot.toFixed(2)  + ' W');
+      /* Live operating point — Python per-Vin data (sweepData) + temp scaling.
+         Drives BOTH the KPI cards (Section A) and the 3D-model overlay (B). At
+         the design point (90 V, 100 °C) every ratio is 1, so the values equal
+         the Python design numbers exactly. */
+      var curVin = +(d.getElementById('vin')   || {value: 90}).value;
+      var curT   = +(d.getElementById('tempC') || {value: 100}).value;
+      var _opTag = d.getElementById('kpiOpTag');
+      if (_opTag) _opTag.innerHTML = 'Operating point: <span style="color:#38bdf8">' +
+        curVin + ' Vac</span> &middot; ' + curT + ' &deg;C';
+      var at = pyAtVin(curVin) ||
+        { Lfull: pyLfull, Bac: pyBac, Pcore: pyPcore, Pcu: (pyPtot - pyPcore), Ptot: pyPtot,
+          Icrest: PY.Icrest90, H: pyH, k: pyK };
+      var tScale     = (235 + curT) / (235 + 100);          // copper R(T)=R100*(235+T)/(235+100)
+      var liveDCR    = pyDCR  * tScale;
+      var liveCore   = at.Pcore * PY.pcoreAnchor;           // core loss, anchored to waveform model
+      var livePcu    = at.Pcu * PY.pcuAnchor * tScale;      // copper loss, anchored, tracks R(T)
+      var livePtot   = liveCore + livePcu;                  // total = core(≈T-indep) + copper(T)
+      var bScale     = pyBac > 0 ? at.Bac / pyBac : 1;      // flux ~ AC excitation
+      var liveBmax   = pyBmax   * bScale;
+      var liveBinner = pyBinner * bScale;
+      var lScale     = pyPtot > 0 ? livePtot / pyPtot : 1;  // thermal rise ~ total loss
+      var liveDT     = pyDT     * lScale;
+      var liveDTcore = pyDTcore * lScale;
+      var liveDTwdg  = pyDTwdg  * lScale;
+      var liveThs    = pyThotspot + (curT - 100) +
+                       Math.max(liveDTcore - pyDTcore, liveDTwdg - pyDTwdg);
 
-      /* B ── Canvas info overlay ────────────────────────────────────────── */
+      /* A ── KPI cards (live: Python per-Vin + temp scaling) ─────────────── */
+      setEl('kpiL0',    pyL0.toFixed(1)     + ' µH');   // zero-bias L — Vin-independent
+      setEl('kpiLfull', at.Lfull.toFixed(1) + ' µH');
+      setEl('kpiH',     at.H.toFixed(1)     + ' Oe');   // per-Vin H_Oe (Python)
+      setEl('kpiK',     at.k.toFixed(3));               // per-Vin k(H)  (Python)
+      setEl('kpiBmax',  liveBmax.toFixed(3) + ' T');    // mean operating flux (Vin)
+      setEl('kpiBpk',   at.Bac.toFixed(3)   + ' T');
+      setEl('kpiDCR',   liveDCR.toFixed(1)  + ' mΩ');
+      setEl('kpiPcore', liveCore.toFixed(2) + ' W');
+      setEl('kpiPtot',  livePtot.toFixed(2) + ' W');
+
+      /* B ── Canvas info overlay — LIVE: Python per-Vin data + temp scaling ── */
       var cvs = d.getElementById('model');
       if (cvs) {
         var ctx = cvs.getContext('2d');
-        var curN   = +(d.getElementById('N')      || {value: ${N}}).value;
-        var curStk = +(d.getElementById('stacks') || {value: ${stacks}}).value;
-        var curT   = +(d.getElementById('tempC')  || {value: 100}).value;
-        ctx.fillStyle = 'rgba(15,23,42,.78)';
+        var curN   = +(d.getElementById('N')      || {value: PY.N}).value;
+        var curStk = +(d.getElementById('stacks') || {value: PY.stacks}).value;
+
+        ctx.fillStyle = 'rgba(15,23,42,.92)';
         ctx.fillRect(14, 14, 392, 160);
         ctx.strokeStyle = 'rgba(148,163,184,.18)';
         ctx.strokeRect(14, 14, 392, 160);
         ctx.fillStyle = '#e5e7eb'; ctx.font = '14px Segoe UI';
-        ctx.fillText('N = ' + curN + '   stacks = ' + curStk + '   temp = ' + curT + '°C', 26, 38);
-        ctx.fillText('Lfull = ' + pyLfull.toFixed(1) + ' µH   Ptotal = ' + pyPtot.toFixed(2) + ' W', 26, 62);
-        ctx.fillText('Bmax,mean = ' + pyBmax.toFixed(3) + ' T   DCR = ' + pyDCR.toFixed(1) + ' mΩ   ΔT = ' + pyDT.toFixed(1) + '°C', 26, 86);
+        ctx.fillText('N = ' + curN + '   stacks = ' + curStk + '   Vin = ' + curVin + ' Vac   temp = ' + curT + '°C', 26, 38);
+        ctx.fillText('Lfull = ' + at.Lfull.toFixed(1) + ' µH   Ptotal = ' + livePtot.toFixed(2) + ' W', 26, 62);
+        ctx.fillText('Bmax,mean = ' + liveBmax.toFixed(3) + ' T   DCR = ' + liveDCR.toFixed(1) + ' mΩ   ΔT = ' + liveDT.toFixed(1) + '°C', 26, 86);
         ctx.fillStyle = '#a78bfa'; ctx.font = '13px Segoe UI';
-        ctx.fillText('T_hotspot = ' + pyThotspot.toFixed(1) + '°C  (core +' + pyDTcore.toFixed(1) + ' / wdg +' + pyDTwdg.toFixed(1) + ' K)   Bmax,inner = ' + pyBinner.toFixed(3) + ' T', 26, 110);
+        ctx.fillText('T_hotspot = ' + liveThs.toFixed(1) + '°C  (core +' + liveDTcore.toFixed(1) + ' / wdg +' + liveDTwdg.toFixed(1) + ' K)   Bmax,inner = ' + liveBinner.toFixed(3) + ' T', 26, 110);
         ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI';
         var cg = window.cfg || {};
         var cOD = (cg.coreOD_mm || 40.9).toFixed(1), cID = (cg.coreID_mm || 21.3).toFixed(1);
@@ -488,6 +657,44 @@ export const ReviewMagnetics: React.FC<Props> = ({
         }
       }
 
+      /* D2 ── Override remaining overview rows with Python-authoritative values */
+      if (ovTbl) {
+        var ovR2 = ovTbl.querySelectorAll('tr');
+        var ovPatch2 = {
+          0: pyCuLen.toFixed(2) + ' m',
+          3: pyIhf.toFixed(2) + ' A',
+          4: (pyPacW * 1000).toFixed(1) + ' mW',
+          5: pyJA.toFixed(2) + ' A/mm²',
+          6: pyKuPct + ' %',
+          8: pyPuncLo.toFixed(2) + '–' + pyPuncHi.toFixed(2) + ' W',
+        };
+        Object.keys(ovPatch2).forEach(function(idx) {
+          var r = ovR2[+idx]; if (!r) return;
+          var tds = r.querySelectorAll('td'); if (tds[1]) tds[1].textContent = ovPatch2[idx];
+        });
+      }
+
+      /* H ── Sweep table — replace JS Steinmetz rows with Python iGSE data ── */
+      var swTbl = d.getElementById('sweepTbl');
+      if (swTbl && pySweepData.length > 0) {
+        swTbl.innerHTML = pySweepData.map(function(r) {
+          var pc = r.Pcore * PY.pcoreAnchor;   // anchored to waveform core loss
+          var pu = r.Pcu   * PY.pcuAnchor;     // anchored to waveform copper loss
+          var pt = pc + pu;
+          var unc = (pu + 1.05*pc).toFixed(2) + '–' + (pu + 1.20*pc).toFixed(2);
+          var hl = r.Vin > 150;
+          return '<tr' + (hl ? ' style="opacity:.75"' : '') + '>' +
+            '<td>' + r.Vin.toFixed(0) + (hl ? ' HL' : ' LL') + '</td>' +
+            '<td>' + r.Icrest.toFixed(2) + '</td>' +
+            '<td>' + r.Lfull.toFixed(1) + '</td>' +
+            '<td>' + r.Bac.toFixed(3) + '</td>' +
+            '<td>' + pc.toFixed(2) + '</td>' +
+            '<td>' + pu.toFixed(2) + '</td>' +
+            '<td>' + pt.toFixed(2) + '</td>' +
+            '<td>' + unc + '</td></tr>';
+        }).join('');
+      }
+
       /* E ── Overview status — Lfull / Bmax / ΔT / hotspot health-check ──── */
       var osi = d.getElementById('overviewStatus');
       if (osi) {
@@ -498,11 +705,11 @@ export const ReviewMagnetics: React.FC<Props> = ({
         var okThs2 = pyThotspot < 110;             // hotspot: healthy when <110°C absolute
         var sm2   = (satT2 / Math.max(pyBmax,   1e-9)).toFixed(2);
         var smI2  = (satT2 / Math.max(pyBinner, 1e-9)).toFixed(2);
-        var cStk2 = +(d.getElementById('stacks') || {value: ${stacks}}).value;
+        var cStk2 = +(d.getElementById('stacks') || {value: PY.stacks}).value;
         var htBEl = d.getElementById('htBuild'), wODEl = d.getElementById('woundOD'), hlEl = d.getElementById('holeID');
-        var htB2  = +(htBEl ? htBEl.value  : ${htBuild.toFixed(1)});
-        var odW2  = +(wODEl ? wODEl.value  : ${woundOD.toFixed(1)});
-        var hlID2 = +(hlEl  ? hlEl.value   : ${holeID.toFixed(1)});
+        var htB2  = +(htBEl ? htBEl.value  : PY.htBuild);
+        var odW2  = +(wODEl ? wODEl.value  : PY.woundOD);
+        var hlID2 = +(hlEl  ? hlEl.value   : PY.holeID);
         var oh2   = cStk2 * (cg2.coreHeight_mm || 17.89) + htB2;
         var sa2   = (Math.PI*odW2*oh2 + 2*(Math.PI/4)*(odW2*odW2 - hlID2*hlID2) + Math.PI*hlID2*oh2) / 100;
         osi.querySelectorAll('div').forEach(function (dv) {
@@ -560,12 +767,12 @@ export const ReviewMagnetics: React.FC<Props> = ({
       var su = d.getElementById('summaryOut');
       if (su && su.value) {
         var pyPcu2  = pyPtot - pyPcore;
-        var pyUncLo = (pyPcu2 + 1.05*pyPcore).toFixed(2);
-        var pyUncHi = (pyPcu2 + 1.20*pyPcore).toFixed(2);
+        var pyUncLo = pyPuncLo > 0 ? pyPuncLo.toFixed(2) : (pyPcu2 + 1.05*pyPcore).toFixed(2);
+        var pyUncHi = pyPuncHi > 0 ? pyPuncHi.toFixed(2) : (pyPcu2 + 1.20*pyPcore).toFixed(2);
         var satT3   = (window.cfg && window.cfg.satT) ? window.cfg.satT : 1.0;
         var sm3     = (satT3 / Math.max(pyBmax, 1e-9)).toFixed(2);
         var okL3 = pyLfull >= 235, pyBHigh = pyBmax > 0.45, pyTHigh = pyDT > 35;
-        var lines = su.value.split('\n'), recIdx = -1;
+        var lines = su.value.split('\\n'), recIdx = -1;
         for (var si = 0; si < lines.length; si++) {
           var ln = lines[si];
           if (ln.indexOf('Inductance:') >= 0) {
@@ -605,15 +812,20 @@ export const ReviewMagnetics: React.FC<Props> = ({
             recs.map(function (t, ix) { return '  ' + (ix + 1) + '. ' + t; })
           );
         }
-        su.value = lines.join('\n');
+        su.value = lines.join('\\n');
       }
+      /* grow the read-only summary box to fit its final (Python-corrected) text — no inner scroll */
+      if (typeof fitSummary === 'function') fitSummary();
     }
 
     applyPyOverrides();
 
-    // Re-apply after any input change that triggers renderAll via the original IIFE listeners.
-    // setTimeout 0 ensures we run after renderAll() has already updated the JS-computed values.
-    var _reApply = function () { setTimeout(applyPyOverrides, 0); };
+    // Re-apply after any input change. Our listeners are registered AFTER the
+    // studio's, so the studio's renderAll() (which redraws the canvas + its own
+    // overlay) has already run by the time this fires. Running SYNCHRONOUSLY —
+    // not via setTimeout — keeps both draws in the same frame so the browser
+    // paints only once: no flicker, and our Python overlay always wins.
+    var _reApply = function () { applyPyOverrides(); };
     ['N','stacks','tempC','explode','vin','Icrest','Vout','fsw',
      'lossAnchor','boreID','bundleOD','woundOD','holeID','htBuild'].forEach(function (id) {
       var el = document.getElementById(id); if (el) el.addEventListener('input', _reApply);
@@ -622,6 +834,12 @@ export const ReviewMagnetics: React.FC<Props> = ({
     if (presetEl2) presetEl2.addEventListener('change', _reApply);
     ['genReview','refreshSummary','frontBtn','isoBtn','topBtn','resetBtn'].forEach(function (id) {
       var el = document.getElementById(id); if (el) el.addEventListener('click', _reApply);
+    });
+    // When the parent posts the step7 contract, the studio's own handler runs renderAll() (which
+    // resets the KPI cards to JS values). Our listener is registered AFTER it, so re-applying the
+    // Python overrides here restores the correct numbers on FIRST load (no slider move needed).
+    window.addEventListener('message', function (ev) {
+      if (ev && ev.data && ev.data.__step7_contract) _reApply();
     });
   })();
 })();
@@ -638,7 +856,10 @@ export const ReviewMagnetics: React.FC<Props> = ({
       '<h1>PFC Inductor Studio V5.1</h1>',
       '<h1>Review Magnetics Data</h1>'
     )
-    // Inject script before </body>
+    // Let the content flow to its natural height (no internal 100vh lock) so the
+    // iframe can be auto-sized to it and the page uses a single browser scrollbar.
+    html = html.replace('min-height:100vh', 'min-height:0')
+    // Inject data island + script before </body>
     html = html.replace('</body>', inject + '</body>')
     return html
   }, [result, confirmedState])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -668,19 +889,155 @@ export const ReviewMagnetics: React.FC<Props> = ({
     } finally { setRptLoad(false) }
   }
 
+  // ── Simulation-Agent shadow cross-check (Phase 1) ──────────────────────────
+  const handleSimCheck = async () => {
+    if (!result || !confirmedState) return
+    setSimLoad(true); setSimError(null)
+    try {
+      const out = await simulateCrossCheck(
+        confirmedState as Record<string, unknown>,
+        { ...result,
+          material_key: result.material_key || (matType === 'powder' ? selMaterial : selGrade) },
+        'litz',
+      )
+      setSimResult(out)
+      if (out.ok === false) setSimError((out.errors ?? ['invalid package']).join('; '))
+    } catch (e) {
+      setSimError((e as Error).message ?? String(e))
+    } finally { setSimLoad(false) }
+  }
+
+  // Fetch step7's view-contract (per-Vin waveforms) and post it into the studio iframe so its
+  // charts render step7's authoritative arrays. Gated in the studio → harmless if it never arrives.
+  useEffect(() => {
+    if (!result || !confirmedState) return
+    let alive = true
+    getViewContract(
+      confirmedState as Record<string, unknown>,
+      { ...result, material_key: result.material_key || (matType === 'powder' ? selMaterial : selGrade) },
+    ).then(out => { if (alive) setContract(out.contract) }).catch(() => {})
+    return () => { alive = false }
+  }, [result, confirmedState])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const postContract = () => {
+    const cw = iframeRef.current?.contentWindow
+    if (cw && contract) cw.postMessage({ __step7_contract: contract }, '*')
+  }
+  useEffect(() => { postContract() }, [contract])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-size the iframe to its content (kills the inner scrollbar) ─────────
+  // The studio is same-origin (allow-same-origin), so we can read its document
+  // height and grow the iframe to fit. With no internal scroll, only the browser
+  // scrollbar moves the page up/down.
+  const fitHeight = () => {
+    const f = iframeRef.current
+    const doc = f?.contentDocument
+    if (!f || !doc) return
+    const h = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0)
+    if (h > 0) f.style.height = h + 'px'
+  }
+  const handleLoad = () => {
+    postContract()
+    fitHeight()
+    const doc = iframeRef.current?.contentDocument
+    roRef.current?.disconnect()
+    const target = doc?.body ?? doc?.documentElement
+    if (target && 'ResizeObserver' in window) {
+      const ro = new ResizeObserver(() => fitHeight())
+      ro.observe(target)
+      roRef.current = ro
+    }
+  }
+  useEffect(() => () => roRef.current?.disconnect(), [])
+
+  // The "Simulation Agent" tab inside the studio posts this to navigate to the Sim Agent page.
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      if (ev?.data?.__navSimAgent && onSimAgent) onSimAgent()
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [onSimAgent])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* ── iframe: all 4 tabs, full-width ────────────────────────────────── */}
       <iframe
+        ref={iframeRef}
+        onLoad={handleLoad}
         srcDoc={iframeHtml}
         title="Review Magnetics Data"
+        scrolling="no"
         style={{
-          width: '100%', height: 'calc(100vh - 175px)', minHeight: 680,
+          width: '100%', minHeight: 680,
           border: 'none', borderRadius: 10, background: '#08101f', display: 'block',
         }}
         sandbox="allow-scripts allow-same-origin"
       />
+
+      {/* ── Simulation-Agent cross-check (Phase 1 shadow; additive) ────────── */}
+      {(simResult || simError) && (
+        <div style={{
+          marginTop: 8, padding: '10px 12px', borderRadius: 8,
+          border: `1px solid ${C.border}`, background: 'rgba(56,189,248,.05)', fontSize: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em',
+              color: C.accent, fontWeight: 700 }}>Simulation cross-check (shadow)</span>
+            {simResult?.verdict && (
+              <span style={{ fontFamily: 'IBM Plex Mono,monospace', fontWeight: 700,
+                color: simResult.verdict === 'APPROVE' ? C.green : C.amber }}>{simResult.verdict}</span>
+            )}
+            {simResult?.crosscheck && (
+              <span style={{ fontFamily: 'IBM Plex Mono,monospace',
+                color: simResult.crosscheck.all_within_band ? C.green : C.amber }}>
+                {simResult.crosscheck.all_within_band === null ? '—'
+                  : simResult.crosscheck.all_within_band ? '✓ all within band'
+                  : '⚠ deviations outside band'}
+              </span>
+            )}
+          </div>
+          {simError && <div style={{ color: '#c0392b', marginBottom: 6 }}>⚠ {simError}</div>}
+          {simResult?.crosscheck?.rows && (
+            <table style={{ width: '100%', borderCollapse: 'collapse',
+              fontFamily: 'IBM Plex Mono,monospace', fontSize: 11 }}>
+              <thead>
+                <tr style={{ color: C.muted, textAlign: 'right' }}>
+                  <th style={{ textAlign: 'left', padding: '2px 6px' }}>Quantity</th>
+                  <th style={{ padding: '2px 6px' }}>Ours (step7)</th>
+                  <th style={{ padding: '2px 6px' }}>Sim engine</th>
+                  <th style={{ padding: '2px 6px' }}>Δ%</th>
+                  <th style={{ padding: '2px 6px' }}>Band</th>
+                  <th style={{ padding: '2px 6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {simResult.crosscheck.rows.map((r) => (
+                  <tr key={r.quantity} style={{ borderTop: `0.5px solid ${C.border}`, textAlign: 'right' }}>
+                    <td style={{ textAlign: 'left', padding: '3px 6px', color: C.text }}>{r.quantity}</td>
+                    <td style={{ padding: '3px 6px', color: C.muted }}>{r.ours ?? '—'}</td>
+                    <td style={{ padding: '3px 6px', color: C.muted }}>{r.sim ?? '—'}</td>
+                    <td style={{ padding: '3px 6px', color: r.within === false ? C.amber : C.text }}>
+                      {r.delta_pct === null ? '—' : `${r.delta_pct > 0 ? '+' : ''}${r.delta_pct}%`}
+                    </td>
+                    <td style={{ padding: '3px 6px', color: C.hint }}>±{r.band_pct}%</td>
+                    <td style={{ padding: '3px 6px',
+                      color: r.within === null ? C.hint : r.within ? C.green : C.amber }}>
+                      {r.within === null ? '—' : r.within ? '✓' : '⚠'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {simResult?.validation?.warnings && simResult.validation.warnings.length > 0 && (
+            <div style={{ marginTop: 6, color: C.amber, fontSize: 10 }}>
+              {simResult.validation.warnings.map((w, i) => <div key={i}>• {w}</div>)}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Action bar ────────────────────────────────────────────────────── */}
       <div style={{
@@ -691,6 +1048,9 @@ export const ReviewMagnetics: React.FC<Props> = ({
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="ghost" onClick={onBack}>← Back to Result</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
+          <Btn variant="ghost" disabled={simLoading} onClick={handleSimCheck}>
+            {simLoading ? '⏳ Simulating…' : '🧪 Sim cross-check'}
+          </Btn>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
           {rptError && (

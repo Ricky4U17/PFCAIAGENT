@@ -5,6 +5,7 @@ import {
   step7GradeOptions, step7WireOptions, step7RunSizing, step8TimeDomain,
 } from '../api/client'
 import { ReviewMagnetics } from './ReviewMagnetics'
+import { SimulationAgent } from './SimulationAgent'
 
 interface Props {
   confirmedState: Record<string, unknown>
@@ -14,7 +15,7 @@ interface Props {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-type SubStep = 'material' | 'powder_rank' | 'ferrite_grade' | 'wire' | 'result' | 'review'
+type SubStep = 'material' | 'powder_rank' | 'ferrite_grade' | 'wire' | 'result' | 'review' | 'simagent'
 
 const WINDING_OPTS = [
   { key: 'single',    label: 'Single strand',  desc: 'Standard — one conductor wound.' },
@@ -50,7 +51,9 @@ const StepBar = ({ sub, isPowder }: { sub: SubStep; isPowder: boolean }) => {
   const steps = isPowder
     ? [['material','Type'],['powder_rank','Rank'],['wire','Wire'],['result','Result'],['review','Review']]
     : [['material','Type'],['ferrite_grade','Grade'],['wire','Wire'],['result','Result'],['review','Review']]
-  const idx = steps.findIndex(([k]) => k === sub)
+  // 'simagent' is a deeper-look page off Review — keep the Review step lit.
+  const effSub = sub === 'simagent' ? 'review' : sub
+  const idx = steps.findIndex(([k]) => k === effSub)
   return (
     <div style={{ display:'grid', gridTemplateColumns:`repeat(${steps.length},1fr)`, gap:4, marginBottom:18 }}>
       {steps.map(([k,lbl],i) => {
@@ -126,6 +129,9 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   const [s8Loading,setS8Load]   = useState(false)
   const [rptLoading,setRptLoad] = useState(false)
   const [rptError,  setRptError] = useState<string|null>(null)
+  // Incremented every time user opens the Review tab — forces ReviewMagnetics to
+  // remount with the currently-selected candidate's data (never stale).
+  const [reviewKey, setReviewKey] = useState(0)
 
   // Load material comparison once
   useEffect(() => {
@@ -772,10 +778,6 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                 </div>
               ))}
             </div>
-            <div style={{fontSize:10,color:C.hint,marginTop:8,lineHeight:1.5}}>
-              Both modes apply the same pass/fail gates (FFcu limit, saturation, ΔT). Only the
-              ordering within each stack tier changes. Run sizing once per mode to compare.
-            </div>
           </div>
 
           {/* ── Coated core toggle ── */}
@@ -974,8 +976,8 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
             <div style={{display:'flex',gap:8,paddingTop:8,borderTop:`0.5px solid ${C.border}`,justifyContent:'space-between',alignItems:'center'}}>
               <Btn variant="ghost" onClick={()=>setSub('wire')}>← Back</Btn>
               {step8 && (
-                <Btn variant="primary" onClick={()=>setSub('review')} style={{padding:'9px 20px',fontSize:13}}>
-                  🔍 Review
+                <Btn variant="primary" onClick={()=>{ setReviewKey(k=>k+1); setSub('review') }} style={{padding:'9px 20px',fontSize:13}}>
+                  🔍 Review — {result.part_number ?? '—'} ×{result.stacks ?? 1}, N={result.N ?? '?'}
                 </Btn>
               )}
               {!step8 && <div style={{fontSize:11,color:C.muted}}>Awaiting Step 8…</div>}
@@ -1241,9 +1243,12 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
         </div>
       )}
 
-      {/* ══ REVIEW: full JS studio (iGSE waveforms, sweep, 3D view) ══════════ */}
+      {/* ══ REVIEW: full JS studio (iGSE waveforms, sweep, 3D view) ══════════
+           reviewKey increments on every "Review" button click, forcing a fresh
+           mount of ReviewMagnetics with the current candidate's data.        */}
       {sub === 'review' && result && (
         <ReviewMagnetics
+          key={reviewKey}
           result={result}
           confirmedState={confirmedState}
           matType={matType}
@@ -1254,7 +1259,20 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
           step8={step8}
           onBack={()=>setSub('result')}
           onRestart={onRestart}
+          onSimAgent={()=>setSub('simagent')}
           onApprove={onApprove ? (design) => onApprove(design) : undefined}
+        />
+      )}
+
+      {/* ── Simulation Agent (Phase 2): field viewer after Review ──────────── */}
+      {sub === 'simagent' && result && (
+        <SimulationAgent
+          result={result}
+          confirmedState={confirmedState}
+          matType={matType}
+          selMaterial={selMaterial}
+          selGrade={selGrade}
+          onBack={()=>setSub('review')}
         />
       )}
     </div>

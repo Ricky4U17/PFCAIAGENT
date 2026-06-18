@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PFC Inductor — Simulation Agent v14 (field-package viewer)</title>
+<style>
+:root{--bg:#07101e;--panel:#111827;--panel2:#0b1220;--line:#334155;--ink:#e5e7eb;--muted:#9ca3af;--a:#38bdf8;--b:#f59e0b;--p:#a78bfa;--r:#ef4444;--g:#22c55e}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#07101e,#0d1528);color:var(--ink)}
+.layout{display:grid;grid-template-columns:360px 1fr;gap:14px;padding:14px;min-height:100vh}.side,.main{background:rgba(17,24,39,.92);border:1px solid rgba(148,163,184,.14);border-radius:16px;box-shadow:0 12px 30px rgba(0,0,0,.28)}.side{padding:15px;overflow:auto}.main{padding:14px;display:flex;flex-direction:column;gap:12px}
+h1{font-size:18px;margin:0 0 10px;color:#fff}h2{font-size:12.5px;margin:13px 0 7px;color:#fff;text-transform:uppercase;letter-spacing:.04em}.sub{font-size:12px;color:var(--muted);line-height:1.5}.field{margin:10px 0}label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;color:#d1d5db}input[type=range]{width:100%;accent-color:var(--a)}button{cursor:pointer;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--ink);font:inherit;font-size:12px}button:hover{border-color:#60a5fa}button.active{background:#0d2038;border-color:#60a5fa;color:#fff}.row{display:flex;gap:7px;flex-wrap:wrap}.kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px}.kpi{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));border:1px solid rgba(148,163,184,.12);border-radius:11px;padding:7px}.kpi .k{font-size:10px;color:var(--muted)}.kpi .v{font-size:15px;font-weight:700;margin-top:2px}.stage{display:grid;grid-template-columns:1.08fr .92fr;gap:12px;align-items:start}.badge{display:inline-block;font-size:11px;padding:3px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:#cbd5e1;margin:2px 4px 2px 0}.badge.src{font-weight:700}.badge.fea{border-color:rgba(34,197,94,.6);color:#bbf7d0}.badge.analytic{border-color:rgba(245,158,11,.5);color:#fde68a}.badge.measured{border-color:rgba(56,189,248,.6);color:#bae6fd}.badge.warn{border-color:rgba(239,68,68,.6);color:#fecaca}canvas{background:radial-gradient(circle at 30% 18%,#13203a,#070d18);border:1px solid rgba(148,163,184,.12);border-radius:14px;width:100%;height:auto}.note{font-size:11px;line-height:1.45;border-radius:10px;padding:8px 10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);color:var(--muted)}.mono{font-family:Consolas,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <h1>PFC Inductor — Simulation Agent</h1>
+    <h2>Field</h2>
+    <div class="row"><button class="fbtn active" data-f="flux">Flux B</button><button class="fbtn" data-f="copper">Cu loss</button><button class="fbtn" data-f="core">Core loss</button><button class="fbtn" data-f="thermal">T</button></div>
+    <h2>Operating point</h2>
+    <div class="field"><label><span>Input voltage</span><strong id="vinV">–</strong></label><input id="vin" type="range" min="90" max="264" step="1" value="180"></div>
+    <div class="field"><label><span>Load (% of rated)</span><strong id="loadV">–</strong></label><input id="load" type="range" min="10" max="120" step="1" value="100"></div>
+    <div class="field"><label><span>Half-cycle phase</span><strong id="phV">–</strong></label><input id="phase" type="range" min="0" max="1000" step="1" value="500"></div>
+    <div class="field"><label><span>Warm-up view</span><strong id="warmV">–</strong></label><input id="warmMin" type="range" min="1" max="60" step="1" value="20"></div>
+    <div class="row"><button id="play">▶ Play half cycle</button><button id="reset">Reset</button></div>
+    <div class="row" style="margin-top:6px"><button id="presetLo">Low-line spec</button><button id="presetHi">High-line spec</button></div>
+    <h2>Operating plane (Vin × load)</h2>
+    <canvas id="planeC" width="328" height="178"></canvas>
+    <div class="sub" id="planeNote" style="margin-top:4px"></div>
+    <h2>Live readouts</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="k">Iφ,crest</div><div class="v" id="kIc">–</div></div>
+      <div class="kpi"><div class="k">L (live, bias)</div><div class="v" id="kL">–</div></div>
+      <div class="kpi"><div class="k">Bmax,mean @ crest</div><div class="v" id="kBp">–</div></div>
+      <div class="kpi"><div class="k">Peak H @ crest</div><div class="v" id="kH">–</div></div>
+      <div class="kpi"><div class="k">P core: avg | inst</div><div class="v" id="kPc">–</div></div>
+      <div class="kpi"><div class="k">P cu: avg | inst</div><div class="v" id="kPu">–</div></div>
+      <div class="kpi"><div class="k">Rdc | Rac</div><div class="v" id="kR">–</div></div>
+      <div class="kpi"><div class="k">Window util K_u</div><div class="v" id="kKu">–</div></div>
+      <div class="kpi"><div class="k">Ambient (input)</div><div class="v" id="kTamb">–</div></div>
+      <div class="kpi"><div class="k">Tcore | Twdg ss</div><div class="v" id="kTnodes">–</div></div>
+      <div class="kpi"><div class="k">T hotspot</div><div class="v" id="kTh">–</div></div>
+      <div class="kpi"><div class="k">P total (avg)</div><div class="v" id="kPt">–</div></div>
+    </div>
+    <h2>Design Verdict</h2>
+    <div id="accPanel" class="sub">–</div>
+  </aside>
+  <main class="main">
+    <div class="row" style="margin-bottom:8px;align-items:center"><button class="gbtn active" data-g="cross">⬚ Cross-section</button><button class="gbtn" data-g="ring">◎ Ring</button><button class="gbtn" data-g="threeD">🧊 3D</button><span class="badge" id="modeBadge" style="margin-left:auto"></span></div>
+    <div class="stage">
+      <div><canvas id="fieldC" width="570" height="575"></canvas><div class="sub" id="caption" style="margin-top:8px"></div><div id="provRow" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div></div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <canvas id="lossC" width="392" height="186"></canvas>
+        <canvas id="tempC" width="392" height="182"></canvas>
+        <canvas id="ltC" width="392" height="168"></canvas>
+        <div class="note" id="noteBox"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+/* =====================================================================================
+   SimAgentField — Simulation-Agent field-package schema + loader (mergeable module)
+   - No design data is hard-coded. Material, geometry, stack, wire, window utilization,
+     ambient, and (optionally) solved field grids all arrive in ONE injected package.
+   - If no package is injected, a clearly-labelled EXAMPLE_PACKAGE renders a preview only.
+   - Loader prefers solver fields (FEA/CFD/measured ROM); otherwise falls back to the
+     analytic model. Every quantity carries provenance (fea | analytic | measured | input).
+   - Headless API for the parent agent: SimAgentField.evaluateHeadless(pkg, op).
+   Inject upstream via:  window.__MAG_FIELD_PACKAGE__  (full package, preferred)
+                  or:    window.__MAG_INPUT__          (scalar model only -> analytic fields)
+   ===================================================================================== */
+(function(global){
+'use strict';
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x)), lerp=(a,b,t)=>a+(b-a)*t;
+const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
+function deepMerge(base,patch){const out=Array.isArray(base)?base.slice():{...base};Object.keys(patch||{}).forEach(k=>{const b=out[k],p=patch[k];out[k]=(isObj(b)&&isObj(p))?deepMerge(b,p):p});return out}
+function interp1(xs,ys,x){if(!xs||!xs.length)return null;if(x<=xs[0])return ys[0];if(x>=xs[xs.length-1])return ys[ys.length-1];for(let i=0;i<xs.length-1;i++){if(x>=xs[i]&&x<=xs[i+1])return lerp(ys[i],ys[i+1],(x-xs[i])/(xs[i+1]-xs[i]))}return ys[ys.length-1]}
+function mapInterp(map,x,fb){if(!isObj(map))return fb;const ks=Object.keys(map).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);if(!ks.length)return fb;return interp1(ks,ks.map(k=>map[k]),x)}
+
+/* ---------------- 1. SCHEMA (the contract; self-documenting) ---------------- */
+const SCHEMA={
+ schemaVersion:'1.0',
+ describe(){return {
+  schemaVersion:'1.0',
+  meta:{units:{length:'mm',B:'T',H:'Oe',R:'ohm',T:'degC',P:'W',f:'Hz'},
+    provenance:{agent1:'analytic',agent2:'fea|null',simAgent:'rom|null',measured:'bool'},
+    generatedAt:'ISO-8601',
+    envelope:{vin:'[Vac]',loadPct:'[%rated]',phase:'[0..1 half-cycle] (optional)'}},
+  model:{/* ALL injected from previous steps - nothing hard-coded */
+    design:'{Vout,fsw,lineHz,Prated,nph,vinMin,vinMax,vinDefault,loadDefaultPct,specLowLineMaxPct,specHighLineMaxPct}',
+    environment:'{Tamb_C}',
+    winding:'{N,stacks,leadLength_mm, window?{Ku,layersNeeded,turnsPerLayer,radialBuild_mm,boreHoleR_mm,bundleOD_mm}}',
+    geometry:'{OD_mm,ID_mm,stackHeight_mm,Ae_mm2,Le_mm,Ve_mm3}',
+    material:'{name,AL_nH,mui,Bsat,steinmetz{a,b,c},retention{k0,k1,p}}',
+    copper:'{wire{type,strands,strandDia_mm,parallel,fillFactor}, measured{RdcTotal_20C?,RdcPerMeter_20C?}, alphaCu,rho20_ohm_m,refDeltaT_C, prox{kSkin,kProx,kCrowd}}',
+    cooling:'{mode,airScale,orientationFactor,boardPathFactor,radiationFactor,hotspotFactor,splitCoreAmbient,splitWdgAmbient,coupleCoreWdg,CthCore_J_perK,CthWdg_J_perK,warmupMinutesDefault}',
+    maps:'{etaByVin{},crestByVin{}}', labels:'{family,source}'},
+  fields:{/* OPTIONAL solved ROM; any absent field => analytic fallback */
+    inductance:'{H:[Oe], L_uH:[uH], provenance}',                       // biased L(H) from magnetostatic FEA
+    flux:'{radial:{r_mm:[],crowd:[B(r)/Bmean]}, grid?{r_mm,z_mm,B,indexedBy}, provenance}',
+    windingAC:'{freq_Hz:[], RacOverRdc:[], perLayer?[[]], provenance}', // eddy-current FEA
+    thermal:'{nodes{Rca_KperW,Rwa_KperW,Rcw_KperW}|{thetaSA_KperW}, airflow_mps?, grid?{r_mm,z_mm,Trise_perW}, provenance}'},
+  acceptance:'{Bmax_T?,Ku_max?,J_max_Apmm2?,dT_max_K?}  (optional limits for pass/fail)'
+ }}
+};
+
+/* ---------------- 2. EXAMPLE package (PREVIEW ONLY - not used when upstream injects) ---------------- */
+const EXAMPLE_PACKAGE={
+ schemaVersion:'1.0', __preview:true,
+ meta:{units:{length:'mm',B:'T',H:'Oe',R:'ohm',T:'degC',P:'W',f:'Hz'},
+   provenance:{agent1:'analytic',agent2:null,simAgent:null,measured:false},
+   generatedAt:null, envelope:{vin:[90,132,180,230,264],loadPct:[25,50,75,100],phase:null}},
+ model:{
+   design:{Vout:390,fsw:70000,lineHz:60,Prated:3600,nph:2,vinMin:90,vinMax:264,vinDefault:180,loadDefaultPct:100,specLowLineMaxPct:47.2,specHighLineMaxPct:100},
+   environment:{Tamb_C:50},
+   winding:{N:32,stacks:2,leadLength_mm:60},
+   geometry:{OD_mm:40.94,ID_mm:21.27,stackHeight_mm:17.89,Ae_mm2:153,Le_mm:94,Ve_mm3:14600},
+   material:{name:'EDGE 60 µ',AL_nH:122,mui:60,Bsat:1.5,steinmetz:{a:86.7,b:2.106,c:1.444},retention:{k0:0.01,k1:9.202e-10,p:3.044}},
+   copper:{wire:{type:'litz',strands:348,strandDia_mm:0.10,parallel:1,fillFactor:0.55},measured:{RdcTotal_20C:null,RdcPerMeter_20C:null},alphaCu:0.00393,rho20_ohm_m:1.724e-8,refDeltaT_C:80,prox:{kSkin:0.5,kProx:0.40,kCrowd:0.25}},
+   cooling:{mode:'natural',airScale:1.0,orientationFactor:1.0,boardPathFactor:1.0,radiationFactor:1.0,hotspotFactor:1.12,splitCoreAmbient:1.0,splitWdgAmbient:0.9,coupleCoreWdg:0.5,CthCore_J_perK:55,CthWdg_J_perK:28,warmupMinutesDefault:20},
+   maps:{etaByVin:{90:0.9437,110:0.9536,120:0.9635,132:0.9728,180:0.9543,200:0.9637,220:0.9643,230:0.9672,264:0.9424},crestByVin:{}},
+   labels:{family:'PREVIEW example',source:'embedded fallback (no upstream package)'}},
+ fields:{},                                   // empty => everything analytic
+ acceptance:{Bmax_T:1.5,Ku_max:0.6,dT_max_K:60}
+};
+
+/* ---------------- 3. validator ---------------- */
+function validatePackage(pkg){
+ const errors=[],warnings=[];
+ if(!pkg||!isObj(pkg)){return {ok:false,errors:['package missing/not an object'],warnings,present:{}}}
+ const m=pkg.model||{};
+ const need={ 'model.design':m.design,'model.environment':m.environment,'model.winding':m.winding,'model.geometry':m.geometry,'model.material':m.material,'model.copper':m.copper,'model.cooling':m.cooling };
+ Object.keys(need).forEach(k=>{ if(!need[k]) errors.push('missing required '+k) });
+ if(m.copper&&!m.copper.wire) errors.push('missing model.copper.wire (type/strands/strandDia)');
+ if(m.material&&(!m.material.steinmetz||!m.material.retention)) errors.push('missing material.steinmetz/retention');
+ if(pkg.__preview) warnings.push('running on PREVIEW example - no upstream field package injected');
+ const f=pkg.fields||{};
+ const present={inductance:!!f.inductance,flux:!!f.flux,windingAC:!!f.windingAC,thermal:!!f.thermal};
+ if(!present.inductance) warnings.push('fields.inductance absent -> L(H) analytic');
+ if(!present.windingAC)  warnings.push('fields.windingAC absent -> R_ac analytic');
+ if(!present.thermal)    warnings.push('fields.thermal absent -> thermal analytic');
+ if(!present.flux)       warnings.push('fields.flux absent -> B(r) analytic (1/r crowding)');
+ return {ok:errors.length===0,errors,warnings,present};
+}
+
+/* ---------------- 4. AnalyticModel (pure physics from the scalar model) ---------------- */
+function AnalyticModel(model){
+ const MU0=4e-7*Math.PI;
+ const cfg=model.design, winding=model.winding, geomIn=model.geometry, mat=model.material, cu=Object.assign({alphaCu:0.00393,rho20_ohm_m:1.724e-8,measured:{},prox:{kSkin:0.5,kProx:0.40,kCrowd:0.25}},model.copper||{}), cool=model.cooling||{}, maps=model.maps||{};
+ const geom={OD:geomIn.OD_mm,ID:geomIn.ID_mm,rin:geomIn.ID_mm/2,rout:geomIn.OD_mm/2,rmean:(geomIn.ID_mm/2+geomIn.OD_mm/2)/2,w:(geomIn.OD_mm-geomIn.ID_mm)/2,h:geomIn.stackHeight_mm*winding.stacks};
+ const N=+winding.N, stacks=+winding.stacks, Tamb=+model.environment.Tamb_C, crowdAxial=geom.rmean/geom.rin;
+ const retention=H=>{const r=mat.retention;return 1/(r.k0+r.k1*Math.pow(Math.max(H,0),r.p))/100};
+   const ALnH=(mat.AL_nH!=null?mat.AL_nH:geomIn.AL_nH);const mui=(mat.mui!=null?mat.mui:ALnH*1e-9*(geomIn.Le_mm/1000)/(MU0*geomIn.Ae_mm2*1e-6));
+ const Ac=mat.steinmetz.c, IC=3.5435, IK=Math.pow(2,Ac)/(Math.pow(2*Math.PI,Ac-1)*IC);
+ const Fd=D=>{D=clamp(D,0.02,0.98);return IK*(Math.pow(D,1-Ac)+Math.pow(1-D,1-Ac))};
+ const MAG=(()=>{const a=[];for(let H=0;H<=160;H+=2)a.push({H,B:MU0*mui*retention(H)*H*79.577});return a})();
+ const etapf=v=>mapInterp(maps.etaByVin,v,0.95);
+ const crestIL=(vin,lf)=>{const mp=mapInterp(maps.crestByVin,vin,null);if(mp!=null&&isFinite(mp)&&mp>0)return mp*lf;return Math.SQRT2*(lf*cfg.Prated)/(Math.max(etapf(vin),0.5)*vin*cfg.nph)};
+ const specMaxPct=v=>{if(v<=132)return cfg.specLowLineMaxPct;if(v>=180)return cfg.specHighLineMaxPct;return null};
+ // window utilization: prefer injected winding.window, else compute from wire+geometry
+ function cuArea_m2(){const w=cu.wire;return Math.max(w.strands,1)*Math.max(w.parallel||1,1)*Math.PI*Math.pow(w.strandDia_mm*1e-3/2,2)}
+ function bundleOD_mm(){const w=cu.wire,n=Math.max(w.strands*(w.parallel||1),1);if(n<=1)return w.strandDia_mm*1.08;return 2*Math.sqrt((cuArea_m2()*1e6)/Math.max(w.fillFactor||0.55,0.2)/Math.PI)}
+ function windowGeom(){const inj=winding.window;
+   if(inj&&isFinite(inj.layersNeeded)){const od=inj.bundleOD_mm||bundleOD_mm();return {bundleOD:od,turnsPerLayer:inj.turnsPerLayer||Math.ceil(N/inj.layersNeeded),layersNeeded:inj.layersNeeded,radialBuildActual_mm:inj.radialBuild_mm||inj.layersNeeded*od,boreHoleR_mm:(inj.boreHoleR_mm!=null?inj.boreHoleR_mm:geom.rin-(inj.radialBuild_mm||inj.layersNeeded*od)),Ku:inj.Ku!=null?inj.Ku:N*cuArea_m2()*1e6/(Math.PI*geom.rin*geom.rin),layerCaps:inj.layerCaps||null,nParallel:inj.nParallel||1,passes:inj.passes||N,source:'input'}}
+   const od=bundleOD_mm(),tpl=Math.max(1,Math.floor(2*Math.PI*Math.max(geom.rin-od/2,od)/od)),layers=Math.max(1,Math.ceil(N/tpl)),rb=layers*od;
+   return {bundleOD:od,turnsPerLayer:tpl,layersNeeded:layers,radialBuildActual_mm:rb,boreHoleR_mm:geom.rin-rb,Ku:N*cuArea_m2()*1e6/(Math.PI*geom.rin*geom.rin),layerCaps:null,nParallel:1,passes:N,source:'computed',overfull:(geom.rin-rb)<0}}
+ const skinDepth=()=>Math.sqrt(cu.rho20_ohm_m/(Math.PI*cfg.fsw*MU0));
+ const mltMeters=()=>(2*(geom.w+geom.h)+2*bundleOD_mm())/1000;
+ function Rdc0(){const A=cuArea_m2(),Ltot=N*mltMeters()+(winding.leadLength_mm||0)/1000,kT=(1+cu.alphaCu*cu.refDeltaT_C);
+   if(cu.measured&&cu.measured.RdcTotal_20C)return cu.measured.RdcTotal_20C*kT;
+   if(cu.measured&&cu.measured.RdcPerMeter_20C)return cu.measured.RdcPerMeter_20C*Ltot*kT;
+   return cu.rho20_ohm_m*kT*Ltot/Math.max(A,1e-12)}
+ function racRatio(f){const x=(cu.wire.strandDia_mm*1e-3)/Math.max(2*Math.sqrt(cu.rho20_ohm_m/(Math.PI*f*MU0)),1e-12),wg=windowGeom();
+   const Fskin=1+cu.prox.kSkin*x*x,Fprox=1+cu.prox.kProx*Math.max(wg.layersNeeded-1,0)*x*x*(1+cu.prox.kCrowd*(crowdAxial-1));return Fskin*Fprox}
+ const Lh=H=>ALnH*stacks*1e-9*N*N*retention(H);                 // henries, biased (AL from material or geometry)
+ const bCrowd=r=>geom.rmean/r;                                       // analytic 1/r
+ function surfaceArea_cm2(){const wg=windowGeom(),od=wg.bundleOD,ODe=geom.OD+2*od,He=geom.h+2*od,bore=2*Math.max(wg.boreHoleR_mm,0.5);return (Math.PI*ODe*He+2*(Math.PI/4)*(ODe*ODe-bore*bore)+Math.PI*bore*He)/100}
+ function thermalR(Pcore,Pcu){const SA=Math.max(surfaceArea_cm2(),1e-3),Ptot=Math.max(Pcore+Pcu,1e-6);
+   const dT_nat=Math.pow(Ptot*1000/SA,0.833),cmult=(cool.mode==='forced'?0.55:1.0)/(Math.max(cool.airScale,0.25)*Math.max(cool.orientationFactor,0.3)*Math.sqrt(Math.max(cool.boardPathFactor,0.25)*Math.max(cool.radiationFactor,0.25)));
+   const theta=(dT_nat*cmult)/Ptot,sC=Math.max(cool.splitCoreAmbient,0.05),sW=Math.max(cool.splitWdgAmbient,0.05),sum=sC+sW;
+   return {Rca:theta*sum/sC,Rwa:theta*sum/sW,Rcw:Math.max(theta*cool.coupleCoreWdg,1e-3)}}
+ return {MU0,cfg,winding,geomIn,mat,cu,cool,geom,N,stacks,Tamb,crowdAxial,retention,Fd,MAG,etapf,crestIL,specMaxPct,
+   cuArea_m2,bundleOD_mm,windowGeom,skinDepth,mltMeters,Rdc0,racRatio,Lh,bCrowd,surfaceArea_cm2,thermalR};
+}
+
+/* ---------------- 5. FieldPackage loader (solver fields override analytic) ---------------- */
+function FieldPackage(pkg, am){
+ const f=pkg.fields||{};
+ const prov={
+  inductance:f.inductance?(f.inductance.provenance||'fea'):'analytic',
+  flux:f.flux?(f.flux.provenance||'fea'):'analytic',
+  windingAC:f.windingAC?(f.windingAC.provenance||'fea'):'analytic',
+  thermal:f.thermal?(f.thermal.provenance||'fea'):'analytic',
+  coreLoss:(pkg.__coreLossProv||'analytic'),
+  window:am.windowGeom().source==='input'?'input':'computed'};
+ // L(H) henries
+ const Lh=H=>{const fi=f.inductance;if(fi&&fi.H&&fi.L_uH){const v=interp1(fi.H,fi.L_uH,H);if(v!=null)return v*1e-6}return am.Lh(H)};
+ // B(r)/Bmean crowd ratio
+ const bCrowd=r=>{const fl=f.flux;if(fl&&fl.radial&&fl.radial.r_mm&&fl.radial.crowd){const v=interp1(fl.radial.r_mm,fl.radial.crowd,r);if(v!=null)return v}return am.bCrowd(r)};
+ // Rac/Rdc at frequency
+ const racRatio=fr=>{const w=f.windingAC;if(w&&w.freq_Hz&&w.RacOverRdc){const v=interp1(w.freq_Hz,w.RacOverRdc,fr);if(v!=null)return v}return am.racRatio(fr)};
+ // thermal node resistances
+ const thermalR=(Pcore,Pcu)=>{const t=f.thermal;if(t&&t.nodes){const n=t.nodes;if(isFinite(n.Rca_KperW)&&isFinite(n.Rwa_KperW))return {Rca:n.Rca_KperW,Rwa:n.Rwa_KperW,Rcw:isFinite(n.Rcw_KperW)?n.Rcw_KperW:n.Rca_KperW*0.5};
+   if(isFinite(n.thetaSA_KperW)){const th=n.thetaSA_KperW;return {Rca:th*2,Rwa:th*2,Rcw:th*0.5}}}return am.thermalR(Pcore,Pcu)};
+ return {prov,Lh,bCrowd,racRatio,thermalR};
+}
+
+/* ---------------- 6. Evaluator (combines model + analytic + fields; headless-capable) ---------------- */
+function Evaluator(rawPkg){
+ const pkg0=rawPkg||EXAMPLE_PACKAGE;
+ // real-world (Tier-3) merge: measured material data outranks FEA fields, which outrank analytic
+ const pkg=(function(){const p=JSON.parse(JSON.stringify(pkg0));const mm=(p.model.material&&p.model.material.measured)||{};
+   p.__coreLossProv='analytic';const cl=mm.coreLoss||{};
+   if(cl.steinmetz&&isFinite(cl.steinmetz.a)){p.model.material.steinmetz=cl.steinmetz;p.__coreLossProv='measured';if(isFinite(cl.maxScale))p.model.material.lossMaxScale=cl.maxScale;}
+   const mi=mm.inductance||{};
+   if(mi.L_uH&&(mi.H_Oe||mi.I_A)){const Nn=p.model.winding.N,Le=p.model.geometry.Le_mm/10;
+     const H=(mi.H_Oe||mi.I_A.map(i=>0.4*Math.PI*Nn*i/Le)).map(Number);
+     const idx=H.map((h,i)=>i).sort((a,b)=>H[a]-H[b]);
+     p.fields=p.fields||{};p.fields.inductance={H:idx.map(i=>H[i]),L_uH:idx.map(i=>Number(mi.L_uH[i])),provenance:'measured'};}
+   return p;})();
+ const model=pkg.model;
+ const am=AnalyticModel(model);
+ const fp=FieldPackage(pkg,am);
+ const {cfg,mat,cu,cool,geom,N,stacks,Tamb,geomIn}=am;
+ const crowdPeak=fp.bCrowd(geom.rin);
+ function opPoint(vin,lf,warmMin){
+   const Ic=am.crestIL(vin,lf),Vpk=vin*Math.SQRT2,Ae=geomIn.Ae_mm2*stacks*1e-6,Ve=geomIn.Ve_mm3*stacks/1000,Le=geomIn.Le_mm/10;
+   const Rdc0=am.Rdc0(),Rac0=Rdc0*fp.racRatio(cfg.fsw),Lfull=fp.Lh(0.4*Math.PI*N*Ic/Le);
+   let pc=0,i2=0,r2=0;const M=240;
+   for(let n=0;n<M;n++){const th=(n+.5)*Math.PI/M,s=Math.sin(th),Vin=Vpk*s,D=clamp(1-Vin/cfg.Vout,0,.98),Iavg=Ic*s,Lt=Math.max(fp.Lh(0.4*Math.PI*N*Iavg/Le),1e-9),BacPk=(Vin*D)/(2*N*Ae*cfg.fsw);
+     pc+=mat.steinmetz.a*Math.pow(Math.max(BacPk,1e-12),mat.steinmetz.b)*Math.pow(cfg.fsw/1000,mat.steinmetz.c)*am.Fd(D)/1000*Ve;const dIpp=(Vin*D)/(Lt*cfg.fsw);i2+=Iavg*Iavg;r2+=(dIpp/(2*Math.sqrt(3)))**2}
+   const Pcore=pc/M,Pcu_dc=(i2/M)*Rdc0,Pcu_ac=(r2/M)*Rac0,Pcu=Pcu_dc+Pcu_ac,Ptot=Pcore+Pcu;
+   const R=fp.thermalR(Pcore,Pcu),a11=1/R.Rca+1/R.Rcw,a12=-1/R.Rcw,a21=-1/R.Rcw,a22=1/R.Rwa+1/R.Rcw,det=a11*a22-a12*a21;
+   let dTc=0,dTw=0;if(Math.abs(det)>1e-12){dTc=(Pcore*a22-a12*Pcu)/det;dTw=(a11*Pcu-a21*Pcore)/det}
+   const TcoreSS=Tamb+dTc,TwdgSS=Tamb+dTw,ThotSS=Tamb+Math.max(dTc,dTw)*cool.hotspotFactor;
+   const warm=transient(R,Pcore,Pcu,warmMin,TcoreSS,TwdgSS);
+   return {Ic,Vpk,L0:fp.Lh(0),Ae,L0_uH:fp.Lh(0)*1e6,Lfull_uH:Lfull*1e6,Pcore,Pcu,Pcu_dc,Pcu_ac,Ptot,Rdc0,Rac0,R,TcoreSS,TwdgSS,ThotSS,warm};
+ }
+ function transient(R,Pcore,Pcu,minutes,TcoreSS,TwdgSS){const dt=0.5,steps=Math.max(8,Math.round((minutes||20)*60/dt));let Tc=Tamb,Tw=Tamb;const arr=[];
+   for(let i=0;i<=steps;i++){const t=i*dt;arr.push({t_min:t/60,Tcore:Tc,Twdg:Tw,Thot:Tamb+Math.max(Tc-Tamb,Tw-Tamb)*cool.hotspotFactor});
+    const qca=(Tc-Tamb)/R.Rca,qwa=(Tw-Tamb)/R.Rwa,qcw=(Tc-Tw)/R.Rcw;Tc+=(Pcore-qca-qcw)/Math.max(cool.CthCore_J_perK,1e-3)*dt;Tw+=(Pcu+qcw-qwa)/Math.max(cool.CthWdg_J_perK,1e-3)*dt}return arr}
+ function inst(op,frac){const th=frac*Math.PI,s=Math.sin(th),Vin=op.Vpk*s,D=clamp(1-Vin/cfg.Vout,0,.98),Iavg=op.Ic*s,Le=geomIn.Le_mm/10,H=0.4*Math.PI*N*Iavg/Le,Lt=Math.max(fp.Lh(H),1e-9),BacPk=(Vin*D)/(2*N*op.Ae*cfg.fsw),Bdc=(Lt*Iavg)/(N*op.Ae),dIpp=(Vin*D)/(Lt*cfg.fsw),Ihf=dIpp/(2*Math.sqrt(3)),Pcore=mat.steinmetz.a*Math.pow(Math.max(BacPk,1e-12),mat.steinmetz.b)*Math.pow(cfg.fsw/1000,mat.steinmetz.c)*am.Fd(D)/1000*(geomIn.Ve_mm3*stacks/1000),Pcu=op.Rdc0*Iavg*Iavg+op.Rac0*Ihf*Ihf;return {Bmean:Bdc+BacPk,Bdc,BacPk,L_inst:Lt,H,D,dIpp,Pcore,Pcu,t_ms:frac*1000/(2*cfg.lineHz)}}
+ function waveform(op){const M=200,half=1000/(2*cfg.lineHz),W=[];let pcMax=0,puMax=0,lMin=Infinity,lMax=0,dcmFrac=0;for(let n=0;n<=M;n++){const fr=inst(op,n/M),Iavg=op.Ic*Math.sin((n/M)*Math.PI),dcm=(Iavg<fr.dIpp/2);if(dcm)dcmFrac++;W.push({fr:n/M,t:fr.t_ms,H:fr.H,Bdc:fr.Bdc,BacPk:fr.BacPk,dIpp:fr.dIpp,Pcore:fr.Pcore,Pcu:fr.Pcu,L_uH:fr.L_inst*1e6,dcm});pcMax=Math.max(pcMax,fr.Pcore);puMax=Math.max(puMax,fr.Pcu);lMin=Math.min(lMin,fr.L_inst*1e6);lMax=Math.max(lMax,fr.L_inst*1e6)}return {W,half,pcMax,puMax,lMin,lMax,dcmFrac:dcmFrac/(M+1)}}
+ const Brad=(Bm,r)=>Bm*fp.bCrowd(r);
+ function dcmBoundaryPct(vin){ // load% where crest just reaches CCM (Iavg_crest = dIpp_crest/2)
+   let lo=1,hi=200,best=hi;for(let it=0;it<26;it++){const mid=(lo+hi)/2,op=opPoint(vin,mid/100,1),f=inst(op,0.5);if(op.Ic>=f.dIpp/2){best=mid;hi=mid}else lo=mid}return best}
+ function envelopeVins(){const ks=Object.keys((model.maps&&model.maps.etaByVin)||{}).map(Number).filter(isFinite).sort((a,b)=>a-b);if(ks.length>=2)return ks;const out=[],a=cfg.vinMin,b=cfg.vinMax;for(let i=0;i<9;i++)out.push(Math.round(a+(b-a)*i/8));return out}
+ function worstCase(warmMin){warmMin=warmMin||20;let wB=0,wBi=0,wBv=0,wP=0,wPv=0,minL=Infinity,maxdT=0,maxJ=0,anyDCM=false;const wg=am.windowGeom();
+   envelopeVins().forEach(v=>{const smp=am.specMaxPct(v),lf=(smp==null?1:smp/100),op=opPoint(v,lf,warmMin),f=inst(op,0.5),wf=waveform(op);const B=f.Bmean;if(B>wB){wB=B;wBi=B*crowdPeak;wBv=v}if(op.Ptot>wP){wP=op.Ptot;wPv=v}minL=Math.min(minL,op.Lfull_uH*(fp.prov.inductance==='analytic'?(1-(geomIn.AL_tol||0)):1));maxdT=Math.max(maxdT,op.ThotSS-Tamb);const Irms=op.Ic/Math.SQRT2,J=Irms/(am.cuArea_m2()*1e6);maxJ=Math.max(maxJ,J);if(wf.dcmFrac>0.5)anyDCM=true});
+   return {Bmax:wB,Binner:wBi,Bmax_vin:wBv,Ptot:wP,Ptot_vin:wPv,Lguar_uH:minL,dT:maxdT,J:maxJ,Ku:wg.Ku,Bsat:mat.Bsat,anyDCM}}
+ function evaluateAcceptance(wc){const A=pkg.acceptance||{};const rows=[];const add=(name,have,val,ok,limTxt)=>rows.push({name,have,val,ok,limTxt});
+   if(!isFinite(wc.Bmax)||!isFinite(wc.J)||!isFinite(wc.Lguar_uH)){return {rows:[{name:'operating data',have:false,val:'—',ok:null,limTxt:'package lacks a current source (maps.etaByVin + design.Prated + spec %, or crestByVin)'}],verdict:'INSUFFICIENT DATA',nChecked:0};}
+   if(A.L_target_uH!=null)add('L_guarantee',true,wc.Lguar_uH.toFixed(0)+' µH',wc.Lguar_uH>=A.L_target_uH,'≥ '+A.L_target_uH+' µH');else add('L_guarantee',false,wc.Lguar_uH.toFixed(0)+' µH',null,'no upstream limit');
+   if(A.Bmax_T!=null)add('B_max',true,wc.Bmax.toFixed(3)+' T',wc.Bmax<=A.Bmax_T,'≤ '+A.Bmax_T+' T');
+   else if(A.sat_margin_min!=null)add('B_max',true,wc.Bmax.toFixed(3)+' T',wc.Bmax<=(1-A.sat_margin_min)*wc.Bsat,'≤ '+((1-A.sat_margin_min)*wc.Bsat).toFixed(2)+' T');
+   else add('B_max',false,wc.Bmax.toFixed(3)+' T',null,'no upstream limit');
+   if(A.Binner_max_T!=null)add('B_inner(crowded)',true,wc.Binner.toFixed(3)+' T',wc.Binner<=A.Binner_max_T,'\u2264 '+A.Binner_max_T+' T');else add('B_inner(crowded)',false,wc.Binner.toFixed(3)+' T',null,'no upstream limit');
+   if(A.Ku_max!=null)add('window K_u',true,(wc.Ku*100).toFixed(0)+'%',wc.Ku<=A.Ku_max,'≤ '+(A.Ku_max*100).toFixed(0)+'%');else add('window K_u',false,(wc.Ku*100).toFixed(0)+'%',null,'no upstream limit');
+   if(A.J_max!=null)add('J',true,wc.J.toFixed(2)+' A/mm²',wc.J<=A.J_max,'≤ '+A.J_max+' A/mm²');else add('J',false,wc.J.toFixed(2)+' A/mm²',null,'no upstream limit');
+   if(A.dT_max_K!=null)add('ΔT',true,wc.dT.toFixed(0)+' K',wc.dT<=A.dT_max_K,'≤ '+A.dT_max_K+' K');else add('ΔT',false,wc.dT.toFixed(0)+' K',null,'no upstream limit');
+   const checked=rows.filter(r=>r.have&&r.ok!=null);const verdict=checked.length?(checked.every(r=>r.ok)?'APPROVE':'REJECT'):'NO LIMITS';return {rows,verdict,nChecked:checked.length}}
+ return {pkg,model,am,fp,prov:fp.prov,validation:validatePackage(pkg),worstCase,dcmBoundaryPct,evaluateAcceptance,
+   cfg,mat,cu,cool,geom,N,stacks,Tamb,geomIn,crowdPeak,MAG:am.MAG,
+   windowGeom:am.windowGeom,specMaxPct:am.specMaxPct,crestIL:am.crestIL,
+   opPoint,inst,waveform,Brad,acceptance:pkg.acceptance||{}};
+}
+function evaluateHeadless(pkg,op){op=op||{};const ev=Evaluator(pkg);const r=ev.opPoint(op.vin!=null?op.vin:ev.cfg.vinDefault,(op.loadPct!=null?op.loadPct:ev.cfg.loadDefaultPct)/100,op.warmMin||20);const wc=ev.worstCase(op.warmMin||20);return {result:r,provenance:ev.prov,validation:ev.validation,windowGeom:ev.windowGeom(),worstCase:wc,acceptance:ev.evaluateAcceptance(wc)}}
+
+/* ---------------- 7. Viewer (DOM consumer; analytic and FEA look identical except provenance) ---------------- */
+function Viewer(ev,doc){
+ const $=id=>doc.getElementById(id);
+ const {cfg,mat,cu,cool,geom,N,stacks,Tamb,geomIn,MAG}=ev;
+ const Brad=ev.Brad, windowGeom=ev.windowGeom, specMaxPct=ev.specMaxPct, crestIL=ev.crestIL, MU0=4e-7*Math.PI;
+ let mode='flux',geo='cross',playing=false,phase=0.5,raf=null,last=0,yaw=0.7,pitch=0.42,drag3=false,lx=0,ly=0;let wcCache=null,wcWarm=null;function getWC(w){if(wcCache&&wcWarm===w)return wcCache;wcWarm=w;wcCache=ev.worstCase(w);return wcCache;}
+ const CM={flux:[[0,[10,22,55]],[.28,[34,120,205]],[.55,[40,205,150]],[.78,[245,205,60]],[1,[235,60,40]]],core:[[0,[12,12,22]],[.4,[150,60,12]],[.72,[245,150,30]],[1,[255,242,160]]],copper:[[0,[40,52,80]],[.4,[150,110,50]],[.72,[235,150,40]],[1,[255,205,95]]],thermal:[[0,[20,45,95]],[.45,[40,165,205]],[.74,[245,205,70]],[1,[232,55,40]]]};
+ function cmap(n,t){const s=CM[n];t=clamp(t,0,1);for(let i=0;i<s.length-1;i++){if(t<=s[i+1][0]){const f=(t-s[i][0])/(s[i+1][0]-s[i][0]||1),a=s[i][1],b=s[i+1][1];return`rgb(${lerp(a[0],b[0],f)|0},${lerp(a[1],b[1],f)|0},${lerp(a[2],b[2],f)|0})`}}const e=s[s.length-1][1];return`rgb(${e[0]},${e[1]},${e[2]})`}
+ function sym(ctx,x,y,r,col,type){ctx.beginPath();ctx.fillStyle=col;ctx.arc(x,y,r,0,7);ctx.fill();ctx.lineWidth=.7;ctx.strokeStyle='rgba(255,255,255,.55)';ctx.stroke();ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=.9;ctx.beginPath();if(type==='x'){const k=r*.62;ctx.moveTo(x-k,y-k);ctx.lineTo(x+k,y+k);ctx.moveTo(x+k,y-k);ctx.lineTo(x-k,y+k)}else{ctx.arc(x,y,r*.3,0,7)}ctx.stroke()}
+ function colorbar(ctx,W,H,name,vmin,vmax){const bx=W-22,by=44,bh=H-130;for(let i=0;i<bh;i++){ctx.fillStyle=cmap(name,1-i/bh);ctx.fillRect(bx,by+i,12,1)}ctx.fillStyle='#cbd5e1';ctx.font='10.5px Segoe UI';const u=name==='flux'?' T':name==='thermal'?' °C':'';ctx.fillText((name==='flux'?vmax.toFixed(2):vmax.toFixed(0))+u,bx-4,by-7)}
+ function fieldSetup(op,f){let valAt,vmin=0,vmax;
+   // ABSOLUTE 0→crest-peak scale: the live field (current phase) sweeps the FULL colour ramp as it
+   // pulses with the phase (instantaneous line voltage), and the inner-vs-outer crowding shows as a
+   // radial gradient at crest. vmax is the crest inner-radius peak so it is stable + well-tuned.
+   const fc=ev.inst(op,0.5);
+   if(mode==='flux'){valAt=r=>Brad(f.Bmean,r);vmax=Brad(fc.Bmean,geom.rin)*1.05;}
+   else if(mode==='core'){const kc=mat.steinmetz.a*Math.pow(cfg.fsw/1000,mat.steinmetz.c);valAt=r=>kc*Math.pow(Brad(f.Bmean,r),mat.steinmetz.b);vmax=kc*Math.pow(Brad(fc.Bmean,geom.rin),mat.steinmetz.b)*1.05;}
+   else if(mode==='thermal'){vmin=Tamb;valAt=r=>Tamb+(Math.max(op.TcoreSS,op.TwdgSS)-Tamb)*(0.55+0.45*Math.pow((geom.rout-r)/geom.w,.7))*cool.hotspotFactor;vmax=op.ThotSS*1.02;}
+   else{valAt=r=>0;vmax=1;}
+   if(!(vmax>vmin))vmax=vmin+1e-6;
+   return {vmax,vmin,valAt};}
+ function drawCross(op,f){const c=$('fieldC'),ctx=c.getContext('2d'),W=c.width,H=c.height;ctx.clearRect(0,0,W,H);
+  const wg=windowGeom(),od=wg.bundleOD,rb=Math.min(wg.radialBuildActual_mm,geom.rin*0.92),holeR=Math.max(geom.rin-rb,geom.rin*0.04),outB=od,axB=od;
+  const span=geom.rout+outB+2,pz=Math.min((W*0.40)/span,(H*0.62)/(geom.h+2*axB+12)),cx=W*0.46,cy=H/2,hh=geom.h/2,Y=z=>cy-z*pz;
+  ctx.strokeStyle='rgba(148,163,184,.4)';ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(cx,28);ctx.lineTo(cx,H-46);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#9ca3af';ctx.font='11px Segoe UI';ctx.fillText('bore axis',cx-20,22);
+  const {vmax,vmin,valAt}=fieldSetup(op,f);const crowd=ev.crowdPeak;
+  const wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2,lI=op.Pcu_dc/4+op.Pcu_ac*wIn/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wOut/sw4,lTB=op.Pcu_dc/4+op.Pcu_ac/sw4,lmx=Math.max(lI,lO,lTB,1e-9);
+  const wtemp=clamp((op.TwdgSS-Tamb)/Math.max(op.ThotSS-Tamb,1e-9),0,1);
+  const wcol=loss=>(mode==='copper')?cmap('copper',loss/lmx):(mode==='thermal')?cmap('thermal',wtemp):'rgba(196,120,32,.95)';
+  function half(sign,ftype){const X=r=>cx+sign*r*pz,strips=56,sw=geom.w*pz/strips+1.5;
+   for(let i=0;i<strips;i++){const r=geom.rin+(i+.5)*geom.w/strips;ctx.fillStyle=(mode==='copper')?'rgba(70,80,100,.32)':cmap(mode,(valAt(r)-vmin)/Math.max(vmax-vmin,1e-9));ctx.fillRect(X(r)-sw/2,Y(hh),sw,geom.h*pz)}
+   ctx.strokeStyle='rgba(203,213,225,.6)';ctx.lineWidth=1.3;const xa=X(geom.rin),xb=X(geom.rout);ctx.strokeRect(Math.min(xa,xb),Y(hh),Math.abs(xb-xa),geom.h*pz);
+   if(mode==='flux'){for(let zi=0;zi<5;zi++)for(let ri=0;ri<5;ri++){const r=geom.rin+(ri+.5)*geom.w/5,z=-hh+(zi+.5)*geom.h/5,rad=clamp(Brad(f.Bmean,r)/.55,0,1)*3+.5;sym(ctx,X(r),Y(z),rad,'rgba(255,255,255,.82)',ftype)}}
+   const bands=[{a:holeR,b:geom.rin,z0:-hh-axB,z1:hh+axB,loss:lI,layers:wg.layersNeeded},{a:geom.rout,b:geom.rout+outB,z0:-hh-axB,z1:hh+axB,loss:lO,layers:1},{a:holeR,b:geom.rout+outB,z0:hh,z1:hh+axB,loss:lTB,layers:1},{a:holeR,b:geom.rout+outB,z0:-hh-axB,z1:-hh,loss:lTB,layers:1}];
+   bands.forEach(bd=>{const x0=X(bd.a),x1=X(bd.b),rx=Math.min(x0,x1),ry=Y(bd.z1),rw=Math.abs(x1-x0),rh=(bd.z1-bd.z0)*pz;ctx.fillStyle=wcol(bd.loss);ctx.fillRect(rx,ry,rw,rh);ctx.strokeStyle='rgba(0,0,0,.32)';ctx.lineWidth=.8;ctx.strokeRect(rx,ry,rw,rh);
+    if(bd.layers>1){ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=.6;for(let L=1;L<bd.layers;L++){const r=bd.a+(bd.b-bd.a)*L/bd.layers;ctx.beginPath();ctx.moveTo(X(r),ry);ctx.lineTo(X(r),ry+rh);ctx.stroke()}}
+    ctx.strokeStyle='rgba(0,0,0,.15)';ctx.lineWidth=.5;const nt=Math.min(16,Math.max(wg.turnsPerLayer,6));for(let k=1;k<nt;k++){const z=bd.z0+(bd.z1-bd.z0)*k/nt;ctx.beginPath();ctx.moveTo(rx,Y(z));ctx.lineTo(rx+rw,Y(z));ctx.stroke()}});
+   ctx.strokeStyle='rgba(148,163,184,.4)';ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(X(holeR),Y(-hh-axB));ctx.lineTo(X(holeR),Y(hh+axB));ctx.stroke();ctx.setLineDash([]);
+   ctx.fillStyle='#9ca3af';ctx.font='10px Segoe UI';ctx.fillText('OD',X(geom.rout)-(sign<0?14:2),Y(hh)-axB*pz-5)}
+  half(1,'dot');half(-1,'x');
+  if(wg.overfull){ctx.fillStyle='#fecaca';ctx.font='12px Segoe UI';ctx.fillText('⚠ winding does not fit the bore (K_u>1)',cx-110,H-46)}
+  if(mode==='thermal'){ctx.fillStyle='#fff';ctx.font='12px Segoe UI';ctx.fillText('hotspot ≈ '+op.ThotSS.toFixed(0)+'°C  (Tamb '+Tamb+'°C)',cx-96,Y(hh)-axB*pz-9)}
+  ctx.fillStyle='#cbd5e1';ctx.font='11px Segoe UI';ctx.fillText('K_u '+(wg.Ku*100).toFixed(0)+'% ('+wg.source+') · '+wg.layersNeeded+' layer(s) · bore Ø'+(2*holeR).toFixed(1)+'mm · bundle Ø'+od.toFixed(2)+'mm',cx-W*0.40,H-30);
+  ctx.fillStyle='#9ca3af';ctx.fillText('full diametral section · winding to scale (bore crowds into layers)',cx-W*0.36,H-14);colorbar(ctx,W,H,mode,vmin,vmax)}
+ function drawRing(op,f){const c=$('fieldC'),ctx=c.getContext('2d'),W=c.width,H=c.height,cx=W/2,cy=H/2;ctx.clearRect(0,0,W,H);
+  const wg=windowGeom(),od=wg.bundleOD,rb=Math.min(wg.radialBuildActual_mm,geom.rin*0.92),holeR=Math.max(geom.rin-rb,geom.rin*0.04);
+  const px=(Math.min(W,H)*0.36)/(geom.rout+od*1.6),rings=80,{vmax,vmin,valAt}=fieldSetup(op,f);
+  for(let i=0;i<rings;i++){const r=geom.rin+(i+.5)*geom.w/rings;ctx.beginPath();ctx.strokeStyle=(mode==='copper')?'rgba(120,128,150,.45)':cmap(mode,(valAt(r)-vmin)/Math.max(vmax-vmin,1e-9));ctx.lineWidth=geom.w*px/rings+1.2;ctx.arc(cx,cy,r*px,0,7);ctx.stroke()}
+  ctx.strokeStyle='rgba(148,163,184,.55)';ctx.lineWidth=1.3;ctx.beginPath();ctx.arc(cx,cy,geom.rin*px,0,7);ctx.stroke();ctx.beginPath();ctx.arc(cx,cy,geom.rout*px,0,7);ctx.stroke();
+  const crowd=ev.crowdPeak,wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2,lI=op.Pcu_dc/4+op.Pcu_ac*wIn/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wOut/sw4,lmx=Math.max(lI,lO,1e-9),sR=Math.max(od*px*0.42,2.4);
+  var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
+  let placed=0;for(let L=0;L<_nl&&placed<_tot;L++){const rr=(geom.rin-(L+0.5)*od)*px,cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed);for(let i=0;i<cnt;i++){const a=i/cnt*2*Math.PI+L*0.4;sym(ctx,cx+rr*Math.cos(a),cy+rr*Math.sin(a),sR,(mode==='copper')?cmap('copper',lI/lmx):'#2a6fb0','x')}placed+=cnt}
+  const rO=(geom.rout+od*0.8)*px;for(let i=0;i<N;i++){const a=i/N*2*Math.PI;sym(ctx,cx+rO*Math.cos(a),cy+rO*Math.sin(a),sR,(mode==='copper')?cmap('copper',lO/lmx):'#1a1a1a','dot')}
+  ctx.strokeStyle='rgba(148,163,184,.45)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(cx,cy,Math.max(holeR,0.1)*px,0,7);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#cbd5e1';ctx.font='11px Segoe UI';ctx.fillText('⊗ bore ('+wg.layersNeeded+'L · '+(wg.passes||N)+(wg.nParallel>1?' passes, '+wg.nParallel+'×'+N:' turns')+') · ⊙ outer',14,H-30);ctx.fillText('K_u '+(wg.Ku*100).toFixed(0)+'% · residual bore Ø'+(2*holeR).toFixed(1)+'mm',14,H-14);
+  if(wg.overfull){ctx.fillStyle='#fecaca';ctx.fillText('⚠ K_u>1',cx+60,H-14)}colorbar(ctx,W,H,mode,vmin,vmax)}
+ function fr2(ctx,W,H,m,title){ctx.fillStyle='#0b1220';ctx.fillRect(0,0,W,H);ctx.fillStyle='#e5e7eb';ctx.font='11.5px Segoe UI';ctx.fillText(title,8,13);ctx.strokeStyle='rgba(148,163,184,.25)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(m.l,m.t);ctx.lineTo(m.l,H-m.b);ctx.lineTo(W-m.r,H-m.b);ctx.stroke()}
+ function tks(ctx,W,H,m,xmin,xmax,ymin,ymax,nx,ny,xd,yd){ctx.fillStyle='#9ca3af';ctx.font='9px Segoe UI';ctx.strokeStyle='rgba(148,163,184,.12)';ctx.lineWidth=1;for(let i=0;i<=nx;i++){const v=xmin+(xmax-xmin)*i/nx,x=m.l+(W-m.l-m.r)*i/nx;ctx.fillText(v.toFixed(xd),x-9,H-m.b+11)}for(let i=0;i<=ny;i++){const v=ymin+(ymax-ymin)*i/ny,y=H-m.b-(H-m.t-m.b)*i/ny;ctx.fillText(v.toFixed(yd),3,y+3);ctx.beginPath();ctx.moveTo(m.l,y);ctx.lineTo(W-m.r,y);ctx.stroke()}}
+ function drawRadial(op,f){const c=$('radialC'),ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:42,r:12,t:18,b:24};ctx.clearRect(0,0,W,H);let valAt,vmax,vmin=0,col,yd=2,unit;if(mode==='copper'||mode==='flux'){valAt=r=>Brad(f.Bmean,r);col='#38bdf8';unit='B (T)';var _fc=ev.inst(op,0.5),_hi=1e-3;for(var _i=0;_i<=20;_i++){var _v=Brad(_fc.Bmean,geom.rin+geom.w*_i/20);if(_v>_hi)_hi=_v;}vmax=_hi*1.08;vmin=0;}else if(mode==='core'){valAt=r=>mat.steinmetz.a*Math.pow(Brad(f.Bmean,r),mat.steinmetz.b)*Math.pow(cfg.fsw/1000,mat.steinmetz.c);vmax=Math.max(valAt(geom.rin)*1.05,1);col='#f59e0b';yd=0;unit='mW/cm³'}else{valAt=r=>Tamb+(Math.max(op.TcoreSS,op.TwdgSS)-Tamb)*(0.55+0.45*Math.pow((geom.rout-r)/geom.w,.7))*cool.hotspotFactor;vmax=op.ThotSS;vmin=Tamb;col='#ef4444';yd=0;unit='T (°C)'}fr2(ctx,W,H,m,'Field vs radius — '+unit);const yb=vmin;tks(ctx,W,H,m,geom.rin,geom.rout,yb,vmax,4,4,1,yd);const xs=r=>m.l+(r-geom.rin)/geom.w*(W-m.l-m.r),ys=v=>H-m.b-(v-yb)/Math.max(vmax-yb,1e-9)*(H-m.t-m.b);ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<=60;i++){const r=geom.rin+i/60*geom.w,x=xs(r),y=ys(valAt(r));i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke();ctx.fillStyle='#9ca3af';ctx.font='9px Segoe UI';ctx.fillText('radius mm (ID→OD)',W/2-40,H-2)}
+ function drawBH(op,wf,wfRef,refLf,vin){const c=$('bhC'),ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:44,r:12,t:18,b:26};ctx.clearRect(0,0,W,H);const Le=geomIn.Le_mm/10;
+  // MAG curve B(H)=L(H)·H·k anchored to the live crest so it COINCIDES with step7's live Bdc(H)
+  // (green trace rides the grey curve). H axis is capped at the curve PEAK so it rises MONOTONICALLY
+  // (a small-signal µ·H curve rolls over past the peak — unphysical), like the original. By auto-fits.
+  var _Hcr=0,_Bcr=0,_liveMax=0;wf.W.forEach(function(p){if(p.H>_Hcr){_Hcr=p.H;_Bcr=p.Bdc;}if(p.Bdc>_liveMax)_liveMax=p.Bdc;});
+  var _bk=(_Hcr>0)?(_Bcr/Math.max(ev.fp.Lh(_Hcr)*_Hcr,1e-12)):0,mag=h=>ev.fp.Lh(h)*h*_bk;
+  var Hx=160,_pm=0;for(var _hh=0;_hh<=160;_hh+=2){var _bv=mag(_hh);if(_bv>=_pm-1e-9){_pm=_bv;Hx=_hh;}else break;}if(Hx<40)Hx=40;
+  const By=Math.max(0.80,_pm*1.1,_liveMax*1.25);
+  fr2(ctx,W,H,m,'B–H — bias point climbs with load');tks(ctx,W,H,m,0,Hx,0,By,4,4,0,2);const xs=h=>m.l+h/Hx*(W-m.l-m.r),ys=b=>H-m.b-b/By*(H-m.t-m.b);
+  ctx.strokeStyle='rgba(148,163,184,.55)';ctx.lineWidth=1.3;ctx.beginPath();for(let _h=0;_h<=Hx;_h+=2){const x=xs(_h),y=ys(mag(_h));_h?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke();
+  [0.25,0.5,0.75,1].forEach(fr=>{const Ic=crestIL(vin,fr*refLf),Hc=0.4*Math.PI*N*Ic/Le,Bc=mag(Hc);ctx.fillStyle='rgba(255,255,255,.45)';ctx.beginPath();ctx.arc(xs(Hc),ys(Bc),2,0,7);ctx.fill();ctx.fillStyle='#94a3b8';ctx.font='8px Segoe UI';ctx.fillText((fr*refLf*100).toFixed(0)+'%',xs(Hc)-5,ys(Bc)-4)});
+  ctx.strokeStyle='rgba(34,197,94,.35)';ctx.lineWidth=1.4;ctx.setLineDash([4,3]);ctx.beginPath();wfRef.W.forEach((p,i)=>{const x=xs(p.H),y=ys(p.Bdc);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle='#22c55e';ctx.lineWidth=2.4;ctx.beginPath();wf.W.forEach((p,i)=>{const x=xs(p.H),y=ys(p.Bdc);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+  let mxH=0,mxi=0;wf.W.forEach((p,i)=>{if(p.H>mxH){mxH=p.H;mxi=i}});const cb=wf.W[mxi];ctx.fillStyle='#22c55e';ctx.beginPath();ctx.arc(xs(cb.H),ys(cb.Bdc),4.5,0,7);ctx.fill();
+  const idx=clamp(Math.round(phase*(wf.W.length-1)),0,wf.W.length-1),cur=wf.W[idx],dH=0.4*Math.PI*N*cur.dIpp/Le;ctx.strokeStyle='#38bdf8';ctx.lineWidth=1.6;ctx.beginPath();ctx.ellipse(xs(cur.H),ys(cur.Bdc),Math.max((dH/2)/Hx*(W-m.l-m.r),2),Math.max(cur.BacPk/By*(H-m.t-m.b),2),0,0,7);ctx.stroke();ctx.fillStyle='#f59e0b';ctx.beginPath();ctx.arc(xs(cur.H),ys(cur.Bdc),3,0,7);ctx.fill();
+  ctx.fillStyle='#94a3b8';ctx.font='8.5px Segoe UI';ctx.fillText('dashed=spec-max load · solid=live · ticks=load%',m.l,m.t+9);ctx.fillStyle='#9ca3af';ctx.fillText('green●=crest bias · blue=switch loop · H(Oe)',m.l,H-3)}
+ function drawLoss(op,wf,wfRef){const c=$('lossC'),ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:44,r:12,t:18,b:26};ctx.clearRect(0,0,W,H);const ymax=Math.max(wf.pcMax,wf.puMax,wfRef.pcMax,wfRef.puMax)*1.12;fr2(ctx,W,H,m,'P core(t) & P cu(t) — Pcu shifts with load');tks(ctx,W,H,m,0,wf.half,0,ymax,4,4,1,2);const xs=t=>m.l+t/wf.half*(W-m.l-m.r),ys=p=>H-m.b-p/ymax*(H-m.t-m.b);
+  const line=(WW,k,col)=>{ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();WW.W.forEach((p,i)=>{const x=xs(p.t),y=ys(p[k]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()};
+  const ghost=k=>{ctx.lineWidth=1.2;ctx.setLineDash([4,3]);ctx.strokeStyle=(k==='Pcu')?'rgba(167,139,250,.45)':'rgba(245,158,11,.45)';ctx.beginPath();wfRef.W.forEach((p,i)=>{const x=xs(p.t),y=ys(p[k]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.setLineDash([])};
+  ghost('Pcu');ghost('Pcore');line(wf,'Pcore','#f59e0b');line(wf,'Pcu','#a78bfa');
+  const idx=clamp(Math.round(phase*(wf.W.length-1)),0,wf.W.length-1),cur=wf.W[idx],mx=xs(cur.t);ctx.strokeStyle='#e5e7eb';ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(mx,m.t);ctx.lineTo(mx,H-m.b);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(mx,ys(cur.Pcore),3,0,7);ctx.fill();ctx.beginPath();ctx.arc(mx,ys(cur.Pcu),3,0,7);ctx.fill();
+  ctx.fillStyle='#f59e0b';ctx.font='9px Segoe UI';ctx.fillText('Pcore',m.l+4,m.t+9);ctx.fillStyle='#a78bfa';ctx.fillText('Pcu',m.l+46,m.t+9);ctx.fillStyle='#9ca3af';ctx.fillText('faint=spec-max · time(ms)',W-140,m.t+9)}
+ function drawTemp(op){const c=$('tempC'),ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:44,r:12,t:18,b:26};ctx.clearRect(0,0,W,H);const warm=op.warm,tMax=warm[warm.length-1].t_min,yMax=Math.max(Tamb+2,...warm.map(p=>p.Thot))*1.03;fr2(ctx,W,H,m,'Warm-up — 2-node transient (min)');tks(ctx,W,H,m,0,tMax,Tamb,yMax,4,4,0,0);const xs=t=>m.l+t/tMax*(W-m.l-m.r),ys=T=>H-m.b-(T-Tamb)/Math.max(yMax-Tamb,1e-9)*(H-m.t-m.b),draw=(k,col)=>{ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();warm.forEach((p,i)=>{const x=xs(p.t_min),y=ys(p[k]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()};draw('Tcore','#f59e0b');draw('Twdg','#a78bfa');draw('Thot','#ef4444');const tMark=warm[Math.floor(phase*(warm.length-1))].t_min,mx=xs(tMark);ctx.strokeStyle='rgba(229,231,235,.85)';ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(mx,m.t);ctx.lineTo(mx,H-m.b);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#f59e0b';ctx.font='9px Segoe UI';ctx.fillText('Tcore',m.l+4,m.t+9);ctx.fillStyle='#a78bfa';ctx.fillText('Twdg',m.l+44,m.t+9);ctx.fillStyle='#ef4444';ctx.fillText('Thot',m.l+84,m.t+9)}
+ function drawPlane(vin,loadPct){const c=$('planeC'),ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:30,r:8,t:8,b:18};ctx.clearRect(0,0,W,H);ctx.fillStyle='#0b1220';ctx.fillRect(0,0,W,H);const xs=v=>m.l+(v-cfg.vinMin)/(cfg.vinMax-cfg.vinMin)*(W-m.l-m.r),ys=p=>H-m.b-clamp(p,0,120)/120*(H-m.t-m.b);ctx.fillStyle='rgba(239,68,68,.10)';ctx.fillRect(m.l,m.t,W-m.l-m.r,H-m.t-m.b);ctx.fillStyle='rgba(34,197,94,.22)';ctx.fillRect(xs(cfg.vinMin),ys(cfg.specLowLineMaxPct),xs(Math.min(132,cfg.vinMax))-xs(cfg.vinMin),ys(0)-ys(cfg.specLowLineMaxPct));if(cfg.vinMax>=180)ctx.fillRect(xs(Math.max(180,cfg.vinMin)),ys(cfg.specHighLineMaxPct),xs(cfg.vinMax)-xs(Math.max(180,cfg.vinMin)),ys(0)-ys(cfg.specHighLineMaxPct));ctx.fillStyle='rgba(148,163,184,.16)';if(cfg.vinMax>=180&&cfg.vinMin<=132)ctx.fillRect(xs(133),m.t,xs(179)-xs(133),H-m.t-m.b);ctx.strokeStyle='rgba(148,163,184,.3)';ctx.beginPath();ctx.moveTo(m.l,m.t);ctx.lineTo(m.l,H-m.b);ctx.lineTo(W-m.r,H-m.b);ctx.stroke();ctx.fillStyle='#9ca3af';ctx.font='8.5px Segoe UI';[cfg.vinMin,180,cfg.vinMax].forEach(v=>ctx.fillText(v,xs(v)-7,H-6));[0,50,100].forEach(p=>ctx.fillText(p,2,ys(p)+3));ctx.fillStyle='rgba(168,85,247,.16)';ctx.beginPath();ctx.moveTo(xs(cfg.vinMin),ys(0));for(let v=cfg.vinMin;v<=cfg.vinMax;v+=8){ctx.lineTo(xs(v),ys(clamp(dcmBoundary(v),0,120)));}ctx.lineTo(xs(cfg.vinMax),ys(0));ctx.closePath();ctx.fill();ctx.strokeStyle='rgba(168,85,247,.7)';ctx.lineWidth=1;ctx.beginPath();let st=false;for(let v=cfg.vinMin;v<=cfg.vinMax;v+=8){const x=xs(v),y=ys(clamp(dcmBoundary(v),0,120));st?ctx.lineTo(x,y):ctx.moveTo(x,y);st=true;}ctx.stroke();ctx.fillStyle='#a78bfa';ctx.font='8px Segoe UI';ctx.fillText('DCM',xs(cfg.vinMin)+3,ys(2));const mx=specMaxPct(vin),inSpec=mx!==null&&loadPct<=mx+0.5;ctx.fillStyle=inSpec?'#38bdf8':'#ef4444';ctx.beginPath();ctx.arc(xs(vin),ys(loadPct),5,0,7);ctx.fill();return inSpec}
+ function rot3(x,y,z){const cy=Math.cos(yaw),sy=Math.sin(yaw),x1=x*cy+z*sy,z1=-x*sy+z*cy,cp=Math.cos(pitch),sp=Math.sin(pitch);return [x1,y*cp-z1*sp,y*sp+z1*cp];}
+ function shade(col,k){if(col[0]!=='r')return col;const v=col.slice(4,-1).split(',').map(Number);return 'rgb('+(Math.min(255,v[0]*k)|0)+','+(Math.min(255,v[1]*k)|0)+','+(Math.min(255,v[2]*k)|0)+')';}
+ function drawWire3D(op,f){const c=$('fieldC'),ctx=c.getContext('2d'),W=c.width,H=c.height;ctx.clearRect(0,0,W,H);
+  const wg=windowGeom(),od=wg.bundleOD,{vmax,vmin,valAt}=fieldSetup(op,f),cx=W*0.5,cy=H*0.52,sMM=(Math.min(W,H)*0.30)/(geom.rout+od),dist=geom.rout*5,hh=geom.h/2,S=44;
+  const P=(r,phi,y)=>{const ax=r*Math.cos(phi),az=r*Math.sin(phi),[X1,Y1,Z1]=rot3(ax,y,az),k=dist/(dist-Z1);return {X:cx+X1*sMM*k,Y:cy-Y1*sMM*k,z:Z1};};
+  const Ld=[0.4,0.7,0.55],Ln=Math.hypot(Ld[0],Ld[1],Ld[2]),nsh=(nx,ny,nz)=>{const[a,b,d]=rot3(nx,ny,nz);return 0.45+0.55*Math.max(0,(a*Ld[0]+b*Ld[1]+d*Ld[2])/Ln);};
+  const prims=[],coreCol=r=>(mode==='copper')?'rgb(96,104,124)':cmap(mode,(valAt(r)-vmin)/Math.max(vmax-vmin,1e-9));
+  const quad=(pts,col)=>{const w=pts.map(q=>P(q[0],q[1],q[2]));prims.push({w,col,depth:(w[0].z+w[1].z+w[2].z+w[3].z)/4});};
+  for(let i=0;i<S;i++){const a0=i/S*2*Math.PI,a1=(i+1)/S*2*Math.PI,am=(a0+a1)/2;
+   quad([[geom.rout,a0,-hh],[geom.rout,a1,-hh],[geom.rout,a1,hh],[geom.rout,a0,hh]],shade(coreCol(geom.rout),nsh(Math.cos(am),0,Math.sin(am))));
+   quad([[geom.rin,a0,hh],[geom.rin,a1,hh],[geom.rin,a1,-hh],[geom.rin,a0,-hh]],shade(coreCol(geom.rin),nsh(-Math.cos(am),0,-Math.sin(am))));
+   quad([[geom.rin,a0,hh],[geom.rout,a0,hh],[geom.rout,a1,hh],[geom.rin,a1,hh]],shade(coreCol(geom.rmean),nsh(0,1,0)));
+   quad([[geom.rin,a1,-hh],[geom.rout,a1,-hh],[geom.rout,a0,-hh],[geom.rin,a0,-hh]],shade(coreCol(geom.rmean),nsh(0,-1,0)));}
+  const crowd=ev.crowdPeak,wI=Math.pow(crowd,2),wO=Math.pow(geom.rmean/geom.rout,2),sw4=wI+wO+2,lI=op.Pcu_dc/4+op.Pcu_ac*wI/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wO/sw4,lmx=Math.max(lI,lO,1e-9),tcol=(mode==='copper')?cmap('copper',lI/lmx):'rgb(196,120,32)';
+  var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
+  let placed=0;for(let L=0;L<_nl&&placed<_tot;L++){const cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed),rIn=Math.max(geom.rin-(L+1)*od,od*0.6),rOut=geom.rout+od*0.6,yt=hh+od*0.6,yb=-hh-od*0.6;
+   for(let j=0;j<cnt;j++){const phi=(j+0.5)/cnt*2*Math.PI+L*0.25,loop=[[rIn,phi,yb],[rOut,phi,yb],[rOut,phi,yt],[rIn,phi,yt],[rIn,phi,yb]].map(q=>P(q[0],q[1],q[2])),depth=loop.reduce((s,p)=>s+p.z,0)/loop.length;prims.push({loop,col:tcol,depth,wire:true});}placed+=cnt;}
+  prims.sort((a,b)=>a.depth-b.depth);
+  prims.forEach(pr=>{if(pr.wire){ctx.strokeStyle=pr.col;ctx.lineWidth=Math.max(od*sMM*0.55,1.2);ctx.beginPath();pr.loop.forEach((p,i)=>i?ctx.lineTo(p.X,p.Y):ctx.moveTo(p.X,p.Y));ctx.stroke();}else{ctx.fillStyle=pr.col;ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=.5;ctx.beginPath();pr.w.forEach((p,i)=>i?ctx.lineTo(p.X,p.Y):ctx.moveTo(p.X,p.Y));ctx.closePath();ctx.fill();ctx.stroke();}});
+  ctx.fillStyle='#cbd5e1';ctx.font='11px Segoe UI';ctx.fillText('3D to-scale · drag to rotate · '+(wg.passes||N)+(wg.nParallel>1?' passes ('+wg.nParallel+'×'+N+')':' turns')+' · '+wg.layersNeeded+' bore layer(s) · bundle Ø'+od.toFixed(2)+'mm',12,H-26);
+  ctx.fillStyle='#9ca3af';ctx.fillText('geometric model (painter depth, no z-buffer/photoreal)',12,H-12);colorbar(ctx,W,H,mode,vmin,vmax);}
+ function drawL(op,wf,wfRef){const c=$('ltC');if(!c)return;const ctx=c.getContext('2d'),W=c.width,H=c.height,m={l:46,r:12,t:18,b:24};ctx.clearRect(0,0,W,H);
+  const lo=Math.min(wf.lMin,wfRef.lMin),hi=Math.max(wf.lMax,wfRef.lMax),pad=(hi-lo)*0.3+0.5,ymin=lo-pad,ymax=hi+pad;fr2(ctx,W,H,m,'L(t) — inductance breathing (µH)');tks(ctx,W,H,m,0,wf.half,ymin,ymax,4,4,1,0);
+  const xs=tt=>m.l+tt/wf.half*(W-m.l-m.r),ys=v=>H-m.b-(v-ymin)/Math.max(ymax-ymin,1e-9)*(H-m.t-m.b);
+  ctx.strokeStyle='rgba(56,189,248,.4)';ctx.lineWidth=1.2;ctx.setLineDash([4,3]);ctx.beginPath();wfRef.W.forEach((p,i)=>{const x=xs(p.t),y=ys(p.L_uH);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.beginPath();wf.W.forEach((p,i)=>{const x=xs(p.t),y=ys(p.L_uH);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+  const idx=clamp(Math.round(phase*(wf.W.length-1)),0,wf.W.length-1),cur=wf.W[idx],mx=xs(cur.t);ctx.strokeStyle='#e5e7eb';ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(mx,m.t);ctx.lineTo(mx,H-m.b);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(mx,ys(cur.L_uH),3,0,7);ctx.fill();
+  ctx.fillStyle='#9ca3af';ctx.font='9px Segoe UI';ctx.fillText('dips at crest (peak bias) · faint=spec-max load · time(ms)',m.l,m.t+9);}
+ function dcmBoundary(vin){const Vpk=vin*Math.SQRT2,Dpk=clamp(1-Vpk/cfg.Vout,0.02,0.98),Le=geomIn.Le_mm/10,g=lf=>{const Ic=crestIL(vin,lf/100),Hh=0.4*Math.PI*N*Ic/Le,L=Math.max(ev.fp.Lh(Hh),1e-9);return Ic-(Vpk*Dpk/(L*cfg.fsw))/2;};let lo=0.5,hi=150;if(g(hi)<0)return hi;if(g(lo)>0)return lo;for(let i=0;i<26;i++){const mid=(lo+hi)/2;if(g(mid)>0)hi=mid;else lo=mid;}return (lo+hi)/2;}
+
+ /* ---------- WebGL 3D (true depth, lit, quarter-cutaway). Pure VIEWER layer: reads op/f, ----------
+    ---------- never writes back. Any failure => automatic fallback to canvas-2D drawWire3D ---------- */
+ const GLH={st:null};
+ function hideGL3(){const g=GLH.st;if(g&&g.canvas&&g.canvas.style)g.canvas.style.display='none';const h=$('fieldC');if(h&&h.style)h.style.display='';}
+ function _persp(fv,as,nr,fr){const tn=1/Math.tan(fv/2);return new Float32Array([tn/as,0,0,0, 0,tn,0,0, 0,0,(fr+nr)/(nr-fr),-1, 0,0,2*fr*nr/(nr-fr),0]);}
+ function _mv(yw,pt,dist){const cy=Math.cos(yw),sy=Math.sin(yw),cp=Math.cos(pt),sp=Math.sin(pt);
+  return new Float32Array([cy,sp*sy,-cp*sy,0, 0,cp,sp,0, sy,-sp*cy,cp*cy,0, 0,0,-dist,1]);}
+ function _ramp(tt){tt=Math.max(0,Math.min(1,tt));let r,g,b;
+  if(tt<0.34){const u=tt/0.34;r=0.10+(0.05-0.10)*u;g=0.20+(0.75-0.20)*u;b=0.75+(0.85-0.75)*u;}
+  else if(tt<0.67){const u=(tt-0.34)/0.33;r=0.05+(0.95-0.05)*u;g=0.75+(0.85-0.75)*u;b=0.85+(0.15-0.85)*u;}
+  else{const u=(tt-0.67)/0.33;r=0.95+(0.90-0.95)*u;g=0.85+(0.15-0.85)*u;b=0.15+(0.10-0.15)*u;}
+  return [r,g,b];}
+ function _rrectPath(rIn,rOut,Y,cr,nE,nC){const pts=[];cr=Math.min(cr,(rOut-rIn)/2.2,Y/1.2);
+  const seg=(x0,y0,x1,y1,k)=>{for(let i=0;i<k;i++){const u=i/k;pts.push([x0+(x1-x0)*u,y0+(y1-y0)*u]);}};
+  const arc=(cx,cy,a0,a1,k)=>{for(let i=0;i<k;i++){const a=a0+(a1-a0)*i/k;pts.push([cx+cr*Math.cos(a),cy+cr*Math.sin(a)]);}};
+  seg(rIn+cr,-Y,rOut-cr,-Y,nE);arc(rOut-cr,-Y+cr,-Math.PI/2,0,nC);
+  seg(rOut,-Y+cr,rOut,Y-cr,nE);arc(rOut-cr,Y-cr,0,Math.PI/2,nC);
+  seg(rOut-cr,Y,rIn+cr,Y,nE);arc(rIn+cr,Y-cr,Math.PI/2,Math.PI,nC);
+  seg(rIn,Y-cr,rIn,-Y+cr,nE);arc(rIn+cr,-Y+cr,Math.PI,1.5*Math.PI,nC);
+  return pts;}
+ function _buildMesh(){const wg=windowGeom(),od=wg.bundleOD,hh=geom.h/2,S=64,CUT=Math.PI/2;
+  const P=[],Nv=[],R=[],M=[],I=[];let vi=0;
+  const push=(x,y,z,nx,ny,nz,r,m)=>{P.push(x,y,z);Nv.push(nx,ny,nz);R.push(r);M.push(m);return vi++;};
+  const quad=(a,b,c,d)=>{I.push(a,b,c,a,c,d);};
+  for(let i=0;i<S;i++){const a0=i/S*2*Math.PI,a1=(i+1)/S*2*Math.PI;
+   if((a0+a1)/2<CUT)continue;
+   const c0=Math.cos(a0),s0=Math.sin(a0),c1=Math.cos(a1),s1=Math.sin(a1);
+   let v0=push(geom.rout*c0,-hh,geom.rout*s0,c0,0,s0,geom.rout,0),v1=push(geom.rout*c1,-hh,geom.rout*s1,c1,0,s1,geom.rout,0),
+       v2=push(geom.rout*c1, hh,geom.rout*s1,c1,0,s1,geom.rout,0),v3=push(geom.rout*c0, hh,geom.rout*s0,c0,0,s0,geom.rout,0);
+   quad(v0,v1,v2,v3);
+   v0=push(geom.rin*c0, hh,geom.rin*s0,-c0,0,-s0,geom.rin,0);v1=push(geom.rin*c1, hh,geom.rin*s1,-c1,0,-s1,geom.rin,0);
+   v2=push(geom.rin*c1,-hh,geom.rin*s1,-c1,0,-s1,geom.rin,0);v3=push(geom.rin*c0,-hh,geom.rin*s0,-c0,0,-s0,geom.rin,0);
+   quad(v0,v1,v2,v3);
+   v0=push(geom.rin*c0,hh,geom.rin*s0,0,1,0,geom.rin,0);v1=push(geom.rout*c0,hh,geom.rout*s0,0,1,0,geom.rout,0);
+   v2=push(geom.rout*c1,hh,geom.rout*s1,0,1,0,geom.rout,0);v3=push(geom.rin*c1,hh,geom.rin*s1,0,1,0,geom.rin,0);
+   quad(v0,v1,v2,v3);
+   v0=push(geom.rin*c1,-hh,geom.rin*s1,0,-1,0,geom.rin,0);v1=push(geom.rout*c1,-hh,geom.rout*s1,0,-1,0,geom.rout,0);
+   v2=push(geom.rout*c0,-hh,geom.rout*s0,0,-1,0,geom.rout,0);v3=push(geom.rin*c0,-hh,geom.rin*s0,0,-1,0,geom.rin,0);
+   quad(v0,v1,v2,v3);}
+  const cutFace=(phi,nx,ny,nz)=>{const K=24,cph=Math.cos(phi),sph=Math.sin(phi);let prevA=-1,prevB=-1;
+   for(let k=0;k<=K;k++){const r=geom.rin+(geom.rout-geom.rin)*k/K;
+    const a=push(r*cph,-hh,r*sph,nx,ny,nz,r,2),b=push(r*cph,hh,r*sph,nx,ny,nz,r,2);
+    if(k>0)quad(prevA,a,b,prevB);prevA=a;prevB=b;}};
+  cutFace(CUT,Math.sin(CUT),0,-Math.cos(CUT));cutFace(2*Math.PI,0,0,1);
+  const Yc=hh+od*0.55,K=7;let placed=0;
+  var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
+  for(let L=0;L<_nl&&placed<_tot;L++){const cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed);
+   const rI=Math.max(geom.rin-(L+1)*od,od*0.8),rO=geom.rout+od*0.55;
+   for(let j=0;j<cnt;j++){const phi=CUT+0.10+((j+0.5)/cnt)*(2*Math.PI-CUT-0.20)+L*0.10;
+    const cph=Math.cos(phi),sph=Math.sin(phi),B=[-sph,0,cph];
+    const path=_rrectPath(rI,rO,Yc,od*0.9,4,3),Mq=path.length,base=vi;
+    for(let p=0;p<Mq;p++){const q=(p+1)%Mq,pm=(p+Mq-1)%Mq;
+     let tr=path[q][0]-path[pm][0],ty=path[q][1]-path[pm][1];const tl=Math.hypot(tr,ty)||1;tr/=tl;ty/=tl;
+     const nr=ty,ny=-tr,Nin=[nr*cph,ny,nr*sph];
+     for(let s=0;s<K;s++){const th=s/K*2*Math.PI,ct=Math.cos(th),st=Math.sin(th);
+      const dx=ct*Nin[0]+st*B[0],dy=ct*Nin[1]+st*B[1],dz=ct*Nin[2]+st*B[2];
+      push(path[p][0]*cph+dx*od/2,path[p][1]+dy*od/2,path[p][0]*sph+dz*od/2,dx,dy,dz,path[p][0],1);}}
+    for(let p=0;p<Mq;p++){const q=(p+1)%Mq;for(let s=0;s<K;s++){const s2=(s+1)%K;
+     quad(base+p*K+s,base+q*K+s,base+q*K+s2,base+p*K+s2);}}
+    placed++;if(placed>=N)break;}}
+  return {pos:new Float32Array(P),nrm:new Float32Array(Nv),vR:R,vM:M,
+          mat:new Float32Array(M),idx:new Uint16Array(I),nVert:vi};}
+ function tryInitGL(){try{
+  if(typeof document==='undefined'||typeof document.createElement!=='function')return null;
+  const host=$('fieldC');if(!host||!host.parentNode)return null;
+  const c=document.createElement('canvas');c.width=host.width;c.height=host.height;
+  if(host.className)c.className=host.className;
+  const gl=c.getContext('webgl',{antialias:true,alpha:true})||c.getContext('experimental-webgl');
+  if(!gl||typeof gl.createShader!=='function')return null;
+  const VS='attribute vec3 aP;attribute vec3 aN;attribute vec3 aC;attribute float aM;'
+    +'uniform mat4 uP;uniform mat4 uMV;varying vec3 vN;varying vec3 vC;varying vec3 vPos;varying float vM;'
+    +'void main(){vec4 p=uMV*vec4(aP,1.0);gl_Position=uP*p;vN=mat3(uMV)*aN;vPos=p.xyz;vC=aC;vM=aM;}';
+  const FS='precision mediump float;varying vec3 vN;varying vec3 vC;varying vec3 vPos;varying float vM;'
+    +'void main(){vec3 Nn=normalize(vN);vec3 L1=normalize(vec3(0.45,0.75,0.55));vec3 L2=normalize(vec3(-0.6,0.2,-0.4));'
+    +'vec3 V=normalize(-vPos);float d=max(dot(Nn,L1),0.0)+0.30*max(dot(Nn,L2),0.0);'
+    +'vec3 H=normalize(L1+V);float sp=pow(max(dot(Nn,H),0.0),(vM>0.5&&vM<1.5)?56.0:10.0);'
+    +'vec3 col;if(vM>1.5){col=vC*(0.55+0.50*d);}else if(vM>0.5){col=vC*(0.22+0.80*d)+vec3(1.0,0.93,0.82)*sp*0.95;}'
+    +'else{col=vC*(0.28+0.72*d)+vec3(1.0)*sp*0.15;}gl_FragColor=vec4(col,1.0);}';
+  const sh=(ty,src)=>{const s=gl.createShader(ty);gl.shaderSource(s,src);gl.compileShader(s);
+   if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error('shader: '+gl.getShaderInfoLog(s));return s;};
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));
+  gl.linkProgram(pr);if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw new Error('link: '+gl.getProgramInfoLog(pr));
+  const mesh=_buildMesh();
+  const mkBuf=(data,loc,sz)=>{const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+   gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);gl.enableVertexAttribArray(loc);
+   gl.vertexAttribPointer(loc,sz,gl.FLOAT,false,0,0);return b;};
+  gl.useProgram(pr);
+  const aP=gl.getAttribLocation(pr,'aP'),aN=gl.getAttribLocation(pr,'aN'),aC=gl.getAttribLocation(pr,'aC'),aM=gl.getAttribLocation(pr,'aM');
+  mkBuf(mesh.pos,aP,3);mkBuf(mesh.nrm,aN,3);mkBuf(mesh.mat,aM,1);
+  const colBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER,mesh.nVert*12,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(aC);gl.vertexAttribPointer(aC,3,gl.FLOAT,false,0,0);
+  const iBuf=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,iBuf);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,mesh.idx,gl.STATIC_DRAW);
+  gl.enable(gl.DEPTH_TEST);gl.clearColor(0,0,0,0);
+  const st={canvas:c,gl,pr,mesh,colBuf,aC,uP:gl.getUniformLocation(pr,'uP'),uMV:gl.getUniformLocation(pr,'uMV'),
+            dist:(geom.rout+windowGeom().bundleOD)*3.1,cols:new Float32Array(mesh.nVert*3)};
+  host.parentNode.insertBefore(c,host.nextSibling);
+  if(c.addEventListener){
+   c.addEventListener('pointerdown',e=>{drag3=true;lx=e.clientX;ly=e.clientY;});
+   c.addEventListener('pointermove',e=>{if(!drag3)return;yaw+=(e.clientX-lx)*0.01;pitch=Math.max(-1.4,Math.min(1.4,pitch+(e.clientY-ly)*0.01));lx=e.clientX;ly=e.clientY;render();});
+   c.addEventListener('pointerup',()=>{drag3=false;});
+   c.addEventListener('wheel',e=>{if(e.preventDefault)e.preventDefault();st.dist=Math.max(geom.rout*1.4,Math.min(geom.rout*9,st.dist*(1+(e.deltaY>0?0.08:-0.08))));render();},{passive:false});}
+  return st;}catch(e){return null;}}
+ function drawGL(op,f){const st=GLH.st,gl=st.gl,me=st.mesh,{vmax,vmin,valAt}=fieldSetup(op,f);
+  for(let i=0;i<me.nVert;i++){let r,g,b;
+   if(me.vM[i]===1){r=0.80;g=0.47;b=0.20;}
+   else if(mode==='copper'){r=0.40;g=0.42;b=0.48;}
+   else{const tt=(valAt(me.vR[i])-vmin)/Math.max(vmax-vmin,1e-9);const c3=_ramp(tt);r=c3[0];g=c3[1];b=c3[2];}
+   st.cols[i*3]=r;st.cols[i*3+1]=g;st.cols[i*3+2]=b;}
+  gl.bindBuffer(gl.ARRAY_BUFFER,st.colBuf);gl.bufferData(gl.ARRAY_BUFFER,st.cols,gl.DYNAMIC_DRAW);
+  gl.vertexAttribPointer(st.aC,3,gl.FLOAT,false,0,0);
+  gl.viewport(0,0,st.canvas.width,st.canvas.height);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.uniformMatrix4fv(st.uP,false,_persp(0.62,st.canvas.width/st.canvas.height,st.dist*0.05,st.dist*6));
+  gl.uniformMatrix4fv(st.uMV,false,_mv(yaw,pitch,st.dist));
+  gl.drawElements(gl.TRIANGLES,me.idx.length,gl.UNSIGNED_SHORT,0);}
+ function draw3D(op,f){
+  if(GLH.st===null){GLH.st=tryInitGL()||false;window.__GL3D=GLH.st?'webgl':'canvas2d-fallback';}
+  const host=$('fieldC');
+  if(GLH.st){try{if(host&&host.style)host.style.display='none';if(GLH.st.canvas.style)GLH.st.canvas.style.display='';drawGL(op,f);return;}
+   catch(e){GLH.st=false;window.__GL3D='canvas2d-fallback';}}
+  if(host&&host.style)host.style.display='';drawWire3D(op,f);}
+ var _last=null;
+ // Graph hover crosshair + value tooltip: on mousemove, redraw the base graph and overlay a
+ // dashed cursor line + the nearest data point's values. Bound once (c._hb guard) in mount().
+ function _hover(cid,redraw,xmaxFn,xf,labelFn){
+   var c=$(cid); if(!c||!c.addEventListener||c._hb)return; c._hb=true; var m={l:44,r:12,t:18,b:26};
+   c.addEventListener('mousemove',function(e){
+     if(!_last||!_last.wf||!_last.wf.W||!_last.wf.W.length)return; redraw();
+     var ctx=c.getContext('2d'),W=c.width,Hh=c.height,rect=c.getBoundingClientRect();
+     var px=(e.clientX-rect.left)*(W/Math.max(rect.width,1)); if(px<m.l||px>W-m.r)return;
+     var xmax=xmaxFn()||1,xv=(px-m.l)/(W-m.l-m.r)*xmax,w=_last.wf.W,best=w[0],bd=1e9;
+     for(var i=0;i<w.length;i++){var d=Math.abs((w[i][xf]||0)-xv);if(d<bd){bd=d;best=w[i];}}
+     ctx.strokeStyle='rgba(229,231,235,.65)';ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px,m.t);ctx.lineTo(px,Hh-m.b);ctx.stroke();ctx.setLineDash([]);
+     var lab=labelFn(best),tw=Math.min(lab.length*5.4+10,300),tx=Math.min(Math.max(px+8,m.l),W-m.r-tw),ty=m.t+2;
+     ctx.fillStyle='rgba(8,16,31,.93)';ctx.fillRect(tx,ty,tw,15);ctx.fillStyle='#e5e7eb';ctx.font='9px Segoe UI';ctx.fillText(lab,tx+5,ty+11);
+   });
+   c.addEventListener('mouseleave',function(){if(_last)redraw();});
+ }
+ // Point 3: design values + config + source, each as its own tile UNDER the view (#provRow).
+ function _buildTiles(){var el=$('provRow'); if(!el)return;
+   var D=(typeof window!=='undefined')&&window.__STEP7_DATA__, S=(D&&D.scalars)||{};
+   function tn(lbl,v,u,d){return (v==null||isNaN(+v))?'':'<span class="badge"><b style="color:#e5e7eb">'+lbl+'</b> '+(+v).toFixed(d)+u+'</span>';}
+   function ts(lbl,v){return v?'<span class="badge"><b style="color:#e5e7eb">'+lbl+'</b> '+v+'</span>':'';}
+   var wire=cu.wire,wt=wire?(wire.type+' '+wire.strands+'×'+wire.strandDia_mm+'mm'+(wire.parallel>1?'×'+wire.parallel+'p':'')):'';
+   el.innerHTML='<span class="badge fea">source: injected field package</span>'
+     +ts('Material',mat.name)+ts('Core',S.part_number)+ts('N',N+' × '+stacks+' stack'+(stacks>1?'s':''))+ts('Wire',wt)+tn('Tamb ',Tamb,' °C',0)
+     +tn('L0 ',S.L0_nom_uH,' µH',1)+tn('Lfull ',S.L_full_load_uH,' µH',1)+tn('Bmax ',S.Bmax_FL_T,' T',3)
+     +tn('Bmax,inner ',S.Bmax_inner_FL_T,' T',3)+tn('Pcore ',S.Pcore_W,' W',2)+tn('Ptot ',S.Ptotal_100C_W,' W',2)
+     +tn('DCR@100 ',S.DCR_100C_mOhm,' mΩ',1)+tn('ΔT ',S.dT_rise_C,' °C',0)+tn('J ',S.J_A_mm2,' A/mm²',2)
+     +tn('Ku ',(S.Ku!=null?S.Ku*100:null),' %',0)+tn('sat margin ',S.sat_margin_pct,' %',0);
+ }
+ function _s7sample(vin,lf){
+   var D=(typeof window!=='undefined')&&window.__STEP7_DATA__; if(!D||!D.waveforms_by_vin)return null;
+   var Wv=D.waveforms_by_vin,ks=Object.keys(Wv).map(Number).sort(function(a,b){return a-b;}); if(!ks.length)return null;
+   var loK=ks[0],hiK=ks[ks.length-1];
+   for(var j=0;j<ks.length;j++){if(ks[j]<=vin)loK=ks[j];if(ks[j]>=vin){hiK=ks[j];break;}}
+   if(hiK-loK>40){if(Math.abs(vin-loK)<=Math.abs(vin-hiK))hiK=loK;else loK=hiK;}   // don't cross the 133–179 gap
+   var wa=Wv[String(loK)],wb=Wv[String(hiK)]; if(!wa||!wa.t_ms||!wa.t_ms.length)return null;
+   var t=(hiK>loK)?Math.max(0,Math.min(1,(vin-loK)/(hiK-loK))):0,n=wa.t_ms.length;
+   var smp=specMaxPct(vin),lfRef=(smp==null?1:smp/100),ls=(lfRef>0)?(lf/lfRef):1; if(!(ls>0))ls=1;
+   function L(a,b,i){return (a[i]||0)+t*((b[i]||0)-(a[i]||0));}
+   var r3=2*Math.sqrt(3),W=[],pcA=0,puA=0,bm=0,hc=0,pci=0,pui=0;
+   for(var k=0;k<n;k++){var H=L(wa.H_Oe,wb.H_Oe,k)*ls,Bd=L(wa.Bdc,wb.Bdc,k)*ls,Bac=L(wa.Bac_pk,wb.Bac_pk,k),Ih=L(wa.Ihf,wb.Ihf,k),Pco=L(wa.Pcore,wb.Pcore,k),Pcu=L(wa.Pcu,wb.Pcu,k)*ls*ls,Bx=Bd+Bac;
+     W.push({fr:k/Math.max(n-1,1),t:L(wa.t_ms,wb.t_ms,k),H:H,Bdc:Bd,Bmax:Bx,BacPk:Bac,dIpp:Ih*r3,Iavg:L(wa.Iavg,wb.Iavg,k)*ls,Pcore:Pco,Pcu:Pcu,L_uH:ev.fp.Lh(H)*1e6});
+     pcA+=Pco;puA+=Pcu;if(Bx>bm)bm=Bx;if(H>hc)hc=H;if(Pco>pci)pci=Pco;if(Pcu>pui)pui=Pcu;}
+   return {W:W,half:wa.t_ms[n-1],ls:ls,Pcore_avg:pcA/n,Pcu_avg:puA/n,Ptot_avg:(pcA+puA)/n,Bmax:bm,Hcrest:hc,PcoreInst:pci,PcuInst:pui};
+ }
+ function render(){const vin=+$('vin').value,lf=+$('load').value/100,warmMin=+$('warmMin').value;$('warmV').textContent=warmMin+' min';
+  const op=ev.opPoint(vin,lf,warmMin),f=ev.inst(op,phase),wf=ev.waveform(op),wg=windowGeom();
+  // Phase C: drive the loss / B–H / L(t) graphs from step7's per-Vin waveform, INTERPOLATED across
+  // Vin and SCALED with load → animates continuously, equals step7 at the design point.
+  var _s7d=_s7sample(vin,lf);
+  if(_s7d){wf.W=_s7d.W;wf.half=_s7d.half;wf.pcMax=_s7d.PcoreInst;wf.puMax=_s7d.PcuInst;
+    wf.lMin=Math.min.apply(null,_s7d.W.map(function(p){return p.L_uH;}));
+    wf.lMax=Math.max.apply(null,_s7d.W.map(function(p){return p.L_uH;}));}
+  const inSpec=drawPlane(vin,lf*100);const smp=specMaxPct(vin),refLf=(smp===null?1:smp/100),opRef=ev.opPoint(vin,refLf,warmMin),wfRef=ev.waveform(opRef);
+  if(geo!=='threeD')hideGL3();(geo==='cross'?drawCross:geo==='ring'?drawRing:draw3D)(op,f);drawLoss(op,wf,wfRef);drawTemp(op);drawL(op,wf,wfRef);
+  _last={op:op,f:f,wf:wf,wfRef:wfRef,refLf:refLf,vin:vin};
+  $('kIc').textContent=op.Ic.toFixed(2)+' A';$('kL').textContent=(f.L_inst*1e6).toFixed(1)+' µH';$('kBp').textContent=(f.Bmean*ev.crowdPeak).toFixed(3)+' T';$('kH').textContent=f.H.toFixed(1)+' Oe';
+  $('kPc').textContent=op.Pcore.toFixed(2)+' | '+f.Pcore.toFixed(2)+' W';$('kPu').textContent=op.Pcu.toFixed(2)+' | '+f.Pcu.toFixed(2)+' W';$('kR').textContent=(op.Rdc0*1e3).toFixed(1)+' | '+(op.Rac0*1e3).toFixed(1)+' mΩ';
+  $('kKu').textContent=(wg.Ku*100).toFixed(0)+' % · '+wg.layersNeeded+'L'+(wg.overfull?' ⚠':'');$('kTamb').textContent=Tamb+' °C';$('kTnodes').textContent=op.TcoreSS.toFixed(0)+' | '+op.TwdgSS.toFixed(0)+' °C';$('kTh').textContent=op.ThotSS.toFixed(0)+' °C';$('kPt').textContent=op.Ptot.toFixed(2)+' W';
+  // Phase C (Option B): overwrite the readout NUMBERS with step7's authoritative values for the
+  // current Vin (waveform model — identical basis to Result/Review). Field PLOTS above keep the
+  // viewer's own geometry. No-op without a posted contract.
+  (function(){var D=(typeof window!=='undefined')&&window.__STEP7_DATA__; if(!D)return;
+    var S=D.scalars||{},vref=(D.meta&&D.meta.vin_design)||90;
+    // nearest-Vin anchored sweep (bsw) AND the design-corner reference row (sref, ~90 V)
+    var sw=D.sweep||[],bsw=null,bds=1e9,sref=null,bdr=1e9;
+    for(var i=0;i<sw.length;i++){var d=Math.abs(sw[i].Vin-vin);if(d<bds){bds=d;bsw=sw[i];}
+      var dr=Math.abs(sw[i].Vin-vref);if(dr<bdr){bdr=dr;sref=sw[i];}}
+    // nearest-Vin waveform (instantaneous peaks for the avg|inst readouts)
+    var W=D.waveforms_by_vin||{},ks=Object.keys(W).map(Number),bk=null,bd=1e9;
+    for(var j=0;j<ks.length;j++){var dd=Math.abs(ks[j]-vin);if(dd<bd){bd=dd;bk=ks[j];}}
+    var w=bk!=null?W[String(bk)]:null;
+    function sT(id,t){var e=document.getElementById(id);if(e)e.textContent=t;}
+    function mxa(a){return a&&a.length?Math.max.apply(null,a):0;}
+    if(_s7d){   // interpolated/scaled step7 → readouts animate with Vin/Load, equal step7 at design
+      // "inst" = the value at the CURRENT half-cycle phase (changes as it plays / phase drags).
+      var _pi=Math.max(0,Math.min(_s7d.W.length-1,Math.round(phase*(_s7d.W.length-1)))),_cur=_s7d.W[_pi];
+      sT('kPc',_s7d.Pcore_avg.toFixed(2)+' | '+_cur.Pcore.toFixed(2)+' W');
+      sT('kPu',_s7d.Pcu_avg.toFixed(2)+' | '+_cur.Pcu.toFixed(2)+' W');
+      sT('kPt',_s7d.Ptot_avg.toFixed(2)+' W');
+      sT('kH',_s7d.Hcrest.toFixed(1)+' Oe');
+      sT('kBp',_s7d.Bmax.toFixed(3)+' T');
+    } else if(bsw){
+      sT('kPc',(+bsw.Pcore_anc).toFixed(2)+(w?' | '+mxa(w.Pcore).toFixed(2):'')+' W');
+      sT('kPu',(+bsw.Pcu_anc).toFixed(2)+(w?' | '+mxa(w.Pcu).toFixed(2):'')+' W');
+      sT('kPt',(+bsw.Ptot_anc).toFixed(2)+' W');
+      var hRef=(sref&&+sref.H_Oe>0)?+sref.H_Oe:(+bsw.H_Oe||1);
+      if(S.H_Oe_design!=null)sT('kH',(+S.H_Oe_design*(+bsw.H_Oe/hRef)).toFixed(1)+' Oe');
+      var bRef=(sref&&+sref.Bac>0)?+sref.Bac:(+S.Bac_pk_T||1);
+      if(S.Bmax_FL_T!=null)sT('kBp',(+S.Bmax_FL_T*(+bsw.Bac/bRef)).toFixed(3)+' T');
+    }
+    if(S.DCR_100C_mOhm!=null){var rdc=+S.DCR_100C_mOhm,rac=rdc*(+S.Rac_Rdc||1);sT('kR',rdc.toFixed(1)+' | '+rac.toFixed(1)+' mΩ');}
+    if(S.Ku!=null)sT('kKu',(+S.Ku*100).toFixed(0)+' %');
+    if(S.T_hotspot_C!=null)sT('kTh',(+S.T_hotspot_C).toFixed(0)+' °C');
+    if(S.dT_rise_C!=null&&S.dT_hotspot_C!=null)sT('kTnodes',(Tamb+(+S.dT_rise_C)).toFixed(0)+' | '+(Tamb+(+S.dT_hotspot_C)).toFixed(0)+' °C');
+  })();
+  $('vinV').textContent=vin+' Vac';$('phV').textContent=f.t_ms.toFixed(2)+' ms';$('loadV').textContent=(lf*100).toFixed(0)+' % · '+(lf*cfg.Prated).toFixed(0)+' W';
+  $('modeBadge').textContent=(geo==='cross'?'Cross-section':'Ring')+' · '+({flux:'Flux B',copper:'Cu loss',core:'Core loss',thermal:'T'}[mode]);
+  $('caption').textContent=(wf.dcmFrac>0.5?'⚠ DCM-dominant at this load (CCM model invalid). ':'')+(inSpec?'':'Beyond spec envelope (hypothetical). ');
+  const wc=getWC(warmMin),TIER={analytic:'T1',computed:'T1',input:'T0',fea:'T2',measured:'T3'};
+  let acc=ev.evaluateAcceptance(wc),accSrc=' · worst-case scan',accReasons=[];
+  // Option B: use step7's AUTHORITATIVE design verdict (passed + fail_reasons) when posted.
+  var _D7a=(typeof window!=='undefined')&&window.__STEP7_DATA__;
+  if(_D7a&&_D7a.acceptance){var a7=_D7a.acceptance;acc={verdict:a7.verdict,nChecked:(a7.rows||[]).length,rows:(a7.rows||[]).map(function(r){return {name:r.name,have:true,val:r.val,ok:r.ok,limTxt:r.limTxt};})};accSrc='';accReasons=a7.reasons||[];}
+  const accHtml='<div style="margin-bottom:4px"><b style="color:'+(acc.verdict==='APPROVE'?'#22c55e':acc.verdict==='REJECT'?'#ef4444':'#9ca3af')+'">'+acc.verdict+'</b>'+(acc.nChecked?'':' (no upstream limits set)')+accSrc+'</div>'+acc.rows.map(r=>{const c=(r.ok==null)?'#9ca3af':(r.ok?'#22c55e':'#ef4444');const mk=(r.ok==null)?'—':(r.ok?'✓':'✗');return '<div><span style="color:'+c+'">'+mk+'</span> '+r.name+': '+r.val+' <span style="color:#9ca3af">('+r.limTxt+')</span></div>';}).join('')+(accReasons.length?'<div style="margin-top:4px;color:#fca5a5">'+accReasons.map(function(x){return '• '+x;}).join('<br>')+'</div>':'');$('accPanel').innerHTML=accHtml;}
+ function mount(){
+  $('vin').min=cfg.vinMin;$('vin').max=cfg.vinMax;$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);
+  const v=ev.validation, srcCls=ev.pkg.__preview?'warn':'fea', srcTxt=ev.pkg.__preview?'SOURCE: preview example (no upstream package)':'SOURCE: injected field-package';
+  const wire=cu.wire, wireTxt=`${wire.type} · ${wire.strands}×${wire.strandDia_mm}mm${(wire.parallel>1)?'×'+wire.parallel+'p':''}`;
+  _buildTiles();   // design-value + source tiles, rendered UNDER the view (#provRow)
+  $('planeNote').innerHTML='Green = within spec · red = beyond (hypothetical) · gray = 133–179 V gap.';
+  $('noteBox').innerHTML=(v.ok?'':'<b style="color:#fecaca">Validation: '+v.errors.join('; ')+'</b>');
+  $('vin').addEventListener('input',render);$('load').addEventListener('input',render);$('phase').addEventListener('input',()=>{phase=+$('phase').value/1000;render()});$('warmMin').addEventListener('input',render);
+  $('presetLo').addEventListener('click',()=>{$('vin').value=Math.round(Math.max(110,cfg.vinMin));$('load').value=Math.round(Math.min(cfg.specLowLineMaxPct,100));render()});
+  $('presetHi').addEventListener('click',()=>{$('vin').value=Math.round(Math.min(230,cfg.vinMax));$('load').value=Math.round(Math.min(cfg.specHighLineMaxPct,100));render()});
+  (doc.querySelectorAll('.fbtn')||[]).forEach(b=>b.addEventListener('click',()=>{doc.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.f;render()}));
+  (doc.querySelectorAll('.gbtn')||[]).forEach(b=>b.addEventListener('click',()=>{doc.querySelectorAll('.gbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');geo=b.dataset.g;render()}));
+  $('play').addEventListener('click',()=>{playing=!playing;$('play').textContent=playing?'❚❚ Pause':'▶ Play half cycle';$('play').classList.toggle('active',playing);if(playing){last=performance.now();raf=requestAnimationFrame(loop)}else cancelAnimationFrame(raf)});
+  $('reset').addEventListener('click',()=>{$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);phase=0.5;$('phase').value=500;mode='flux';geo='cross';doc.querySelectorAll('.fbtn').forEach((x,i)=>x.classList.toggle('active',i===0));doc.querySelectorAll('.gbtn').forEach((x,i)=>x.classList.toggle('active',i===0));render()});
+  const fc=$('fieldC');if(fc&&fc.addEventListener){fc.addEventListener('pointerdown',e=>{if(geo!=='threeD')return;drag3=true;lx=e.clientX;ly=e.clientY;});window.addEventListener&&window.addEventListener('pointerup',()=>{drag3=false;});fc.addEventListener('pointermove',e=>{if(!drag3||geo!=='threeD')return;yaw+=(e.clientX-lx)*0.01;pitch=clamp(pitch+(e.clientY-ly)*0.01,-1.4,1.4);lx=e.clientX;ly=e.clientY;render();});}
+  function loop(now){const dt=(now-last)/1000;last=now;phase=(phase+dt/1.6)%1;$('phase').value=Math.round(phase*1000);render();if(playing)raf=requestAnimationFrame(loop)}
+  // Phase C (Option B): receive step7's contract from the parent and re-render with its values.
+  window.addEventListener('message',function(mev){if(mev&&mev.data&&mev.data.__step7_contract){window.__STEP7_DATA__=mev.data.__step7_contract;try{_buildTiles();render();}catch(e){}}});
+  render();
+  // hover crosshair + value tooltip on the time/field graphs
+  _hover('lossC',function(){drawLoss(_last.op,_last.wf,_last.wfRef);},function(){return _last.wf.half;},'t',function(p){return 't '+p.t.toFixed(2)+' ms · Pcore '+p.Pcore.toFixed(2)+' W · Pcu '+p.Pcu.toFixed(2)+' W';});
+  _hover('ltC',function(){drawL(_last.op,_last.wf,_last.wfRef);},function(){return _last.wf.half;},'t',function(p){return 't '+p.t.toFixed(2)+' ms · L '+((p.L_uH)||0).toFixed(1)+' µH';});
+ }
+ return {mount,render:()=>{}};
+}
+
+/* ---------------- 8. boot / resolve injected input ---------------- */
+function resolveInput(){
+ if(global.__MAG_FIELD_PACKAGE__) return global.__MAG_FIELD_PACKAGE__;            // full package (preferred)
+ if(global.__MAG_INPUT__) return {schemaVersion:'1.0',meta:{},model:global.__MAG_INPUT__,fields:{}}; // scalar model only
+ return EXAMPLE_PACKAGE;                                                          // preview fallback
+}
+function boot(doc){doc=doc||(typeof document!=='undefined'?document:null);if(!doc)return null;const ev=Evaluator(resolveInput());const view=Viewer(ev,doc);view.mount();return {ev,view}}
+
+global.SimAgentField={version:'1.0',SCHEMA,EXAMPLE_PACKAGE,validatePackage,AnalyticModel,FieldPackage,Evaluator,evaluateHeadless,Viewer,boot};
+if(typeof document!=='undefined'&&document&&document.getElementById&&document.getElementById('fieldC')) boot(document);
+})(typeof window!=='undefined'?window:globalThis);
+</script>
+</body>
+</html>

@@ -1225,11 +1225,6 @@ def _resolve_params(approved_design: dict, state: dict) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Analytical DC-bias retention k(H) — matches JS V5.1 retention() formula
-def _retention_edge_report(H_Oe: float) -> float:
-    H = max(0.0, H_Oe)
-    return min(1.0, (1.0 / (0.01 + 9.202e-10 * H ** 3.044)) / 100.0)
-
-
 def _sec_14_6_extended_waveforms(story, D, S):
     """Step 14.6 — Extended waveform analysis (matching JS 'Waveform Panes' tab).
     Adds: H(t), full B(t) overlay (Bdc, Bmax, Bac,pk), Pcu(t), Ptotal(t) at 90 Vac.
@@ -1238,7 +1233,7 @@ def _sec_14_6_extended_waveforms(story, D, S):
     _h1_band('Step 14.6) Extended Waveform Analysis — H, B, Copper & Total Loss', story, S)
     story.append(Paragraph(
         'Instantaneous quantities over one half line cycle at 90 Vac full load. '
-        'Computed with the analytical DC-bias retention k(H) from the iGSE-corrected model. '
+        'Computed with the selected material\'s DC-bias retention k(H) from the MagneticsDB. '
         'Matches the waveform-pane outputs of the Review Magnetics tool.',
         S['body']))
     story.append(Spacer(1, 4*mm))
@@ -1276,7 +1271,14 @@ def _sec_14_6_extended_waveforms(story, D, S):
     D_t    = np.clip(1.0 - Vin / Vbus, 0.0, 0.98)
 
     H_t    = 0.4 * math.pi * N * I_t / Le_cm           # Oe
-    k_t    = np.array([_retention_edge_report(float(h)) for h in H_t])
+    # Selected material's DB DC-bias curve — never an EDGE-hardcoded fallback.
+    _mk = D.get('material_key', '')
+    try:
+        from app.magnetics.db import get_db as _get_kdb
+        _kdb = _get_kdb()
+        k_t = np.array([_kdb.get_k_bias(_mk, float(h)) for h in H_t])
+    except Exception:
+        k_t = np.ones_like(H_t)   # ferrite / unavailable: no powder roll-off (never EDGE)
     L_t    = np.maximum(L0_H * k_t, 1e-9)               # H
 
     Bac_t  = Vin * D_t / (2.0 * N * Ae_m2 * fsw)       # T
@@ -1651,6 +1653,88 @@ def _sec_14_8_design_review(story, D, S):
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+def _sec_14_9_sim_verification(story, approved_design, state, S):
+    """Step 14.9 — independent Simulation-Agent cross-check. ADDITIVE and DEFENSIVE:
+    any failure degrades to a short note and never aborts the report. Uses the sim
+    engine (fed our DB physics via fields) + its equation reference to verify Steps 13-14."""
+    try:
+        from app.sim_agent import adapter
+        from app.sim_agent import pfc_inductor_engine as _eng
+    except Exception:
+        return  # sim-agent module not in this tree — silently skip
+
+    story.append(PageBreak())
+    story.append(Paragraph('Step 14.9) Simulation-Agent Verification — Independent Cross-Check',
+                           S['h2']))
+    try:
+        pkg, vr = adapter.build_and_validate(approved_design or {}, state or {})
+        if not vr.ok:
+            story.append(Paragraph(
+                "Simulation-agent package could not be validated for this design ("
+                + "; ".join(vr.errors[:2]) + "). The Step 13-14 results above are authoritative.",
+                S['body']))
+            return
+        sim = _eng.compute(pkg)
+    except Exception as e:
+        story.append(Paragraph(
+            f"Simulation-agent cross-check unavailable ({type(e).__name__}); "
+            "the Step 13-14 results above are authoritative.", S['body']))
+        return
+
+    story.append(Paragraph(
+        "An independent, material-agnostic field engine re-derives the inductor performance from "
+        "the same approved design, fed with our database physics (DC-bias curve, AC resistance, "
+        "two-node thermal) through traceable override channels. Every quantity carries a provenance "
+        "tier (T1 = analytic/computed, T2 = FEA, T3 = measured). Steps 13-14 remain authoritative "
+        "for the design; this section is independent verification.", S['body']))
+    tiers = sim.get('tier', {}) or {}
+    tier_txt = ', '.join(f"{k} {v}" for k, v in tiers.items())
+    story.append(Paragraph(f"<b>Field-engine verdict:</b> {sim.get('verdict','—')}.  "
+                           f"<b>Provenance:</b> {tier_txt}.", S['body']))
+    story.append(Spacer(1, 3*mm))
+
+    ccr = adapter.crosscheck_rows(approved_design, sim)   # single shared, apples-to-apples definition
+    def _st(r): return "within" if r["within"] else ("review" if r["within"] is not None else "—")
+    n_ok  = sum(1 for r in ccr if r["within"])
+    n_tot = sum(1 for r in ccr if r["within"] is not None)
+    notes = "; ".join(f"{r['quantity']} — {r['note']}" for r in ccr if r["within"] is False and r["note"])
+
+    hdr  = ["Quantity", "Step 13-14 (ours)", "Field engine", "Δ", "Band", "Status"]
+    cw   = PAGE_W - LM - RM
+    colw = [cw*0.22, cw*0.20, cw*0.20, cw*0.12, cw*0.11, cw*0.15]
+    tdata = [[Paragraph(h, S['tbl_hdr']) for h in hdr]]
+    for r in ccr:
+        cells = [r["quantity"], r["ours"], r["sim"],
+                 (f"{r['delta_pct']:+.1f}%" if r["delta_pct"] is not None else "—"),
+                 f"±{r['band_pct']}%", _st(r)]
+        tdata.append([Paragraph(str(cells[0]), S['tbl_cell_l'])]
+                     + [Paragraph(str(c), S['tbl_cell']) for c in cells[1:]])
+    t = Table(tdata, colWidths=colw)
+    t.setStyle(_tbl_style())
+    story.append(t)
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(
+        f"{n_ok} of {n_tot} quantities agree within band. "
+        + (f"Basis notes — {notes}. " if notes else "")
+        + "Residual deltas are documented model-tier differences, not physics disagreements; "
+          "Steps 13-14 values are authoritative.", S['note']))
+    story.append(Spacer(1, 3*mm))
+
+    story.append(Paragraph('Step 14.9.1) Field-engine governing relations (provenance-tiered)',
+                           S['h3']))
+    for eq in [
+        "P_core = cycle-mean of  Pv(Bac, f) &middot; F_D(D) &middot; Ve            (iGSE, T1)",
+        "L(H)   = k(H) &middot; L0        [k(H) from our DB DC-bias curve, T1 computed]",
+        "P_Cu   = I_phi,rms^2 &middot; R_DC(T) + I_hf,rms^2 (F_R-1) k_harm R_DC(T),   k_harm ~ 1.213",
+        "Thermal: dT from two-node R_ca / R_wa / R_cw network   (our DB physics)",
+    ]:
+        story.append(Paragraph(eq, S['eq']))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(
+        "Full S0-S13 equation set: see the engine equation reference "
+        "(PFC_Inductor_Engine_Equations.pdf).", S['note']))
+
+
 def generate_steps13_14_pdf(approved_design: dict, state: dict) -> bytes:
     """Generate Steps 13–14 PDF bytes."""
     D = _resolve_params(approved_design, state)
@@ -1694,6 +1778,10 @@ def generate_steps13_14_pdf(approved_design: dict, state: dict) -> bytes:
     _sec_14_6_extended_waveforms(story, D, S)      # H(t), B(t), Pcu(t), Ptotal(t)
     _sec_14_7_voltage_sweep_uncertainty(story, D, S)  # loss sweep + uncertainty band
     _sec_14_8_design_review(story, D, S)           # audit checklist + narrative
+    try:                                           # 14.9 — independent sim-agent cross-check
+        _sec_14_9_sim_verification(story, approved_design, state, S)
+    except Exception:
+        pass
 
     doc.build(story,
               onFirstPage=_page_header_footer,

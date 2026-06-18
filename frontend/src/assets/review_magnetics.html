@@ -31,6 +31,9 @@
   canvas{width:100%;height:auto;background:radial-gradient(circle at 20% 20%, #1b2941 0%, #0a1222 55%, #050814 100%);border:1px solid rgba(148,163,184,.12);border-radius:14px}
   .plot-sm{height:220px}.plot-lg{height:300px}.plot-xl{height:340px}
   .table-wrap{max-height:360px;overflow:auto;border:1px solid rgba(148,163,184,.1);border-radius:12px}
+  /* Design Review Summary tab: fit the audit table + summary to content (no inner scroll) */
+  #review .table-wrap{max-height:none;overflow:visible}
+  #summaryOut{min-height:180px;height:auto;resize:none;overflow:hidden;text-align:justify;line-height:1.55;cursor:default}
   table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(148,163,184,.1)} th{background:rgba(255,255,255,.03);color:#fff;position:sticky;top:0}
   .eq{background:#fff7cc;color:#111827;border-left:4px solid #d97706;padding:10px 12px;border-radius:10px;font-family:Consolas,Monaco,monospace;font-size:12px;white-space:pre-wrap}
   .legend{display:flex;gap:8px;flex-wrap:wrap}.legend label{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);padding:6px 10px;border-radius:999px;margin:0;color:#cbd5e1}.legend input{width:auto}
@@ -52,7 +55,7 @@
     <div class="field"><label><span>Exploded stack gap</span><strong id="explodeVal">0 mm</strong></label><input id="explode" type="range" min="0" max="50" step="1" value="0"></div>
 
     <h2>Operating point</h2>
-    <div class="field"><label><span>Input voltage</span><strong id="vinVal">180 Vac</strong></label><input id="vin" type="range" min="90" max="264" step="1" value="180"></div>
+    <div class="field"><label><span>Input voltage</span><strong id="vinVal">90 Vac</strong></label><input id="vin" type="range" min="90" max="264" step="1" value="90"></div>
     <div class="grid2">
       <div class="field"><label><span>Preset</span></label><select id="preset"></select></div>
       <div class="field"><label><span>Loss anchor</span></label><select id="lossAnchor"><option value="67.4">Typical a = 67.4</option><option value="86.7" selected>Max a = 86.7</option></select></div>
@@ -95,6 +98,7 @@
       <button class="tab-btn active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="waveforms">Waveform Panes</button>
       <button class="tab-btn" data-tab="sweep">Voltage Sweep</button>
+      <button class="tab-btn" id="navSimAgent" style="border-color:#60a5fa;color:#bfdbfe">🔬 Simulation Agent</button>
       <button class="tab-btn" data-tab="review">Design Review Summary</button>
     </div>
 
@@ -102,12 +106,14 @@
       <div class="split">
         <div class="stack">
           <canvas id="model" width="980" height="560"></canvas>
+          <div id="kpiOpTag" style="font-size:11px;color:#94a3b8;margin:2px 0 5px 0;font-weight:600">Operating point: <span style="color:#38bdf8">90 Vac</span> &middot; 100 &deg;C</div>
           <div class="cards">
             <div class="card"><div class="k">L0 @ 0 A</div><div class="v" id="kpiL0">249.9 µH</div></div>
             <div class="card"><div class="k">Lfull @ crest</div><div class="v" id="kpiLfull">243.0 µH</div></div>
             <div class="card"><div class="k">Peak H @ crest</div><div class="v" id="kpiH">63.4 Oe</div></div>
             <div class="card"><div class="k">Retention k(H)</div><div class="v" id="kpiK">0.973</div></div>
             <div class="card"><div class="k">Bac,pk @ crest</div><div class="v" id="kpiBpk">0.064 T</div></div>
+            <div class="card"><div class="k">Bmax,mean @ crest</div><div class="v" id="kpiBmax">0.064 T</div></div>
             <div class="card"><div class="k">DCR @ T</div><div class="v" id="kpiDCR">25.3 mΩ</div></div>
             <div class="card"><div class="k">Pcore avg</div><div class="v" id="kpiPcore">3.04 W</div></div>
             <div class="card"><div class="k">Ptotal avg</div><div class="v" id="kpiPtot">5.88 W</div></div>
@@ -117,6 +123,7 @@
           <canvas id="windowBuild" class="plot-sm" width="640" height="260"></canvas>
           <div class="toolbar"><button id="exportMiniPng">Export mini plot PNG</button></div>
           <canvas id="miniPlot" class="plot-sm" width="640" height="240"></canvas>
+          <canvas id="miniPlot2" class="plot-sm" width="640" height="240"></canvas>
           <div id="overviewStatus" class="status"></div>
           <div class="table-wrap"><table><thead><tr><th>Quantity</th><th>Value</th><th>Comment</th></tr></thead><tbody id="overviewTbl"></tbody></table></div>
         </div>
@@ -144,6 +151,7 @@
         <div class="split">
           <div class="stack">
             <canvas id="waveH" class="plot-sm" width="780" height="230"></canvas>
+            <canvas id="waveIavg" class="plot-sm" width="780" height="230"></canvas>
             <canvas id="waveB" class="plot-sm" width="780" height="230"></canvas>
           </div>
           <div class="stack">
@@ -181,7 +189,7 @@
         </div>
         <div class="stack">
           <h3>Generate design review summary</h3>
-          <textarea id="summaryOut"></textarea>
+          <textarea id="summaryOut" readonly></textarea>
           <div class="toolbar"><button id="refreshSummary">Refresh summary</button><button id="copySummary2">Copy summary</button></div>
         </div>
       </div>
@@ -230,8 +238,8 @@
     const Pcore=pCoreAcc/M, Irms=Math.sqrt(i2/M), IhfRms=Math.sqrt(r2/M);
     const Pac=IhfRms*IhfRms*Rac;                       // full HF-ripple copper loss (Ihf² · Rac)
     const Pcu=Irms*Irms*Rdc+Pac, Ptotal=Pcore+Pcu, PuncLo=Pcu+1.05*Pcore, PuncHi=Pcu+1.20*Pcore;
-    const fillBare=(3.14*i.N)/cfg.Wa_mm2;
-    const fillIns=(i.N*2*(Math.PI/4)*i.bundleOD*i.bundleOD)/cfg.Wa_mm2;   // tracks the bundle-OD input (2 bundles/turn)
+    const fillBare=(i.N*(cfg.CuArea_mm2||3.14))/cfg.Wa_mm2;
+    const fillIns=(i.N*(cfg.nParallel||1)*(Math.PI/4)*i.bundleOD*i.bundleOD)/cfg.Wa_mm2;
     const J=Irms/Math.max(cfg.CuArea_mm2||3.14, 0.01);
     // Wound-envelope surface area scales with stack count (matches report 101.5 cm² at 2-stack)
     const oh=i.stacks*cfg.coreHeight_mm+i.htBuild, od=i.woundOD, hole=i.holeID;
@@ -302,32 +310,49 @@
     placed.forEach(p=>{ ctx.beginPath(); ctx.fillStyle=['rgba(56,189,248,.90)','rgba(245,158,11,.90)','rgba(34,197,94,.88)','rgba(167,139,250,.88)'][p.layer%4]; ctx.arc(p.x,p.y,bundleRpx,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.stroke(); });
     if(fits&&holeDia>0){ ctx.strokeStyle='rgba(100,116,139,.45)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.arc(cx,cy,(holeDia/2)*pxPerMm,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]); }
     const x0=w*0.62; ctx.fillStyle='#e5e7eb'; ctx.font='14px Segoe UI'; ctx.fillText('Build metrics (screening)', x0, 34);
-    const lines=[`Bundle passes = 2 × N = ${passes}`,`Layers used = ${lays.length}${fits?'':'  — DOES NOT FIT'}`,`Layer capacities = ${lays.map(L=>L.cap).join(' / ')||'—'}`,`Remaining feed hole ≈ ${fmt(holeDia,1)} mm${fits&&holeDia<3?'  (shuttle-limited!)':''}`,`Insulated fill ≈ ${fmt(o.fillIns*100,1)} %  ·  bare Cu ${fmt(o.fillBare*100,1)} %`,`Bundle OD ${fmt(i.bundleOD,2)} mm  ·  Bore ID ${fmt(i.boreID,1)} mm`];
+    const lines=[`Turns N = ${i.N}  ·  bundle passes = ${cfg.nParallel||1} × N = ${passes}`,`Layers used = ${lays.length}${fits?'':'  — DOES NOT FIT'}`,`Layer capacities = ${lays.map(L=>L.cap).join(' / ')||'—'}`,`Remaining feed hole ≈ ${fmt(holeDia,1)} mm${fits&&holeDia<3?'  (shuttle-limited!)':''}`,`Insulated fill ≈ ${fmt(o.fillIns*100,1)} %  ·  bare Cu ${fmt(o.fillBare*100,1)} %`,`Bundle OD ${fmt(i.bundleOD,2)} mm  ·  Bore ID ${fmt(i.boreID,1)} mm`];
     ctx.fillStyle = fits ? '#cbd5e1' : '#fca5a5'; ctx.font='13px Segoe UI'; lines.forEach((t,idx)=>ctx.fillText(t,x0,60+idx*22));
     ctx.font='12px Segoe UI'; ctx.fillStyle='#9ca3af'; ctx.fillText('Layer colors', x0, 210); ['#38bdf8','#f59e0b','#22c55e','#a78bfa'].forEach((col,j)=>{ ctx.fillStyle=col; ctx.fillRect(x0+j*52,218,14,14); ctx.fillStyle='#cbd5e1'; ctx.fillText(`L${j+1}`, x0+18+j*52,229); });
   }
 
   function drawAxes(ctx,w,h,m){ ctx.strokeStyle='rgba(148,163,184,.18)'; ctx.lineWidth=1; for(let i=0;i<5;i++){ const y=m.t+i*(h-m.t-m.b)/4; ctx.beginPath(); ctx.moveTo(m.l,y); ctx.lineTo(w-m.r,y); ctx.stroke(); } ctx.beginPath(); ctx.moveTo(m.l,m.t); ctx.lineTo(m.l,h-m.b); ctx.lineTo(w-m.r,h-m.b); ctx.stroke(); }
-  function drawPlot(id,series,opt={}){ const c=$(id), ctx=c.getContext('2d'), w=c.width,h=c.height,m={l:56,r:12,t:28,b:46}; ctx.clearRect(0,0,w,h); ctx.fillStyle='#0b1220'; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,m); const xs=series.flatMap(s=>s.data.map(p=>p.x)); const ys=series.flatMap(s=>s.band ? s.data.flatMap(p=>[p.yLow,p.yHigh]) : s.data.map(p=>p.y)); let xmin=opt.xmin ?? Math.min(...xs), xmax=opt.xmax ?? Math.max(...xs), ymin=opt.ymin ?? Math.min(...ys), ymax=opt.ymax ?? Math.max(...ys); if(ymin===ymax){ymin-=1;ymax+=1;} const xMap=x=>m.l+(x-xmin)/(xmax-xmin)*(w-m.l-m.r), yMap=y=>h-m.b-(y-ymin)/(ymax-ymin)*(h-m.t-m.b);
+  function drawPlot(id,series,opt={}){ const c=$(id), ctx=c.getContext('2d'), w=c.width,h=c.height;
+    const hasR=series.some(s=>s.axis==='right'); const m={l:56,r:hasR?58:12,t:28,b:46};
+    ctx.clearRect(0,0,w,h); ctx.fillStyle='#0b1220'; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,m);
+    const xs=series.flatMap(s=>s.data.map(p=>p.x));
+    const yvals=s=>s.band ? s.data.flatMap(p=>[p.yLow,p.yHigh]) : s.data.map(p=>p.y);
+    const Lser=series.filter(s=>s.axis!=='right'), Rser=series.filter(s=>s.axis==='right');
+    const lys=Lser.flatMap(yvals), rys=Rser.flatMap(yvals);
+    let xmin=opt.xmin ?? Math.min(...xs), xmax=opt.xmax ?? Math.max(...xs);
+    let ymin=opt.ymin ?? Math.min(...lys), ymax=opt.ymax ?? Math.max(...lys); if(ymin===ymax){ymin-=1;ymax+=1;}
+    let y2min=opt.rmin ?? (rys.length?Math.min(...rys):0), y2max=opt.rmax ?? (rys.length?Math.max(...rys):1); if(y2min===y2max){y2min-=1;y2max+=1;}
+    const xMap=x=>m.l+(x-xmin)/(xmax-xmin)*(w-m.l-m.r);
+    const yMap=y=>h-m.b-(y-ymin)/(ymax-ymin)*(h-m.t-m.b);
+    const yMap2=y=>h-m.b-(y-y2min)/(y2max-y2min)*(h-m.t-m.b);
+    const mapOf=s=>(s.axis==='right')?yMap2:yMap;
     const fmtTick=v=>{if(v===0)return'0';const a=Math.abs(v);if(a>=1000)return(v/1000).toPrecision(3).replace(/\.?0+$/,'')+'k';if(a>=1)return parseFloat(v.toPrecision(3)).toString();if(a>=0.01)return parseFloat(v.toPrecision(2)).toString();return parseFloat(v.toPrecision(1)).toExponential(0);};
     ctx.save();ctx.fillStyle='rgba(148,163,184,.85)';ctx.font='10px Segoe UI';
     ctx.textAlign='right';ctx.textBaseline='middle';
     for(let i=0;i<=4;i++){const yv=ymax-i*(ymax-ymin)/4,yp=m.t+i*(h-m.t-m.b)/4;ctx.fillText(fmtTick(yv),m.l-5,yp);}
+    if(hasR){ ctx.textAlign='left'; for(let i=0;i<=4;i++){const yv=y2max-i*(y2max-y2min)/4,yp=m.t+i*(h-m.t-m.b)/4;ctx.fillText(fmtTick(yv),w-m.r+6,yp);} }
     ctx.textAlign='center';ctx.textBaseline='top';
     for(let i=0;i<=4;i++){const xv=xmin+i*(xmax-xmin)/4,xp=m.l+i*(w-m.l-m.r)/4;ctx.fillText(fmtTick(xv),xp,h-m.b+4);}
     ctx.restore();
     // title using exact report-style wording
     ctx.fillStyle='#e5e7eb'; ctx.font='15px Segoe UI'; if(opt.title) ctx.fillText(opt.title, 16, 20);
-    series.filter(s=>s.band).forEach(s=>{ ctx.fillStyle=s.color; ctx.beginPath(); s.data.forEach((p,i)=>{ const x=xMap(p.x), y=yMap(p.yLow); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);}); for(let i=s.data.length-1;i>=0;i--){ const p=s.data[i]; ctx.lineTo(xMap(p.x), yMap(p.yHigh)); } ctx.closePath(); ctx.fill(); });
-    series.filter(s=>!s.band).forEach(s=>{ ctx.save(); ctx.strokeStyle=s.color; ctx.lineWidth=s.width||2; if(s.dash) ctx.setLineDash(s.dash); ctx.beginPath(); s.data.forEach((p,i)=>{ const x=xMap(p.x), y=yMap(p.y); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke(); ctx.restore(); });
-    ctx.fillStyle='#cbd5e1'; ctx.font='12px Segoe UI'; if(opt.xlabel) ctx.fillText(opt.xlabel, w/2-88, h-8); if(opt.ylabel){ ctx.save(); ctx.translate(14,h/2+24); ctx.rotate(-Math.PI/2); ctx.fillText(opt.ylabel,0,0); ctx.restore(); }
-    let lx=w-220, ly=18; series.filter(s=>s.legend!==false).slice(0,5).forEach(s=>{ if(s.band){ ctx.fillStyle=s.color; ctx.fillRect(lx,ly-7,16,8); } else { ctx.save(); ctx.strokeStyle=s.color; ctx.lineWidth=2; if(s.dash) ctx.setLineDash(s.dash); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+16,ly); ctx.stroke(); ctx.restore(); } ctx.fillStyle='#cbd5e1'; ctx.fillText(s.name, lx+22, ly+4); ly+=18; }); }
+    series.filter(s=>s.band).forEach(s=>{ const Y=mapOf(s); ctx.fillStyle=s.color; ctx.beginPath(); s.data.forEach((p,i)=>{ const x=xMap(p.x), y=Y(p.yLow); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);}); for(let i=s.data.length-1;i>=0;i--){ const p=s.data[i]; ctx.lineTo(xMap(p.x), Y(p.yHigh)); } ctx.closePath(); ctx.fill(); });
+    series.filter(s=>!s.band).forEach(s=>{ const Y=mapOf(s); ctx.save(); ctx.strokeStyle=s.color; ctx.lineWidth=s.width||2; if(s.dash) ctx.setLineDash(s.dash); ctx.beginPath(); s.data.forEach((p,i)=>{ const x=xMap(p.x), y=Y(p.y); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke(); ctx.restore(); });
+    ctx.fillStyle='#cbd5e1'; ctx.font='12px Segoe UI'; if(opt.xlabel) ctx.fillText(opt.xlabel, w/2-88, h-8);
+    if(opt.ylabel){ ctx.save(); ctx.translate(14,h/2+24); ctx.rotate(-Math.PI/2); ctx.fillText(opt.ylabel,0,0); ctx.restore(); }
+    if(opt.rlabel){ ctx.save(); ctx.fillStyle='#cbd5e1'; ctx.textAlign='center'; ctx.translate(w-4,h/2-24); ctx.rotate(-Math.PI/2); ctx.fillText(opt.rlabel,0,0); ctx.restore(); }
+    let lx=w-220, ly=18; series.filter(s=>s.legend!==false).slice(0,5).forEach(s=>{ if(s.band){ ctx.fillStyle=s.color; ctx.fillRect(lx,ly-7,16,8); } else { ctx.save(); ctx.strokeStyle=s.color; ctx.lineWidth=2; if(s.dash) ctx.setLineDash(s.dash); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+16,ly); ctx.stroke(); ctx.restore(); } ctx.fillStyle='#cbd5e1'; ctx.textAlign='left'; ctx.fillText(s.name, lx+22, ly+4); ly+=18; }); }
 
   function exportCanvasPng(id, filename){ const c=$(id); const a=document.createElement('a'); a.href=c.toDataURL('image/png'); a.download=filename; a.click(); }
   function drawWaveSection(i,o){
     const showH=$('showH').checked, showBdc=$('showBdc').checked, showBmax=$('showBmax').checked, showBac=$('showBac').checked, showPcore=$('showPcore').checked, showPcu=$('showPcu').checked, showPtot=$('showPtot').checked;
-    const waveH=[]; if(showH) waveH.push({name:'H(t)',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.H}))}); waveH.push({name:'Iavg(t) × 4',color:'#a78bfa',data:o.wave.map(p=>({x:p.t_ms,y:p.Iavg*4}))});
-    drawPlot('waveH',waveH,{title:'H (Oe) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Oe  /  A×4',xmin:0,xmax:1000/(2*cfg.lineHz)});
+    const waveH=[]; if(showH) waveH.push({name:'H(t)',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.H}))}); else waveH.push({name:'H(t) hidden',color:'rgba(56,189,248,.18)',data:o.wave.map(p=>({x:p.t_ms,y:0}))});
+    drawPlot('waveH',waveH,{title:'Magnetizing Force H(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'H (Oe)',xmin:0,xmax:1000/(2*cfg.lineHz)});
+    drawPlot('waveIavg',[{name:'Iavg(t)',color:'#a78bfa',data:o.wave.map(p=>({x:p.t_ms,y:p.Iavg}))}],{title:'Avg Current / Phase Iavg(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Current (A)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     const waveB=[]; if(showBdc) waveB.push({name:'Bdc(t)',color:'#22c55e',data:o.wave.map(p=>({x:p.t_ms,y:p.Bdc}))}); if(showBmax) waveB.push({name:'Bmax(t)',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.Bmax}))}); if(showBac) waveB.push({name:'Bac,pk(t)',color:'#f59e0b',data:o.wave.map(p=>({x:p.t_ms,y:p.BacPk}))}); drawPlot('waveB',waveB,{title:'Flux Density B (T) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Flux Density B(T)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     drawPlot('wavePcore', showPcore?[{name:'Pcore(t)',color:'#f59e0b',data:o.wave.map(p=>({x:p.t_ms,y:p.Pcore}))}]:[{name:'Pcore(t) hidden',color:'rgba(245,158,11,.18)',data:o.wave.map(p=>({x:p.t_ms,y:0}))}], {title:'Core Loss (W) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Core Loss (W)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     drawPlot('wavePcu', showPcu?[{name:'Pcu(t)',color:'#a78bfa',data:o.wave.map(p=>({x:p.t_ms,y:p.Pcu}))}]:[{name:'Pcu(t) hidden',color:'rgba(167,139,250,.18)',data:o.wave.map(p=>({x:p.t_ms,y:0}))}], {title:'Copper Loss (W) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Copper Loss (W)',xmin:0,xmax:1000/(2*cfg.lineHz)});
@@ -335,8 +360,42 @@
     $('waveStatus').innerHTML=`Selected point: <strong>${i.vinRms} Vac</strong>, <strong>${fmt(i.Icrest,2)} A crest / phase</strong>, <strong>${i.tempC} °C</strong>. Separate waveform panes now isolate <strong>core loss</strong>, <strong>copper loss</strong>, and <strong>total instantaneous loss</strong>. Use the legend toggles above to show or hide individual traces.`;
     $('waveTbl').innerHTML=[['Peak H(t)',`${fmt(o.Hcrest,1)} Oe`],['Peak Bdc(t)',`${fmt(o.BdcMax,3)} T`],['Peak Bmax(t)',`${fmt(o.Bmax,3)} T`],['Peak Pcore(t)',`${fmt(o.pCorePk,2)} W`],['Peak Pcu(t)',`${fmt(o.pCuPk,2)} W`],['Peak Ptotal(t)',`${fmt(o.pTotPk,2)} W`],['Half-line period',`${fmt(1000/(2*cfg.lineHz),3)} mSec`]].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
   }
-  function renderAll(){ const i=inp(); sync(i); const o=compute(i); const sw=makeSweep(i); state.last={i,o,sw}; draw3D(i,o); drawWindowBuild(i,o);
+  // Phase C: render step7's authoritative waveform for the current Vin (nearest OPS point)
+  // when an upstream contract has been posted in. No-op without it → studio behaves as before.
+  function _step7WaveFor(vin){
+    var Dd=(typeof window!=='undefined')&&window.__STEP7_DATA__;
+    if(!Dd||!Dd.waveforms_by_vin)return null;
+    var W=Dd.waveforms_by_vin,keys=Object.keys(W).map(Number).sort(function(a,b){return a-b;});
+    if(!keys.length)return null;
+    var best=keys[0],bd=1e9;for(var j=0;j<keys.length;j++){var d=Math.abs(keys[j]-vin);if(d<bd){bd=d;best=keys[j];}}
+    var w=W[String(best)];if(!w||!w.t_ms||!w.t_ms.length)return null;
+    var out=[];for(var k=0;k<w.t_ms.length;k++){out.push({t_ms:w.t_ms[k],H:w.H_Oe[k],Bdc:w.Bdc[k],BacPk:w.Bac_pk[k],Bmax:w.Bmax[k],Pcore:w.Pcore[k],Pcu:w.Pcu[k],Ptotal:w.Ptot[k],Iavg:w.Iavg[k],D:w.D[k]});}
+    return out;
+  }
+  function renderAll(){ const i=inp(); sync(i); const o=compute(i); const sw=makeSweep(i);
+    var _s7=_step7WaveFor(i.vinRms);
+    if(_s7&&_s7.length){ o.wave=_s7;
+      o.Bmax=Math.max.apply(null,_s7.map(function(p){return p.Bmax;}));
+      o.BdcMax=Math.max.apply(null,_s7.map(function(p){return p.Bdc;}));
+      o.Hcrest=Math.max.apply(null,_s7.map(function(p){return p.H;}));
+      o.pCorePk=Math.max.apply(null,_s7.map(function(p){return p.Pcore;}));
+      o.pCuPk=Math.max.apply(null,_s7.map(function(p){return p.Pcu;}));
+      o.pTotPk=Math.max.apply(null,_s7.map(function(p){return p.Ptotal;})); }
+    // Phase C: feed step7's anchored per-Vin sweep into the Voltage-Sweep charts (same source as
+    // the readouts/table), interpolated within each line regime. No-op without a posted contract.
+    (function(){var D=(typeof window!=='undefined')&&window.__STEP7_DATA__; if(!D||!D.sweep||!D.sweep.length)return;
+      var S=D.sweep.slice().sort(function(a,b){return a.Vin-b.Vin;});
+      function lerp(vin,key){var a=null,b=null;for(var k=0;k<S.length;k++){if(S[k].Vin<=vin)a=S[k];if(S[k].Vin>=vin&&!b)b=S[k];}
+        if(!a)return b?+b[key]:0; if(!b)return +a[key]; if(a.Vin===b.Vin)return +a[key];
+        var t=(vin-a.Vin)/(b.Vin-a.Vin); return +a[key]+t*(+b[key]-+a[key]);}
+      [sw.lo,sw.hi].forEach(function(reg){reg.forEach(function(s){var v=s.vinRms;
+        s.Pcore=lerp(v,'Pcore_anc'); s.Pcu=lerp(v,'Pcu_anc'); s.Ptotal=lerp(v,'Ptot_anc');
+        s.BacPk_crest=lerp(v,'Bac'); s.Lfull_uH=lerp(v,'Lfull');
+        s.PuncLo=s.Pcu+1.05*s.Pcore; s.PuncHi=s.Pcu+1.20*s.Pcore; });});
+    })();
+    state.last={i,o,sw}; draw3D(i,o); drawWindowBuild(i,o);
     $('kpiL0').textContent=`${fmt(o.L0_uH,1)} µH`; $('kpiLfull').textContent=`${fmt(o.Lfull_uH,1)} µH`; $('kpiH').textContent=`${fmt(o.Hcrest,1)} Oe`; $('kpiK').textContent=fmt(o.k,3); $('kpiBpk').textContent=`${fmt(o.BacPk_crest,3)} T`; $('kpiDCR').textContent=`${fmt(o.Rdc_mOhm,1)} mΩ`; $('kpiPcore').textContent=`${fmt(o.Pcore,2)} W`; $('kpiPtot').textContent=`${fmt(o.Ptotal,2)} W`;
+    {const _ot=$('kpiOpTag');if(_ot)_ot.innerHTML='Operating point: <span style="color:#38bdf8">'+i.vinRms+' Vac</span> &middot; '+i.tempC+' &deg;C';}
     const satMargin=cfg.satT/o.Bmax, okL=o.Lfull_uH>=235, okB=o.Bmax<0.5, okT=o.dT<40;
     const fitBad=o.fillIns>=1.0, fitHard=!fitBad&&o.fillIns>=0.85, fitTight=!fitBad&&!fitHard&&o.fillIns>0.70;
     $('overviewStatus').innerHTML=(inGap(i.vinRms)?`<div><span class="warn">Between defined operating corners</span> — 133–179 Vac lies outside both Table-A regimes (different power corners); crest current is taken as manually set, verify it.</div>`:'')
@@ -347,8 +406,9 @@
       +`<div><span class="${okL?'ok':'warn'}">${okL?'Inductance target met':'Inductance target missed'}</span> — Lfull = ${fmt(o.Lfull_uH,1)} µH versus 235 µH target.</div>`
       +`<div><span class="${okB?'ok':'warn'}">${okB?'Flux level looks comfortable':'Flux level is getting high'}</span> — Bmax ≈ ${fmt(o.Bmax,3)} T (≈${fmt(satMargin,2)}× to ${cfg.satT.toFixed(2)} T).</div>`
       +`<div><span class="${okT?'ok':'warn'}">${okT?'Estimated temperature rise looks manageable':'Estimated temperature rise is getting high'}</span> — ΔT ≈ ${fmt(o.dT,1)} °C (SA ${fmt(o.SA,0)} cm², ${i.stacks}-stack).</div>`;
-    $('overviewTbl').innerHTML=[['Copper length',`${fmt(o.len_m,2)} m`,'Directly affects DCR'],['Duty at crest',fmt(o.Dcrest,3),'D = 1 − Vin,pk / Vout'],['Irms',`${fmt(o.Irms,2)} A`,'Half-line sine assumption'],['HF ripple rms',`${fmt(o.IhfRms,2)} A`,'From ΔIpp/(2√3)'],['HF ripple copper loss',`${fmt(o.Pac*1000,1)} mW`,'Ihf,rms² · Rac (full term)'],['Current density',`${fmt(o.J,2)} A/mm²`,'Based on 3.14 mm² copper'],['Insulated fill',`${fmt(o.fillIns*100,1)} %`,'From bundle OD input, 2 bundles/turn'],['Estimated ΔT',`${fmt(o.dT,1)} °C`,`Surface-area method, SA = ${fmt(o.SA,0)} cm² (editable wound envelope)`],['Total-loss uncertainty range',`${fmt(o.PuncLo,2)}–${fmt(o.PuncHi,2)} W`,'+5–20% core uplift — unanchored band']].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
-    drawPlot('miniPlot',[{name:'Pcore(t)',color:'#f59e0b',data:o.wave.map(p=>({x:p.t_ms,y:p.Pcore}))},{name:'Bmax(t) × 8',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.Bmax*8}))}],{title:'Pcore(Biased Ripple) and Bmax Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Orange: W   Blue: T×8',xmin:0,xmax:1000/(2*cfg.lineHz)});
+    $('overviewTbl').innerHTML=[['Copper length',`${fmt(o.len_m,2)} m`,'Directly affects DCR'],['Duty at crest',fmt(o.Dcrest,3),'D = 1 − Vin,pk / Vout'],['Irms',`${fmt(o.Irms,2)} A`,'Half-line sine assumption'],['HF ripple rms',`${fmt(o.IhfRms,2)} A`,'From ΔIpp/(2√3)'],['HF ripple copper loss',`${fmt(o.Pac*1000,1)} mW`,'Ihf,rms² · Rac (full term)'],['Current density',`${fmt(o.J,2)} A/mm²`,'Irms / Cu_area — overridden by Python below'],['Insulated fill',`${fmt(o.fillIns*100,1)} %`,'N × nParallel bundles/turn — overridden by Python below'],['Estimated ΔT',`${fmt(o.dT,1)} °C`,`Surface-area method, SA = ${fmt(o.SA,0)} cm² (editable wound envelope)`],['Total-loss uncertainty range',`${fmt(o.PuncLo,2)}–${fmt(o.PuncHi,2)} W`,'+5–20% core uplift — unanchored band']].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+    drawPlot('miniPlot',[{name:'Pcore(t)',color:'#f59e0b',data:o.wave.map(p=>({x:p.t_ms,y:p.Pcore}))}],{title:'Core Loss Pcore(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Core Loss (W)',xmin:0,xmax:1000/(2*cfg.lineHz)});
+    drawPlot('miniPlot2',[{name:'Bmax(t)',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.Bmax}))}],{title:'Peak Flux Density Bmax(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Flux Density (T)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     drawWaveSection(i,o);
     // sweep
     const regs=[sw.lo,sw.hi];
@@ -359,9 +419,9 @@
       regs.map((d,j)=>({name:'Analytical total',legend:j>0?false:undefined,color:'#60a5fa',dash:[6,4],data:d.map(s=>({x:s.vinRms,y:s.Ptotal}))}))
     ),{title:'Loss Vs Input Voltage (Per Inductor) — gap 133–179 Vac not defined',xlabel:'Input Voltage (Vac)',ylabel:'Loss per Inductor (W)',xmin:90,xmax:264});
     drawPlot('sweepPlot2',[].concat(
-      regs.map((d,j)=>({name:'Bac,pk crest',legend:j>0?false:undefined,color:'#f59e0b',data:d.map(s=>({x:s.vinRms,y:s.BacPk_crest}))})),
-      regs.map((d,j)=>({name:'Lfull / 4000',legend:j>0?false:undefined,color:'#22c55e',data:d.map(s=>({x:s.vinRms,y:s.Lfull_uH/4000}))}))
-    ),{title:'Flux Density and Inductance Vs Input Voltage',xlabel:'Input Voltage (Vac)',ylabel:'Orange: T    Green: µH/4000',xmin:90,xmax:264});
+      regs.map((d,j)=>({name:'Bac,pk crest (T)',legend:j>0?false:undefined,color:'#f59e0b',data:d.map(s=>({x:s.vinRms,y:s.BacPk_crest}))})),
+      regs.map((d,j)=>({name:'Lfull (µH)',legend:j>0?false:undefined,axis:'right',color:'#22c55e',data:d.map(s=>({x:s.vinRms,y:s.Lfull_uH}))}))
+    ),{title:'Flux Density and Inductance Vs Input Voltage',xlabel:'Input Voltage (Vac)',ylabel:'Flux density Bac,pk (T)',rlabel:'Inductance Lfull (µH)',xmin:90,xmax:264});
     $('sweepTbl').innerHTML=sw.all.map(s=>`<tr><td>${fmt(s.vinRms,0)}</td><td>${fmt(s.Icrest,2)}</td><td>${fmt(s.Lfull_uH,1)}</td><td>${fmt(s.BacPk_crest,3)}</td><td>${fmt(s.Pcore,2)}</td><td>${fmt(s.Pcu,2)}</td><td>${fmt(s.Ptotal,2)}</td><td>${fmt(s.PuncLo,2)}–${fmt(s.PuncHi,2)}</td></tr>`).join('');
     // review summary
     const worst = sw.all.reduce((a,b)=> b.Ptotal>a.Ptotal?b:a, sw.all[0]);
@@ -385,8 +445,10 @@
       'Recommended talking points:',
       ...rec.map((t,idx)=>`  ${idx+1}. ${t}`)
     ].join('\n');
-    $('summaryOut').value=summary; $('reviewStatus').innerHTML='Press "Generate design review summary" any time, or just use the auto-generated summary shown here.'; $('auditTbl').innerHTML=[['N',i.N],['Stacks',i.stacks],['Vin',`${i.vinRms} Vac`],['Icrest',`${fmt(i.Icrest,2)} A`],['Temperature',`${i.tempC} °C`],['Lfull',`${fmt(o.Lfull_uH,1)} µH`],['Bmax',`${fmt(o.Bmax,3)} T`],['Ptotal',`${fmt(o.Ptotal,2)} W`],['Total-loss uncertainty range',`${fmt(o.PuncLo,2)}–${fmt(o.PuncHi,2)} W`],['Insulated fill',`${fmt(o.fillIns*100,1)} %`],['Estimated ΔT',`${fmt(o.dT,1)} °C`]].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+    $('summaryOut').value=summary; $('reviewStatus').innerHTML='Press "Generate design review summary" any time, or just use the auto-generated summary shown here.'; $('auditTbl').innerHTML=[['N',i.N],['Stacks',i.stacks],['Vin',`${i.vinRms} Vac`],['Icrest',`${fmt(i.Icrest,2)} A`],['Temperature',`${i.tempC} °C`],['Lfull',`${fmt(o.Lfull_uH,1)} µH`],['Bmax',`${fmt(o.Bmax,3)} T`],['Ptotal',`${fmt(o.Ptotal,2)} W`],['Total-loss uncertainty range',`${fmt(o.PuncLo,2)}–${fmt(o.PuncHi,2)} W`],['Insulated fill',`${fmt(o.fillIns*100,1)} %`],['Estimated ΔT',`${fmt(o.dT,1)} °C`]].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join(''); fitSummary();
   }
+  // Grow the (read-only) summary box to its content so it shows everything without an inner scrollbar.
+  function fitSummary(){ const t=$('summaryOut'); if(t&&t.tagName==='TEXTAREA'){ t.style.height='auto'; t.style.height=(t.scrollHeight+6)+'px'; } }
 
   // init presets
   Object.keys(currentMap).forEach(v=>{ const opt=document.createElement('option'); opt.value=v; opt.textContent=`${v} Vac preset → Icrest ${currentMap[v].toFixed(2)} A`; if(+v===180) opt.selected=true; $('preset').appendChild(opt); });
@@ -394,7 +456,8 @@
   ['N','stacks','tempC','explode','vin','Icrest','Vout','fsw','lossAnchor','boreID','bundleOD','woundOD','holeID','htBuild'].forEach(id=>$(id).addEventListener('input',renderAll));
   ['showH','showBdc','showBmax','showBac','showPcore','showPcu','showPtot'].forEach(id=>$(id).addEventListener('input',()=>{ if(state.last) drawWaveSection(state.last.i,state.last.o); }));
   $('preset').addEventListener('change',()=>{ const v=+$('preset').value; $('vin').value=v; $('Icrest').value=crestCurrent(v); renderAll(); });
-  $$('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{ $$('.tab-btn').forEach(b=>b.classList.remove('active')); $$('.tab').forEach(t=>t.classList.remove('active')); btn.classList.add('active'); $(btn.dataset.tab).classList.add('active'); }));
+  $$('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{ if(!btn.dataset.tab)return; $$('.tab-btn').forEach(b=>b.classList.remove('active')); $$('.tab').forEach(t=>t.classList.remove('active')); btn.classList.add('active'); $(btn.dataset.tab).classList.add('active'); fitSummary(); }));
+  { const _na=$('navSimAgent'); if(_na)_na.addEventListener('click',function(){ try{ window.parent.postMessage({__navSimAgent:true},'*'); }catch(e){} }); }
   const model=$('model'); model.addEventListener('mousedown',e=>{ state.drag=true; state.lx=e.clientX; state.ly=e.clientY; }); window.addEventListener('mouseup',()=>state.drag=false); window.addEventListener('mousemove',e=>{ if(!state.drag||!state.last) return; state.yaw += (e.clientX-state.lx)/180; state.pitch = clamp(state.pitch + (e.clientY-state.ly)/180, -1.35, 1.35); state.lx=e.clientX; state.ly=e.clientY; draw3D(state.last.i, state.last.o); }); model.addEventListener('wheel',e=>{ e.preventDefault(); state.zoom=clamp(state.zoom + Math.sign(e.deltaY)*0.12,0.4,2.4); if(state.last) draw3D(state.last.i,state.last.o); },{passive:false});
   $('frontBtn').onclick=()=>{ state.yaw=0; state.pitch=0.3; renderAll(); }; $('isoBtn').onclick=()=>{ state.yaw=-0.62; state.pitch=0.55; renderAll(); }; $('topBtn').onclick=()=>{ state.yaw=0; state.pitch=1.2; renderAll(); }; $('resetBtn').onclick=()=>{ state.yaw=-0.62; state.pitch=0.55; state.zoom=1; renderAll(); };
   $('exportModelPng').onclick=()=>exportCanvasPng('model','pfc_inductor_3d.png'); $('exportWindowPng').onclick=()=>exportCanvasPng('windowBuild','pfc_inductor_window_build.png'); $('exportMiniPng').onclick=()=>exportCanvasPng('miniPlot','pfc_inductor_mini_plot.png'); $('exportHpng').onclick=()=>exportCanvasPng('waveH','H_vs_Time_Over_Half_Line_Cycle.png'); $('exportBpng').onclick=()=>exportCanvasPng('waveB','Flux_Density_B_vs_Time_Over_Half_Line_Cycle.png'); $('exportPcorePng').onclick=()=>exportCanvasPng('wavePcore','Core_Loss_vs_Time_Over_Half_Line_Cycle.png'); $('exportPcuPng').onclick=()=>exportCanvasPng('wavePcu','Copper_Loss_vs_Time_Over_Half_Line_Cycle.png'); $('exportPtotalPng').onclick=()=>exportCanvasPng('wavePtotal','Instantaneous_Loss_vs_Time_Over_Half_Line_Cycle.png'); $('exportSweep1Png').onclick=()=>exportCanvasPng('sweepPlot','Loss_vs_Input_Voltage.png'); $('exportSweep2Png').onclick=()=>exportCanvasPng('sweepPlot2','Flux_And_Inductance_vs_Input_Voltage.png');
@@ -407,6 +470,11 @@
   // Expose internals on window so the pre-population inject script can reach them
   window.cfg=cfg; window.currentMap=currentMap;
   window.renderAll=renderAll; window.crestCurrent=crestCurrent;
+  // Phase C: receive step7's per-Vin waveform contract from the parent and re-render with it.
+  window.addEventListener('message',function(ev){
+    if(ev&&ev.data&&ev.data.__step7_contract){ window.__STEP7_DATA__=ev.data.__step7_contract;
+      try{ renderAll(); }catch(e){} }
+  });
   renderAll();
 })();
 </script>
