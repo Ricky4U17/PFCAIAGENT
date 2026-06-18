@@ -131,8 +131,51 @@ def type3_ota_compensator(r2_k=143.0, r3_m=8.66, c1_nf=390.0, c2_nf=1.1, c3_nf=2
     return _drawing_to_image(d, max_frac=0.95)
 
 
+def type2_voltage_compensator(r2_k=143.0, c1_nf=390.0, c3_nf=24.0,
+                              r1_m=3.63, r4_k=23.2, gmv_us=100.0):
+    """Fig 14A (Type-II variant) — OTA Type-II voltage-loop compensator.
+
+    Same as the Type-III network but without the R3-C2 feed-forward branch:
+    OTA (G_MV) senses the bus through R1/R4; R2-C1 set the integrator + zero and
+    C3 adds the high-frequency pole. Used when the designer selects a Type-II
+    voltage compensator in the GUI.
+    """
+    d = schemdraw.Drawing(show=False)
+    d.config(unit=2.2, fontsize=10.5)
+
+    d += elm.Dot(open=True).label("V$_O$", loc="right")
+    vo = d.here
+    d += elm.Resistor().down().at(vo).label("R1\n%g MΩ" % r1_m)
+    fb = d.here
+    d += elm.Dot().label("FB", loc="right", ofst=(0.05, 0))
+    d += elm.Resistor().down().at(fb).label("R4\n%g kΩ" % r4_k, loc="right")
+    d += elm.Ground()
+
+    op = elm.Opamp(leads=True).right().anchor("in1").at((fb[0] + 2.0, fb[1]))
+    d += op
+    d += elm.Line().at(fb).to(op.in1)
+    d += elm.Line().left().at(op.in2).length(0.5)
+    d += elm.Dot(open=True).label("V$_{REF}$", loc="left")
+    d += elm.Label().at(op.center).label("OTA\nG$_{MV}$ = %g µS" % gmv_us, ofst=(-0.1, 0))
+
+    d += elm.Line().right().at(op.out).length(1.0)
+    comp = d.here
+    d += elm.Dot().label("COMP", loc="top", ofst=(0, 0.15))
+    d += elm.Capacitor().down().at(comp).label("C3\n%g nF" % c3_nf, loc="left")
+    d += elm.Line().down().length(d.unit)
+    bot_b = d.here
+    d += elm.Line().right().at(comp).length(1.6)
+    d += elm.Resistor().down().label("R2\n%g kΩ" % r2_k)
+    d += elm.Capacitor().down().label("C1\n%g nF" % c1_nf)
+    d += elm.Line().left().at(d.here).to(bot_b)
+    d += elm.Ground().at(bot_b)
+    return _drawing_to_image(d, max_frac=0.82)
+
+
 if __name__ == "__main__":
     img = type2_ota_compensator()
     print("Fig 10A image flowable:", img.drawWidth, "x", img.drawHeight)
     img3 = type3_ota_compensator()
     print("Fig 14A image flowable:", img3.drawWidth, "x", img3.drawHeight)
+    img2v = type2_voltage_compensator()
+    print("Fig 14A (type2) image flowable:", img2v.drawWidth, "x", img2v.drawHeight)

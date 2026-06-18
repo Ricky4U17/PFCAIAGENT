@@ -1569,6 +1569,68 @@ class _DocReportReq(BaseModel):
     step15_result:   Optional[Dict[str, Any]] = None
     step16_params:   Optional[Dict[str, Any]] = None
 
+
+def _num(v):
+    try:
+        if v is None or v == "":
+            return None
+        f = float(v)
+        return f if f == f else None  # reject NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Map the ControlDesign step16_params (power stage) + its embedded
+    js_design_state (designer-selected control specs) into the control-report
+    calc-engine inputs. Missing values fall back to the engine defaults."""
+    sp = sp or {}
+    js = sp.get("js_design_state") or {}
+    out: Dict[str, Any] = {}
+    # power stage
+    pairs = {
+        "vout": sp.get("Vout_V"), "fsw": sp.get("fsw_Hz"), "lphi_uH": sp.get("L_uH"),
+        "cout_uF": sp.get("C_uF"), "nch": sp.get("nch"), "pout_lo": sp.get("Pout_lo_W"),
+        "pout_hi": sp.get("Pout_hi_W"), "eta_lo": sp.get("eta_lo"), "eta_hi": sp.get("eta_hi"),
+    }
+    for k, v in pairs.items():
+        n = _num(v)
+        if n is not None:
+            out[k] = int(n) if k == "nch" else n
+    if _num(sp.get("DCR_mOhm")) is not None: out["r_l"] = _num(sp["DCR_mOhm"]) / 1000.0
+    if _num(sp.get("ESR_mOhm")) is not None: out["r_c"] = _num(sp["ESR_mOhm"]) / 1000.0
+    # designer-selected control specs (exact designState keys)
+    jsmap = {
+        "fci": js.get("fci_Hz"), "fcv": js.get("fcv_Hz"), "f_z": js.get("cfz_Hz"),
+        "f_p": js.get("cfp_Hz"), "fz1": js.get("vfz1_Hz"), "fz2": js.get("vfz2_Hz"),
+        "fp1": js.get("vfp1_Hz"), "fp2": js.get("vfp2_Hz"), "gmv": js.get("gmv_S"),
+        "r_m": js.get("rf"), "c_m": js.get("cf"), "rfb1_unit": js.get("r1fb"),
+    }
+    for k, v in jsmap.items():
+        n = _num(v)
+        if n is not None:
+            out[k] = n
+    if "rfb1_unit" in out:
+        out["rfb1_count"] = 1
+    if js.get("vType") in ("type2", "type3"):
+        out["comp_type"] = js["vType"]
+    return out
+
+
+def _merge_pdfs(parts: List[bytes]) -> bytes:
+    """Concatenate several PDF byte-strings into one."""
+    import io as _io
+    from pypdf import PdfWriter, PdfReader
+    w = PdfWriter()
+    for b in parts:
+        if not b:
+            continue
+        for pg in PdfReader(_io.BytesIO(b)).pages:
+            w.add_page(pg)
+    buf = _io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
 @app.post("/mode-b/documentation/report-status", tags=["documentation"])
 def doc_report_status(req: _DocStatusReq):
     """
@@ -1611,11 +1673,24 @@ def doc_generate_report(req: _DocReportReq):
         from app.mode_b.documentation_agent import DocumentationAgent
         from fastapi.responses import Response
         agent = DocumentationAgent(req.state)
-        pdf = agent.generate(
-            approved_design = req.approved_design,
-            step15_result   = req.step15_result,
-            step16_params   = req.step16_params,
-        )
+        full = bool(req.step16_params and req.approved_design and req.step15_result)
+        if full:
+            # Single combined PDF: Chapters 1–5 from the documentation agent
+            # (Ch6 omitted there) + the full detailed Chapter 6 control report.
+            from app.mode_b.report_steps1_8 import build_control_report
+            ch1_5 = agent.generate(
+                approved_design = req.approved_design,
+                step15_result   = req.step15_result,
+                step16_params   = None,
+            )
+            ch6 = build_control_report(_control_inputs_from_step16(req.step16_params))
+            pdf = _merge_pdfs([ch1_5, ch6])
+        else:
+            pdf = agent.generate(
+                approved_design = req.approved_design,
+                step15_result   = req.step15_result,
+                step16_params   = req.step16_params,
+            )
         project_id = req.state.get("project_id", "design")
         if req.step16_params and req.approved_design and req.step15_result:
             label = "Steps1_16"

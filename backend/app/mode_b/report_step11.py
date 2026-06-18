@@ -231,6 +231,9 @@ def build_step11(story, data: dict):
         "same compensator yields a lower crossover — quantified in Section 11.9."
         % abs(rows[0]["tvbase"]), CH)
 
+    if cm["type"] == "type2":
+        _build_step11_type2(story, d, cm, s, rows)
+        return
     # ── 11.6 ──────────────────────────────────────────────────────────────────
     sub_h(story, "11.6", "OTA Type-III Compensator Design (SLVA662, Method B)", CH)
     body(story,
@@ -361,6 +364,96 @@ def build_step11(story, data: dict):
         "C3 = %.0f nF (OTA Type-III, GMV = %.0f µS)."
         % (rows[4]["fco"], rows[4]["pm"], rows[0]["fco"], rows[0]["pm"],
            cm["r2s"]/1e3, cm["r3s"]/1e6, cm["c1s"]*1e9, cm["c2s"]*1e9, cm["c3s"]*1e9, s["gmv"]*1e6), CH)
+
+
+def _build_step11_type2(story, d, cm, s, rows):
+    """§11.6–11.9 + figures + verdict when the designer selects a Type-II voltage
+    compensator (one zero, one HF pole; no R3-C2 feed-forward branch)."""
+    sub_h(story, "11.6", "OTA Type-II Compensator Design (Method B)", CH)
+    body(story,
+        "The designer selected a Type-II voltage compensator. Method B folds the feedback divider "
+        "(R<sub>1</sub>, R<sub>4</sub>) into the OTA network together with g<sub>m</sub>, R<sub>2</sub>, "
+        "C<sub>1</sub> and C<sub>3</sub>. It provides an integrator with one phase-boost zero and one "
+        "high-frequency pole:", CH)
+    eq_box(story, [r"H_{OTA}(s)=-G_0\times\dfrac{1+\omega_z/s}{1+s/\omega_p}"], number="11.6", ch=CH)
+    data_table(story, "11.6", "Type-II Compensator Targets",
+        "Divider from Step 5; crossover and pole/zero are designer-selected.",
+        ["Quantity", "Value", "Symbol", "Role"],
+        [["Top feedback resistor", f"{s['r1']/1e6:.2f} MΩ", "R1 = R_FB,top", "From Step 5 divider"],
+         ["Bottom feedback resistor", f"{s['r4']/1e3:.1f} kΩ", "R4 = R_FB,bottom", "From Step 5 divider"],
+         ["Transconductance", f"{s['gmv']*1e6:.0f} µS", "gm = GMV", "Voltage-loop OTA"],
+         ["Crossover", f"{s['fcv']:.0f} Hz", "f_c", "Design target"],
+         ["Required gain at f_c", f"{d['G']:.6f}", "G", "= 1/|T_v,base| (HL)"],
+         ["Zero / Pole", f"{cm['fz']:.0f} Hz / {cm['fp']:.0f} Hz", "f_z / f_p", "Phase boost / HF roll-off"]],
+        col_widths=[CW*0.30, CW*0.20, CW*0.22, CW*0.28], ch=CH)
+    body(story, "<b>Shape factor and component values (design point)</b>", CH)
+    eq_box(story, [r"\kappa=\dfrac{\sqrt{1+(f_z/f_c)^2}}{\sqrt{1+(f_c/f_p)^2}}=%.6f" % cm["kappa"]], ch=CH)
+    _ws(story, "Step 1 — R<sub>2</sub> (sets the loop gain at f<sub>cv</sub>):",
+        r"R_2=\dfrac{G\,(R_1+R_4)}{R_4\,g_m\,\kappa}=%.2f\ \mathrm{k\Omega}" % (cm["r2"]/1e3))
+    _ws(story, "Step 2 — C<sub>1</sub> (sets the zero f<sub>z</sub>):",
+        r"C_1=\dfrac{1}{2\pi R_2 f_z}=%.2f\ \mathrm{nF}" % (cm["c1"]*1e9))
+    _ws(story, "Step 3 — C<sub>3</sub> (sets the HF pole f<sub>p</sub>):",
+        r"C_3=\dfrac{1}{2\pi R_2 f_p}=%.2f\ \mathrm{nF}" % (cm["c3"]*1e9))
+
+    sub_h(story, "11.7", "Final Compensator Component Values", CH)
+    data_table(story, "11.7", "Voltage Compensator Components (Type-II)",
+        "Calculated values and standard selections.",
+        ["Component", "Calculated", "Standard value", "Sets"],
+        [["R2", f"{cm['r2']/1e3:.2f} kΩ", f"{cm['r2s']/1e3:.0f} kΩ", "f_z, f_p, gain"],
+         ["C1", f"{cm['c1']*1e9:.2f} nF", f"{cm['c1s']*1e9:.0f} nF", "f_z"],
+         ["C3", f"{cm['c3']*1e9:.2f} nF", f"{cm['c3s']*1e9:.0f} nF", "f_p"]],
+        col_widths=[CW*0.20, CW*0.27, CW*0.27, CW*0.26], ch=CH)
+    annotation(story, "DECISION",
+        "Voltage compensator (OTA Type-II, GMV = %.0f µS):  R2 = %.0f kΩ, C1 = %.0f nF, C3 = %.0f nF, "
+        "with divider R1 = %.2f MΩ / R4 = %.1f kΩ. Pole-zero set: f_z = %.1f Hz, f_p = %.1f Hz."
+        % (s["gmv"]*1e6, cm["r2s"]/1e3, cm["c1s"]*1e9, cm["c3s"]*1e9, s["r1"]/1e6, s["r4"]/1e3,
+           cm["fz_a"], cm["fp_a"]), CH)
+
+    sub_h(story, "11.8", "Pole-Zero Verification (standard components)", CH)
+    eq_box(story, [r"f_z=\dfrac{1}{2\pi R_2 C_1}=%.3f\ \mathrm{Hz}" % cm["fz_a"],
+                   r"f_p=\dfrac{1}{2\pi R_2 C_3}=%.3f\ \mathrm{Hz}" % cm["fp_a"]], ch=CH)
+
+    sub_h(story, "11.9", "Voltage-Loop Crossover and Stability — All 8 Operating Points", CH)
+    body(story,
+        "With the final standard components the loop is evaluated across all operating points. The "
+        "compensator is sized for the 3600 W design point; at low line (1700 W) the lower plant gain "
+        "shifts the crossover down.", CH)
+    data_table(story, "11.9", "Voltage-Loop Crossover and Stability — 8 Conditions", "",
+        ["V_AC (V)", "P_OUT (W)", "Loop gain at 17 Hz (dB)", "Crossover f_cv (Hz)", "Phase margin (°)"],
+        [[f"{o['vac']}", f"{o['pout']}", f"{o['loopdb_fcv']:.2f}", f"{o['fco']:.2f}", f"{o['pm']:.1f}"]
+         for o in rows], col_widths=[CW*0.15, CW*0.16, CW*0.27, CW*0.22, CW*0.20], ch=CH)
+    annotation(story, "NOTE",
+        "A Type-II compensator provides up to ~90° of phase boost from its single zero/pole pair — "
+        "less than a Type-III. Confirm the phase margin above meets the ≥60° target at every "
+        "operating point; if not, switch to the Type-III compensator (the reference design choice).", CH)
+
+    body(story, "<b>Figure 14A — Type-II OTA Voltage-Loop Compensator Schematic</b>", CH)
+    body(story,
+        "The voltage OTA (GMV = %.0f µS) senses the bus through the R1/R4 divider. R2-C1 set the "
+        "integrator and the compensating zero; C3 adds the high-frequency pole." % (s["gmv"]*1e6), CH)
+    from app.mode_b.schematics import type2_voltage_compensator
+    story.append(type2_voltage_compensator(
+        r2_k=cm["r2s"]/1e3, c1_nf=cm["c1s"]*1e9, c3_nf=cm["c3s"]*1e9,
+        r1_m=s["r1"]/1e6, r4_k=s["r4"]/1e3, gmv_us=s["gmv"]*1e6))
+    body(story, "<i>Figure 14A — Type-II network: R2 = %.0f kΩ, C1 = %.0f nF, C3 = %.0f nF. "
+        "Zero %.1f Hz, pole %.1f Hz.</i>"
+        % (cm["r2s"]/1e3, cm["c1s"]*1e9, cm["c3s"]*1e9, cm["fz_a"], cm["fp_a"]), CH)
+    body(story, "<b>Figure 3 — Open-Loop Voltage Loop T<sub>v</sub>(s)  |  All 8 Operating Points</b>", CH)
+    body(story, "The open-loop voltage gain with the Type-II compensator across all eight operating "
+        "points; the crossover and phase margin per point are tabulated in §11.9.", CH)
+    story.append(_fig_open_loop_v(d))
+    body(story, "<i>Figure 3 — Open-loop T<sub>v</sub>(s): gain (dB, top) and phase (°, bottom). "
+        "Crossover %.1f Hz (LL) / %.0f Hz (HL); PM %.0f° / %.0f°.</i>"
+        % (rows[0]["fco"], rows[4]["fco"], rows[0]["pm"], rows[4]["pm"]), CH)
+    body(story, "<b>Figure 4 — Closed-Loop Voltage Loop T<sub>v</sub>(s)/(1+T<sub>v</sub>(s))</b>", CH)
+    story.append(_fig_closed_loop_v(d))
+    body(story, "<i>Figure 4 — Closed-loop T<sub>v</sub>(s)/(1+T<sub>v</sub>(s)): gain and phase "
+        "across all 8 operating points.</i>", CH)
+    annotation(story, "DECISION",
+        "Outer voltage loop (Type-II) — crossover %.0f Hz at 3600 W (PM %.0f°) and %.1f Hz at 1700 W "
+        "(PM %.0f°). Compensator: R2 = %.0f kΩ, C1 = %.0f nF, C3 = %.0f nF (OTA Type-II, GMV = %.0f µS)."
+        % (rows[4]["fco"], rows[4]["pm"], rows[0]["fco"], rows[0]["pm"],
+           cm["r2s"]/1e3, cm["c1s"]*1e9, cm["c3s"]*1e9, s["gmv"]*1e6), CH)
 
 
 def make_pdf(path: str, inp: dict | None = None):
