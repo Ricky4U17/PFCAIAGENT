@@ -102,26 +102,46 @@ async function testControlDesignButtons(browser) {
      'Fixed Coefficients table present (coefficients endpoint OK)');
   await waitConfirm('S3 Confirm & Continue enabled');
 
-  // now the FAN9672 tool iframe + the two action buttons appear
+  // S4 — Compensators & Bode (interactive tool in wizard mode)
   const iframe = page.locator('iframe').first();
   ok(await iframe.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false),
-     'Control Design iframe (FAN9672 tool) rendered after Screens 1–3 confirm');
+     'S4: FAN9672 tool iframe rendered (interactive Compensators & Bode)');
+  const wizStep = async (label) => {
+    ok(await page.getByText(new RegExp(label, 'i')).first()
+        .waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),
+       label + ' wizard label shown');
+  };
+  await wizStep('Screen 4/7 . Compensators & Bode');
+  await page.getByRole('button', { name: /Confirm & Continue/i }).first().click();   // S4 -> S5
+  await wizStep('Screen 5/7 . Transient');
+  await page.getByRole('button', { name: /Confirm & Continue/i }).first().click();   // S5 -> S6
+  await wizStep('Screen 6/7 . iTHD');
+  await page.getByRole('button', { name: /Confirm & Continue/i }).first().click();   // S6 -> S7
+  await wizStep('Screen 7/7 . Schematic & Report');
 
-  const reportBtn = page.getByRole('button', { name: /Generate Full Report/i }).first();
-  ok(await reportBtn.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),
-     'single "Generate Full Report (Chapters 1–6 + Appendices)" button present');
-  ok(await page.getByRole('button', { name: /Control-Loop Report/i }).count() === 0,
-     'old standalone "Control-Loop Report" button removed');
-
-  const semiBtn = page.getByRole('button', { name: /Select Semiconductors/i }).first();
-  ok(await semiBtn.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
-     '"Select Semiconductors →" button present');
-
-  // clicking it advances to the Chapter 7 page
-  await semiBtn.click();
-  const ch7 = await page.getByText(/Chapter 7 — Semiconductor Selection/i).first()
-    .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
-  ok(ch7, 'Select Semiconductors → navigates to the Chapter 7 page');
+  // S7 — Download + Review, then Approve (gated until a report is generated)
+  const dlBtn = page.getByRole('button', { name: /Download \+ Review/i }).first();
+  ok(await dlBtn.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     'S7: "Download + Review" button present');
+  const approveBtn = page.getByRole('button', { name: /Approve & go to Semiconductors/i }).first();
+  ok(!(await approveBtn.isEnabled().catch(() => true)),
+     'S7: Approve is disabled until a report is generated');
+  // mock the combined-report endpoint (the real PDF is backend-verified at 161 pages)
+  await ctx.route('**/mode-b/documentation/generate-report', route =>
+    route.fulfill({ status: 200, contentType: 'application/pdf', body: Buffer.from('%PDF-1.4\n% e2e mock report\n%%EOF\n') }));
+  const dl = page.waitForEvent('download', { timeout: 30000 });
+  await dlBtn.click();
+  const download = await dl;
+  const buf = require('fs').readFileSync(await download.path());
+  ok(buf.slice(0, 5).toString('latin1') === '%PDF-', 'S7: Download + Review produces a PDF');
+  // Approve now enabled → advances to Chapter 7
+  let appEn = false;
+  for (let i = 0; i < 30 && !appEn; i++) { appEn = await approveBtn.isEnabled().catch(() => false); if (!appEn) await page.waitForTimeout(150); }
+  ok(appEn, 'S7: Approve enabled after Download + Review');
+  await approveBtn.click();
+  ok(await page.getByText(/Chapter 7 — Semiconductor Selection/i).first()
+      .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     'Approve → navigates to the Chapter 7 page');
   ok(errs.length === 0, 'no console/page errors' + (errs.length ? ': ' + errs.slice(0,2).join(' | ') : ''));
   await ctx.close();
 }

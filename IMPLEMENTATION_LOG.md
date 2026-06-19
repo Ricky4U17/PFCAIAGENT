@@ -3000,3 +3000,10 @@ only font/text/alignment changed to our style.
 - Frontend: new CoreReview.tsx (Screen 3, review-only) - consolidated Core Component Table (fixed components + Screen-2 designer selections with function) + Fixed Coefficients/Internal Parameters table; client controlCoefficients(). ControlDesign wizard s1->s2->s3->tool; S3 reads s2sel (reflects R_CS override in fetched values); tool Back -> Screen 3.
 - e2e Test B: clears S1,S2,S3 (asserts each renders + endpoint data + confirm) then tool. ALL CHECKS PASS; tsc/build clean.
 - Status: S1, S2, S3 DONE. Next: S4 (Compensators & Bode) - first migration of interactive tool content into a gated React screen (or keep tool tab + confirm gate).
+
+
+## C27 - Control Design redesign: Screens 4-7 (wizard-driven embedded tool) - REDESIGN COMPLETE
+- control_design.html (public + src/assets): added 'wizard mode' - setWizardScreen postMessage activates one tool tab (screen2-5) + body.wizard hides the tab bar; setPythonValues now accepts rcs_mohm (designer R_CS -> state.rcsSel + rcsCustom).
+- ControlDesign.tsx: screen wizard extended to s1..s7. S4-S7 drive the SAME mounted iframe via setWizardScreen (S4 Compensators&Bode interactive, S5 Transient, S6 iTHD, S7 Schematic). Per-screen action bar: Back/New design + 'Confirm & Continue' (S4-S6); S7 = 'Download + Review' (handleReport, combined Ch1-6+appendices) + 'Approve & go to Semiconductors' (gated: enabled only after a report is generated -> reportGen state). R_CS (s2sel) injected into the tool so the Bode reflects it.
+- e2e Test B: full 7-screen walk (S1-S3 native, S4-S7 wizard labels, S7 Download+Review [route-mocked report] -> Approve enables -> Ch7). ALL CHECKS PASS; tsc/build clean. Verified S4 wizard mode via screenshot (tab bar hidden, interactive Ti(s) Bode with LL/HL overlay).
+- STATUS: Control Design (Chapter 6) 7-screen confirm-gated redesign COMPLETE (S1-S7). Remaining GUI cleanup: broader items G1-G11 + Chapters 1-5 (open), and Chapter 7 build-out.

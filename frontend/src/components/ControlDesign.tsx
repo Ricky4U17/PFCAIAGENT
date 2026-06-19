@@ -37,11 +37,30 @@ export const ControlDesign: React.FC<Props> = ({
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string|null>(null)
-  // Control-Design screen wizard (S1 Power Plant, S2 Components, S3 Core review;
-  // 'tool' = existing FAN9672 tool for S4–S7, migrated screen-by-screen).
-  const [screen, setScreen] = useState<'s1'|'s2'|'s3'|'tool'>('s1')
+  // Control-Design screen wizard. S1–S3 are native React screens; S4–S7 drive the
+  // embedded FAN9672 tool's tabs (S4 Compensators&Bode interactive, S5 Transient,
+  // S6 iTHD, S7 Schematic + report/approve) one at a time in "wizard mode".
+  type Scr = 's1'|'s2'|'s3'|'s4'|'s5'|'s6'|'s7'
+  const [screen, setScreen] = useState<Scr>('s1')
   const [s2sel, setS2Sel] = useState<ComponentSelections|null>(null)
+  const [reportGen, setReportGen] = useState(false)
   const injectedRef = useRef(false)
+  const TOOL_TAB: Record<string, string> = { s4: 'screen2', s5: 'screen3', s6: 'screen4', s7: 'screen5' }
+  const WIZ_NEXT: Record<string, Scr> = { s4: 's5', s5: 's6', s6: 's7' }
+  const WIZ_PREV: Record<string, Scr> = { s4: 's3', s5: 's4', s6: 's5', s7: 's6' }
+  const WIZ_LABEL: Record<string, string> = {
+    s4: 'Screen 4/7 · Compensators & Bode (interactive)', s5: 'Screen 5/7 · Transient',
+    s6: 'Screen 6/7 · iTHD', s7: 'Screen 7/7 · Schematic & Report',
+  }
+  const screenRef = useRef<Scr>(screen); screenRef.current = screen
+  const postWizard = () => {
+    const t = TOOL_TAB[screenRef.current]
+    if (t) iframeRef.current?.contentWindow?.postMessage({ type: 'setWizardScreen', screen: t }, '*')
+  }
+  // drive the tool tab when moving between S4–S7 (iframe stays mounted)
+  useEffect(() => {
+    if (TOOL_TAB[screen]) { const id = setTimeout(postWizard, 60); return () => clearTimeout(id) }
+  }, [screen])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
   // control_design.html is cross-origin (no allow-same-origin), so it posts its
@@ -79,10 +98,10 @@ export const ControlDesign: React.FC<Props> = ({
   const sendValues = useCallback(() => {
     if (!iframeRef.current?.contentWindow) return
     iframeRef.current.contentWindow.postMessage(
-      { type: 'setPythonValues', params },
+      { type: 'setPythonValues', params: { ...params, rcs_mohm: s2sel?.rcs_mohm } },
       '*'
     )
-  }, [params])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params, s2sel])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLoad = useCallback(() => {
     injectedRef.current = false
@@ -91,12 +110,13 @@ export const ControlDesign: React.FC<Props> = ({
     const tryInject = (attempt: number) => {
       setTimeout(() => {
         sendValues()
+        postWizard()   // put the tool into wizard mode on the current screen's tab
         // Retry once more after another second in case the first arrived early
         if (attempt < 2) tryInject(attempt + 1)
       }, attempt === 0 ? 2000 : 1500)
     }
     tryInject(0)
-  }, [sendValues])
+  }, [sendValues])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Step16 params for Python report ───────────────────────────────────────
   const step16_params = {
@@ -147,6 +167,7 @@ export const ControlDesign: React.FC<Props> = ({
       a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_16.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 150)
+      setReportGen(true)   // enable "Approve & go to Semiconductors"
     } catch(e) {
       setRptError((e as Error).message ?? String(e))
     } finally { setRptLoad(false) }
@@ -175,7 +196,7 @@ export const ControlDesign: React.FC<Props> = ({
       params={params}
       s2sel={s2sel}
       onBack={() => setScreen('s2')}
-      onConfirm={() => setScreen('tool')} />
+      onConfirm={() => setScreen('s4')} />
   }
 
   return (
@@ -199,33 +220,40 @@ export const ControlDesign: React.FC<Props> = ({
         sandbox="allow-scripts allow-downloads allow-forms allow-modals"
       />
 
-      {/* ── Action bar ─────────────────────────────────────────────────── */}
+      {/* ── Action bar (per wizard screen) ─────────────────────────────── */}
       <div style={{
         display: 'flex', gap: 8, paddingTop: 10, marginTop: 6,
         borderTop: `0.5px solid ${C.border}`,
-        justifyContent: 'space-between', alignItems: 'flex-start',
+        justifyContent: 'space-between', alignItems: 'center',
       }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="ghost" onClick={() => setScreen('s3')}>← Back (Screen 3)</Btn>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Btn variant="ghost" onClick={() => setScreen(WIZ_PREV[screen])}>← Back</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
+          <span style={{ fontSize: 11, color: C.hint, fontFamily: 'IBM Plex Mono,monospace' }}>
+            {WIZ_LABEL[screen]}
+          </span>
         </div>
 
-        <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
-          {rptError && (
-            <div style={{ fontSize:11, color:'#c0392b', background:'#fdf2f2',
-              border:'1px solid #e8b4b8', borderRadius:6, padding:'4px 10px' }}>
-              ⚠ Report failed: {rptError}
+        {screen !== 's7' ? (
+          <Btn variant="primary" onClick={() => setScreen(WIZ_NEXT[screen])}>Confirm &amp; Continue →</Btn>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
+            {rptError && (
+              <div style={{ fontSize:11, color:'#c0392b', background:'#fdf2f2',
+                border:'1px solid #e8b4b8', borderRadius:6, padding:'4px 10px' }}>
+                ⚠ Report failed: {rptError}
+              </div>
+            )}
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
+                {rptLoading ? '⏳ Generating…' : '📥 Download + Review (Chapters 1–6 + Appendices)'}
+              </Btn>
+              <Btn variant="primary" disabled={!reportGen} onClick={onSelectSemiconductors}>
+                ✓ Approve &amp; go to Semiconductors →
+              </Btn>
             </div>
-          )}
-          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-            <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
-              {rptLoading ? '⏳ Generating…' : '📄 Generate Full Report (Chapters 1–6 + Appendices)'}
-            </Btn>
-            <Btn variant="primary" onClick={onSelectSemiconductors}>
-              Select Semiconductors →
-            </Btn>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

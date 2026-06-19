@@ -21,6 +21,7 @@
   main{padding:16px;display:grid;gap:16px}
   .tabs{display:flex;gap:8px;flex-wrap:wrap}
   .screen{display:none}.screen.active{display:grid;grid-template-columns:430px 1fr;gap:16px}
+  body.wizard .tabs{display:none}
   #screen1.active{display:block}
   #screen5.active{display:block}
   .schemWrap{overflow:auto;background:#0a111f;border:1px solid var(--line);border-radius:12px}
@@ -2202,6 +2203,7 @@ window.setPythonValues = function(p){
   // Sync visible Pout and eta fields to current mode values
   $('pout').value = (state.mode==='low') ? POUT_LO : POUT_HI;
   $('eta').value  = (state.mode==='low') ? ETA_LO  : ETA_HI;
+  if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; const el=$('rcsCustom'); if(el) el.value=v; } }
   recalc();
 };
 
@@ -2226,6 +2228,11 @@ window.addEventListener('message',function(e){
   if(e.data.type==='setPythonValues'&&typeof window.setPythonValues==='function'){
     window.setPythonValues(e.data.params);
     setTimeout(postH,50);
+  }
+  if(e.data.type==='setWizardScreen'){
+    document.body.classList.add('wizard');
+    if(e.data.screen && typeof tab==='function') tab(e.data.screen);
+    setTimeout(postH,60);
   }
   if(e.data.type==='getDesignState'){
     if(!lastCtx){e.source.postMessage({type:'designState',data:null},'*');postH();return;}
