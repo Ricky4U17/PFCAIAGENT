@@ -2985,3 +2985,11 @@ only font/text/alignment changed to our style.
 - ControlDesign.tsx: screen wizard state ('s1' -> 'tool'); S1 renders first, Confirm -> existing FAN9672 tool (S2-S7, to be migrated next); tool Back -> Screen 1.
 - e2e Test B updated: asserts S1 renders + table loads (endpoint OK) + Confirm enables -> tool + buttons + Chapter 7 nav. ALL CHECKS PASS; tsc/build clean.
 - Status: S1 DONE. Next: S2 (controller-fixed components + selectable caps/R_CS).
+
+
+## C25 - Control Design redesign: Screen 2 (Controller-fixed components + selections)
+- Backend: POST /mode-b/control/components returns 16 fixed/auto-calc components (R_RI, R_FB1/2, R_IAC LL/HL, R_RLPK, R_VIR FR/HV, RB1-4, CB1-2, R_GC, R_pin8=4.75k) + R_CS valid band (Method-1 bound: 12.84-15.1 mOhm, rec 15) + 8 selectable items (C_GC/C_LS/C_SS/C_LPK/C_RLPK/C_ILIMIT/C_ILIMIT2 with pin-filter poles, R_LS).
+- Engine: compute_steps_1_8 now accepts optional rcs override (DEFAULT_INPUTS rcs=None) so designer R_CS flows downstream; _control_inputs_from_step16 maps step16_params.s2 {rcs_mohm,c_gc_pf,c_ls_pf} -> rcs/c_gc/c_ls.
+- Frontend: new ComponentsSelect.tsx (Screen 2) - fixed table, R_CS constrained selector with live valid-HL&LL check, filter-cap + R_LS inputs; client controlComponents(). ControlDesign wizard s1->s2->tool; S2 selections stored + injected into handleReport step16_params.s2; tool Back -> Screen 2.
+- e2e Test B: clears S1 then S2 (asserts components render + R_CS valid indicator + confirm) then tool. ALL CHECKS PASS; tsc/build clean. Verified R_CS=13mOhm flows into report.
+- Status: S1, S2 DONE. Next: S3 (review Core Component Table + Fixed Coefficients).

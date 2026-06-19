@@ -296,6 +296,80 @@ def control_power_plant(req: _PowerPlantReq):
     except Exception as e:
         log.exception("power-plant"); raise HTTPException(500, str(e))
 
+class _ComponentsReq(BaseModel):
+    inputs: Optional[Dict[str, Any]] = None
+
+@app.post("/mode-b/control/components", tags=["mode-b"])
+def control_components(req: _ComponentsReq):
+    """Control Design Screen 2 — controller-fixed components + designer selections.
+    Returns the components fixed/auto-calculated by the time we reach control
+    design (display-only) and the designer-selectable items (R_CS over its valid
+    band, filter caps, R_LS) with their calculated defaults and pin-filter poles."""
+    try:
+        import math
+        from app.mode_b.step16_steps1_8 import compute_steps_1_8
+        from app.mode_b.step16_step9_bibo import compute_step9_bibo
+        inp = req.inputs or None
+        d = compute_steps_1_8(inp); c = d["const"]; s4 = d["step4"]; s5 = d["step5"]
+        s6 = d["step6"]; s8 = d["step8"]; b = compute_step9_bibo(inp)
+
+        def ohm(x):
+            return f"{x/1e6:.2f} MΩ" if x >= 1e6 else (f"{x/1e3:.1f} kΩ" if x >= 1e3 else f"{x:.1f} Ω")
+        R_PIN8 = 4.75e3
+        fixed = [
+            {"name": "Oscillator resistor", "symbol": "R_RI", "value": ohm(s4["rri_selected"]),
+             "role": f"sets f_sw ≈ {s4['fsw_at_selected']/1e3:.1f} kHz"},
+            {"name": "FB divider top", "symbol": "R_FB1", "value": ohm(s5["rfb1"]), "role": "3 × 1.21 MΩ series"},
+            {"name": "FB divider bottom", "symbol": "R_FB2", "value": ohm(s5["rfb2"]), "role": "sets V_OUT"},
+            {"name": "IAC resistor — LL (FR)", "symbol": "R_IAC", "value": ohm(c["riac_fr"]), "role": "line sense, FR"},
+            {"name": "IAC resistor — HL (HV)", "symbol": "R_IAC", "value": ohm(c["riac_hv"]), "role": "line sense, HV"},
+            {"name": "Peak-detector resistor", "symbol": "R_RLPK", "value": ohm(c["r_rlpk"]), "role": "V_LPK scaling"},
+            {"name": "VIR resistor — FR", "symbol": "R_VIR", "value": ohm(c["r_vir_fr"]), "role": "V_VIR < 1.5 V → FR"},
+            {"name": "VIR resistor — HV", "symbol": "R_VIR", "value": ohm(c["r_vir_hv"]), "role": "V_VIR > 3.5 V → HV"},
+            {"name": "BIBO R1", "symbol": "RB1", "value": ohm(b["rb1"]), "role": "brown-in/out divider"},
+            {"name": "BIBO R2", "symbol": "RB2", "value": ohm(b["rb2"]), "role": "brown-in/out divider"},
+            {"name": "BIBO R3", "symbol": "RB3", "value": ohm(b["rb3"]), "role": "filter pole 1"},
+            {"name": "BIBO R4", "symbol": "RB4", "value": ohm(b["rb4"]), "role": "bottom leg, sets ratio"},
+            {"name": "BIBO C1", "symbol": "CB1", "value": f"{b['cb1']*1e9:.0f} nF", "role": "filter pole 1"},
+            {"name": "BIBO C2", "symbol": "CB2", "value": f"{b['cb2']*1e9:.0f} nF", "role": "filter pole 2"},
+            {"name": "Gain-control resistor", "symbol": "R_GC", "value": ohm(s8["r_gc_sel"]), "role": "LPT gain align"},
+            {"name": "Pin-8 series resistor", "symbol": "R_pin8", "value": ohm(R_PIN8), "role": "LPK series (fixed)"},
+        ]
+        m1_ll, m1_hl = s6["rcs1_ll"], s6["rcs1_hl"]
+        rcs_max = min(m1_ll, m1_hl)
+        rcs = {
+            "min_mohm": round(0.85 * rcs_max * 1e3, 2),
+            "max_mohm": round(rcs_max * 1e3, 2),
+            "recommended_mohm": round(s6["rcs_sel"] * 1e3, 2),
+            "m1_ll_mohm": round(m1_ll * 1e3, 2), "m1_hl_mohm": round(m1_hl * 1e3, 2),
+            "note": "Valid band satisfies the AN4165 (Method-1) VRM limit at both HL and LL.",
+        }
+
+        def pole(R, C):
+            return round(1.0 / (2 * math.pi * R * C), 1)
+        selectable = [
+            {"key": "c_gc", "name": "Gain-control filter cap", "symbol": "C_GC",
+             "default_pf": round(s8["c_gc"] * 1e12, 1), "role": f"pole {s8['f_gc']/1e3:.2f} kHz (with R_GC)"},
+            {"key": "c_ls", "name": "Current-predict filter cap", "symbol": "C_LS",
+             "default_pf": round(s8["c_ls"] * 1e12, 1), "role": f"pole {s8['f_ls']/1e3:.2f} kHz (with R_LS)"},
+            {"key": "c_ss", "name": "Soft-start cap", "symbol": "C_SS",
+             "default_pf": round(s8["c_ss"] * 1e12, 1), "role": f"t_SS ≈ {s8['t_ss_real']*1e3:.0f} ms"},
+            {"key": "c_lpk", "name": "LPK signal filter cap", "symbol": "C_LPK",
+             "default_pf": 1000.0, "role": f"pole {pole(R_PIN8, 1e-9)/1e3:.1f} kHz (with R_pin8)"},
+            {"key": "c_rlpk", "name": "RLPK filter cap", "symbol": "C_RLPK",
+             "default_pf": 1000.0, "role": f"pole {pole(c['r_rlpk'], 1e-9)/1e3:.1f} kHz (with R_RLPK)"},
+            {"key": "c_ilimit", "name": "ILIMIT filter cap", "symbol": "C_ILIMIT",
+             "default_pf": 18000.0, "role": f"pole {pole(s8['r_ilimit_sel'], 18e-9)/1e3:.2f} kHz (with R_ILIMIT)"},
+            {"key": "c_ilimit2", "name": "ILIMIT2 filter cap", "symbol": "C_ILIMIT2",
+             "default_pf": 75000.0, "role": f"pole {pole(s8['r_ilimit2_sel'], 75e-9)/1e3:.2f} kHz (with R_ILIMIT2)"},
+            {"key": "r_ls", "name": "Current-predict resistor (R_LS)", "symbol": "R_LS",
+             "default_pf": None, "default_kohm": round(s8["r_ls_sel"]/1e3, 1),
+             "role": f"calc {s8['r_ls']/1e3:.1f} kΩ; valid 12–87 kΩ"},
+        ]
+        return {"fixed": fixed, "rcs": rcs, "selectable": selectable}
+    except Exception as e:
+        log.exception("control components"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:
@@ -1650,6 +1724,14 @@ def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         out["rfb1_count"] = 1
     if js.get("vType") in ("type2", "type3"):
         out["comp_type"] = js["vType"]
+    # Screen-2 designer selections (R_CS + filter caps) — override engine defaults.
+    s2 = sp.get("s2") or {}
+    if _num(s2.get("rcs_mohm")) is not None:
+        out["rcs"] = _num(s2["rcs_mohm"]) / 1000.0
+    if _num(s2.get("c_gc_pf")) is not None:
+        out["c_gc"] = _num(s2["c_gc_pf"]) * 1e-12
+    if _num(s2.get("c_ls_pf")) is not None:
+        out["c_ls"] = _num(s2["c_ls_pf"]) * 1e-12
     return out
 
 

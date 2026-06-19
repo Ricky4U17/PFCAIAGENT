@@ -49,6 +49,7 @@ DEFAULT_INPUTS = dict(
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
     c_gc=430e-12, c_ls=240e-12,
+    rcs=None,                       # designer R_CS override (Ω); None → 15 mΩ default
 )
 
 # ── controller constants (Step 2 base; FAN9672-D / AND9925-D) ───────────────────
@@ -205,7 +206,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         m2_rows.append([f"{vmax:.1f} V", f"{vee:.1f} V",
                         f"{num_ll:.4e}", f"{rcs_m2(c['riac_fr'], vee, pmax_nch_lo)*1e3:.3f} mΩ",
                         f"{num_hl:.4e}", f"{rcs_m2(c['riac_hv'], vee, pmax_nch_hi)*1e3:.3f} mΩ"])
-    rcs_sel = 0.015
+    # Designer-selected R_CS (Screen 2) overrides the 15 mΩ default when provided.
+    rcs_sel = float(p["rcs"]) if p.get("rcs") else 0.015
     # 6.4 back-calculated V_EA,eff for selected R_CS = 15 mΩ
     def vea_eff_from_rcs(riac, pmaxn):
         return rcs_sel * den_common * pmaxn / (c["k_rm"] * riac)

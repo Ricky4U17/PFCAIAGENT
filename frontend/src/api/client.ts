@@ -281,6 +281,26 @@ export const controlPowerPlant = (p: {
     return res.json()
   })
 
+// Control Design Screen 2 — controller-fixed components + designer selections.
+export interface FixedComp { name: string; symbol: string; value: string; role: string }
+export interface SelComp { key: string; name: string; symbol: string; role: string
+  default_pf?: number | null; default_kohm?: number | null }
+export interface ControlComponents {
+  fixed: FixedComp[]
+  rcs: { min_mohm: number; max_mohm: number; recommended_mohm: number
+         m1_ll_mohm: number; m1_hl_mohm: number; note: string }
+  selectable: SelComp[]
+}
+export const controlComponents = (inputs: Record<string, unknown>): Promise<ControlComponents> =>
+  fetch(`${BASE}/mode-b/control/components`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ inputs }),
+  }).then(async res => {
+    if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
+    return res.json()
+  })
+
 // ── Step 7: Generate combined report (Steps 1–14) ────────────────────────────
 export const step7GenerateReport = (payload: {
   state:           Record<string, unknown>

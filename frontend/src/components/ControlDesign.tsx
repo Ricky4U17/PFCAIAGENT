@@ -18,6 +18,7 @@ import { C, Btn } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { docGenerateReport } from '../api/client'
 import { PowerPlantReview } from './PowerPlantReview'
+import { ComponentsSelect, type ComponentSelections } from './ComponentsSelect'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -35,9 +36,10 @@ export const ControlDesign: React.FC<Props> = ({
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string|null>(null)
-  // Control-Design screen wizard (S1 = Power Plant review; 'tool' = existing
-  // FAN9672 tool for S2–S7, migrated screen-by-screen).
-  const [screen, setScreen] = useState<'s1'|'tool'>('s1')
+  // Control-Design screen wizard (S1 Power Plant, S2 Components; 'tool' = existing
+  // FAN9672 tool for S3–S7, migrated screen-by-screen).
+  const [screen, setScreen] = useState<'s1'|'s2'|'tool'>('s1')
+  const [s2sel, setS2Sel] = useState<ComponentSelections|null>(null)
   const injectedRef = useRef(false)
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
@@ -136,7 +138,7 @@ export const ControlDesign: React.FC<Props> = ({
         step15_result:   approvedCapacitorDesign
                            ? ({ ...approvedCapacitorDesign } as Record<string, unknown>)
                            : {},
-        step16_params: { ...step16_params, js_design_state: jsState },
+        step16_params: { ...step16_params, js_design_state: jsState, s2: s2sel ?? undefined },
       })
       const url = URL.createObjectURL(blob)
       const a   = document.createElement('a')
@@ -156,7 +158,15 @@ export const ControlDesign: React.FC<Props> = ({
       confirmedState={confirmedState}
       params={params}
       onBack={onBack}
-      onConfirm={() => setScreen('tool')} />
+      onConfirm={() => setScreen('s2')} />
+  }
+  // ── Screen 2 — Controller-fixed components + designer selections ───────────
+  if (screen === 's2') {
+    return <ComponentsSelect
+      params={params}
+      initial={s2sel}
+      onBack={() => setScreen('s1')}
+      onConfirm={(sel) => { setS2Sel(sel); setScreen('tool') }} />
   }
 
   return (
@@ -187,7 +197,7 @@ export const ControlDesign: React.FC<Props> = ({
         justifyContent: 'space-between', alignItems: 'flex-start',
       }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="ghost" onClick={() => setScreen('s1')}>← Back (Screen 1)</Btn>
+          <Btn variant="ghost" onClick={() => setScreen('s2')}>← Back (Screen 2)</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
         </div>
 

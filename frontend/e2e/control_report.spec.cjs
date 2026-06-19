@@ -75,14 +75,23 @@ async function testControlDesignButtons(browser) {
   ok(await page.getByText(/Operating points/i).first()
       .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
      'operating-point table present (power-plant endpoint OK)');
-  const confirm = page.getByRole('button', { name: /Confirm & Continue/i }).first();
-  let enabled = false;
-  for (let i = 0; i < 40 && !enabled; i++) {
-    enabled = await confirm.isEnabled().catch(() => false);
-    if (!enabled) await page.waitForTimeout(200);
-  }
-  ok(enabled, 'Confirm & Continue becomes enabled once the table loads');
-  await confirm.click();
+  const waitConfirm = async (label) => {
+    const b = page.getByRole('button', { name: /Confirm & Continue/i }).first();
+    let en = false;
+    for (let i = 0; i < 40 && !en; i++) { en = await b.isEnabled().catch(() => false); if (!en) await page.waitForTimeout(200); }
+    ok(en, label);
+    await b.click();
+  };
+  await waitConfirm('S1 Confirm & Continue becomes enabled once the table loads');
+
+  // Screen 2 — Controller-fixed components + selections
+  ok(await page.getByText(/Screen 2 of 7 — Controller-Fixed Components/i).first()
+      .waitFor({ state: 'visible', timeout: 12000 }).then(() => true).catch(() => false),
+     'Screen 2 (Components) renders');
+  ok(await page.getByText(/valid for HL & LL/i).first()
+      .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     'R_CS valid-band indicator present (components endpoint OK)');
+  await waitConfirm('S2 Confirm & Continue enabled (R_CS in valid band)');
 
   // now the FAN9672 tool iframe + the two action buttons appear
   const iframe = page.locator('iframe').first();
