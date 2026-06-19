@@ -2993,3 +2993,10 @@ only font/text/alignment changed to our style.
 - Frontend: new ComponentsSelect.tsx (Screen 2) - fixed table, R_CS constrained selector with live valid-HL&LL check, filter-cap + R_LS inputs; client controlComponents(). ControlDesign wizard s1->s2->tool; S2 selections stored + injected into handleReport step16_params.s2; tool Back -> Screen 2.
 - e2e Test B: clears S1 then S2 (asserts components render + R_CS valid indicator + confirm) then tool. ALL CHECKS PASS; tsc/build clean. Verified R_CS=13mOhm flows into report.
 - Status: S1, S2 DONE. Next: S3 (review Core Component Table + Fixed Coefficients).
+
+
+## C26 - Control Design redesign: Screen 3 (Core Components + Fixed Coefficients review)
+- Backend: POST /mode-b/control/coefficients returns the 11 controller-constant rows (report Step 2 table).
+- Frontend: new CoreReview.tsx (Screen 3, review-only) - consolidated Core Component Table (fixed components + Screen-2 designer selections with function) + Fixed Coefficients/Internal Parameters table; client controlCoefficients(). ControlDesign wizard s1->s2->s3->tool; S3 reads s2sel (reflects R_CS override in fetched values); tool Back -> Screen 3.
+- e2e Test B: clears S1,S2,S3 (asserts each renders + endpoint data + confirm) then tool. ALL CHECKS PASS; tsc/build clean.
+- Status: S1, S2, S3 DONE. Next: S4 (Compensators & Bode) - first migration of interactive tool content into a gated React screen (or keep tool tab + confirm gate).

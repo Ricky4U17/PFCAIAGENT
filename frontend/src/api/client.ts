@@ -301,6 +301,17 @@ export const controlComponents = (inputs: Record<string, unknown>): Promise<Cont
     return res.json()
   })
 
+// Control Design Screen 3 — Fixed Coefficients / Internal Parameters (review).
+export const controlCoefficients = (inputs: Record<string, unknown>): Promise<{ coefficients: string[][] }> =>
+  fetch(`${BASE}/mode-b/control/coefficients`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ inputs }),
+  }).then(async res => {
+    if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
+    return res.json()
+  })
+
 // ── Step 7: Generate combined report (Steps 1–14) ────────────────────────────
 export const step7GenerateReport = (payload: {
   state:           Record<string, unknown>

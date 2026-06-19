@@ -93,10 +93,19 @@ async function testControlDesignButtons(browser) {
      'R_CS valid-band indicator present (components endpoint OK)');
   await waitConfirm('S2 Confirm & Continue enabled (R_CS in valid band)');
 
+  // Screen 3 — Core components + Fixed coefficients (review)
+  ok(await page.getByText(/Screen 3 of 7 — Core Components & Fixed Coefficients/i).first()
+      .waitFor({ state: 'visible', timeout: 12000 }).then(() => true).catch(() => false),
+     'Screen 3 (Core Components & Fixed Coefficients) renders');
+  ok(await page.getByText(/Fixed Coefficients \/ Internal Parameters/i).first()
+      .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     'Fixed Coefficients table present (coefficients endpoint OK)');
+  await waitConfirm('S3 Confirm & Continue enabled');
+
   // now the FAN9672 tool iframe + the two action buttons appear
   const iframe = page.locator('iframe').first();
   ok(await iframe.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false),
-     'Control Design iframe (FAN9672 tool) rendered after Screen 1 confirm');
+     'Control Design iframe (FAN9672 tool) rendered after Screens 1–3 confirm');
 
   const reportBtn = page.getByRole('button', { name: /Generate Full Report/i }).first();
   ok(await reportBtn.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),

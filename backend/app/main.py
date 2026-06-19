@@ -370,6 +370,17 @@ def control_components(req: _ComponentsReq):
     except Exception as e:
         log.exception("control components"); raise HTTPException(500, str(e))
 
+@app.post("/mode-b/control/coefficients", tags=["mode-b"])
+def control_coefficients(req: _ComponentsReq):
+    """Control Design Screen 3 — Fixed Coefficients / Internal Parameters (review).
+    Returns the controller constants & design targets (report Step 2 table)."""
+    try:
+        from app.mode_b.step16_steps1_8 import compute_steps_1_8
+        d = compute_steps_1_8(req.inputs or None)
+        return {"coefficients": d["step2"]["rows"]}
+    except Exception as e:
+        log.exception("control coefficients"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:

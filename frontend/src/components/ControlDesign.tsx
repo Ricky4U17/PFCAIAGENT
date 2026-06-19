@@ -19,6 +19,7 @@ import type { CapacitorResult } from './Step15Capacitor'
 import { docGenerateReport } from '../api/client'
 import { PowerPlantReview } from './PowerPlantReview'
 import { ComponentsSelect, type ComponentSelections } from './ComponentsSelect'
+import { CoreReview } from './CoreReview'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -36,9 +37,9 @@ export const ControlDesign: React.FC<Props> = ({
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string|null>(null)
-  // Control-Design screen wizard (S1 Power Plant, S2 Components; 'tool' = existing
-  // FAN9672 tool for S3–S7, migrated screen-by-screen).
-  const [screen, setScreen] = useState<'s1'|'s2'|'tool'>('s1')
+  // Control-Design screen wizard (S1 Power Plant, S2 Components, S3 Core review;
+  // 'tool' = existing FAN9672 tool for S4–S7, migrated screen-by-screen).
+  const [screen, setScreen] = useState<'s1'|'s2'|'s3'|'tool'>('s1')
   const [s2sel, setS2Sel] = useState<ComponentSelections|null>(null)
   const injectedRef = useRef(false)
 
@@ -166,7 +167,15 @@ export const ControlDesign: React.FC<Props> = ({
       params={params}
       initial={s2sel}
       onBack={() => setScreen('s1')}
-      onConfirm={(sel) => { setS2Sel(sel); setScreen('tool') }} />
+      onConfirm={(sel) => { setS2Sel(sel); setScreen('s3') }} />
+  }
+  // ── Screen 3 — Core components + Fixed coefficients (review) ───────────────
+  if (screen === 's3') {
+    return <CoreReview
+      params={params}
+      s2sel={s2sel}
+      onBack={() => setScreen('s2')}
+      onConfirm={() => setScreen('tool')} />
   }
 
   return (
@@ -197,7 +206,7 @@ export const ControlDesign: React.FC<Props> = ({
         justifyContent: 'space-between', alignItems: 'flex-start',
       }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="ghost" onClick={() => setScreen('s2')}>← Back (Screen 2)</Btn>
+          <Btn variant="ghost" onClick={() => setScreen('s3')}>← Back (Screen 3)</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
         </div>
 
