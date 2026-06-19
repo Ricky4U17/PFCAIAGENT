@@ -260,6 +260,42 @@ def control_report(req: ControlReportReq):
     except Exception as e:
         log.exception("control report gen"); raise HTTPException(500, str(e))
 
+
+class _PowerPlantReq(BaseModel):
+    vin_min: float = 90.0
+    vin_max: float = 264.0
+    pout_lo: float = 1700.0
+    pout_hi: float = 3600.0
+    vout:    float = 393.7
+
+@app.post("/mode-b/control/power-plant", tags=["mode-b"])
+def control_power_plant(req: _PowerPlantReq):
+    """Control Design Screen 1 — power-plant parameters review.
+    Returns the canonical operating-point grid (the same η/PF reference used in
+    the report's Table 1.2.2) with per-point V_in,pk, duty and R_LOAD derived
+    for the chosen V_OUT. Scalar fixed params (L, C, compliance, …) are rendered
+    by the GUI from carried-in state."""
+    try:
+        import math
+        from app.mode_b.calculations import canonical_ops_table
+        m = canonical_ops_table(req.vin_min, req.vin_max, req.pout_lo, req.pout_hi)
+        rows = []
+        for r in m:
+            vac, pout, eta, pf = float(r[0]), float(r[1]), float(r[2]), float(r[3])
+            vin_pk = vac * math.sqrt(2.0)
+            duty = max(0.0, 1.0 - vin_pk / req.vout)
+            rload = req.vout ** 2 / pout
+            rows.append({
+                "vac": round(vac, 1), "pout": round(pout, 0),
+                "eta_pct": round(eta * 100, 2), "pf": round(pf, 4),
+                "vin_pk": round(vin_pk, 2), "duty": round(duty, 4),
+                "rload": round(rload, 3),
+                "line": "Low" if vac < 180 else "High",
+            })
+        return {"rows": rows}
+    except Exception as e:
+        log.exception("power-plant"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:

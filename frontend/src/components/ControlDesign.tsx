@@ -17,6 +17,7 @@ import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { C, Btn } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { docGenerateReport } from '../api/client'
+import { PowerPlantReview } from './PowerPlantReview'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -34,6 +35,9 @@ export const ControlDesign: React.FC<Props> = ({
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string|null>(null)
+  // Control-Design screen wizard (S1 = Power Plant review; 'tool' = existing
+  // FAN9672 tool for S2–S7, migrated screen-by-screen).
+  const [screen, setScreen] = useState<'s1'|'tool'>('s1')
   const injectedRef = useRef(false)
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
@@ -146,6 +150,15 @@ export const ControlDesign: React.FC<Props> = ({
   }
 
 
+  // ── Screen 1 — Power Plant Parameters (review → confirm) ───────────────────
+  if (screen === 's1') {
+    return <PowerPlantReview
+      confirmedState={confirmedState}
+      params={params}
+      onBack={onBack}
+      onConfirm={() => setScreen('tool')} />
+  }
+
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
 
@@ -174,7 +187,7 @@ export const ControlDesign: React.FC<Props> = ({
         justifyContent: 'space-between', alignItems: 'flex-start',
       }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="ghost" onClick={onBack}>← Back</Btn>
+          <Btn variant="ghost" onClick={() => setScreen('s1')}>← Back (Screen 1)</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
         </div>
 

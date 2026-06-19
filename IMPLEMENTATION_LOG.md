@@ -2977,3 +2977,11 @@ only font/text/alignment changed to our style.
 - ControlDesign page now has ONE report button: "Generate Full Report (Chapters 1-6 + Appendices)" (combined Ch1-5 + detailed Ch6 via docGenerateReport). Removed the standalone "Control-Loop Report (Steps 1-14 + Appendices)" button + handleControlReport + ctrl state + controlReport import. (/mode-b/control-report endpoint + client kept for API use.)
 - New second button "Select Semiconductors ->" advances to Chapter 7. App.tsx: added 'semiconductors' step + SS label + onSelectSemiconductors wiring; new SemiconductorSelection.tsx (Chapter 7 scaffold carrying bus V / power / L / C forward). Stepper.tsx: added Semiconductors entry.
 - e2e updated (Test B): asserts the single Generate-Full-Report button present, old Control-Loop Report button removed, Select Semiconductors button present, and that it navigates to the Chapter 7 page. ALL CHECKS PASS. tsc/build clean.
+
+
+## C24 - Control Design redesign: Screen 1 (Power Plant Parameters) implemented
+- Backend: POST /mode-b/control/power-plant (canonical_ops_table) returns the 9-point grid (vac, pout, eta_pct, pf, vin_pk, duty, rload, line) = same eta/PF as report Table 1.2.2.
+- Frontend: new PowerPlantReview.tsx (Screen 1, themed React) - fixed-params cards (Vin range, Vout, Pout HL/LL, fsw, Nch, L, r_L, C, r_C, PF/eff targets, line freq), 9-point operating-point table, compliance card; Confirm & Continue gating. client.ts controlPowerPlant()/PowerPlantRow.
+- ControlDesign.tsx: screen wizard state ('s1' -> 'tool'); S1 renders first, Confirm -> existing FAN9672 tool (S2-S7, to be migrated next); tool Back -> Screen 1.
+- e2e Test B updated: asserts S1 renders + table loads (endpoint OK) + Confirm enables -> tool + buttons + Chapter 7 nav. ALL CHECKS PASS; tsc/build clean.
+- Status: S1 DONE. Next: S2 (controller-fixed components + selectable caps/R_CS).

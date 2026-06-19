@@ -67,10 +67,27 @@ async function testControlDesignButtons(browser) {
   page.on('pageerror', e => errs.push(String(e)));
   await page.goto(APP, { waitUntil: 'load' });
 
-  // the real ControlDesign component renders the FAN9672 tool iframe + two buttons
+  // Screen 1 — Power Plant Parameters (review) shows first
+  ok(await page.getByText(/Screen 1 of 7 — Power Plant Parameters/i).first()
+      .waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false),
+     'Screen 1 (Power Plant Parameters) renders');
+  // the operating-point table (Table 1.2.2 data) loaded from the backend
+  ok(await page.getByText(/Operating points/i).first()
+      .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false),
+     'operating-point table present (power-plant endpoint OK)');
+  const confirm = page.getByRole('button', { name: /Confirm & Continue/i }).first();
+  let enabled = false;
+  for (let i = 0; i < 40 && !enabled; i++) {
+    enabled = await confirm.isEnabled().catch(() => false);
+    if (!enabled) await page.waitForTimeout(200);
+  }
+  ok(enabled, 'Confirm & Continue becomes enabled once the table loads');
+  await confirm.click();
+
+  // now the FAN9672 tool iframe + the two action buttons appear
   const iframe = page.locator('iframe').first();
   ok(await iframe.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false),
-     'Control Design iframe (FAN9672 tool) rendered');
+     'Control Design iframe (FAN9672 tool) rendered after Screen 1 confirm');
 
   const reportBtn = page.getByRole('button', { name: /Generate Full Report/i }).first();
   ok(await reportBtn.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),

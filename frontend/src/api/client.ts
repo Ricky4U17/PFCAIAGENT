@@ -264,6 +264,23 @@ export const controlReport = (inputs: Record<string, unknown>): Promise<Blob> =>
     return res.blob()
   })
 
+export interface PowerPlantRow {
+  vac: number; pout: number; eta_pct: number; pf: number
+  vin_pk: number; duty: number; rload: number; line: string
+}
+// Control Design Screen 1 — canonical operating-point grid (eta/PF/Vin_pk/duty/R_LOAD).
+export const controlPowerPlant = (p: {
+  vin_min: number; vin_max: number; pout_lo: number; pout_hi: number; vout: number
+}): Promise<{ rows: PowerPlantRow[] }> =>
+  fetch(`${BASE}/mode-b/control/power-plant`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(p),
+  }).then(async res => {
+    if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
+    return res.json()
+  })
+
 // ── Step 7: Generate combined report (Steps 1–14) ────────────────────────────
 export const step7GenerateReport = (payload: {
   state:           Record<string, unknown>
