@@ -1429,22 +1429,29 @@ function renderScreen4(p,dci,dcv){
   if(!$('screen4').classList.contains('active'))return;
   if(dcv.err){$('thdTable').innerHTML='';$('cards3').innerHTML='';$('thdNote').textContent=dcv.err;return}
   const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk, rcs=state.rcsSel*1e-3;
+  const IEC_I3=2.30;   // IEC 61000-3-2 Class A — 3rd-harmonic current limit (A, absolute)
   const rows=opPts(p,'all').map(op=>{
     const riac=op.line==='LL'?6e6:12e6;
     const veaEff=rcs*den*((op.pout/p.nch)*p.kmax)/(p.krm*riac);
     const t=thdCalc(p,dci,dcv,op.vac,op.pout,veaEff);
-    return{op,veaEff,...t};
+    const eta=op.line==='LL'?ETA_LO:ETA_HI;
+    const i1=op.pout/(eta*op.vac);     // fundamental RMS input current (PF≈1)
+    const i3=(t.thd3/100)*i1;          // 3rd-harmonic current = iTHD₃ · I₁
+    return{op,veaEff,...t,i1,i3,iecPass:i3<=IEC_I3};
   });
-  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple,pk 120 Hz</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th></tr>';
+  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple,pk 120 Hz</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th><th>I₁ (A)</th><th>I₃ (A)</th><th>IEC 61000-3-2<br>Class A ≤ 2.30 A</th></tr>';
   for(const r of rows){
-    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(r.Vr,2)} V (${fmt(100*r.Vr/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td></tr>`;
+    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(r.Vr,2)} V (${fmt(100*r.Vr/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td><td>${fmt(r.i1,1)}</td><td>${fmt(r.i3,3)}</td><td><span class="pill ${r.iecPass?'ok':'bad'}">${r.iecPass?'PASS':'FAIL'}</span></td></tr>`;
   }
   $('thdTable').innerHTML=th;
   const allOK=rows.every(r=>r.rej>=20);
-  $('thdNote').className='note '+(allOK?'':'badN');
-  $('thdNote').innerHTML=allOK
+  const wIEC=rows.reduce((a,b)=>a.i3>b.i3?a:b), iecAll=rows.every(r=>r.iecPass), over16=rows.some(r=>r.i1>16);
+  const iecLine=` <br><b>IEC 61000-3-2 (Class A)</b> — 3rd-harmonic limit I₃ ≤ 2.30 A: worst I₃ = ${fmt(wIEC.i3,3)} A @ ${wIEC.op.vac} Vac → <span class="pill ${iecAll?'ok':'bad'}">${iecAll?'PASS':'FAIL'}</span> (I₃ = iTHD₃ · I₁, I₁ = P_in/(η·V_AC)).`
+    +(over16?' Operating points drawing >16 A fundamental are formally covered by IEC 61000-3-12; 2.30 A shown as the Class-A reference.':'');
+  $('thdNote').className='note '+(allOK&&iecAll?'':'badN');
+  $('thdNote').innerHTML=(allOK
     ?'Rejection = −20·log₁₀|T<sub>v</sub>(j2π·120)| from the compensated loop; iTHD₃ ≈ 50·V<sub>EA,120</sub>/V<sub>EA,eff</sub> with V<sub>EA,eff</sub> back-calculated per range from the selected R<sub>CS</sub>. Lower f<sub>cv</sub> to reduce iTHD at the cost of a larger transient dip (Screen 3).'
-    :'120 Hz rejection is below the 20 dB floor at one or more voltages — the loop will inject 3rd-harmonic distortion. Lower f<sub>cv</sub> or pull the compensator poles down.';
+    :'120 Hz rejection is below the 20 dB floor at one or more voltages — the loop will inject 3rd-harmonic distortion. Lower f<sub>cv</sub> or pull the compensator poles down.')+iecLine;
   const wLL=rows.filter(r=>r.op.line==='LL').reduce((a,b)=>a.thd3>b.thd3?a:b);
   const wHL=rows.filter(r=>r.op.line==='HL').reduce((a,b)=>a.thd3>b.thd3?a:b);
   const wRej=rows.reduce((a,b)=>a.rej<b.rej?a:b);
@@ -1452,7 +1459,8 @@ function renderScreen4(p,dci,dcv){
     <div class="card"><div class="k">Worst iTHD₃ — low line</div><div class="v">${fmt(wLL.thd3,2)} %</div><div class="u">@ ${wLL.op.vac} Vac · rej ${fmt(wLL.rej,1)} dB</div></div>
     <div class="card"><div class="k">Worst iTHD₃ — high line</div><div class="v">${fmt(wHL.thd3,2)} %</div><div class="u">@ ${wHL.op.vac} Vac · rej ${fmt(wHL.rej,1)} dB</div></div>
     <div class="card ${wRej.rej>=20?'gd':'bd'}"><div class="k">Worst 120 Hz rejection</div><div class="v">${fmt(wRej.rej,1)} dB</div><div class="u">floor 20 dB · @ ${wRej.op.vac} Vac</div></div>
-    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(rows.find(r=>r.op.vac===180).Vr,2)} V</div><div class="u">${fmt(100*rows.find(r=>r.op.vac===180).Vr/p.vout,2)} % of V_OUT</div></div>`;
+    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(rows.find(r=>r.op.vac===180).Vr,2)} V</div><div class="u">${fmt(100*rows.find(r=>r.op.vac===180).Vr/p.vout,2)} % of V_OUT</div></div>
+    <div class="card ${iecAll?'gd':'bd'}"><div class="k">IEC 61000-3-2 · I₃ (Class A)</div><div class="v">${fmt(wIEC.i3,2)} / 2.30 A</div><div class="u">worst @ ${wIEC.op.vac} Vac · ${iecAll?'PASS':'FAIL'}</div></div>`;
   drawThdPlot(rows,p);
 }
 function drawThdPlot(rows,p,cvId='thdPlot'){

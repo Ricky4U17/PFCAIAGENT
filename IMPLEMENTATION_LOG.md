@@ -3152,3 +3152,11 @@ only font/text/alignment changed to our style.
   across S1->S4 (no remount); iframe present-but-hidden at S1, visible at S4.
 - Tool-level confirmed transient/iTHD DO update on crossover change (tab->recalc): -29V/142ms
   -> -21V/60ms; iTHD 0.68%% -> 1.11%%.
+
+## C40 - S6 iTHD: add IEC 61000-3-2 (Class A) 3rd-harmonic pass/fail
+- control_design.html (public + src/assets) renderScreen4: per operating point compute
+  I1 = Pout/(eta*Vac) (fundamental, PF~1) and I3 = (iTHD3/100)*I1, compare to IEC 61000-3-2
+  Class A 3rd-harmonic limit 2.30 A. Added table columns I1 (A) / I3 (A) / IEC verdict;
+  summary card 'IEC 61000-3-2 . I3 (Class A) = X / 2.30 A'; note line with worst I3 + the
+  >16 A -> IEC 61000-3-12 scope caveat. Class A used because PFC is >600 W (not Class D).
+- Verified headless: worst I3 = 0.42 A @ 180 Vac -> PASS; columns/card/note render; no JS errors.
