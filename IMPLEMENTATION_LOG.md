@@ -3036,3 +3036,11 @@ only font/text/alignment changed to our style.
   reverses (4a Back -> S3, S5 Back -> 4c). postWizard sends {screen:screen2, sub} on S4.
   Label shows '4a/4b/4c'. goNext/goBack replace WIZ_NEXT/PREV for S4.
 - Verified headless (playwright): correct panels per sub, allCompBom 13 rows, no JS errors.
+
+## C31 - S4 sub-screens: gated steps -> free sub-tab bar
+- ControlDesign.tsx: S4 now shows a 3-button sub-tab bar (4a Current / 4b Voltage /
+  4c Final components) above the iframe; clicking sets s4sub directly (effect re-posts
+  {screen:screen2,sub} to the tool). S4 advances/retreats as a whole again:
+  goNext/goBack reduced to WIZ_NEXT/WIZ_PREV (s4->s5 / s4->s3). Continue label simplified.
+- No control_design.html change (sub switching already supported via setWizardScreen sub).
+- Build clean.

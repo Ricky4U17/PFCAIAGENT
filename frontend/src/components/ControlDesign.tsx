@@ -48,10 +48,15 @@ export const ControlDesign: React.FC<Props> = ({
   const [reportGen, setReportGen] = useState(false)
   const injectedRef = useRef(false)
   const TOOL_TAB: Record<string, string> = { s4: 'screen2', s5: 'screen3', s6: 'screen4', s7: 'screen5' }
-  const WIZ_NEXT: Record<string, Scr> = { s5: 's6', s6: 's7' }
-  const WIZ_PREV: Record<string, Scr> = { s6: 's5', s7: 's6' }
+  const WIZ_NEXT: Record<string, Scr> = { s4: 's5', s5: 's6', s6: 's7' }
+  const WIZ_PREV: Record<string, Scr> = { s4: 's3', s5: 's4', s6: 's5', s7: 's6' }
   const WIZ_LABEL: Record<string, string> = {
     s5: 'Screen 5/7 · Transient', s6: 'Screen 6/7 · iTHD', s7: 'Screen 7/7 · Schematic & Report',
+  }
+  // S4 sub-screens — freely switchable via a sub-tab bar (not gated)
+  const SUB_ORDER: Sub[] = ['cur', 'vol', 'res']
+  const SUB_TAB: Record<Sub, string> = {
+    cur: '4a · Current loop', vol: '4b · Voltage loop', res: '4c · Final components',
   }
   const SUB_LABEL: Record<Sub, string> = {
     cur: '4a · Current loop — HL & LL (incl. CS filter across R_CS)',
@@ -74,22 +79,9 @@ export const ControlDesign: React.FC<Props> = ({
     if (TOOL_TAB[screen]) { const id = setTimeout(postWizard, 60); return () => clearTimeout(id) }
   }, [screen, s4sub])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // wizard nav — S4 walks its 3 sub-screens (current → voltage → results) before S5
-  const goNext = () => {
-    if (screen === 's4') {
-      if (s4sub === 'cur') setS4sub('vol')
-      else if (s4sub === 'vol') setS4sub('res')
-      else setScreen('s5')
-    } else setScreen(WIZ_NEXT[screen])
-  }
-  const goBack = () => {
-    if (screen === 's4') {
-      if (s4sub === 'cur') setScreen('s3')
-      else if (s4sub === 'vol') setS4sub('cur')
-      else setS4sub('vol')
-    } else if (screen === 's5') { setS4sub('res'); setScreen('s4') }
-    else setScreen(WIZ_PREV[screen])
-  }
+  // wizard nav — S4 advances/retreats as a whole; its 3 sub-screens switch freely (tabs)
+  const goNext = () => setScreen(WIZ_NEXT[screen])
+  const goBack = () => setScreen(WIZ_PREV[screen])
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
   // control_design.html is cross-origin (no allow-same-origin), so it posts its
@@ -231,6 +223,24 @@ export const ControlDesign: React.FC<Props> = ({
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
 
+      {/* ── S4 sub-tab bar: freely switch current / voltage / results ── */}
+      {screen === 's4' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {SUB_ORDER.map(sb => {
+            const active = sb === s4sub
+            return (
+              <button key={sb} onClick={() => setS4sub(sb)} style={{
+                flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                fontSize: 12, fontWeight: 600, fontFamily: 'IBM Plex Mono,monospace',
+                border: `1px solid ${active ? C.teal : C.border}`,
+                background: active ? 'rgba(45,212,191,.12)' : C.bg3,
+                color: active ? C.teal : C.muted,
+              }}>{SUB_TAB[sb]}</button>
+            )
+          })}
+        </div>
+      )}
+
       {/* ── iframe: served from public/ — no srcdoc, no allow-same-origin ── */}
       <iframe
         ref={iframeRef}
@@ -264,9 +274,7 @@ export const ControlDesign: React.FC<Props> = ({
         </div>
 
         {screen !== 's7' ? (
-          <Btn variant="primary" onClick={goNext}>
-            {screen === 's4' && s4sub !== 'res' ? 'Confirm & Next →' : 'Confirm & Continue →'}
-          </Btn>
+          <Btn variant="primary" onClick={goNext}>Confirm &amp; Continue →</Btn>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
             {rptError && (
