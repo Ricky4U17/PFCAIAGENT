@@ -3015,3 +3015,9 @@ only font/text/alignment changed to our style.
 - S3 (CoreReview): selectable rows updated to the new cap set; 'Pin-8 series resistor'/'R_pin8' renamed -> 'LPK series resistor'/'R_LPK', default 4.7 kOhm (was 4.75).
 - e2e ALL PASS; tsc/build clean; verified S2 via screenshot (dropdowns + live poles + R_LPK 4.7k). Restarted user :8000 backend with --reload.
 - Earlier this turn: diagnosed user 404 = stale 4-day-old backend holding :8000 (Errno 10048 on restart); cleared orphaned multiprocessing workers, freed port, started fresh.
+
+## C29 - S2: R_LS tracks R_CS
+- R_LS = Lφ/(1.5e-9·R_CS·ratio) ⇒ R_LS ∝ 1/R_CS. Selecting a non-recommended R_CS now
+  live-rescales R_LS (calc_kohm·recommended/rcs) and snaps to the nearest standard kΩ.
+- C_LS pole (cap across R_LS) now uses the SELECTED R_LS, so it tracks too.
+- R_LS row note shows the live calc + '(tracks R_CS)'. Frontend-only; build clean.

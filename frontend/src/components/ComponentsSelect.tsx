@@ -72,6 +72,16 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
   const upd = (k: keyof ComponentSelections, v: number) => setS(x => x ? { ...x, [k]: v } : x)
   const rcsValid = !!(data && s && s.rcs_mohm >= data.rcs.min_mohm && s.rcs_mohm <= data.rcs.max_mohm)
 
+  // R_LS = Lφ/(1.5e-9·R_CS·ratio) ⇒ R_LS ∝ 1/R_CS. calc_kohm is computed at the
+  // recommended R_CS, so rescale it live for any selected R_CS, then snap to standard.
+  const rlsCalcK = (rcsMohm: number) =>
+    data ? data.r_ls.calc_kohm * (data.rcs.recommended_mohm / rcsMohm) : 0
+  const nearestK = (k: number) =>
+    data ? data.r_ls.options_kohm.reduce((a, b) => Math.abs(b - k) < Math.abs(a - k) ? b : a,
+      data.r_ls.options_kohm[0]) : k
+  // selecting a different R_CS retracks R_LS to the rescaled standard value
+  const onRcs = (v: number) => setS(x => x ? { ...x, rcs_mohm: v, r_ls_kohm: nearestK(rlsCalcK(v)) } : x)
+
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '8px 4px 24px' }}>
       <SecHead icon="🧩" label="Control Design · Screen 2 of 7 — Controller-Fixed Components & Selections"
@@ -106,7 +116,7 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 12, color: C.text }}>R_CS:
               <select value={s.rcs_mohm} style={{ ...sel, marginLeft: 8 }}
-                onChange={e => upd('rcs_mohm', Number(e.target.value))}>
+                onChange={e => onRcs(Number(e.target.value))}>
                 {data.rcs.options_mohm.map(v => (
                   <option key={v} value={v}>{v} mΩ{v === data.rcs.recommended_mohm ? ' (recommended)' : ''}</option>
                 ))}
@@ -133,6 +143,8 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
                 {CAP_FIELDS.map(([field, key]) => {
                   const meta = data.selectable.find(x => x.key === key)!
                   const cur = s[field]
+                  // C_LS sits across R_LS, so its pole tracks the selected R_LS
+                  const rOhm = key === 'c_ls' ? s.r_ls_kohm * 1000 : meta.r_assoc_ohm
                   return (
                     <tr key={key}>
                       <td style={cell}>{meta.name}</td>
@@ -143,7 +155,7 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
                         </select>
                       </td>
                       <td style={{ ...cell, color: C.muted }}>
-                        pole {fmtHz(poleHz(meta.r_assoc_ohm, cur))} ({meta.role})
+                        pole {fmtHz(poleHz(rOhm, cur))} ({meta.role})
                       </td>
                     </tr>
                   )
@@ -156,7 +168,7 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
                       {data.r_ls.options_kohm.map(v => <option key={v} value={v}>{v} kΩ</option>)}
                     </select>
                   </td>
-                  <td style={{ ...cell, color: C.muted }}>calc {data.r_ls.calc_kohm} kΩ · {data.r_ls.role}</td>
+                  <td style={{ ...cell, color: C.muted }}>calc {rlsCalcK(s.rcs_mohm).toFixed(1)} kΩ (tracks R_CS) · {data.r_ls.role}</td>
                 </tr>
               </tbody>
             </table>
