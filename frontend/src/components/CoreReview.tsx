@@ -51,13 +51,12 @@ export const CoreReview: React.FC<Props> = ({ params, s2sel, onBack, onConfirm }
   const selRows: { name: string; symbol: string; value: string; role: string }[] = s2sel ? [
     { name: 'Current-sense resistor', symbol: 'R_CS', value: `${s2sel.rcs_mohm} mΩ`, role: 'designer-selected' },
     { name: 'Gain-control filter cap', symbol: sym('c_gc'), value: fmtCap(s2sel.c_gc_pf), role: role('c_gc') },
-    { name: 'Current-predict filter cap', symbol: sym('c_ls'), value: fmtCap(s2sel.c_ls_pf), role: role('c_ls') },
-    { name: 'Soft-start cap', symbol: sym('c_ss'), value: fmtCap(s2sel.c_ss_pf), role: role('c_ss') },
-    { name: 'LPK signal filter cap', symbol: sym('c_lpk'), value: fmtCap(s2sel.c_lpk_pf), role: role('c_lpk') },
     { name: 'RLPK filter cap', symbol: sym('c_rlpk'), value: fmtCap(s2sel.c_rlpk_pf), role: role('c_rlpk') },
     { name: 'ILIMIT filter cap', symbol: sym('c_ilimit'), value: fmtCap(s2sel.c_ilimit_pf), role: role('c_ilimit') },
     { name: 'ILIMIT2 filter cap', symbol: sym('c_ilimit2'), value: fmtCap(s2sel.c_ilimit2_pf), role: role('c_ilimit2') },
-    { name: 'Current-predict resistor', symbol: 'R_LS', value: `${s2sel.r_ls_kohm} kΩ`, role: role('r_ls') },
+    { name: 'VIR filter cap', symbol: sym('c_vir'), value: fmtCap(s2sel.c_vir_pf), role: role('c_vir') },
+    { name: 'Current-predict filter cap', symbol: sym('c_ls'), value: fmtCap(s2sel.c_ls_pf), role: role('c_ls') },
+    { name: 'Current-predict resistor', symbol: 'R_LS', value: `${s2sel.r_ls_kohm} kΩ`, role: 'designer-selected' },
   ] : []
 
   const tableA = comp ? [...comp.fixed, ...selRows] : []

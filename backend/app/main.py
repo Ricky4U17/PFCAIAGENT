@@ -315,7 +315,7 @@ def control_components(req: _ComponentsReq):
 
         def ohm(x):
             return f"{x/1e6:.2f} MΩ" if x >= 1e6 else (f"{x/1e3:.1f} kΩ" if x >= 1e3 else f"{x:.1f} Ω")
-        R_PIN8 = 4.75e3
+        R_LPK = 4.7e3   # LPK series resistor (fixed)
         fixed = [
             {"name": "Oscillator resistor", "symbol": "R_RI", "value": ohm(s4["rri_selected"]),
              "role": f"sets f_sw ≈ {s4['fsw_at_selected']/1e3:.1f} kHz"},
@@ -333,40 +333,43 @@ def control_components(req: _ComponentsReq):
             {"name": "BIBO C1", "symbol": "CB1", "value": f"{b['cb1']*1e9:.0f} nF", "role": "filter pole 1"},
             {"name": "BIBO C2", "symbol": "CB2", "value": f"{b['cb2']*1e9:.0f} nF", "role": "filter pole 2"},
             {"name": "Gain-control resistor", "symbol": "R_GC", "value": ohm(s8["r_gc_sel"]), "role": "LPT gain align"},
-            {"name": "Pin-8 series resistor", "symbol": "R_pin8", "value": ohm(R_PIN8), "role": "LPK series (fixed)"},
+            {"name": "LPK series resistor", "symbol": "R_LPK", "value": ohm(R_LPK), "role": "LPK series (fixed)"},
         ]
         m1_ll, m1_hl = s6["rcs1_ll"], s6["rcs1_hl"]
         rcs_max = min(m1_ll, m1_hl)
+        rcs_min = 0.85 * rcs_max
+        rec_mohm = round(s6["rcs_sel"] * 1e3, 2)
+        STD_MOHM = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
+        rcs_opts = sorted(set([v for v in STD_MOHM if rcs_min * 1e3 <= v <= rcs_max * 1e3] + [rec_mohm]))
         rcs = {
-            "min_mohm": round(0.85 * rcs_max * 1e3, 2),
-            "max_mohm": round(rcs_max * 1e3, 2),
-            "recommended_mohm": round(s6["rcs_sel"] * 1e3, 2),
+            "min_mohm": round(rcs_min * 1e3, 2), "max_mohm": round(rcs_max * 1e3, 2),
+            "recommended_mohm": rec_mohm, "options_mohm": rcs_opts,
             "m1_ll_mohm": round(m1_ll * 1e3, 2), "m1_hl_mohm": round(m1_hl * 1e3, 2),
             "note": "Valid band satisfies the AN4165 (Method-1) VRM limit at both HL and LL.",
         }
-
-        def pole(R, C):
-            return round(1.0 / (2 * math.pi * R * C), 1)
+        # standard E6 capacitor values (pF) offered in every cap dropdown
+        CAP_PF = [100, 150, 220, 330, 470, 680, 1000, 1500, 2200, 3300, 4700, 6800,
+                  10000, 15000, 22000, 33000, 47000, 68000, 100000]
+        RLS_KOHM = [12, 13, 15, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82]
+        # designer-selectable filter caps: default + associated R (frontend computes the live pole)
         selectable = [
             {"key": "c_gc", "name": "Gain-control filter cap", "symbol": "C_GC",
-             "default_pf": round(s8["c_gc"] * 1e12, 1), "role": f"pole {s8['f_gc']/1e3:.2f} kHz (with R_GC)"},
-            {"key": "c_ls", "name": "Current-predict filter cap", "symbol": "C_LS",
-             "default_pf": round(s8["c_ls"] * 1e12, 1), "role": f"pole {s8['f_ls']/1e3:.2f} kHz (with R_LS)"},
-            {"key": "c_ss", "name": "Soft-start cap", "symbol": "C_SS",
-             "default_pf": round(s8["c_ss"] * 1e12, 1), "role": f"t_SS ≈ {s8['t_ss_real']*1e3:.0f} ms"},
-            {"key": "c_lpk", "name": "LPK signal filter cap", "symbol": "C_LPK",
-             "default_pf": 1000.0, "role": f"pole {pole(R_PIN8, 1e-9)/1e3:.1f} kHz (with R_pin8)"},
+             "default_pf": 470, "r_assoc_ohm": round(s8["r_gc_sel"], 1), "role": "with R_GC", "options_pf": CAP_PF},
             {"key": "c_rlpk", "name": "RLPK filter cap", "symbol": "C_RLPK",
-             "default_pf": 1000.0, "role": f"pole {pole(c['r_rlpk'], 1e-9)/1e3:.1f} kHz (with R_RLPK)"},
+             "default_pf": 10000, "r_assoc_ohm": round(c["r_rlpk"], 1), "role": "with R_RLPK", "options_pf": CAP_PF},
             {"key": "c_ilimit", "name": "ILIMIT filter cap", "symbol": "C_ILIMIT",
-             "default_pf": 18000.0, "role": f"pole {pole(s8['r_ilimit_sel'], 18e-9)/1e3:.2f} kHz (with R_ILIMIT)"},
+             "default_pf": 10000, "r_assoc_ohm": round(s8["r_ilimit_sel"], 1), "role": "with R_ILIMIT", "options_pf": CAP_PF},
             {"key": "c_ilimit2", "name": "ILIMIT2 filter cap", "symbol": "C_ILIMIT2",
-             "default_pf": 75000.0, "role": f"pole {pole(s8['r_ilimit2_sel'], 75e-9)/1e3:.2f} kHz (with R_ILIMIT2)"},
-            {"key": "r_ls", "name": "Current-predict resistor (R_LS)", "symbol": "R_LS",
-             "default_pf": None, "default_kohm": round(s8["r_ls_sel"]/1e3, 1),
-             "role": f"calc {s8['r_ls']/1e3:.1f} kΩ; valid 12–87 kΩ"},
+             "default_pf": 10000, "r_assoc_ohm": round(s8["r_ilimit2_sel"], 1), "role": "with R_ILIMIT2", "options_pf": CAP_PF},
+            {"key": "c_vir", "name": "VIR filter cap", "symbol": "C_VIR",
+             "default_pf": 10000, "r_assoc_ohm": round(c["r_vir_fr"], 1), "role": "with R_VIR (FR)", "options_pf": CAP_PF},
+            {"key": "c_ls", "name": "Current-predict filter cap (across R_LS)", "symbol": "C_LS",
+             "default_pf": 470, "r_assoc_ohm": round(s8["r_ls_sel"], 1), "role": "with R_LS", "options_pf": CAP_PF},
         ]
-        return {"fixed": fixed, "rcs": rcs, "selectable": selectable}
+        rls_default = min(RLS_KOHM, key=lambda x: abs(x - s8["r_ls_sel"] / 1e3))  # nearest standard
+        r_ls = {"default_kohm": rls_default, "calc_kohm": round(s8["r_ls"] / 1e3, 1),
+                "options_kohm": RLS_KOHM, "role": "current-predict; valid 12–87 kΩ"}
+        return {"fixed": fixed, "rcs": rcs, "selectable": selectable, "r_ls": r_ls}
     except Exception as e:
         log.exception("control components"); raise HTTPException(500, str(e))
 

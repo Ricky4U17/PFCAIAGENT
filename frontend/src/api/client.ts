@@ -284,12 +284,13 @@ export const controlPowerPlant = (p: {
 // Control Design Screen 2 — controller-fixed components + designer selections.
 export interface FixedComp { name: string; symbol: string; value: string; role: string }
 export interface SelComp { key: string; name: string; symbol: string; role: string
-  default_pf?: number | null; default_kohm?: number | null }
+  default_pf: number; r_assoc_ohm: number; options_pf: number[] }
 export interface ControlComponents {
   fixed: FixedComp[]
-  rcs: { min_mohm: number; max_mohm: number; recommended_mohm: number
+  rcs: { min_mohm: number; max_mohm: number; recommended_mohm: number; options_mohm: number[]
          m1_ll_mohm: number; m1_hl_mohm: number; note: string }
   selectable: SelComp[]
+  r_ls: { default_kohm: number; calc_kohm: number; options_kohm: number[]; role: string }
 }
 export const controlComponents = (inputs: Record<string, unknown>): Promise<ControlComponents> =>
   fetch(`${BASE}/mode-b/control/components`, {

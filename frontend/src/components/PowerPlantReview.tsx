@@ -56,7 +56,7 @@ export const PowerPlantReview: React.FC<Props> = ({ confirmedState, params, onBa
     ['Input voltage range', `${vinMin}–${vinMax} Vrms`],
     ['Output voltage  V_OUT', `${params.vout_V.toFixed(1)} V`],
     ['Output power (HL / LL)', `${params.pout_hi_W.toFixed(0)} / ${params.pout_lo_W.toFixed(0)} W`],
-    ['Switching freq  f_sw', `${params.fsw_kHz.toFixed(0)} kHz`],
+    ['Switching frequency f_sw (selected)', `${params.fsw_kHz.toFixed(0)} kHz`],
     ['Channels  N_ch', `${params.nch}`],
     ['Per-phase inductance  Lφ', `${params.lphi_uH.toFixed(0)} µH`],
     ['Inductor DCR  r_L', `${params.rl_mOhm.toFixed(0)} mΩ`],
@@ -95,7 +95,7 @@ export const PowerPlantReview: React.FC<Props> = ({ confirmedState, params, onBa
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr>
-                {['V_in (Vrms)', 'Line', 'P_out (W)', 'η (%)', 'PF', 'V_in,pk (V)', 'Duty D', 'R_LOAD (Ω)']
+                {['V_in (Vrms)', 'Line', 'P_out (W)', 'Efficiency η (%)', 'PF', 'V_in,pk (V)', 'Duty D', 'R_LOAD (Ω)']
                   .map(h => <th key={h} style={th}>{h}</th>)}
               </tr></thead>
               <tbody>

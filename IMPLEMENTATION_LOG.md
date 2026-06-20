@@ -3007,3 +3007,11 @@ only font/text/alignment changed to our style.
 - ControlDesign.tsx: screen wizard extended to s1..s7. S4-S7 drive the SAME mounted iframe via setWizardScreen (S4 Compensators&Bode interactive, S5 Transient, S6 iTHD, S7 Schematic). Per-screen action bar: Back/New design + 'Confirm & Continue' (S4-S6); S7 = 'Download + Review' (handleReport, combined Ch1-6+appendices) + 'Approve & go to Semiconductors' (gated: enabled only after a report is generated -> reportGen state). R_CS (s2sel) injected into the tool so the Bode reflects it.
 - e2e Test B: full 7-screen walk (S1-S3 native, S4-S7 wizard labels, S7 Download+Review [route-mocked report] -> Approve enables -> Ch7). ALL CHECKS PASS; tsc/build clean. Verified S4 wizard mode via screenshot (tab bar hidden, interactive Ti(s) Bode with LL/HL overlay).
 - STATUS: Control Design (Chapter 6) 7-screen confirm-gated redesign COMPLETE (S1-S7). Remaining GUI cleanup: broader items G1-G11 + Chapters 1-5 (open), and Chapter 7 build-out.
+
+
+## C28 - Control Design screens 1-3 designer feedback
+- S1 (PowerPlantReview): efficiency column header -> 'Efficiency η (%)'; switching freq labeled 'Switching frequency f_sw (selected)'.
+- S2 (ComponentsSelect): reworked to standard-value DROPDOWNS. R_CS = dropdown of standard mOhm values within the HL&LL valid band (recommended flagged). Filter caps = per-cap dropdown of standard E6 values with LIVE pole freq (computed frontend from backend r_assoc_ohm). New cap set per designer: C_GC=470pF, C_RLPK=10nF, C_ILIMIT=10nF, C_ILIMIT2=10nF, C_VIR=10nF (new), C_LS=470pF; dropped C_SS/C_LPK from selectable. R_LS = dropdown of standard kOhm (12-87), default snapped to nearest standard (68k). Backend /mode-b/control/components returns options_mohm, options_pf, r_assoc_ohm, options_kohm.
+- S3 (CoreReview): selectable rows updated to the new cap set; 'Pin-8 series resistor'/'R_pin8' renamed -> 'LPK series resistor'/'R_LPK', default 4.7 kOhm (was 4.75).
+- e2e ALL PASS; tsc/build clean; verified S2 via screenshot (dropdowns + live poles + R_LPK 4.7k). Restarted user :8000 backend with --reload.
+- Earlier this turn: diagnosed user 404 = stale 4-day-old backend holding :8000 (Errno 10048 on restart); cleared orphaned multiprocessing workers, freed port, started fresh.
