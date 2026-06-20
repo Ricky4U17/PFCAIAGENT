@@ -3070,3 +3070,14 @@ only font/text/alignment changed to our style.
 - IDs preserved (pzCur/pzVol/modeLow/modeHigh) so pzPointer/drawPZ/setMode wiring intact.
 - Verified headless: BOM note gone, pz under correct Bode panels, modeLow in Line Range
   panel (not header), mode toggle works, no JS errors.
+
+## C34 - S4/S5 cleanup: hide transient notes, move Line Range, trim fci label
+- control_design.html (public + src/assets):
+  1) Added global 'body.wizard .nowiz{display:none}'; tagged S5 Transient Notes panel
+     (calcLog3) .nowiz -> hidden in wizard (S5 now shows only Load-Step Transient + dVout plot).
+  2) Removed Line Range description text; MOVED Line Range panel to TOP of screen2 left
+     column (above Standard-Value Series).
+  3) fci: simplified label to 'Crossover f_ci (Hz)' and removed the 'Allowed ...' band
+     readout (#fciBand). syncCrossoverUI already guards $('fciBand') with if(b) -> safe.
+     Guardrail clamp + slider bounds unchanged. (fcv label/band left as-is per request.)
+- Verified headless: left order Line Range>Std-Value>..., notes hidden, fciBand gone, no JS errors.

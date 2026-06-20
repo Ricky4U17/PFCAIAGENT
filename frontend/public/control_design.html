@@ -22,6 +22,7 @@
   .tabs{display:flex;gap:8px;flex-wrap:wrap}
   .screen{display:none}.screen.active{display:grid;grid-template-columns:430px 1fr;gap:16px}
   body.wizard .tabs{display:none}
+  body.wizard .nowiz{display:none !important}
   /* S4 wizard sub-screens: show only the active sub's panels inside screen2 */
   body.wizard.sub-cur #screen2 [data-sub]:not([data-sub~="cur"]),
   body.wizard.sub-vol #screen2 [data-sub]:not([data-sub~="vol"]),
@@ -223,6 +224,13 @@
   <section id="screen2" class="screen">
     <div>
       <div class="panel" data-sub="cur vol">
+        <h2>Line Range</h2>
+        <div class="seg">
+          <button id="modeLow" class="active">Low Line</button>
+          <button id="modeHigh">High Line</button>
+        </div>
+      </div>
+      <div class="panel" data-sub="cur vol">
         <h2>Standard-Value Series</h2>
         <div class="grid">
           <div><label>Resistor series</label><select id="serR"><option>E96</option><option>E24</option></select></div>
@@ -235,10 +243,9 @@
         <div id="ciRec"></div>
         <div id="ciTypeCards"></div>
         <div class="grid">
-          <div style="grid-column:1/-1"><label>Crossover f<sub>ci</sub> (Hz) — slide to set; bounded f<sub>SW</sub>/20 … f<sub>SW</sub>/5</label>
+          <div style="grid-column:1/-1"><label>Crossover f<sub>ci</sub> (Hz)</label>
             <div class="inline"><input id="fci" type="number" value="8000" step="100" style="max-width:96px">
-            <input id="fciRange" type="range" min="3500" max="14000" step="100" value="8000" style="flex:1"></div>
-            <div class="small" id="fciBand"></div></div>
+            <input id="fciRange" type="range" min="3500" max="14000" step="100" value="8000" style="flex:1"></div></div>
           <div><label>Zero fz (Hz)</label><input id="cfz" type="number" value="1000" step="10"></div>
           <div><label>HF pole fp (Hz)</label><input id="cfp" type="number" value="26000" step="100"></div>
           <div><label>CS filter RF (Ω) / CF (pF)</label>
@@ -279,15 +286,6 @@
         </div>
         <h3>Component Values — select your standard</h3>
         <div class="tableWrap"><table id="cvBom"></table></div>
-      </div>
-
-      <div class="panel" data-sub="cur vol">
-        <h2>Line Range</h2>
-        <div class="seg">
-          <button id="modeLow" class="active">Low Line</button>
-          <button id="modeHigh">High Line</button>
-        </div>
-        <div class="small" style="margin-top:6px">Sets the operating corner used for compensator sizing and the inspect point on the Bode plots. Both HL &amp; LL are always overlaid.</div>
       </div>
 
       <div class="panel" data-sub="res">
@@ -349,7 +347,7 @@
         <div class="canvasWrap"><canvas id="stepPlot" height="320"></canvas></div>
         <div class="legend" id="stepLegend"></div>
       </div>
-      <div class="panel">
+      <div class="panel nowiz">
         <h2>Transient Notes</h2>
         <div id="calcLog3" class="code"></div>
       </div>
