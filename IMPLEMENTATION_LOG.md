@@ -3111,3 +3111,21 @@ only font/text/alignment changed to our style.
   PM 59.9; Type-2 fcv25 fz8.55/fp73.07 PM 60.1; unlock re-enables. No JS errors.
 - NOTE: wizard default voltage-loop design now uses k-factor placement (was the SLVA662
   manual fz1=3/fz2=12/fp1=50/fp2=17); uncheck for manual/report values.
+
+## C37 - Auto-optimize (balanced) for both loops + tightened guardrails
+- Guardrails updated per designer rules: f_cv in [10,20] Hz (HL; reject 100/120 Hz, keep
+  response); f_ci in [2 decades above f_cv (100*f_cv), f_SW/6] (loop decoupling + separation).
+  gather() clamps + syncCrossoverUI() slider bounds + fcv input/slider min/max updated.
+- designCI/designCV gained a 'quiet' no-DOM eval path (uses pre-set fz/fp, nearestStd, no
+  field writes) so the optimizer can score candidates without side effects. Live behavior
+  unchanged (verified: pre-optimize scorecard identical to prior).
+- Two 'Auto-optimize (balanced)' buttons (#vOpt voltage, #cOpt current) + result notes.
+  Voltage: sweep f_cv 10-20 @0.5, k-factor target 60, pick HIGHEST f_cv with sizing-corner
+  PM>=58 (60 target, ~2 for snap) AND worst 120Hz rejection>=26 dB (fallback: >=20 floor).
+  Current: sweep f_ci [100*f_cv, min(f_SW/6, 0.9*f_RHP)] (32 pts log), k-factor target 60,
+  among PM>=58 take the HIGHEST f_ci within 3deg of best PM (max bandwidth, RHP benign).
+  Both set crossover + enable k-factor lock + recalc + show note.
+- Verified headless: V(type3) f_cv 17Hz PM59.4 rej26.8; V(type2) 16.5Hz PM58.5; I 5.81kHz
+  PM59.9 below RHP 6.45kHz f_SW/12.1. No JS errors.
+- NOTE: PM constraint for voltage is at the sizing (HL) corner (k-factor controls it);
+  worst-over-8-points voltage PM is inherently lower (~51) and shown in the margin table.

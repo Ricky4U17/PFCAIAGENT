@@ -246,6 +246,8 @@
           <div style="grid-column:1/-1"><label>Crossover f<sub>ci</sub> (Hz)</label>
             <div class="inline"><input id="fci" type="number" value="8000" step="100" style="max-width:96px">
             <input id="fciRange" type="range" min="3500" max="14000" step="100" value="8000" style="flex:1"></div></div>
+          <div style="grid-column:1/-1"><button id="cOpt" class="action" style="width:100%">⚙ Auto-optimize f<sub>ci</sub> + placement (balanced)</button>
+            <div class="small" id="cOptNote" style="margin-top:4px"></div></div>
           <div style="grid-column:1/-1"><label><input type="checkbox" id="ciKlock" checked style="width:auto"> &nbsp;Auto-place f<sub>z</sub> / f<sub>p</sub> from f<sub>ci</sub> (true k-factor) — uncheck to set manually</label>
             <div class="small" id="ciKnote"></div></div>
           <div><label>Target phase margin (°)</label><input id="ciPM" type="number" value="60" step="1" min="30" max="80"></div>
@@ -269,10 +271,12 @@
         <div id="cvRec"></div>
         <div id="cvTypeCards"></div>
         <div class="grid">
-          <div style="grid-column:1/-1"><label>Target crossover f<sub>cv</sub> (Hz) — slide to set; bounded 2 … 40 Hz</label>
-            <div class="inline"><input id="fcv" type="number" value="17" step="0.1" min="2" max="40" style="max-width:96px">
-            <input id="fcvRange" type="range" min="2" max="40" step="0.5" value="17" style="flex:1"></div>
+          <div style="grid-column:1/-1"><label>Target crossover f<sub>cv</sub> (Hz) — slide to set; bounded 10 … 20 Hz</label>
+            <div class="inline"><input id="fcv" type="number" value="17" step="0.1" min="10" max="20" style="max-width:96px">
+            <input id="fcvRange" type="range" min="10" max="20" step="0.5" value="17" style="flex:1"></div>
             <div class="small" id="fcvBand"></div></div>
+          <div style="grid-column:1/-1"><button id="vOpt" class="action" style="width:100%">⚙ Auto-optimize f<sub>cv</sub> + placement (balanced)</button>
+            <div class="small" id="vOptNote" style="margin-top:4px"></div></div>
           <div style="grid-column:1/-1"><label><input type="checkbox" id="vKlock" checked style="width:auto"> &nbsp;Auto-place zeros / poles from f<sub>cv</sub> (true k-factor) — uncheck to set manually</label>
             <div class="small" id="vKnote"></div></div>
           <div><label>Target phase margin (°)</label><input id="vPM" type="number" value="60" step="1" min="30" max="80"></div>
@@ -451,10 +455,11 @@ function gather(){
   // Sync the visible η field so the designer can see/override the current value
   const etaField = +$('eta').value;
   const eta = Number.isFinite(etaField) && etaField>0 ? etaField : etaMode;
-  // crossover guardrails: f_ci ∈ [f_SW/20, f_SW/5]; f_cv ∈ [2, 40] Hz
+  // crossover guardrails: f_cv ∈ [10, 20] Hz (HL — reject 100/120 Hz, keep response);
+  // f_ci ∈ [2 decades above f_cv, f_SW/6] (loop decoupling + f_SW/6 separation)
   const fswHz=+$('fsw').value*1e3;
-  const fci=Math.max(fswHz/20,Math.min(fswHz/5,(+$('fci').value)||fswHz/10));
-  const fcv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
+  const fcv=Math.max(10,Math.min(20,(+$('fcv').value)||17));
+  const fci=Math.max(100*fcv,Math.min(fswHz/6,(+$('fci').value)||fswHz/10));
   return{mode:state.mode,vac:+$('vac').value,pout:+$('pout').value,vout:+$('vout').value,
     fsw:fswHz,lphi:+$('lphi').value*1e-6,co:+$('co').value*1e-6,
     rl:+$('rl').value*1e-3,rc:+$('rc').value*1e-3,riac:+$('riac').value*1e6,rvir:+$('rvir').value*1e3,
@@ -521,18 +526,19 @@ function HotaStd(p,dcv,f){
 function Tv(p,dci,dcv,vac,pout,f){return cmul(TvBase(p,dci,vac,pout,f),HotaStd(p,dcv,f))}
 
 /* ============ designs (calc + standard suggestion) ============ */
-function designCI(p){
+function designCI(p,quiet){
   const corner=state.mode==='low'?{vac:90,pout:POUT_LO}:{vac:180,pout:POUT_HI};
   const Tu=TiUnc(p,corner.vac,corner.pout,p.fci), mTu=cabs(Tu), aTu=cang(Tu);
   const pmT1=180+aTu-90, boostNeed=Math.max(0,60-pmT1);
   let calc={},std={};
   if(state.cType==='T1'){
     const C=p.gmi*mTu/(2*Math.PI*p.fci);
-    calc={CIC:C}; std={CIC:bomGet('cur_CIC',C,p.serC)};
+    calc={CIC:C}; std={CIC:(quiet?nearestStd(C,p.serC):bomGet('cur_CIC',C,p.serC))};
   }else{
     // true k-factor: place f_z = f_ci/k, f_p = f_ci·k for the target phase margin
     // (boost = PM_target − no-boost PM; k = tan(45° + boost/2)). Lock on ⇒ auto-track f_ci.
-    const lock=$('ciKlock')?$('ciKlock').checked:false;
+    // quiet=true (optimizer): use the pre-set p.cfz/p.cfp, no DOM read/write, std=nearest.
+    const lock=!quiet && ($('ciKlock')?$('ciKlock').checked:false);
     let fz=p.cfz, fp=p.cfp, kfac=null, boostUsed=null, pmTgt=null;
     if(lock){
       pmTgt=Math.max(30,Math.min(80,(+$('ciPM').value)||60));
@@ -547,31 +553,35 @@ function designCI(p){
     const RIC=1/(mTu*p.gmi*kap);
     const C1=1/(2*Math.PI*RIC*fz), C2=1/(2*Math.PI*RIC*fp);
     calc={RIC,C1,C2};
-    std={RIC:bomGet('cur_RIC',RIC,p.serR),C1:bomGet('cur_C1',C1,p.serC),C2:bomGet('cur_C2',C2,p.serC)};
-    if($('cfz')) $('cfz').disabled=lock;
-    if($('cfp')) $('cfp').disabled=lock;
-    if($('ciPM')) $('ciPM').disabled=!lock;
-    const note=$('ciKnote');
-    if(note) note.textContent=lock
-      ? `k-factor → target PM ${pmTgt.toFixed(0)}° · no-boost PM ${pmT1.toFixed(1)}° · boost ${boostUsed.toFixed(1)}° · k ${kfac.toFixed(2)} · f_z ${fmtHz(fz)}, f_p ${fmtHz(fp)}`
-      : 'Manual f_z / f_p (k-factor auto-place off).';
+    const pk=quiet?(k,v,s)=>nearestStd(v,s):(k,v,s)=>bomGet(k,v,s);
+    std={RIC:pk('cur_RIC',RIC,p.serR),C1:pk('cur_C1',C1,p.serC),C2:pk('cur_C2',C2,p.serC)};
+    if(!quiet){
+      if($('cfz')) $('cfz').disabled=lock;
+      if($('cfp')) $('cfp').disabled=lock;
+      if($('ciPM')) $('ciPM').disabled=!lock;
+      const note=$('ciKnote');
+      if(note) note.textContent=lock
+        ? `k-factor → target PM ${pmTgt.toFixed(0)}° · no-boost PM ${pmT1.toFixed(1)}° · boost ${boostUsed.toFixed(1)}° · k ${kfac.toFixed(2)} · f_z ${fmtHz(fz)}, f_p ${fmtHz(fp)}`
+        : 'Manual f_z / f_p (k-factor auto-place off).';
+    }
   }
   return{corner,mTu,aTu,pmT1,boostNeed,calc,std};
 }
 function sizingCorner(p){return state.phil==='shared'?{vac:180,pout:POUT_HI,lab:'HL 180 Vac / '+POUT_HI+' W (shared)'}
   :(state.mode==='low'?{vac:90,pout:POUT_LO,lab:'LL 90 Vac / '+POUT_LO+' W (dedicated)'}:{vac:180,pout:POUT_HI,lab:'HL 180 Vac / '+POUT_HI+' W (dedicated)'})}
-function designCV(p,dci,pure){
+function designCV(p,dci,pure,quiet){
   const cor=sizingCorner(p);
   const Tb=TvBase(p,dci,cor.vac,cor.pout,p.fcv), mTb=cabs(Tb), aTb=cang(Tb);
   const Hdiv=p.r4fb/(p.r1fb+p.r4fb);
   const G=1/mTb;                       // required |HOTA| at fcv (Method B)
   const pmNoBoost=180+(aTb+ang0(Hdiv))-90; // Hdiv real, ang 0
   const vt=pure?'type3':state.vType;
-  const pick=(k,v,s)=>pure?nearestStd(v,s):bomGet(k,v,s);
+  const pick=(k,v,s)=>(pure||quiet)?nearestStd(v,s):bomGet(k,v,s);
   // true k-factor auto-placement (live design only). Type-2: f_z=f_cv/k, f_p=f_cv·k,
   // k=tan(45°+boost/2). Type-3: coincident pairs f_z=f_cv/√k, f_p=f_cv·√k, k=tan²(45°+boost/4).
+  // quiet=true (optimizer): use the pre-set p.vfz*/p.vfp*, no DOM read/write, std=nearest.
   let vk=null;
-  const vlock=!pure && ($('vKlock')?$('vKlock').checked:false);
+  const vlock=!pure && !quiet && ($('vKlock')?$('vKlock').checked:false);
   if(vlock){
     const pmTgt=Math.max(30,Math.min(80,(+$('vPM').value)||60));
     const fld=v=>v<100?(+v).toFixed(2):Math.round(v);
@@ -610,7 +620,7 @@ function designCV(p,dci,pure){
            C1:pick('v3_C1',C1,p.serC),C2:pick('v3_C2',C2,p.serC),C3:pick('v3_C3',C3,p.serC)};
     }
   }
-  if(!pure){
+  if(!pure && !quiet){
     const lk=$('vKlock')?$('vKlock').checked:false;
     ['vfz1','vfz2','vfp1','vfp2'].forEach(id=>{if($(id))$(id).disabled=lk});
     if($('vPM')) $('vPM').disabled=!lk;
@@ -622,6 +632,67 @@ function designCV(p,dci,pure){
   return{cor,mTb,aTb,G,pmNoBoost,calc,std,err,vt};
 }
 function ang0(){return 0}
+
+/* ============ Auto-optimize (balanced) ============ */
+// Voltage: highest f_cv in [10,20] Hz that keeps worst PM ≥ 60° and 120 Hz rejection
+// comfortably in spec (≥26 dB ≈ 2× the 20 dB iTHD floor). Higher f_cv ⇒ stiffer output
+// (faster, smaller dip) at the pinned 60° PM, so the only real trade is rejection/iTHD.
+// PM at the sizing corner (what k-factor controls + the scorecard headline)
+function _pmSizeV(p,dci,dcv){const c=sizingCorner(p);const m=marginsOf(sweepLoop(f=>Tv(p,dci,dcv,c.vac,c.pout,f),0.1,1e6,300));return m.pm;}
+function _rejWorstV(p,dci,dcv,pts){let w=1e9;for(const op of pts){const r=-magdb(Tv(p,dci,dcv,op.vac,op.pout,120));if(r<w)w=r;}return w;}
+function _placeCV(pc,dci,fcv,pmTgt){
+  pc.fcv=fcv; const cor=sizingCorner(pc);
+  const aTb=cang(TvBase(pc,dci,cor.vac,cor.pout,fcv)), pmNB=180+aTb-90;
+  if(state.vType==='type2'){const b=Math.max(0,Math.min(88,pmTgt-pmNB)),k=Math.tan((45+b/2)*Math.PI/180);pc.vfz1=pc.vfz2=fcv/k;pc.vfp1=pc.vfp2=fcv*k;}
+  else{const b=Math.max(1,Math.min(160,pmTgt-pmNB)),k=Math.tan((45+b/4)*Math.PI/180)**2,rk=Math.sqrt(k);pc.vfz1=pc.vfz2=fcv/rk;pc.vfp1=pc.vfp2=fcv*rk;}
+}
+function optimizeVoltage(){
+  const p=gather(), dci=designCI(p), pts=opPts(p,'all');
+  let best=null, floor=null;
+  for(let fcv=10; fcv<=20.0001; fcv+=0.5){
+    const pc=Object.assign({},p); _placeCV(pc,dci,fcv,60);
+    const dcv=designCV(pc,dci,false,true); if(dcv.err) continue;
+    const pm=_pmSizeV(pc,dci,dcv), rej=_rejWorstV(pc,dci,dcv,pts);
+    if(pm<58||rej<20) continue;   // 60° target at sizing corner; allow ~2° for std-value snapping
+    if(!floor||fcv>floor.fcv) floor={fcv,pm,rej};
+    if(rej>=26 && (!best||fcv>best.fcv)) best={fcv,pm,rej};
+  }
+  const pick=best||floor;
+  if(!pick){alert('Auto-optimize: no f_cv in 10–20 Hz meets PM ≥ 60° and 120 Hz rejection ≥ 20 dB for the current plant / compensator type.');return;}
+  $('fcv').value=pick.fcv; if($('fcvRange'))$('fcvRange').value=pick.fcv;
+  if($('vKlock'))$('vKlock').checked=true; if($('vPM'))$('vPM').value=60;
+  recalc();
+  const o=$('vOptNote');
+  if(o) o.textContent=`✓ Balanced pick: f_cv ${fmt(pick.fcv,1)} Hz · sizing-corner PM ${fmt(pick.pm,1)}° · worst 120 Hz rejection ${fmt(pick.rej,1)} dB`+(best?' (≥26 dB iTHD margin)':' (at rejection floor)');
+}
+// Current: maximum phase margin with the most usable bandwidth — sweep f_ci in
+// [2 decades above f_cv, min(f_SW/6, 0.9·f_RHP)], k-factor at 60°, then take the highest
+// f_ci within 3° of the best achievable PM (fast tracking/transient, RHP stays benign).
+function _pmWorstI(p,dci,pts){let w=1e9;for(const op of pts){const m=marginsOf(sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),100,3e5,200));if(Number.isFinite(m.pm)&&m.pm<w)w=m.pm;}return w;}
+function optimizeCurrent(){
+  const p=gather(), pts=opPts(p,'all');
+  const corner=state.mode==='low'?{vac:90,pout:POUT_LO}:{vac:180,pout:POUT_HI};
+  const fRHP=plantI(p,corner.vac,corner.pout,1000).fRHPi;
+  const lo=100*p.fcv, hi=Math.min(p.fsw/6,0.9*fRHP);
+  if(hi<=lo){alert('Auto-optimize: no current-loop window — the 2-decade rule ('+fmtHz(lo)+') exceeds f_SW/6 / RHP limit ('+fmtHz(hi)+'). Lower the voltage crossover first.');return;}
+  const N=32, cands=[];
+  for(let i=0;i<=N;i++){
+    const fci=lo*Math.pow(hi/lo,i/N), pc=Object.assign({},p); pc.fci=fci;
+    const aTu=cang(TiUnc(pc,corner.vac,corner.pout,fci)), pmT1=180+aTu-90;
+    const b=Math.max(0,Math.min(88,60-pmT1)), k=Math.tan((45+b/2)*Math.PI/180);
+    pc.cfz=fci/k; pc.cfp=fci*k;
+    const dci=designCI(pc,true), pm=_pmWorstI(pc,dci,pts);
+    if(pm>=58) cands.push({fci,pm});
+  }
+  if(!cands.length){alert('Auto-optimize: no current-loop crossover in ['+fmtHz(lo)+', '+fmtHz(hi)+'] holds PM ≥ 58°.');return;}
+  const pmMax=Math.max(...cands.map(c=>c.pm));
+  const pick=cands.filter(c=>c.pm>=pmMax-3).reduce((a,b)=>b.fci>a.fci?b:a);
+  $('fci').value=Math.round(pick.fci); if($('fciRange'))$('fciRange').value=Math.round(pick.fci);
+  if($('ciKlock'))$('ciKlock').checked=true; if($('ciPM'))$('ciPM').value=60;
+  recalc();
+  const o=$('cOptNote');
+  if(o) o.textContent=`✓ Balanced pick: f_ci ${fmtHz(pick.fci)} · worst PM ${fmt(pick.pm,1)}° · f_SW/${fmt(p.fsw/pick.fci,1)} separation · RHP at ${fmtHz(fRHP)}`;
+}
 
 /* ============ margins (unwrapped) ============ */
 function sweepLoop(fn,f1,f2,N){
@@ -2203,14 +2274,15 @@ function applyPreset(k){
 /* ============ master recalc ============ */
 let lastSc=null,lastCtx=null;
 function syncCrossoverUI(){
-  // keep the crossover sliders + band labels in step with the guardrails (f_SW dependent)
-  const fswHz=(+$('fsw').value||70)*1e3, ciLo=fswHz/20, ciHi=fswHz/5;
+  // keep the crossover sliders + band labels in step with the guardrails (f_SW / f_cv dependent)
+  const fswHz=(+$('fsw').value||70)*1e3;
+  const cv=Math.max(10,Math.min(20,(+$('fcv').value)||17));
+  const rv=$('fcvRange'); if(rv){rv.min=10;rv.max=20;rv.value=cv;}
+  const bv=$('fcvBand'); if(bv) bv.textContent='Allowed 10 – 20 Hz (HL — rejects 100/120 Hz)';
+  const ciLo=100*cv, ciHi=fswHz/6;
   const ci=Math.max(ciLo,Math.min(ciHi,(+$('fci').value)||fswHz/10));
   const r=$('fciRange'); if(r){r.min=Math.round(ciLo);r.max=Math.round(ciHi);r.value=Math.round(ci);}
-  const b=$('fciBand'); if(b) b.textContent='Allowed '+fmtHz(ciLo)+' – '+fmtHz(ciHi)+'  (f_SW/20 – f_SW/5)';
-  const cv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
-  const rv=$('fcvRange'); if(rv) rv.value=cv;
-  const bv=$('fcvBand'); if(bv) bv.textContent='Allowed 2 – 40 Hz';
+  const b=$('fciBand'); if(b) b.textContent='Allowed '+fmtHz(ciLo)+' – '+fmtHz(ciHi)+' (≥2 dec above f_cv, ≤ f_SW/6)';
 }
 function recalc(){
   syncCrossoverUI();
@@ -2309,6 +2381,8 @@ function commitCrossover(){
 }
 $('fci').addEventListener('change',commitCrossover);
 $('fcv').addEventListener('change',commitCrossover);
+if($('cOpt')) $('cOpt').onclick=optimizeCurrent;
+if($('vOpt')) $('vOpt').onclick=optimizeVoltage;
 window.addEventListener('resize',()=>recalc());
 /* ── Python integration: expose internals for inject-script pre-population ──
  *
