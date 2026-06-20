@@ -3160,3 +3160,14 @@ only font/text/alignment changed to our style.
   summary card 'IEC 61000-3-2 . I3 (Class A) = X / 2.30 A'; note line with worst I3 + the
   >16 A -> IEC 61000-3-12 scope caveat. Class A used because PFC is >600 W (not Class D).
 - Verified headless: worst I3 = 0.42 A @ 180 Vac -> PASS; columns/card/note render; no JS errors.
+
+## C41 - S6 iTHD: add 5th & 7th IEC 61000-3-2 Class A limits
+- thdCalc extended: returns thd5, thd7 via the harmonic cascade. I_h/I1 = vea_{h-1}/(2*veaEff);
+  4f bus ripple Vr4 = Vr*(thd3/100)*0.5, 6f Vr6 = Vr*(thd5/100)/3 (from omega ratios);
+  vea at 240/360 Hz = |Hota|*Vrh/|1+Tv|. eaRipple() helper. Backward compatible (Vr,rej,vea120,thd3).
+- renderScreen4: per-point i3/i5/i7 from iTHD_h*I1; per-voltage table now shows I1 + overall IEC
+  Class A verdict. New #iecTable compliance table: rows 3rd/5th/7th with Class A limit
+  (2.30/1.14/0.77 A), worst-case I_h @ V_AC, margin (x), PASS/FAIL. Summary card + note updated;
+  note flags 5th/7th as second-order cascade (also EMI-filter/rectifier dependent) + >16A 3-12 caveat.
+- Added #iecTable element under thdNote in screen4 panel.
+- Verified headless: 3rd 0.42/2.30 PASS, 5th 0.002/1.14 PASS, 7th ~0/0.77 PASS; no JS errors.
