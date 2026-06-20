@@ -3171,3 +3171,21 @@ only font/text/alignment changed to our style.
   note flags 5th/7th as second-order cascade (also EMI-filter/rectifier dependent) + >16A 3-12 caveat.
 - Added #iecTable element under thdNote in screen4 panel.
 - Verified headless: 3rd 0.42/2.30 PASS, 5th 0.002/1.14 PASS, 7th ~0/0.77 PASS; no JS errors.
+
+## C42 - S4 visionary upgrade: live transient (4b), tracking+iTHD model (4a), 6-goal scorecard
+- thdCalc: added current-loop tracking-distortion model. Intrinsic cusp seed SEED={3:3,5:1.5,7:1}%
+  suppressed by current-loop sensitivity S=1/|1+Ti| at h-th line harmonic; thd_h total = RSS of
+  voltage-loop cascade (thd_hv) and current-loop (thd_hi). Exposes thd3v/5v/7v, thd3i/5i/7i,
+  trackdB. S6 IEC table now uses totals automatically. Verified: thd3i grows 0.002->0.013% and
+  trackdB drops 62->48 dB as f_ci 8k->2k (physically: current loop not the THD bottleneck in range).
+- 4b (voltage): new live ΔVout(t) HL 0→100% step panel (#liveStep canvas data-h aware +
+  #liveMetrics: peak dip, recovery, PM->ringing). drawStepPlot now honors data-h.
+- 4a (current): new Current Tracking & iTHD panel (#trackTable): per-line-harmonic current-loop
+  gain (dB) + iTHD contribution (responds to f_ci).
+- Both tuning subs: 6-goal live scorecard (#goalCards): fast response, over/undershoot, ringing,
+  phase margin, current tracking, 2f rejection — green/red, updates on every recalc. Thresholds:
+  recovery<=80ms, dip<=8%, ringing PM>=52, PM current>=45 & voltage>=58, track>=20dB, rej>=20dB.
+- renderLive(p,dci,dcv,mg,mgv,sc) called each recalc (one step + thdCalc, cheap). S5 stays the
+  transient explorer, S6 the full iTHD+IEC detail (now totals).
+- Verified headless: scorecard 6 chips all green nominal; sub visibility correct (4a track, 4b step);
+  responsiveness (tracking vs f_ci, recovery vs f_cv); no JS errors.
