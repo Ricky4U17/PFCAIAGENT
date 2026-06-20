@@ -62,7 +62,7 @@
   td.std{color:var(--good);font-weight:700} td.calcv{color:var(--muted)}
   .canvasWrap{background:#0a111f;border:1px solid var(--line);border-radius:12px;padding:8px;position:relative}
   canvas{width:100%;display:block;cursor:crosshair}
-  canvas.pz{cursor:grab;height:74px}
+  canvas.pz{cursor:grab;height:170px}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--muted);padding:6px 4px 0}
   .legend i{display:inline-block;width:18px;height:0;border-top:2.5px solid;margin-right:5px;vertical-align:middle}
   .code{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11.5px;color:#dbe6ff;font-family:Consolas,ui-monospace,monospace;max-height:260px;overflow:auto}
@@ -238,7 +238,10 @@
         <div id="ciRec"></div>
         <div id="ciTypeCards"></div>
         <div class="grid">
-          <div><label>Crossover fci (Hz)</label><input id="fci" type="number" value="8000" step="100"></div>
+          <div style="grid-column:1/-1"><label>Crossover f<sub>ci</sub> (Hz) — slide to set; bounded f<sub>SW</sub>/20 … f<sub>SW</sub>/5</label>
+            <div class="inline"><input id="fci" type="number" value="8000" step="100" style="max-width:96px">
+            <input id="fciRange" type="range" min="3500" max="14000" step="100" value="8000" style="flex:1"></div>
+            <div class="small" id="fciBand"></div></div>
           <div><label>Zero fz (Hz)</label><input id="cfz" type="number" value="1000" step="10"></div>
           <div><label>HF pole fp (Hz)</label><input id="cfp" type="number" value="26000" step="100"></div>
           <div><label>CS filter RF (Ω) / CF (pF)</label>
@@ -261,7 +264,10 @@
         <div id="cvRec"></div>
         <div id="cvTypeCards"></div>
         <div class="grid">
-          <div><label>Target crossover fcv (Hz)</label><input id="fcv" type="number" value="17" step="0.1"></div>
+          <div style="grid-column:1/-1"><label>Target crossover f<sub>cv</sub> (Hz) — slide to set; bounded 2 … 40 Hz</label>
+            <div class="inline"><input id="fcv" type="number" value="17" step="0.1" min="2" max="40" style="max-width:96px">
+            <input id="fcvRange" type="range" min="2" max="40" step="0.5" value="17" style="flex:1"></div>
+            <div class="small" id="fcvBand"></div></div>
           <div><label>FB top R1 (MΩ) / bottom R4 (kΩ)</label>
             <div class="inline"><input id="r1fb" type="number" value="3.63" step="0.01"><input id="r4fb" type="number" value="23.2" step="0.1"></div></div>
           <div><label>Zero 1 fz1 (Hz)</label><input id="vfz1" type="number" value="3" step="0.1"></div>
@@ -312,7 +318,7 @@
         <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
         <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
       </div>
-      <div class="panel" data-sub="cur vol">
+      <div class="panel" data-sub="none">
         <h2>Compensation Calculation Log</h2>
         <div id="calcLog2" class="code"></div>
       </div>
@@ -435,13 +441,17 @@ function gather(){
   // Sync the visible η field so the designer can see/override the current value
   const etaField = +$('eta').value;
   const eta = Number.isFinite(etaField) && etaField>0 ? etaField : etaMode;
+  // crossover guardrails: f_ci ∈ [f_SW/20, f_SW/5]; f_cv ∈ [2, 40] Hz
+  const fswHz=+$('fsw').value*1e3;
+  const fci=Math.max(fswHz/20,Math.min(fswHz/5,(+$('fci').value)||fswHz/10));
+  const fcv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
   return{mode:state.mode,vac:+$('vac').value,pout:+$('pout').value,vout:+$('vout').value,
-    fsw:+$('fsw').value*1e3,lphi:+$('lphi').value*1e-6,co:+$('co').value*1e-6,
+    fsw:fswHz,lphi:+$('lphi').value*1e-6,co:+$('co').value*1e-6,
     rl:+$('rl').value*1e-3,rc:+$('rc').value*1e-3,riac:+$('riac').value*1e6,rvir:+$('rvir').value*1e3,
     rrlpk:+$('rrlpk').value*1e3,kmax:Math.min(1.6,Math.max(1.3,+$('kmax').value)),eta,
     rfb2:+$('rfb2').value*1e3,r1fb:+$('r1fb').value*1e6,r4fb:+$('r4fb').value*1e3,
-    fci:+$('fci').value,cfz:+$('cfz').value,cfp:+$('cfp').value,rf:+$('rf').value,cf:+$('cf').value*1e-12,
-    fcv:+$('fcv').value,vfz1:+$('vfz1').value,vfz2:+$('vfz2').value,vfp1:+$('vfp1').value,vfp2:+$('vfp2').value,
+    fci,cfz:+$('cfz').value,cfp:+$('cfp').value,rf:+$('rf').value,cf:+$('cf').value*1e-12,
+    fcv,vfz1:+$('vfz1').value,vfz2:+$('vfz2').value,vfp1:+$('vfp1').value,vfp2:+$('vfp2').value,
     rb1:+$('rb1').value*1e3,rb2:+$('rb2').value*1e3,rb3:+$('rb3').value*1e3,rb4:+$('rb4').value*1e3,
     cb1:+$('cb1').value*1e-9,cb2:+$('cb2').value*1e-9,
     serR:$('serR').value,serC:$('serC').value,
@@ -705,26 +715,29 @@ const pzDefs={
 };
 function drawPZ(cvId,p){
   const cv=$(cvId),def=pzDefs[cvId],dpr=window.devicePixelRatio||1;
-  const W=cv.clientWidth||800,H=74;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
+  const W=cv.clientWidth||800,H=+(cv.getAttribute('data-h'))||170;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
   const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
-  const pad=30,ax=H-22;
+  const pad=34,ax=H-26,mc=Math.round(H*0.5);   // axis near bottom; markers on a centred row
   const fx=f=>pad+(W-2*pad)*Math.log(f/def.f1)/Math.log(def.f2/def.f1);
   ctx.strokeStyle='rgba(154,168,196,.5)';ctx.beginPath();ctx.moveTo(pad,ax);ctx.lineTo(W-pad,ax);ctx.stroke();
-  ctx.font='9.5px Segoe UI';ctx.fillStyle='#9aa8c4';ctx.textAlign='center';
+  ctx.font='10.5px Segoe UI';ctx.fillStyle='#9aa8c4';ctx.textAlign='center';
   for(let d=Math.ceil(Math.log10(def.f1));d<=Math.floor(Math.log10(def.f2));d++){
     const f=10**d,x=fx(f);ctx.strokeStyle='rgba(154,168,196,.3)';
-    ctx.beginPath();ctx.moveTo(x,ax-4);ctx.lineTo(x,ax+4);ctx.stroke();ctx.fillText(fmtHz(f).replace('.00',''),x,ax+15);
+    ctx.beginPath();ctx.moveTo(x,ax-5);ctx.lineTo(x,ax+5);ctx.stroke();ctx.fillText(fmtHz(f).replace('.00',''),x,ax+18);
   }
+  // faint centre guide so the marker row reads clearly
+  ctx.strokeStyle='rgba(154,168,196,.12)';ctx.beginPath();ctx.moveTo(pad,mc);ctx.lineTo(W-pad,mc);ctx.stroke();
   for(const r of def.refs(p)){if(r.f<def.f1||r.f>def.f2)continue;const x=fx(r.f);
-    ctx.strokeStyle=r.col;ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(x,10);ctx.lineTo(x,ax);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle=r.col;ctx.fillText(r.lab,x,9)}
+    ctx.strokeStyle=r.col;ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(x,14);ctx.lineTo(x,ax);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=r.col;ctx.fillText(r.lab,x,11)}
   cv._hits=[];
+  ctx.font='11.5px Segoe UI';
   for(const it of def.items()){
     const f=+$(it.id).value;if(!(f>0))continue;const x=Math.max(pad,Math.min(W-pad,fx(f)));
-    ctx.lineWidth=2;ctx.strokeStyle=it.type==='z'?'#56a3ff':'#b18cff';
-    if(it.type==='z'){ctx.beginPath();ctx.arc(x,ax-16,6,0,7);ctx.stroke()}
-    else{ctx.beginPath();ctx.moveTo(x-5,ax-21);ctx.lineTo(x+5,ax-11);ctx.moveTo(x+5,ax-21);ctx.lineTo(x-5,ax-11);ctx.stroke()}
-    ctx.fillStyle=it.type==='z'?'#56a3ff':'#b18cff';ctx.fillText(it.lab,x,ax-28);
+    ctx.lineWidth=2.4;ctx.strokeStyle=it.type==='z'?'#56a3ff':'#b18cff';
+    if(it.type==='z'){ctx.beginPath();ctx.arc(x,mc,9,0,7);ctx.stroke()}
+    else{ctx.beginPath();ctx.moveTo(x-8,mc-8);ctx.lineTo(x+8,mc+8);ctx.moveTo(x+8,mc-8);ctx.lineTo(x-8,mc+8);ctx.stroke()}
+    ctx.fillStyle=it.type==='z'?'#56a3ff':'#b18cff';ctx.fillText(it.lab,x,mc-16);
     cv._hits.push({x,id:it.id});
   }
   cv._fx={f1:def.f1,f2:def.f2,pad,W};
@@ -734,7 +747,7 @@ function pzPointer(cvId){
   const cv=$(cvId);
   cv.addEventListener('pointerdown',e=>{
     const r=cv.getBoundingClientRect(),x=e.clientX-r.left;
-    if(!cv._hits)return;let best=null,bd=12;
+    if(!cv._hits)return;let best=null,bd=18;
     for(const h of cv._hits){const d=Math.abs(h.x-x);if(d<bd){bd=d;best=h}}
     if(best){pzDrag={cv,id:best.id};cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'}
   });
@@ -2129,7 +2142,18 @@ function applyPreset(k){
 
 /* ============ master recalc ============ */
 let lastSc=null,lastCtx=null;
+function syncCrossoverUI(){
+  // keep the crossover sliders + band labels in step with the guardrails (f_SW dependent)
+  const fswHz=(+$('fsw').value||70)*1e3, ciLo=fswHz/20, ciHi=fswHz/5;
+  const ci=Math.max(ciLo,Math.min(ciHi,(+$('fci').value)||fswHz/10));
+  const r=$('fciRange'); if(r){r.min=Math.round(ciLo);r.max=Math.round(ciHi);r.value=Math.round(ci);}
+  const b=$('fciBand'); if(b) b.textContent='Allowed '+fmtHz(ciLo)+' – '+fmtHz(ciHi)+'  (f_SW/20 – f_SW/5)';
+  const cv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
+  const rv=$('fcvRange'); if(rv) rv.value=cv;
+  const bv=$('fcvBand'); if(bv) bv.textContent='Allowed 2 – 40 Hz';
+}
 function recalc(){
+  syncCrossoverUI();
   const p=gather();
   const rcsInfo=renderRCS(p);
   const dci=designCI(p);
@@ -2212,6 +2236,17 @@ $('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.ta
  'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
 attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
 pzPointer('pzCur');pzPointer('pzVol');
+// crossover scroll bars drive the number field; commit (blur/enter) snaps it into the band
+$('fciRange').addEventListener('input',()=>{$('fci').value=$('fciRange').value;recalc()});
+$('fcvRange').addEventListener('input',()=>{$('fcv').value=$('fcvRange').value;recalc()});
+function commitCrossover(){
+  const fswHz=(+$('fsw').value||70)*1e3;
+  let ci=(+$('fci').value)||fswHz/10; ci=Math.max(fswHz/20,Math.min(fswHz/5,ci)); $('fci').value=Math.round(ci);
+  let cv=(+$('fcv').value)||17; cv=Math.max(2,Math.min(40,cv)); $('fcv').value=(cv<10?cv.toFixed(1):Math.round(cv));
+  recalc();
+}
+$('fci').addEventListener('change',commitCrossover);
+$('fcv').addEventListener('change',commitCrossover);
 window.addEventListener('resize',()=>recalc());
 /* ── Python integration: expose internals for inject-script pre-population ──
  *

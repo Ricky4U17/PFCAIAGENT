@@ -3044,3 +3044,17 @@ only font/text/alignment changed to our style.
   goNext/goBack reduced to WIZ_NEXT/WIZ_PREV (s4->s5 / s4->s3). Continue label simplified.
 - No control_design.html change (sub switching already supported via setWizardScreen sub).
 - Build clean.
+
+## C32 - S4 refinements: hide calc log, bigger PZ, crossover sliders + guardrails
+- control_design.html (public + src/assets):
+  1) Compensation Calculation Log panel data-sub none -> hidden in all S4 wizard subs.
+  2) Pole-Zero canvas H 74 -> 170px (data-h aware); markers/labels enlarged, centred
+     marker row + faint guide; drag hit tolerance 12 -> 18px (.pz CSS 170px).
+  3) Crossover scroll bars: fci slider bounded f_SW/20..f_SW/5, fcv slider 2..40 Hz,
+     each with a live 'Allowed ...' band label. Sliders drive the number field;
+     commit (change) snaps into band. gather() hard-clamps fci/fcv so the math always
+     respects the guardrails. syncCrossoverUI() (called at top of recalc) keeps slider
+     min/max + value + band labels in step with f_SW.
+- Verified headless: calc log hidden, PZ 170px, fci[3.5k,14k]/fcv[2,40] bands + labels,
+  clamps (fci 50000->14000, fcv 0.5->2), no JS errors.
+- NOTE: user fcv spec was garbled ('not more than half 40 Hz') -> interpreted as max 40 Hz.
