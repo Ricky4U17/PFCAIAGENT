@@ -3021,3 +3021,18 @@ only font/text/alignment changed to our style.
   live-rescales R_LS (calc_kohm·recommended/rcs) and snaps to the nearest standard kΩ.
 - C_LS pole (cap across R_LS) now uses the SELECTED R_LS, so it tracks too.
 - R_LS row note shows the live calc + '(tracks R_CS)'. Frontend-only; build clean.
+
+## C30 - S4 split into 3 confirm-gated sub-screens (current / voltage / results)
+- control_design.html (public + src/assets): tagged every #screen2 panel with data-sub
+  (cur|vol|res); CSS hides non-active-sub panels in wizard mode. setWizardScreen handler
+  now accepts a 'sub' field → toggles body.sub-cur/vol/res. Added Final Control-Loop
+  Components panel (#allCompBom) + renderAllComp(p,dci,dcv): consolidated read-only table
+  of R_CS, CS filter (R_F/C_F across R_CS), current comp (R_IC/C_IC1/C_IC2), voltage comp
+  (Type-2/3), FB divider. Wired into recalc().
+    · sub=cur: Std-Value, Current Loop, Ti Bode, Calc log
+    · sub=vol: Std-Value, Voltage Loop, Tv Bode, Calc log
+    · sub=res: Final Components, Tolerance, Scorecard
+- ControlDesign.tsx: S4 now walks 4a current -> 4b voltage -> 4c results before S5; Back
+  reverses (4a Back -> S3, S5 Back -> 4c). postWizard sends {screen:screen2, sub} on S4.
+  Label shows '4a/4b/4c'. goNext/goBack replace WIZ_NEXT/PREV for S4.
+- Verified headless (playwright): correct panels per sub, allCompBom 13 rows, no JS errors.

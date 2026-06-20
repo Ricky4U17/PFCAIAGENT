@@ -22,6 +22,10 @@
   .tabs{display:flex;gap:8px;flex-wrap:wrap}
   .screen{display:none}.screen.active{display:grid;grid-template-columns:430px 1fr;gap:16px}
   body.wizard .tabs{display:none}
+  /* S4 wizard sub-screens: show only the active sub's panels inside screen2 */
+  body.wizard.sub-cur #screen2 [data-sub]:not([data-sub~="cur"]),
+  body.wizard.sub-vol #screen2 [data-sub]:not([data-sub~="vol"]),
+  body.wizard.sub-res #screen2 [data-sub]:not([data-sub~="res"]){display:none !important}
   #screen1.active{display:block}
   #screen5.active{display:block}
   .schemWrap{overflow:auto;background:#0a111f;border:1px solid var(--line);border-radius:12px}
@@ -220,7 +224,7 @@
   <!-- ================= SCREEN 2 ================= -->
   <section id="screen2" class="screen">
     <div>
-      <div class="panel">
+      <div class="panel" data-sub="cur vol">
         <h2>Standard-Value Series</h2>
         <div class="grid">
           <div><label>Resistor series</label><select id="serR"><option>E96</option><option>E24</option></select></div>
@@ -229,7 +233,7 @@
         <div class="small" style="margin-top:6px">Report BOM uses E96 resistors / E24-class capacitors. Every plot and margin below is evaluated from the <b>selected standard values</b>, not the ideal ones.</div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-sub="cur">
         <h2>Current Loop — Compensator on IEA (G<sub>MI</sub> = 88 µS)</h2>
         <div id="ciRec"></div>
         <div id="ciTypeCards"></div>
@@ -246,7 +250,7 @@
         <div class="tableWrap"><table id="ciBom"></table></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-sub="vol">
         <h2>Voltage Loop — Compensator on VEA (G<sub>MV</sub> = 100 µS, SLVA662)</h2>
         <div class="inline" style="margin-bottom:8px">
           <div class="switch" style="flex:1">
@@ -278,7 +282,13 @@
         <div class="tableWrap"><table id="cvBom"></table></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-sub="res">
+        <h2>Final Control-Loop Components — all selected values</h2>
+        <div class="small" style="margin-bottom:6px">Consolidated read-only summary of every control-loop component selected across the current- and voltage-loop sub-screens, plus the R<sub>CS</sub> / CS-filter network and FB divider.</div>
+        <div class="tableWrap"><table id="allCompBom"></table></div>
+      </div>
+
+      <div class="panel" data-sub="res">
         <h2>Tolerance Corners</h2>
         <label class="inline" style="color:var(--text);font-size:13px"><input type="checkbox" id="tolChk" style="width:auto"> &nbsp;Evaluate ±1 % R / ±5 % C worst-case phase margin (48 random corners)</label>
         <div id="tolOut" class="small" style="margin-top:6px"></div>
@@ -286,23 +296,23 @@
     </div>
 
     <div>
-      <div class="panel">
+      <div class="panel" data-sub="res">
         <h2>Stability Scorecard — all operating points, standard values</h2>
         <div class="cards" id="cards2"></div>
         <div class="tableWrap" style="margin-top:10px"><table id="marginTable"></table></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-sub="cur">
         <h2>Current Loop T<sub>i</sub>(s) — 10 Hz to 500 kHz</h2>
         <label class="inline" style="font-size:12px;color:var(--muted)"><input type="checkbox" id="ovl" checked style="width:auto">&nbsp;Overlay all operating points (solid = low line, dashed = high line)</label>
         <div class="canvasWrap"><canvas id="bodeCur" data-h="430"></canvas><div class="hoverbox" id="hbCur"></div></div>
         <div class="legend"><span><i style="border-color:#56a3ff"></i>Loop T<sub>i</sub> (selected std values)</span><span><i style="border-color:rgba(86,163,255,.35)"></i>Other operating points (overlay)</span><span><i style="border-color:#34d399"></i>achieved fc / PM / GM</span></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-sub="vol">
         <h2>Voltage Loop T<sub>v</sub>(s) — 0.1 Hz to 1 MHz</h2>
         <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
         <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-sub="cur vol">
         <h2>Compensation Calculation Log</h2>
         <div id="calcLog2" class="code"></div>
       </div>
@@ -1179,6 +1189,40 @@ function renderMargins(p,dci,dcv,set){
   return{worstPMi,worstPMv,worstRej,fcSet};
 }
 
+function renderAllComp(p,dci,dcv){
+  const el=$('allCompBom'); if(!el) return;
+  const row=(grp,sym,val,fn)=>`<tr><td class="small">${grp}</td><td class="mono">${sym}</td><td class="std">${val}</td><td class="small">${fn}</td></tr>`;
+  let h='<tr><th>Group</th><th>Symbol</th><th>Value</th><th>Function</th></tr>';
+  // current-sense + CS anti-alias filter (across R_CS)
+  h+=row('Current sense','R_CS',fmt(state.rcsSel,2)+' mΩ','Kelvin shunt — phase-current sense');
+  h+=row('Current sense','R_F / C_F',fmtOhm(p.rf)+' / '+fmtCap(p.cf),'CS anti-alias filter across R_CS — f_RC = '+fmtHz(1/(2*Math.PI*p.rf*p.cf)));
+  // current-loop (IEA) compensator
+  if(state.cType==='T1'){
+    h+=row('Current comp (IEA)','C_IC',fmtCap(dci.std.CIC),'Type-I integrator — 0 dB @ f_ci');
+  }else{
+    h+=row('Current comp (IEA)','R_IC',fmtOhm(dci.std.RIC),'Type-2 crossover gain @ f_ci = '+fmtHz(p.fci));
+    h+=row('Current comp (IEA)','C_IC1',fmtCap(dci.std.C1),'phase-boost zero f_z = '+fmtHz(1/(2*Math.PI*dci.std.RIC*dci.std.C1)));
+    h+=row('Current comp (IEA)','C_IC2',fmtCap(dci.std.C2),'HF noise-limit pole f_p = '+fmtHz(1/(2*Math.PI*dci.std.RIC*dci.std.C2)));
+  }
+  // voltage-loop (VEA) compensator
+  if(dcv.err){
+    h+=`<tr><td colspan="4" style="color:var(--bad)">Voltage loop: ${dcv.err}</td></tr>`;
+  }else if(state.vType==='type2'){
+    h+=row('Voltage comp (VEA)','R2',fmtOhm(dcv.std.R2),'crossover gain @ f_cv = '+fmt(p.fcv,1)+' Hz');
+    h+=row('Voltage comp (VEA)','C1',fmtCap(dcv.std.C1),'phase-boost zero');
+    h+=row('Voltage comp (VEA)','C3',fmtCap(dcv.std.C3),'HF roll-off pole');
+  }else{
+    h+=row('Voltage comp (VEA)','R2',fmtOhm(dcv.std.R2),'Type-3 primary gain resistor');
+    h+=row('Voltage comp (VEA)','R3',fmtOhm(dcv.std.R3),'second-branch resistor (z2/p2)');
+    h+=row('Voltage comp (VEA)','C1',fmtCap(dcv.std.C1),'zero-1 capacitor');
+    h+=row('Voltage comp (VEA)','C2',fmtCap(dcv.std.C2),'branch cap (z2/p2 pair)');
+    h+=row('Voltage comp (VEA)','C3',fmtCap(dcv.std.C3),'pole-1 capacitor');
+  }
+  // FB divider
+  h+=row('FB divider','R1 (top)',fmt(p.r1fb,2)+' MΩ','3× series — V_OUT sense');
+  h+=row('FB divider','R4 (bottom)',fmt(p.r4fb,1)+' kΩ','sets divider ratio H_div');
+  el.innerHTML=h;
+}
 function ensureTranSel(p){
   if(!state.tranSel)state.tranSel={};
   for(const op of opPts(p,'all'))if(state.tranSel[op.vac]===undefined)state.tranSel[op.vac]=true;
@@ -2097,6 +2141,7 @@ function recalc(){
   drawPZ('pzCur',p);drawPZ('pzVol',p);
   const{mg,mgv,set}=renderPlots(p,dci,dcv);
   const sc=renderMargins(p,dci,dcv,set);
+  renderAllComp(p,dci,dcv);
   lastSc=sc;lastCtx={p,dci,dcv,rcsInfo,aux};
   // scorecard cards
   const fswOK=p.fci<=p.fsw/6;
@@ -2232,6 +2277,8 @@ window.addEventListener('message',function(e){
   if(e.data.type==='setWizardScreen'){
     document.body.classList.add('wizard');
     if(e.data.screen && typeof tab==='function') tab(e.data.screen);
+    document.body.classList.remove('sub-cur','sub-vol','sub-res');
+    if(e.data.sub) document.body.classList.add('sub-'+e.data.sub);
     setTimeout(postH,60);
   }
   if(e.data.type==='getDesignState'){

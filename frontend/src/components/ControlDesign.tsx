@@ -41,26 +41,55 @@ export const ControlDesign: React.FC<Props> = ({
   // embedded FAN9672 tool's tabs (S4 Compensators&Bode interactive, S5 Transient,
   // S6 iTHD, S7 Schematic + report/approve) one at a time in "wizard mode".
   type Scr = 's1'|'s2'|'s3'|'s4'|'s5'|'s6'|'s7'
+  type Sub = 'cur'|'vol'|'res'
   const [screen, setScreen] = useState<Scr>('s1')
+  const [s4sub, setS4sub] = useState<Sub>('cur')   // S4 sub-screen: current → voltage → results
   const [s2sel, setS2Sel] = useState<ComponentSelections|null>(null)
   const [reportGen, setReportGen] = useState(false)
   const injectedRef = useRef(false)
   const TOOL_TAB: Record<string, string> = { s4: 'screen2', s5: 'screen3', s6: 'screen4', s7: 'screen5' }
-  const WIZ_NEXT: Record<string, Scr> = { s4: 's5', s5: 's6', s6: 's7' }
-  const WIZ_PREV: Record<string, Scr> = { s4: 's3', s5: 's4', s6: 's5', s7: 's6' }
+  const WIZ_NEXT: Record<string, Scr> = { s5: 's6', s6: 's7' }
+  const WIZ_PREV: Record<string, Scr> = { s6: 's5', s7: 's6' }
   const WIZ_LABEL: Record<string, string> = {
-    s4: 'Screen 4/7 · Compensators & Bode (interactive)', s5: 'Screen 5/7 · Transient',
-    s6: 'Screen 6/7 · iTHD', s7: 'Screen 7/7 · Schematic & Report',
+    s5: 'Screen 5/7 · Transient', s6: 'Screen 6/7 · iTHD', s7: 'Screen 7/7 · Schematic & Report',
+  }
+  const SUB_LABEL: Record<Sub, string> = {
+    cur: '4a · Current loop — HL & LL (incl. CS filter across R_CS)',
+    vol: '4b · Voltage loop — HL & LL',
+    res: '4c · Final control-loop components',
   }
   const screenRef = useRef<Scr>(screen); screenRef.current = screen
+  const s4subRef = useRef<Sub>(s4sub); s4subRef.current = s4sub
   const postWizard = () => {
-    const t = TOOL_TAB[screenRef.current]
-    if (t) iframeRef.current?.contentWindow?.postMessage({ type: 'setWizardScreen', screen: t }, '*')
+    const s = screenRef.current
+    if (s === 's4') {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'setWizardScreen', screen: 'screen2', sub: s4subRef.current }, '*')
+    } else if (TOOL_TAB[s]) {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'setWizardScreen', screen: TOOL_TAB[s] }, '*')
+    }
   }
-  // drive the tool tab when moving between S4–S7 (iframe stays mounted)
+  // drive the tool tab / S4 sub-screen when moving between S4–S7 (iframe stays mounted)
   useEffect(() => {
     if (TOOL_TAB[screen]) { const id = setTimeout(postWizard, 60); return () => clearTimeout(id) }
-  }, [screen])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [screen, s4sub])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // wizard nav — S4 walks its 3 sub-screens (current → voltage → results) before S5
+  const goNext = () => {
+    if (screen === 's4') {
+      if (s4sub === 'cur') setS4sub('vol')
+      else if (s4sub === 'vol') setS4sub('res')
+      else setScreen('s5')
+    } else setScreen(WIZ_NEXT[screen])
+  }
+  const goBack = () => {
+    if (screen === 's4') {
+      if (s4sub === 'cur') setScreen('s3')
+      else if (s4sub === 'vol') setS4sub('cur')
+      else setS4sub('vol')
+    } else if (screen === 's5') { setS4sub('res'); setScreen('s4') }
+    else setScreen(WIZ_PREV[screen])
+  }
 
   // ── Auto-size the iframe to its content (single browser scrollbar) ──────────
   // control_design.html is cross-origin (no allow-same-origin), so it posts its
@@ -196,7 +225,7 @@ export const ControlDesign: React.FC<Props> = ({
       params={params}
       s2sel={s2sel}
       onBack={() => setScreen('s2')}
-      onConfirm={() => setScreen('s4')} />
+      onConfirm={() => { setS4sub('cur'); setScreen('s4') }} />
   }
 
   return (
@@ -227,15 +256,17 @@ export const ControlDesign: React.FC<Props> = ({
         justifyContent: 'space-between', alignItems: 'center',
       }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Btn variant="ghost" onClick={() => setScreen(WIZ_PREV[screen])}>← Back</Btn>
+          <Btn variant="ghost" onClick={goBack}>← Back</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
           <span style={{ fontSize: 11, color: C.hint, fontFamily: 'IBM Plex Mono,monospace' }}>
-            {WIZ_LABEL[screen]}
+            {screen === 's4' ? `Screen 4/7 · ${SUB_LABEL[s4sub]}` : WIZ_LABEL[screen]}
           </span>
         </div>
 
         {screen !== 's7' ? (
-          <Btn variant="primary" onClick={() => setScreen(WIZ_NEXT[screen])}>Confirm &amp; Continue →</Btn>
+          <Btn variant="primary" onClick={goNext}>
+            {screen === 's4' && s4sub !== 'res' ? 'Confirm & Next →' : 'Confirm & Continue →'}
+          </Btn>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
             {rptError && (
