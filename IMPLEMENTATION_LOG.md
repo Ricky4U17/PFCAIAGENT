@@ -3129,3 +3129,9 @@ only font/text/alignment changed to our style.
   PM59.9 below RHP 6.45kHz f_SW/12.1. No JS errors.
 - NOTE: PM constraint for voltage is at the sizing (HL) corner (k-factor controls it);
   worst-over-8-points voltage PM is inherently lower (~51) and shown in the margin table.
+
+## C38 - Voltage manual slider back to 2-40 Hz (optimizer stays 10-20)
+- Per designer: manual f_cv slider/input/clamp restored to [2,40] Hz; auto-optimizer
+  search range stays hardcoded 10-20 Hz (independent of slider). fcvBand note now reads
+  'Allowed 2 - 40 Hz · auto-optimizer targets 10 - 20 Hz'. Verified: manual 35 Hz accepted,
+  optimize() still returns 17 Hz; no JS errors.

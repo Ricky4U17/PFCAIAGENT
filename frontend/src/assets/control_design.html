@@ -271,9 +271,9 @@
         <div id="cvRec"></div>
         <div id="cvTypeCards"></div>
         <div class="grid">
-          <div style="grid-column:1/-1"><label>Target crossover f<sub>cv</sub> (Hz) — slide to set; bounded 10 … 20 Hz</label>
-            <div class="inline"><input id="fcv" type="number" value="17" step="0.1" min="10" max="20" style="max-width:96px">
-            <input id="fcvRange" type="range" min="10" max="20" step="0.5" value="17" style="flex:1"></div>
+          <div style="grid-column:1/-1"><label>Target crossover f<sub>cv</sub> (Hz) — slide to set; bounded 2 … 40 Hz</label>
+            <div class="inline"><input id="fcv" type="number" value="17" step="0.1" min="2" max="40" style="max-width:96px">
+            <input id="fcvRange" type="range" min="2" max="40" step="0.5" value="17" style="flex:1"></div>
             <div class="small" id="fcvBand"></div></div>
           <div style="grid-column:1/-1"><button id="vOpt" class="action" style="width:100%">⚙ Auto-optimize f<sub>cv</sub> + placement (balanced)</button>
             <div class="small" id="vOptNote" style="margin-top:4px"></div></div>
@@ -455,10 +455,10 @@ function gather(){
   // Sync the visible η field so the designer can see/override the current value
   const etaField = +$('eta').value;
   const eta = Number.isFinite(etaField) && etaField>0 ? etaField : etaMode;
-  // crossover guardrails: f_cv ∈ [10, 20] Hz (HL — reject 100/120 Hz, keep response);
+  // crossover guardrails: f_cv ∈ [2, 40] Hz manual range (auto-optimizer uses 10–20 Hz);
   // f_ci ∈ [2 decades above f_cv, f_SW/6] (loop decoupling + f_SW/6 separation)
   const fswHz=+$('fsw').value*1e3;
-  const fcv=Math.max(10,Math.min(20,(+$('fcv').value)||17));
+  const fcv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
   const fci=Math.max(100*fcv,Math.min(fswHz/6,(+$('fci').value)||fswHz/10));
   return{mode:state.mode,vac:+$('vac').value,pout:+$('pout').value,vout:+$('vout').value,
     fsw:fswHz,lphi:+$('lphi').value*1e-6,co:+$('co').value*1e-6,
@@ -2276,9 +2276,9 @@ let lastSc=null,lastCtx=null;
 function syncCrossoverUI(){
   // keep the crossover sliders + band labels in step with the guardrails (f_SW / f_cv dependent)
   const fswHz=(+$('fsw').value||70)*1e3;
-  const cv=Math.max(10,Math.min(20,(+$('fcv').value)||17));
-  const rv=$('fcvRange'); if(rv){rv.min=10;rv.max=20;rv.value=cv;}
-  const bv=$('fcvBand'); if(bv) bv.textContent='Allowed 10 – 20 Hz (HL — rejects 100/120 Hz)';
+  const cv=Math.max(2,Math.min(40,(+$('fcv').value)||17));
+  const rv=$('fcvRange'); if(rv){rv.min=2;rv.max=40;rv.value=cv;}
+  const bv=$('fcvBand'); if(bv) bv.textContent='Allowed 2 – 40 Hz · auto-optimizer targets 10 – 20 Hz (rejects 100/120 Hz)';
   const ciLo=100*cv, ciHi=fswHz/6;
   const ci=Math.max(ciLo,Math.min(ciHi,(+$('fci').value)||fswHz/10));
   const r=$('fciRange'); if(r){r.min=Math.round(ciLo);r.max=Math.round(ciHi);r.value=Math.round(ci);}
