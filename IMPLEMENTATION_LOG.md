@@ -3058,3 +3058,15 @@ only font/text/alignment changed to our style.
 - Verified headless: calc log hidden, PZ 170px, fci[3.5k,14k]/fcv[2,40] bands + labels,
   clamps (fci 50000->14000, fcv 0.5->2), no JS errors.
 - NOTE: user fcv spec was garbled ('not more than half 40 Hz') -> interpreted as max 40 Hz.
+
+## C33 - S4 layout: PZ under Bode, drop BOM note, Line Range to left column
+- control_design.html (public + src/assets):
+  1) Pole-Zero placement moved out of the Current/Voltage Loop panels (left) to directly
+     UNDER the corresponding Bode plot (right column) -> canvas now ~974px wide (was ~430).
+  2) Removed the 'Report BOM uses E96 ... not the ideal ones.' note from Standard-Value panel.
+  3) Moved Low/High line selector out of the header toolbar into a new 'Line Range' panel
+     in screen2 left column (data-sub=cur vol) -> shows under the loop design on both 4a/4b.
+     (Header previously held the only mode toggle, which sat above the wizard content.)
+- IDs preserved (pzCur/pzVol/modeLow/modeHigh) so pzPointer/drawPZ/setMode wiring intact.
+- Verified headless: BOM note gone, pz under correct Bode panels, modeLow in Line Range
+  panel (not header), mode toggle works, no JS errors.

@@ -94,8 +94,6 @@
       <h1>Control Loop Design</h1>
     </div>
     <div class="seg">
-      <button id="modeLow" class="active">Low Line</button>
-      <button id="modeHigh">High Line</button>
       <button id="loadDefaults" class="action" style="display:none">Load Report Defaults</button>
       <button id="btnExport" class="ghost" style="display:none">Export Summary</button>
       <button id="btnReport" class="ghost" style="display:none">Generate Report</button>
@@ -230,7 +228,6 @@
           <div><label>Resistor series</label><select id="serR"><option>E96</option><option>E24</option></select></div>
           <div><label>Capacitor series</label><select id="serC"><option>E24</option><option>E12</option></select></div>
         </div>
-        <div class="small" style="margin-top:6px">Report BOM uses E96 resistors / E24-class capacitors. Every plot and margin below is evaluated from the <b>selected standard values</b>, not the ideal ones.</div>
       </div>
 
       <div class="panel" data-sub="cur">
@@ -247,8 +244,6 @@
           <div><label>CS filter RF (Ω) / CF (pF)</label>
             <div class="inline"><input id="rf" type="number" value="2000" step="10"><input id="cf" type="number" value="470" step="10"></div></div>
         </div>
-        <h3>Pole–Zero Placement (drag ○ zero / × pole)</h3>
-        <div class="canvasWrap"><canvas id="pzCur" class="pz"></canvas></div>
         <h3>Component Values — select your standard</h3>
         <div class="tableWrap"><table id="ciBom"></table></div>
       </div>
@@ -282,10 +277,17 @@
           <button class="ghost preset" data-p="B">B — Balanced 20 Hz</button>
           <button class="ghost preset" data-p="C">C — Transient 25 Hz</button>
         </div>
-        <h3>Pole–Zero Placement (drag ○ zeros / × poles)</h3>
-        <div class="canvasWrap"><canvas id="pzVol" class="pz"></canvas></div>
         <h3>Component Values — select your standard</h3>
         <div class="tableWrap"><table id="cvBom"></table></div>
+      </div>
+
+      <div class="panel" data-sub="cur vol">
+        <h2>Line Range</h2>
+        <div class="seg">
+          <button id="modeLow" class="active">Low Line</button>
+          <button id="modeHigh">High Line</button>
+        </div>
+        <div class="small" style="margin-top:6px">Sets the operating corner used for compensator sizing and the inspect point on the Bode plots. Both HL &amp; LL are always overlaid.</div>
       </div>
 
       <div class="panel" data-sub="res">
@@ -312,11 +314,15 @@
         <label class="inline" style="font-size:12px;color:var(--muted)"><input type="checkbox" id="ovl" checked style="width:auto">&nbsp;Overlay all operating points (solid = low line, dashed = high line)</label>
         <div class="canvasWrap"><canvas id="bodeCur" data-h="430"></canvas><div class="hoverbox" id="hbCur"></div></div>
         <div class="legend"><span><i style="border-color:#56a3ff"></i>Loop T<sub>i</sub> (selected std values)</span><span><i style="border-color:rgba(86,163,255,.35)"></i>Other operating points (overlay)</span><span><i style="border-color:#34d399"></i>achieved fc / PM / GM</span></div>
+        <h3 style="margin-top:10px">Pole–Zero Placement (drag ○ zero / × pole)</h3>
+        <div class="canvasWrap"><canvas id="pzCur" class="pz"></canvas></div>
       </div>
       <div class="panel" data-sub="vol">
         <h2>Voltage Loop T<sub>v</sub>(s) — 0.1 Hz to 1 MHz</h2>
         <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
         <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
+        <h3 style="margin-top:10px">Pole–Zero Placement (drag ○ zeros / × poles)</h3>
+        <div class="canvasWrap"><canvas id="pzVol" class="pz"></canvas></div>
       </div>
       <div class="panel" data-sub="none">
         <h2>Compensation Calculation Log</h2>
