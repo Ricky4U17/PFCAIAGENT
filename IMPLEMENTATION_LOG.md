@@ -3096,3 +3096,18 @@ only font/text/alignment changed to our style.
   current-loop PM 59.7 deg vs 60 target; PM 45 reduces boost; unlock re-enables fields. No JS errors.
 - NOTE: wizard default current-loop design now uses k-factor placement (was fz1k/fp26k);
   uncheck the toggle for manual/report values.
+
+## C36 - Voltage-loop compensator: true k-factor auto-track + lock toggle
+- control_design.html (public + src/assets): Voltage Loop panel gains #vKlock checkbox
+  (default ON) + #vPM target-PM input (default 60).
+- designCV: when locked (live design only, gated !pure), boost = PM_target - pmNoBoost.
+  Type-2: k=tan(45+boost/2), f_z1=f_cv/k, f_p1=f_cv*k (boost clamp 0..88).
+  Type-3: coincident pairs, k=tan^2(45+boost/4), f_z1=f_z2=f_cv/sqrt(k),
+  f_p1=f_p2=f_cv*sqrt(k) (boost clamp 1..160 so f_z2<f_p2 and R3>0). Writes placements
+  back to vfz1/vfz2/vfp1/vfp2 fields + p so PZ markers, Bode, BOM track. Manual fields
+  disabled while locked; #vKnote shows type/target/no-boost PM/boost/k/placements.
+- Wired vKlock/vPM to recalc; saveJSON/loadJSON persist; loadDefaults sets lock OFF.
+- Verified headless: Type-3 fcv17 -> fz/fp 10.96/26.37 (geo mean=fcv), PM 59.4; fcv25 tracks
+  PM 59.9; Type-2 fcv25 fz8.55/fp73.07 PM 60.1; unlock re-enables. No JS errors.
+- NOTE: wizard default voltage-loop design now uses k-factor placement (was the SLVA662
+  manual fz1=3/fz2=12/fp1=50/fp2=17); uncheck for manual/report values.
