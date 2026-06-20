@@ -3135,3 +3135,20 @@ only font/text/alignment changed to our style.
   search range stays hardcoded 10-20 Hz (independent of slider). fcvBand note now reads
   'Allowed 2 - 40 Hz · auto-optimizer targets 10 - 20 Hz'. Verified: manual 35 Hz accepted,
   optimize() still returns 17 Hz; no JS errors.
+
+## C39 - Fix S3->S4 iframe remount (flash + lost crossover/transient/iTHD)
+- ROOT CAUSE: S1-S3 were early-return native screens, so the control_design.html iframe
+  was only mounted when reaching S4 -> every S3->S4 transition REMOUNTED it fresh:
+  (1) showed its un-configured default for ~2s (the 'old setup' flash), and (2) reset the
+  crossover to HTML defaults, so transient/iTHD never reflected the designer's changes.
+- FIX (ControlDesign.tsx): keep ONE iframe mounted for the whole Control-Design session,
+  hidden (display:none wrapper) on S1-S3, visible on S4-S7. It loads + configures once
+  during S1-S3 and is ready/instant at S4; tool state (crossover, placement) persists across
+  all navigation. postWizard now pre-positions the hidden iframe at wizard screen2; the
+  drive-effect runs on every screen change; added a re-inject effect so the designer's R_CS
+  is pushed to the tool once S2 is confirmed (iframe now loads before S2).
+- e2e: updated stale S4 label assertion ('Compensators & Bode' -> '4a . Current loop', changed
+  in C31). Full spec ALL CHECKS PASSED. Verified: control_design.html loads exactly ONCE
+  across S1->S4 (no remount); iframe present-but-hidden at S1, visible at S4.
+- Tool-level confirmed transient/iTHD DO update on crossover change (tab->recalc): -29V/142ms
+  -> -21V/60ms; iTHD 0.68%% -> 1.11%%.

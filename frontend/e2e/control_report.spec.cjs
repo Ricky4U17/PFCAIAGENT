@@ -111,7 +111,7 @@ async function testControlDesignButtons(browser) {
         .waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false),
        label + ' wizard label shown');
   };
-  await wizStep('Screen 4/7 . Compensators & Bode');
+  await wizStep('Screen 4/7 . 4a . Current loop');
   await page.getByRole('button', { name: /Confirm & Continue/i }).first().click();   // S4 -> S5
   await wizStep('Screen 5/7 . Transient');
   await page.getByRole('button', { name: /Confirm & Continue/i }).first().click();   // S5 -> S6

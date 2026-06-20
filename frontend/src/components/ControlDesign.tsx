@@ -67,16 +67,21 @@ export const ControlDesign: React.FC<Props> = ({
   const s4subRef = useRef<Sub>(s4sub); s4subRef.current = s4sub
   const postWizard = () => {
     const s = screenRef.current
+    const win = iframeRef.current?.contentWindow
+    if (!win) return
     if (s === 's4') {
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: 'setWizardScreen', screen: 'screen2', sub: s4subRef.current }, '*')
+      win.postMessage({ type: 'setWizardScreen', screen: 'screen2', sub: s4subRef.current }, '*')
     } else if (TOOL_TAB[s]) {
-      iframeRef.current?.contentWindow?.postMessage({ type: 'setWizardScreen', screen: TOOL_TAB[s] }, '*')
+      win.postMessage({ type: 'setWizardScreen', screen: TOOL_TAB[s] }, '*')
+    } else {
+      // S1–S3: iframe is mounted but hidden — pre-position it on the first tool screen
+      // in wizard mode so revealing it at S4 is instant (no un-configured flash).
+      win.postMessage({ type: 'setWizardScreen', screen: 'screen2', sub: 'cur' }, '*')
     }
   }
-  // drive the tool tab / S4 sub-screen when moving between S4–S7 (iframe stays mounted)
+  // drive the tool tab / S4 sub-screen on every screen change (iframe stays mounted always)
   useEffect(() => {
-    if (TOOL_TAB[screen]) { const id = setTimeout(postWizard, 60); return () => clearTimeout(id) }
+    const id = setTimeout(postWizard, 60); return () => clearTimeout(id)
   }, [screen, s4sub])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // wizard nav — S4 advances/retreats as a whole; its 3 sub-screens switch freely (tabs)
@@ -123,6 +128,12 @@ export const ControlDesign: React.FC<Props> = ({
       '*'
     )
   }, [params, s2sel])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The iframe now loads before S2 is confirmed, so re-inject the designer's R_CS
+  // into the tool once S2 is locked in (rcs drives the compensator sizing / Bode).
+  useEffect(() => {
+    if (s2sel) sendValues()
+  }, [s2sel])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLoad = useCallback(() => {
     injectedRef.current = false
@@ -195,105 +206,93 @@ export const ControlDesign: React.FC<Props> = ({
   }
 
 
-  // ── Screen 1 — Power Plant Parameters (review → confirm) ───────────────────
-  if (screen === 's1') {
-    return <PowerPlantReview
-      confirmedState={confirmedState}
-      params={params}
-      onBack={onBack}
-      onConfirm={() => setScreen('s2')} />
-  }
-  // ── Screen 2 — Controller-fixed components + designer selections ───────────
-  if (screen === 's2') {
-    return <ComponentsSelect
-      params={params}
-      initial={s2sel}
-      onBack={() => setScreen('s1')}
-      onConfirm={(sel) => { setS2Sel(sel); setScreen('s3') }} />
-  }
-  // ── Screen 3 — Core components + Fixed coefficients (review) ───────────────
-  if (screen === 's3') {
-    return <CoreReview
-      params={params}
-      s2sel={s2sel}
-      onBack={() => setScreen('s2')}
-      onConfirm={() => { setS4sub('cur'); setScreen('s4') }} />
-  }
+  const onS123 = screen === 's1' || screen === 's2' || screen === 's3'
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-
-      {/* ── S4 sub-tab bar: freely switch current / voltage / results ── */}
-      {screen === 's4' && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          {SUB_ORDER.map(sb => {
-            const active = sb === s4sub
-            return (
-              <button key={sb} onClick={() => setS4sub(sb)} style={{
-                flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                fontSize: 12, fontWeight: 600, fontFamily: 'IBM Plex Mono,monospace',
-                border: `1px solid ${active ? C.teal : C.border}`,
-                background: active ? 'rgba(45,212,191,.12)' : C.bg3,
-                color: active ? C.teal : C.muted,
-              }}>{SUB_TAB[sb]}</button>
-            )
-          })}
-        </div>
+    <>
+      {/* ── Native review/select screens S1–S3 ── */}
+      {screen === 's1' && (
+        <PowerPlantReview confirmedState={confirmedState} params={params}
+          onBack={onBack} onConfirm={() => setScreen('s2')} />
+      )}
+      {screen === 's2' && (
+        <ComponentsSelect params={params} initial={s2sel}
+          onBack={() => setScreen('s1')} onConfirm={(sel) => { setS2Sel(sel); setScreen('s3') }} />
+      )}
+      {screen === 's3' && (
+        <CoreReview params={params} s2sel={s2sel}
+          onBack={() => setScreen('s2')} onConfirm={() => { setS4sub('cur'); setScreen('s4') }} />
       )}
 
-      {/* ── iframe: served from public/ — no srcdoc, no allow-same-origin ── */}
-      <iframe
-        ref={iframeRef}
-        src="/control_design.html"
-        title="PFC Control Loop Design Tool"
-        onLoad={handleLoad}
-        scrolling="no"
-        style={{
-          width: '100%',
-          minHeight: 680,
-          border: 'none',
-          borderRadius: 10,
-          background: '#0b1220',
-          display: 'block',
-        }}
-        sandbox="allow-scripts allow-downloads allow-forms allow-modals"
-      />
+      {/* ── S4–S7 share ONE iframe mounted for the whole Control-Design session
+            (hidden on S1–S3). It loads + configures once, so it never reloads,
+            never flashes its un-configured default, and keeps the designer's tool
+            state (crossover, placement) across navigation. ── */}
+      <div style={{ display: onS123 ? 'none' : 'flex', flexDirection: 'column', height: '100%' }}>
 
-      {/* ── Action bar (per wizard screen) ─────────────────────────────── */}
-      <div style={{
-        display: 'flex', gap: 8, paddingTop: 10, marginTop: 6,
-        borderTop: `0.5px solid ${C.border}`,
-        justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Btn variant="ghost" onClick={goBack}>← Back</Btn>
-          <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
-          <span style={{ fontSize: 11, color: C.hint, fontFamily: 'IBM Plex Mono,monospace' }}>
-            {screen === 's4' ? `Screen 4/7 · ${SUB_LABEL[s4sub]}` : WIZ_LABEL[screen]}
-          </span>
-        </div>
+        {/* S4 sub-tab bar: freely switch current / voltage / results */}
+        {screen === 's4' && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {SUB_ORDER.map(sb => {
+              const active = sb === s4sub
+              return (
+                <button key={sb} onClick={() => setS4sub(sb)} style={{
+                  flex: 1, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, fontFamily: 'IBM Plex Mono,monospace',
+                  border: `1px solid ${active ? C.teal : C.border}`,
+                  background: active ? 'rgba(45,212,191,.12)' : C.bg3,
+                  color: active ? C.teal : C.muted,
+                }}>{SUB_TAB[sb]}</button>
+              )
+            })}
+          </div>
+        )}
 
-        {screen !== 's7' ? (
-          <Btn variant="primary" onClick={goNext}>Confirm &amp; Continue →</Btn>
-        ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
-            {rptError && (
-              <div style={{ fontSize:11, color:'#c0392b', background:'#fdf2f2',
-                border:'1px solid #e8b4b8', borderRadius:6, padding:'4px 10px' }}>
-                ⚠ Report failed: {rptError}
+        <iframe
+          ref={iframeRef}
+          src="/control_design.html"
+          title="PFC Control Loop Design Tool"
+          onLoad={handleLoad}
+          scrolling="no"
+          style={{ width: '100%', minHeight: 680, border: 'none', borderRadius: 10,
+            background: '#0b1220', display: 'block' }}
+          sandbox="allow-scripts allow-downloads allow-forms allow-modals"
+        />
+
+        {!onS123 && (
+          <div style={{ display: 'flex', gap: 8, paddingTop: 10, marginTop: 6,
+            borderTop: `0.5px solid ${C.border}`, justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Btn variant="ghost" onClick={goBack}>← Back</Btn>
+              <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
+              <span style={{ fontSize: 11, color: C.hint, fontFamily: 'IBM Plex Mono,monospace' }}>
+                {screen === 's4' ? `Screen 4/7 · ${SUB_LABEL[s4sub]}` : WIZ_LABEL[screen]}
+              </span>
+            </div>
+
+            {screen !== 's7' ? (
+              <Btn variant="primary" onClick={goNext}>Confirm &amp; Continue →</Btn>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
+                {rptError && (
+                  <div style={{ fontSize:11, color:'#c0392b', background:'#fdf2f2',
+                    border:'1px solid #e8b4b8', borderRadius:6, padding:'4px 10px' }}>
+                    ⚠ Report failed: {rptError}
+                  </div>
+                )}
+                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                  <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
+                    {rptLoading ? '⏳ Generating…' : '📥 Download + Review (Chapters 1–6 + Appendices)'}
+                  </Btn>
+                  <Btn variant="primary" disabled={!reportGen} onClick={onSelectSemiconductors}>
+                    ✓ Approve &amp; go to Semiconductors →
+                  </Btn>
+                </div>
               </div>
             )}
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
-                {rptLoading ? '⏳ Generating…' : '📥 Download + Review (Chapters 1–6 + Appendices)'}
-              </Btn>
-              <Btn variant="primary" disabled={!reportGen} onClick={onSelectSemiconductors}>
-                ✓ Approve &amp; go to Semiconductors →
-              </Btn>
-            </div>
           </div>
         )}
       </div>
-    </div>
+    </>
   )
 }
