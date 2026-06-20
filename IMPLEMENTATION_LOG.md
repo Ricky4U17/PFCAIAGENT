@@ -3081,3 +3081,18 @@ only font/text/alignment changed to our style.
      readout (#fciBand). syncCrossoverUI already guards $('fciBand') with if(b) -> safe.
      Guardrail clamp + slider bounds unchanged. (fcv label/band left as-is per request.)
 - Verified headless: left order Line Range>Std-Value>..., notes hidden, fciBand gone, no JS errors.
+
+## C35 - Current-loop compensator: true k-factor auto-track + lock toggle
+- control_design.html (public + src/assets): Current Loop panel gains a 'Auto-place f_z/f_p
+  from f_ci (true k-factor)' checkbox (#ciKlock, default ON) + 'Target phase margin' input
+  (#ciPM, default 60).
+- designCI Type-2 branch: when locked, boost = clamp(PM_target - pmT1, 0..88) where
+  pmT1 = no-boost PM (90+aTu); k = tan(45 + boost/2); f_z = f_ci/k, f_p = f_ci*k. Writes
+  f_z/f_p back to fields + p so PZ markers, Bode, BOM all track. Manual fields disabled
+  when locked. #ciKnote shows target/no-boost PM, boost, k, f_z, f_p. Unlocked = old manual.
+- Wired ciKlock/ciPM to recalc; saveJSON/loadJSON persist them; loadDefaults sets lock OFF
+  (report defaults are the exact manual f_z=1k/f_p=26k design).
+- Verified headless: fci 8000 -> fz1.95k/fp32.9k (geo mean=fci); fci 12000 tracks; achieved
+  current-loop PM 59.7 deg vs 60 target; PM 45 reduces boost; unlock re-enables fields. No JS errors.
+- NOTE: wizard default current-loop design now uses k-factor placement (was fz1k/fp26k);
+  uncheck the toggle for manual/report values.

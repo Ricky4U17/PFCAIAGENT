@@ -246,6 +246,9 @@
           <div style="grid-column:1/-1"><label>Crossover f<sub>ci</sub> (Hz)</label>
             <div class="inline"><input id="fci" type="number" value="8000" step="100" style="max-width:96px">
             <input id="fciRange" type="range" min="3500" max="14000" step="100" value="8000" style="flex:1"></div></div>
+          <div style="grid-column:1/-1"><label><input type="checkbox" id="ciKlock" checked style="width:auto"> &nbsp;Auto-place f<sub>z</sub> / f<sub>p</sub> from f<sub>ci</sub> (true k-factor) — uncheck to set manually</label>
+            <div class="small" id="ciKnote"></div></div>
+          <div><label>Target phase margin (°)</label><input id="ciPM" type="number" value="60" step="1" min="30" max="80"></div>
           <div><label>Zero fz (Hz)</label><input id="cfz" type="number" value="1000" step="10"></div>
           <div><label>HF pole fp (Hz)</label><input id="cfp" type="number" value="26000" step="100"></div>
           <div><label>CS filter RF (Ω) / CF (pF)</label>
@@ -524,11 +527,31 @@ function designCI(p){
     const C=p.gmi*mTu/(2*Math.PI*p.fci);
     calc={CIC:C}; std={CIC:bomGet('cur_CIC',C,p.serC)};
   }else{
-    const kap=Math.sqrt(1+(p.cfz/p.fci)**2)/Math.sqrt(1+(p.fci/p.cfp)**2);
+    // true k-factor: place f_z = f_ci/k, f_p = f_ci·k for the target phase margin
+    // (boost = PM_target − no-boost PM; k = tan(45° + boost/2)). Lock on ⇒ auto-track f_ci.
+    const lock=$('ciKlock')?$('ciKlock').checked:false;
+    let fz=p.cfz, fp=p.cfp, kfac=null, boostUsed=null, pmTgt=null;
+    if(lock){
+      pmTgt=Math.max(30,Math.min(80,(+$('ciPM').value)||60));
+      boostUsed=Math.max(0,Math.min(88,pmTgt-pmT1));
+      kfac=Math.tan((45+boostUsed/2)*Math.PI/180);
+      fz=p.fci/kfac; fp=p.fci*kfac;
+      p.cfz=fz; p.cfp=fp;                                   // propagate to markers + downstream
+      $('cfz').value=fz<100?fz.toFixed(1):Math.round(fz);
+      $('cfp').value=fp<100?fp.toFixed(1):Math.round(fp);
+    }
+    const kap=Math.sqrt(1+(fz/p.fci)**2)/Math.sqrt(1+(p.fci/fp)**2);
     const RIC=1/(mTu*p.gmi*kap);
-    const C1=1/(2*Math.PI*RIC*p.cfz), C2=1/(2*Math.PI*RIC*p.cfp);
+    const C1=1/(2*Math.PI*RIC*fz), C2=1/(2*Math.PI*RIC*fp);
     calc={RIC,C1,C2};
     std={RIC:bomGet('cur_RIC',RIC,p.serR),C1:bomGet('cur_C1',C1,p.serC),C2:bomGet('cur_C2',C2,p.serC)};
+    if($('cfz')) $('cfz').disabled=lock;
+    if($('cfp')) $('cfp').disabled=lock;
+    if($('ciPM')) $('ciPM').disabled=!lock;
+    const note=$('ciKnote');
+    if(note) note.textContent=lock
+      ? `k-factor → target PM ${pmTgt.toFixed(0)}° · no-boost PM ${pmT1.toFixed(1)}° · boost ${boostUsed.toFixed(1)}° · k ${kfac.toFixed(2)} · f_z ${fmtHz(fz)}, f_p ${fmtHz(fp)}`
+      : 'Manual f_z / f_p (k-factor auto-place off).';
   }
   return{corner,mTu,aTu,pmT1,boostNeed,calc,std};
 }
@@ -2109,9 +2132,10 @@ function exportSummary(p,dci,dcv,rcsInfo,sc){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Design_summary.txt';a.click();
 }
 function saveJSON(){
-  const ids=['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb','fci','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2','serR','serC','rcsCustom'];
+  const ids=['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb','fci','ciPM','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2','serR','serC','rcsCustom'];
   const o={state:JSON.parse(JSON.stringify(state)),inputs:{}};
   ids.forEach(id=>o.inputs[id]=$(id).value);
+  o.inputs.ciKlock=$('ciKlock')?$('ciKlock').checked:true;
   const blob=new Blob([JSON.stringify(o,null,1)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Design.json';a.click();
 }
@@ -2122,6 +2146,7 @@ function loadJSON(file){
     Object.assign(state,o.state||{});
     setModeSilent(state.mode);
     for(const[id,v]of Object.entries(o.inputs||{}))if($(id))$(id).value=v;
+    if($('ciKlock')&&o.inputs&&o.inputs.ciKlock!=null)$('ciKlock').checked=!!o.inputs.ciKlock;
     recalc();
   }catch(e){alert('Invalid JSON: '+e.message)}};
   rd.readAsText(file);
@@ -2218,6 +2243,7 @@ $('loadDefaults').onclick=()=>{
   $('vout').value=393.7;$('fsw').value=70;$('lphi').value=235;$('co').value=2200;$('rl').value=10;$('rc').value=10;
   $('rrlpk').value=12.1;$('kmax').value=1.49;$('eta').value=0.93;$('rfb2').value=23.2;
   $('fci').value=8000;$('cfz').value=1000;$('cfp').value=26000;$('rf').value=2000;$('cf').value=470;
+  if($('ciKlock'))$('ciKlock').checked=false;if($('ciPM'))$('ciPM').value=60;  // report defaults are the exact manual f_z/f_p
   $('fcv').value=17;$('r1fb').value=3.63;$('r4fb').value=23.2;$('vfz1').value=3;$('vfz2').value=12;$('vfp1').value=50;$('vfp2').value=17;
   $('rb1').value=560;$('rb2').value=560;$('rb3').value=82;$('rb4').value=30;$('cb1').value=100;$('cb2').value=560;
   $('serR').value='E96';$('serC').value='E24';$('rcsCustom').value='';
@@ -2236,7 +2262,7 @@ $('btnSave').onclick=saveJSON;
 $('btnLoad').onclick=()=>$('fileLoad').click();
 $('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.target.value=''};
 ['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb',
- 'fci','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
+ 'fci','ciKlock','ciPM','cfz','cfp','rf','cf','fcv','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
  'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
 attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
 pzPointer('pzCur');pzPointer('pzVol');
