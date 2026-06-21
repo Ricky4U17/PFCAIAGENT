@@ -3201,3 +3201,15 @@ only font/text/alignment changed to our style.
   Note shows 'coincident' / 'spread r=x' + split fz/fp. Wired to recalc + save/load.
 - Verified headless: coincident fz1=fz2 10.96/fp 26.37 PM59.4; spread r=2 fz 5.48/21.92 fp 13.18/52.73
   (geo means preserved) PM51.9 R3>0; Type-2 & manual disable the control; no JS errors.
+
+## C44 - S5 six step-plots (dip+overshoot) + S5/S6 layout cleanup
+- drawStepPlot gained a step-fraction param (default 1): plots ΔV = step·(Pout/Vout)·yr, so
+  load-decrease steps (k<0) now render as OVERSHOOT. Guards missing canvas.
+- S5: right column now shows ALL 6 load-step transitions as a 2×3 grid of plots
+  (stepPlot0..5, paired increase/decrease), drawn via trans.forEach. Removed the single
+  0→100% plot. Transient table max-height none (no scroll). Removed the 'Each cell:...' note row.
+  Transient Notes panel moved under the table (left col, still nowiz).
+- S6: #screen4.active{display:block} → single column. Reordered: iTHD₃ graph on top, then
+  '120 Hz Rejection & iTHD₃' table (+note+IEC), then Summary. tableWraps max-height none (no scroll).
+- Verified headless: 6 plots 175px, note gone, no-scroll on S5/S6 tables, S6 order graph>table>summary,
+  display block; no JS errors.

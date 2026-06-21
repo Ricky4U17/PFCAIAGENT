@@ -28,6 +28,7 @@
   body.wizard.sub-vol #screen2 [data-sub]:not([data-sub~="vol"]),
   body.wizard.sub-res #screen2 [data-sub]:not([data-sub~="res"]){display:none !important}
   #screen1.active{display:block}
+  #screen4.active{display:block}
   #screen5.active{display:block}
   .schemWrap{overflow:auto;background:#0a111f;border:1px solid var(--line);border-radius:12px}
   .schemWrap svg{display:block;min-width:1280px;width:100%;height:auto}
@@ -367,43 +368,46 @@
         <h3>Input voltages shown</h3>
         <div class="chipRow" id="tranToggles"></div>
         <h3>Transient response — all enabled voltages, all 6 load steps</h3>
-        <div class="tableWrap" style="max-height:520px"><table id="transientTable"></table></div>
-      </div>
-    </div>
-    <div>
-      <div class="panel">
-        <h2>ΔV<sub>out</sub>(t) — full 0→100 % load step</h2>
-        <div class="canvasWrap"><canvas id="stepPlot" height="320"></canvas></div>
-        <div class="legend" id="stepLegend"></div>
+        <div class="tableWrap" style="max-height:none"><table id="transientTable"></table></div>
       </div>
       <div class="panel nowiz">
         <h2>Transient Notes</h2>
         <div id="calcLog3" class="code"></div>
       </div>
     </div>
+    <div>
+      <div class="panel">
+        <h2>ΔV<sub>out</sub>(t) — all 6 load steps (load-increase ⇒ dip, load-decrease ⇒ overshoot)</h2>
+        <div class="legend" id="stepLegend" style="margin-bottom:8px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><div class="small" style="text-align:center;margin-bottom:2px">0 → 100 % (dip)</div><div class="canvasWrap"><canvas id="stepPlot0" data-h="175"></canvas></div></div>
+          <div><div class="small" style="text-align:center;margin-bottom:2px">100 → 0 % (overshoot)</div><div class="canvasWrap"><canvas id="stepPlot3" data-h="175"></canvas></div></div>
+          <div><div class="small" style="text-align:center;margin-bottom:2px">0 → 50 %</div><div class="canvasWrap"><canvas id="stepPlot1" data-h="175"></canvas></div></div>
+          <div><div class="small" style="text-align:center;margin-bottom:2px">50 → 0 %</div><div class="canvasWrap"><canvas id="stepPlot4" data-h="175"></canvas></div></div>
+          <div><div class="small" style="text-align:center;margin-bottom:2px">50 → 100 %</div><div class="canvasWrap"><canvas id="stepPlot2" data-h="175"></canvas></div></div>
+          <div><div class="small" style="text-align:center;margin-bottom:2px">100 → 50 %</div><div class="canvasWrap"><canvas id="stepPlot5" data-h="175"></canvas></div></div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- ================= SCREEN 4 ================= -->
   <section id="screen4" class="screen">
-    <div>
-      <div class="panel">
-        <h2>120 Hz Rejection &amp; iTHD₃</h2>
-        <div class="tableWrap"><table id="thdTable"></table></div>
-        <div class="note" id="thdNote"></div>
-        <h3 style="margin-top:10px">IEC 61000-3-2 Class A — odd-harmonic current limits</h3>
-        <div class="tableWrap"><table id="iecTable"></table></div>
-      </div>
-      <div class="panel">
-        <h2>Summary</h2>
-        <div class="cards" id="cards3"></div>
-      </div>
+    <div class="panel">
+      <h2>iTHD₃ vs Input Voltage</h2>
+      <div class="canvasWrap"><canvas id="thdPlot" height="320"></canvas></div>
+      <div class="legend"><span><i style="border-color:#56a3ff"></i>Low line</span><span><i style="border-color:#f59e0b"></i>High line</span></div>
     </div>
-    <div>
-      <div class="panel">
-        <h2>iTHD₃ vs Input Voltage</h2>
-        <div class="canvasWrap"><canvas id="thdPlot" height="320"></canvas></div>
-        <div class="legend"><span><i style="border-color:#56a3ff"></i>Low line</span><span><i style="border-color:#f59e0b"></i>High line</span></div>
-      </div>
+    <div class="panel">
+      <h2>120 Hz Rejection &amp; iTHD₃</h2>
+      <div class="tableWrap" style="max-height:none"><table id="thdTable"></table></div>
+      <div class="note" id="thdNote"></div>
+      <h3 style="margin-top:10px">IEC 61000-3-2 Class A — odd-harmonic current limits</h3>
+      <div class="tableWrap" style="max-height:none"><table id="iecTable"></table></div>
+    </div>
+    <div class="panel">
+      <h2>Summary</h2>
+      <div class="cards" id="cards3"></div>
     </div>
   </section>
 
@@ -1436,9 +1440,9 @@ function renderScreen3(p,dci,dcv){
     }
     tt+='</tr>';
   }
-  tt+=`<tr><td colspan="7" class="small">Each cell: peak ΔV_OUT and recovery time to ±1 % (±${fmt(band,2)} V). Computed from Z_open/(1+T_v) with your selected standard components.</td></tr>`;
   $('transientTable').innerHTML=tt;
-  drawStepPlot(resp,band,p);
+  // one plot per load-step transition (load-increase = dip, load-decrease = overshoot)
+  trans.forEach((t,i)=>drawStepPlot(resp,band,p,'stepPlot'+i,t[1]));
   $('stepLegend').innerHTML=resp.map(r=>`<span><i style="border-color:${VCOLORS[r.op.vac]}"></i>${r.op.vac} V (${r.op.line})</span>`).join('')+'<span><i style="border-color:#34d399;border-top-style:dashed"></i>±1 % band</span>';
   $('calcLog3').textContent=[
     'Transient results are computed from the selected standard component values:',
@@ -1446,14 +1450,14 @@ function renderScreen3(p,dci,dcv){
     '  ΔI     = step fraction × POUT/VOUT for the voltage\u2019s line range',
     '  t_rec  = time to re-enter the ±1 % band (±'+fmt(band,2)+' V)'].join('\n');
 }
-function drawStepPlot(resp,band,p,cvId='stepPlot'){
-  const cv=$(cvId),dpr=window.devicePixelRatio||1;
+function drawStepPlot(resp,band,p,cvId='stepPlot',step=1){
+  const cv=$(cvId);if(!cv)return;const dpr=window.devicePixelRatio||1;
   const W=cv.clientWidth||760,H=+(cv.getAttribute('data-h'))||320;cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';
   const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#0a111f';ctx.fillRect(0,0,W,H);
   const pad={l:52,r:10,t:12,b:28};
   let ymax=band*1.5;
-  for(const r of resp){const dI=r.op.pout/p.vout;for(const y of r.yr.ys)ymax=Math.max(ymax,Math.abs(y*dI)*1.15)}
+  for(const r of resp){const dI=step*r.op.pout/p.vout;for(const y of r.yr.ys)ymax=Math.max(ymax,Math.abs(y*dI)*1.15)}
   const T=0.45;
   const X=t=>pad.l+(W-pad.l-pad.r)*t/T, Y=v=>pad.t+(H-pad.t-pad.b)*(1-(v+ymax)/(2*ymax));
   ctx.strokeStyle='rgba(154,168,196,.15)';ctx.font='10px Segoe UI';ctx.fillStyle='#9aa8c4';
@@ -1464,7 +1468,7 @@ function drawStepPlot(resp,band,p,cvId='stepPlot'){
   ctx.beginPath();ctx.moveTo(pad.l,Y(band));ctx.lineTo(W-pad.r,Y(band));ctx.stroke();
   ctx.beginPath();ctx.moveTo(pad.l,Y(-band));ctx.lineTo(W-pad.r,Y(-band));ctx.stroke();ctx.setLineDash([]);
   for(const r of resp){
-    const dI=r.op.pout/p.vout;
+    const dI=step*r.op.pout/p.vout;
     ctx.strokeStyle=VCOLORS[r.op.vac]||'#56a3ff';ctx.lineWidth=r.op.line==='HL'?2.2:1.8;ctx.beginPath();
     r.yr.ts.forEach((t,i)=>{const x=X(t),y=Y(r.yr.ys[i]*dI);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});
     ctx.stroke();
