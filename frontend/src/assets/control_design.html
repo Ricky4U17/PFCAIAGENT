@@ -284,8 +284,8 @@
           <div><label>k-factor placement (Type-III)</label>
             <div class="inline"><select id="vPlace"><option value="coincident">Coincident</option><option value="spread">Spread</option></select>
             <input id="vSpread" type="number" value="1.5" step="0.1" min="1" max="5" title="spread ratio r (geometric)" style="max-width:64px"></div></div>
-          <div><label>FB top R1 (MΩ) / bottom R4 (kΩ)</label>
-            <div class="inline"><input id="r1fb" type="number" value="3.63" step="0.01"><input id="r4fb" type="number" value="23.2" step="0.1"></div></div>
+          <div><label>FB top R1 (MΩ) / bottom R4 (kΩ) — fixed (Step 5)</label>
+            <div class="inline"><input id="r1fb" type="number" value="3.63" step="0.01" readonly title="FB divider top — fixed by Step 5, not editable here"><input id="r4fb" type="number" value="23.2" step="0.1" readonly title="FB divider bottom — fixed by Step 5, not editable here"></div></div>
           <div><label>Zero 1 fz1 (Hz)</label><input id="vfz1" type="number" value="3" step="0.1"></div>
           <div><label>Zero 2 fz2 (Hz) — Type-III</label><input id="vfz2" type="number" value="12" step="0.1"></div>
           <div><label>Pole 1 fp1 (Hz)</label><input id="vfp1" type="number" value="50" step="0.5"></div>

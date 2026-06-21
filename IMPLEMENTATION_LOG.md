@@ -3223,3 +3223,8 @@ only font/text/alignment changed to our style.
   FR<->HV (R_IAC, R_VIR) with both values, active range highlighted amber. Plus note:
   'Switch these components using the microcontroller (relay/analog switch) ...'.
 - Verified headless: toggle updates riac/rvir + highlight; S4 modeHigh stays synced; note present; no JS errors.
+
+## C46 - Voltage loop: FB top/bottom (R1/R4) made read-only (fixed by Step 5)
+- r1fb/r4fb inputs on the voltage compensator panel now readonly (+ title, label '— fixed (Step 5)'),
+  matching the R_IAC/R_VIR fixed-field pattern. Still read by gather() so H_div / Type-3 math
+  unchanged; designer can see but not edit. Verified: readonly true, values 3.63MΩ/23.2kΩ still used; no JS errors.
