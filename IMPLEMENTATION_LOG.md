@@ -3213,3 +3213,13 @@ only font/text/alignment changed to our style.
   '120 Hz Rejection & iTHD₃' table (+note+IEC), then Summary. tableWraps max-height none (no scroll).
 - Verified headless: 6 plots 175px, note gone, no-scroll on S5/S6 tables, S6 order graph>table>summary,
   display block; no JS errors.
+
+## C45 - S7 schematic: line-range selector + switched-components list + note
+- screen5 (schematic): added Low Line (FR) / High Line (HV) selector (#modeLow2/#modeHigh2)
+  -> setMode -> schematic redraws with the selected range's live values (R_IAC 6/12 MΩ,
+  R_VIR 10/470 kΩ via populateMode). _syncModeBtns() keeps S4 Line Range + screen5 buttons in sync
+  (setMode/setModeSilent). Wired onclick.
+- Added #lineDiffTable under the schematic in renderSchematic: lists the components that change
+  FR<->HV (R_IAC, R_VIR) with both values, active range highlighted amber. Plus note:
+  'Switch these components using the microcontroller (relay/analog switch) ...'.
+- Verified headless: toggle updates riac/rvir + highlight; S4 modeHigh stays synced; note present; no JS errors.
