@@ -280,6 +280,9 @@
           <div style="grid-column:1/-1"><label><input type="checkbox" id="vKlock" checked style="width:auto"> &nbsp;Auto-place zeros / poles from f<sub>cv</sub> (true k-factor) — uncheck to set manually</label>
             <div class="small" id="vKnote"></div></div>
           <div><label>Target phase margin (°)</label><input id="vPM" type="number" value="60" step="1" min="30" max="80"></div>
+          <div><label>k-factor placement (Type-III)</label>
+            <div class="inline"><select id="vPlace"><option value="coincident">Coincident</option><option value="spread">Spread</option></select>
+            <input id="vSpread" type="number" value="1.5" step="0.1" min="1" max="5" title="spread ratio r (geometric)" style="max-width:64px"></div></div>
           <div><label>FB top R1 (MΩ) / bottom R4 (kΩ)</label>
             <div class="inline"><input id="r1fb" type="number" value="3.63" step="0.01"><input id="r4fb" type="number" value="23.2" step="0.1"></div></div>
           <div><label>Zero 1 fz1 (Hz)</label><input id="vfz1" type="number" value="3" step="0.1"></div>
@@ -608,7 +611,12 @@ function designCV(p,dci,pure,quiet){
       p.vfz1=p.fcv/k; p.vfp1=p.fcv*k; vk={pmTgt,boost,k};
     }else{
       const boost=Math.max(1,Math.min(160,pmTgt-pmNoBoost)), k=Math.tan((45+boost/4)*Math.PI/180)**2, rk=Math.sqrt(k);
-      p.vfz1=p.vfz2=p.fcv/rk; p.vfp1=p.vfp2=p.fcv*rk; vk={pmTgt,boost,k};
+      const zc=p.fcv/rk, pc=p.fcv*rk;   // k-factor geometric centres (zeros, poles)
+      // Spread straddles each pair geometrically around its centre (r=1 ⇒ coincident);
+      // geometric means stay at zc/pc so the boost stays centred at f_cv, plateau widens.
+      const spread=$('vPlace')&&$('vPlace').value==='spread';
+      const r=spread?Math.max(1,Math.min(5,(+$('vSpread').value)||1.5)):1;
+      p.vfz1=zc/r; p.vfz2=zc*r; p.vfp1=pc/r; p.vfp2=pc*r; vk={pmTgt,boost,k,r,spread};
     }
     $('vfz1').value=fld(p.vfz1); $('vfp1').value=fld(p.vfp1);
     $('vfz2').value=fld(p.vfz2); $('vfp2').value=fld(p.vfp2);
@@ -642,9 +650,13 @@ function designCV(p,dci,pure,quiet){
     const lk=$('vKlock')?$('vKlock').checked:false;
     ['vfz1','vfz2','vfp1','vfp2'].forEach(id=>{if($(id))$(id).disabled=lk});
     if($('vPM')) $('vPM').disabled=!lk;
+    const showSpread=lk && vt==='type3';
+    if($('vPlace'))  $('vPlace').disabled=!showSpread;
+    if($('vSpread')) $('vSpread').disabled=!(showSpread && $('vPlace').value==='spread');
+    const place=vt==='type3'?(' · '+(vk&&vk.spread?'spread r='+vk.r.toFixed(1):'coincident')):'';
     const note=$('vKnote');
     if(note) note.textContent=lk
-      ? `k-factor (${vt==='type2'?'Type-2':'Type-3'}) → target PM ${vk?vk.pmTgt.toFixed(0):'—'}° · no-boost PM ${pmNoBoost.toFixed(1)}° · boost ${vk?vk.boost.toFixed(1):'—'}° · k ${vk?vk.k.toFixed(2):'—'} · f_z ${fmtHz(p.vfz1)}${vt==='type3'?'/'+fmtHz(p.vfz2):''}, f_p ${fmtHz(p.vfp1)}${vt==='type3'?'/'+fmtHz(p.vfp2):''}`
+      ? `k-factor (${vt==='type2'?'Type-2':'Type-3'}) → target PM ${vk?vk.pmTgt.toFixed(0):'—'}° · no-boost PM ${pmNoBoost.toFixed(1)}° · boost ${vk?vk.boost.toFixed(1):'—'}° · k ${vk?vk.k.toFixed(2):'—'}${place} · f_z ${fmtHz(p.vfz1)}${vt==='type3'?'/'+fmtHz(p.vfz2):''}, f_p ${fmtHz(p.vfp1)}${vt==='type3'?'/'+fmtHz(p.vfp2):''}`
       : 'Manual zero / pole placement (k-factor auto-place off).';
   }
   return{cor,mTb,aTb,G,pmNoBoost,calc,std,err,vt};
@@ -662,7 +674,9 @@ function _placeCV(pc,dci,fcv,pmTgt){
   pc.fcv=fcv; const cor=sizingCorner(pc);
   const aTb=cang(TvBase(pc,dci,cor.vac,cor.pout,fcv)), pmNB=180+aTb-90;
   if(state.vType==='type2'){const b=Math.max(0,Math.min(88,pmTgt-pmNB)),k=Math.tan((45+b/2)*Math.PI/180);pc.vfz1=pc.vfz2=fcv/k;pc.vfp1=pc.vfp2=fcv*k;}
-  else{const b=Math.max(1,Math.min(160,pmTgt-pmNB)),k=Math.tan((45+b/4)*Math.PI/180)**2,rk=Math.sqrt(k);pc.vfz1=pc.vfz2=fcv/rk;pc.vfp1=pc.vfp2=fcv*rk;}
+  else{const b=Math.max(1,Math.min(160,pmTgt-pmNB)),k=Math.tan((45+b/4)*Math.PI/180)**2,rk=Math.sqrt(k),zc=fcv/rk,pcc=fcv*rk;
+    const r=($('vPlace')&&$('vPlace').value==='spread')?Math.max(1,Math.min(5,(+$('vSpread').value)||1.5)):1;
+    pc.vfz1=zc/r;pc.vfz2=zc*r;pc.vfp1=pcc/r;pc.vfp2=pcc*r;}
 }
 function optimizeVoltage(){
   const p=gather(), dci=designCI(p), pts=opPts(p,'all');
@@ -2281,7 +2295,7 @@ function exportSummary(p,dci,dcv,rcsInfo,sc){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PFC_Control_Design_summary.txt';a.click();
 }
 function saveJSON(){
-  const ids=['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb','fci','ciPM','cfz','cfp','rf','cf','fcv','vPM','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2','serR','serC','rcsCustom'];
+  const ids=['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb','fci','ciPM','cfz','cfp','rf','cf','fcv','vPM','vPlace','vSpread','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2','serR','serC','rcsCustom'];
   const o={state:JSON.parse(JSON.stringify(state)),inputs:{}};
   ids.forEach(id=>o.inputs[id]=$(id).value);
   o.inputs.ciKlock=$('ciKlock')?$('ciKlock').checked:true;
@@ -2447,7 +2461,7 @@ $('btnSave').onclick=saveJSON;
 $('btnLoad').onclick=()=>$('fileLoad').click();
 $('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.target.value=''};
 ['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb',
- 'fci','ciKlock','ciPM','cfz','cfp','rf','cf','fcv','vKlock','vPM','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
+ 'fci','ciKlock','ciPM','cfz','cfp','rf','cf','fcv','vKlock','vPM','vPlace','vSpread','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
  'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
 attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
 pzPointer('pzCur');pzPointer('pzVol');

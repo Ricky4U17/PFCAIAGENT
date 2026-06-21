@@ -3189,3 +3189,15 @@ only font/text/alignment changed to our style.
   transient explorer, S6 the full iTHD+IEC detail (now totals).
 - Verified headless: scorecard 6 chips all green nominal; sub visibility correct (4a track, 4b step);
   responsiveness (tracking vs f_ci, recovery vs f_cv); no JS errors.
+
+## C43 - Type-III voltage k-factor: zero/pole spread control (3 placement options)
+- Voltage panel: added #vPlace select (Coincident/Spread) + #vSpread ratio r input (Type-III only).
+- designCV type3 k-factor: geometric centres zc=fcv/√k, pc=fcv·√k; spread straddles each pair
+  geometrically — fz1=zc/r, fz2=zc·r, fp1=pc/r, fp2=pc·r (r=1 ⇒ coincident). Geometric means
+  preserved so boost stays centred at fcv; plateau widens, peak boost (PM) drops with r. R3>0
+  preserved (vfp2/vfz2 = pc/zc = k regardless of r). _placeCV (optimizer) respects the setting.
+- 3 placement options now: (1) k-factor Coincident [lock on], (2) k-factor Spread r [lock on],
+  (3) Manual [lock off, 4 independent inputs]. vPlace/vSpread disabled unless lock on & Type-III.
+  Note shows 'coincident' / 'spread r=x' + split fz/fp. Wired to recalc + save/load.
+- Verified headless: coincident fz1=fz2 10.96/fp 26.37 PM59.4; spread r=2 fz 5.48/21.92 fp 13.18/52.73
+  (geo means preserved) PM51.9 R3>0; Type-2 & manual disable the control; no JS errors.
