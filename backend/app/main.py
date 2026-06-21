@@ -1763,6 +1763,50 @@ def _merge_pdfs(parts: List[bytes]) -> bytes:
     w.write(buf)
     return buf.getvalue()
 
+# painting / image / path-drawing operators — a page with any of these is not blank
+_PDF_PAINT = __import__("re").compile(rb'(?:^|[\s>])(?:S|s|f|F|f\*|B|B\*|b|b\*|Do|sh|re|m|l|c|v|y)(?:[\s/\[]|$)')
+
+def _strip_blank_pages(pdf_bytes: bytes) -> bytes:
+    """Drop pages that have no text, no images and no vector drawing (truly blank).
+    Conservative: any uncertainty keeps the page."""
+    import io as _io
+    try:
+        from pypdf import PdfReader, PdfWriter
+        reader = PdfReader(_io.BytesIO(pdf_bytes))
+    except Exception:
+        return pdf_bytes
+    w = PdfWriter()
+    removed = 0
+    for pg in reader.pages:
+        blank = True
+        try:
+            if (pg.extract_text() or "").strip():
+                blank = False
+        except Exception:
+            blank = False                      # extraction failed → keep
+        if blank:
+            try:
+                if list(pg.images):
+                    blank = False
+            except Exception:
+                blank = False
+        if blank:
+            try:
+                c = pg.get_contents()
+                raw = c.get_data() if c is not None else b""
+            except Exception:
+                raw = b"keep"                   # unknown content → keep
+            if _PDF_PAINT.search(raw or b""):
+                blank = False
+        if blank:
+            removed += 1
+        else:
+            w.add_page(pg)
+    if removed == 0:
+        return pdf_bytes
+    out = _io.BytesIO(); w.write(out)
+    return out.getvalue()
+
 @app.post("/mode-b/documentation/report-status", tags=["documentation"])
 def doc_report_status(req: _DocStatusReq):
     """
@@ -1814,6 +1858,7 @@ def doc_generate_report(req: _DocReportReq):
                 approved_design = req.approved_design,
                 step15_result   = req.step15_result,
                 step16_params   = None,
+                include_ch6     = False,   # Ch6 supplied by build_control_report below
             )
             ch6 = build_control_report(_control_inputs_from_step16(req.step16_params))
             pdf = _merge_pdfs([ch1_5, ch6])
@@ -1823,6 +1868,7 @@ def doc_generate_report(req: _DocReportReq):
                 step15_result   = req.step15_result,
                 step16_params   = req.step16_params,
             )
+        pdf = _strip_blank_pages(pdf)
         project_id = req.state.get("project_id", "design")
         if req.step16_params and req.approved_design and req.step15_result:
             label = "Steps1_16"

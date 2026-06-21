@@ -96,6 +96,7 @@ class DocumentationAgent:
         approved_design:  Optional[dict] = None,
         step15_result:    Optional[dict] = None,
         step16_params:    Optional[dict] = None,
+        include_ch6:      bool = True,
     ) -> bytes:
         """
         Generate chapter-based PDF using the new documentation standards:
@@ -116,6 +117,7 @@ class DocumentationAgent:
             approved_design = approved_design,
             step15_result   = step15_result,
             step16_params   = step16_params,
+            include_ch6     = include_ch6,
         )
 
     def generate(
@@ -123,16 +125,20 @@ class DocumentationAgent:
         approved_design:  Optional[dict] = None,
         step15_result:    Optional[dict] = None,
         step16_params:    Optional[dict] = None,
+        include_ch6:      bool = True,
     ) -> bytes:
         """
         Generate PDF — routes to chapter-based builder first, falls back to
         existing generators if builder fails (backward compatibility).
+        include_ch6=False omits the Chapter 6 splash/placeholder (used when the
+        full detailed Chapter 6 is merged in separately, to avoid a duplicate heading).
         """
         try:
             return self.generate_chapter_report(
                 approved_design = approved_design,
                 step15_result   = step15_result,
                 step16_params   = step16_params,
+                include_ch6     = include_ch6,
             )
         except Exception:
             return self._generate_legacy(approved_design, step15_result, step16_params)

@@ -4229,7 +4229,7 @@ def _ch6_references(story, controller_id="fan9672"):
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN ASSEMBLER
 # ═══════════════════════════════════════════════════════════════════════════════
-def build_full_report(state, approved_design=None, step15_result=None, step16_params=None):
+def build_full_report(state, approved_design=None, step15_result=None, step16_params=None, include_ch6=True):
     buf = io.BytesIO()
     doc = _ReportDoc(buf, pagesize=A4,
                      leftMargin=LM, rightMargin=RM,
@@ -4278,7 +4278,10 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
         _ch3(story, state, approved_design)
         _ch4(story, state, approved_design)
     _ch5(story, state, step15_result)
-    _ch6(story, state, step16_params)
+    # When the full detailed Chapter 6 is merged in separately (combined report),
+    # skip the Ch6 splash/placeholder here to avoid a duplicate "Chapter 6" heading.
+    if include_ch6:
+        _ch6(story, state, step16_params)
 
     # multiBuild = two passes so the TOC page numbers resolve correctly.
     doc.multiBuild(story)

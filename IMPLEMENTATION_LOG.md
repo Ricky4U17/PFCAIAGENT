@@ -3228,3 +3228,16 @@ only font/text/alignment changed to our style.
 - r1fb/r4fb inputs on the voltage compensator panel now readonly (+ title, label '— fixed (Step 5)'),
   matching the R_IAC/R_VIR fixed-field pattern. Still read by gather() so H_div / Type-3 math
   unchanged; designer can see but not edit. Verified: readonly true, values 3.63MΩ/23.2kΩ still used; no JS errors.
+
+## C47 - PDF report: remove duplicate Chapter 6 heading + strip blank pages
+- Duplicate Ch6: combined report = ch1_5 (agent) + ch6 (build_control_report). The agent's
+  _ch6 emitted a Chapter-6 splash + 'Step 16 data not yet available' placeholder (misleading,
+  data IS in the merged ch6) -> two 'CHAPTER 6 — Control Scheme' splashes. Added include_ch6
+  flag threaded generate -> generate_chapter_report -> build_full_report (guards _ch6); endpoint
+  combined path passes include_ch6=False. Verified: splash pages [27,29] -> [27] (one heading).
+- Blank pages: added _strip_blank_pages(pdf) in main.py (pypdf) — drops pages with no text,
+  no images, no vector/paint ops (conservative; figures kept). Applied to the final pdf in
+  doc_generate_report. Verified: synthetic 4->3 (blank removed, figure kept); combined report
+  8 blank pages removed.
+- CAVEAT: ch1_5 TOC page numbers may drift slightly if blanks fell within ch1_5 (merged-TOC was
+  already approximate). Acceptable per the explicit 'remove blanks' request. Backend restart needed.
