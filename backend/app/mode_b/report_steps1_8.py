@@ -655,15 +655,17 @@ def build_story(inp: dict | None = None):
          "9 BIBO  ·  10 inner current loop  ·  11 outer voltage loop (Type-2 / Type-3 OTA)",
          "12 step-load transient  ·  13 input THD & 120 Hz rejection  ·  14 compensator optimization",
          "Appendix A derivations  ·  B BOM  ·  C bench test plan  ·  D references  ·  E quick-reference"])
+    # Each build_stepN / build_appendices starts with step_h(), which already inserts a
+    # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
-    story.append(PageBreak()); build_step9(story, compute_step9_bibo(inp))
-    story.append(PageBreak()); build_step10(story, compute_step10_iloop(inp, prior))
-    story.append(PageBreak()); build_step11(story, compute_step11_vloop(inp, prior))
-    story.append(PageBreak()); build_step12(story, compute_step12_transient(inp, prior))
+    build_step9(story, compute_step9_bibo(inp))
+    build_step10(story, compute_step10_iloop(inp, prior))
+    build_step11(story, compute_step11_vloop(inp, prior))
+    build_step12(story, compute_step12_transient(inp, prior))
     s13 = compute_step13_thd(inp, prior)
-    story.append(PageBreak()); build_step13(story, s13)
-    story.append(PageBreak()); build_step14(story, s13)
-    story.append(PageBreak()); build_appendices(story)
+    build_step13(story, s13)
+    build_step14(story, s13)
+    build_appendices(story)
     while story and isinstance(story[0], PageBreak):
         story.pop(0)
     return story

@@ -3241,3 +3241,13 @@ only font/text/alignment changed to our style.
   8 blank pages removed.
 - CAVEAT: ch1_5 TOC page numbers may drift slightly if blanks fell within ch1_5 (merged-TOC was
   already approximate). Acceptable per the explicit 'remove blanks' request. Backend restart needed.
+
+## C48 - PDF blank pages fixed at SOURCE (TOC stays accurate)
+- Root cause: step_h() and chapter_splash() each already start with PageBreak() (by design —
+  splash ends mid-page, first step_h supplies the break). The explicit story.append(PageBreak())
+  before each build_stepN/appendices in build_story (report_steps1_8) and after the TOC in
+  build_full_report (doc_report_builder) DOUBLED the break -> 8 blank pages.
+- Fix: removed the 7 redundant PageBreaks before build_step9..14 + build_appendices, and the
+  1 after the TOC. Verified: ch1_5 26->25, ch6 89->82, merged 115->107, ZERO blank pages, no
+  content merged (counts = old minus blanks). TOC now accurate (real layout, no post-strip needed).
+- _strip_blank_pages (C47) retained as a no-op safety net (removes 0 now).

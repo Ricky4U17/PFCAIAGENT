@@ -4270,7 +4270,8 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
                        leftIndent=30, leading=11.5, spaceAfter=0),
     ]
     story.append(toc)
-    story.append(PageBreak())
+    # No PageBreak here — _ch1 → chapter_splash() already starts with a PageBreak;
+    # an extra one would leave a blank page between the TOC and Chapter 1.
 
     _ch1(story, state)
     _ch2(story, state)
