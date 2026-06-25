@@ -403,6 +403,16 @@ def semiconductor_manifest():
     except Exception as e:
         log.exception("semiconductor manifest"); raise HTTPException(500, str(e))
 
+@app.get("/mode-b/semiconductor/library", tags=["mode-b"])
+def semiconductor_library():
+    """Stored parts the designer can select instead of entering a datasheet by hand
+    (provision for the future local component DB). Each entry is a full engine-format block."""
+    try:
+        from app.mode_b.semiconductor.library import list_components
+        return list_components()
+    except Exception as e:
+        log.exception("semiconductor library"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/semiconductor/calculate", tags=["mode-b"])
 def semiconductor_calculate(req: _SemiReq):
     """Validate the 3 parts, sweep all 9 input voltages, run the design-vs-engine

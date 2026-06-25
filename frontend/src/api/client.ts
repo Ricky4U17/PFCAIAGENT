@@ -387,6 +387,8 @@ export interface SemiReqBody {
   tj_limit?:     Record<string, number>
   selected_vac?: number
 }
+export const semiconductorLibrary = () =>
+  get<Record<string, Array<Record<string, unknown>>>>('/mode-b/semiconductor/library')
 export const semiconductorCalculate = (b: SemiReqBody) =>
   post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
 export const semiconductorFigures = (b: SemiReqBody) =>

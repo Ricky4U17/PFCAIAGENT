@@ -8,10 +8,10 @@
  * from the same single-source-of-truth grid every chapter uses, and a consistency
  * gate guarantees the loss numbers never diverge from the rest of the design.
  */
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
+import { semiconductorCalculate, semiconductorFigures, semiconductorLibrary, docGenerateReport,
          type SemiCalcResult, type SemiReqBody } from '../api/client'
 
 interface Props {
@@ -111,6 +111,24 @@ function buildBlock(state: Record<string, any>, fields: Field[]): Record<string,
   return out
 }
 
+// ── library part (engine block) → form state (inverse of buildBlock) ──
+const numToStr = (v: any) => typeof v === 'number' ? String(v) : (v ?? '')
+const curveToForm = (c: any): Curve => Array.isArray(c) && c.length === 2
+  ? { x: (c[0] as number[]).join(', '), y: (c[1] as number[]).join(', ') } : { x: '', y: '' }
+function blockToForm(block: Record<string, any>, fields: Field[], base: Record<string, any>) {
+  const out: Record<string, any> = { ...base }
+  for (const f of fields) {
+    if (!(f.key in block)) continue
+    const v = block[f.key]
+    if (f.kind === 'curve') out[f.key] = curveToForm(v)
+    else if (f.kind === 'num') out[f.key] = numToStr(v)
+    else out[f.key] = v
+  }
+  return out
+}
+const BASE: Record<Sub, Record<string, any>> = { bridge: BRIDGE0, mosfet: MOSFET0, diode: DIODE0, results: {} }
+const FIELDS: Record<Sub, Field[]> = { bridge: BRIDGE_FIELDS, mosfet: MOSFET_FIELDS, diode: DIODE_FIELDS, results: [] }
+
 const inStyle: React.CSSProperties = { background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6,
   color: C.text, padding: '5px 8px', fontSize: 12, fontFamily: 'IBM Plex Mono,monospace', width: '100%' }
 const fmtW = (n: number) => `${n.toFixed(2)} W`
@@ -147,6 +165,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [figBusy, setFigBusy] = useState(false)
   const [rptBusy, setRptBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [lib, setLib] = useState<Record<string, Record<string, any>[]>>({})
+  const [libMode, setLibMode] = useState<Record<string, boolean>>({ bridge: false, mosfet: false, diode: false })
+  useEffect(() => { semiconductorLibrary().then(setLib).catch(() => {}) }, [])
+  const setWhole = (which: Sub, value: Record<string, any>) => {
+    (which === 'mosfet' ? setMosfet : which === 'diode' ? setDiode : setBridge)(value as any)
+  }
 
   const body = (): SemiReqBody => ({
     design,
@@ -241,7 +265,29 @@ export const SemiconductorSelection: React.FC<Props> = ({
           </div>
         )}
       </div>
-      <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: C.muted }}>Source:</span>
+        {([['manual', 'Manual / external datasheet'], ['library', 'From library']] as [string, string][]).map(([m, lbl]) => {
+          const isLib = m === 'library'; const active = !!libMode[which] === isLib
+          return (
+            <button key={m} onClick={() => setLibMode(s => ({ ...s, [which]: isLib }))} style={{
+              padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              border: `1px solid ${active ? C.teal : C.border}`, background: active ? 'rgba(45,212,191,.12)' : C.bg3,
+              color: active ? C.teal : C.muted }}>{lbl}</button>
+          )
+        })}
+        {libMode[which] && (
+          <select style={{ ...inStyle, width: 'auto', flex: 1, minWidth: 200 }} defaultValue=""
+            onChange={e => {
+              const part = (lib[which] ?? [])[Number(e.target.value)]
+              if (part) setWhole(which, blockToForm(part, FIELDS[which], BASE[which]))
+            }}>
+            <option value="">{(lib[which] ?? []).length ? 'Select a part…' : 'Library empty (coming soon)'}</option>
+            {(lib[which] ?? []).map((p, i) => <option key={i} value={i}>{p.manufacturer} — {p.part_number}</option>)}
+          </select>
+        )}
+      </div>
+      <div>
         {fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}
       </div>
     </Card>

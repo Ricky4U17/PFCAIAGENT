@@ -3301,3 +3301,14 @@ only font/text/alignment changed to our style.
   button (gated on validation.ok) reconstructs step16_params + sends semiconductor block.
 - Verified: Ch7 standalone 10pp all sections no blanks; combined Ch1-7 161pp, ONE Ch6(p70) ONE Ch7(p152),
   no blanks; frontend build clean; backend restarted --reload.
+
+## C52 - Semiconductor: component-source provision (manual datasheet OR library)
+- library.py (stub): _SEED {mosfet:2, diode:2, bridge:1} parts as full engine-format blocks
+  {manufacturer, part_number, ...datasheet}; list_components(kind)/get_component(). Real DB
+  replaces _SEED later with zero GUI/engine change (block shape identical to manual path).
+- GET /mode-b/semiconductor/library endpoint; client.ts semiconductorLibrary().
+- SemiconductorSelection: per-component Source toggle 'Manual / external datasheet' | 'From library';
+  library mode shows a part dropdown; selecting populates the form via blockToForm (inverse of
+  buildBlock: curve->{x,y} strings, num->string). Library fetched on mount. Empty -> 'coming soon'.
+- Verified: library endpoint returns 5 seed parts; frontend build clean; both endpoints 200 on :8000.
+- Windows note: uvicorn --reload flaky (hung reloads + dead-PID zombie socket on 8000); restart clean.
