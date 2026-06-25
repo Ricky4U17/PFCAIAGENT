@@ -3251,3 +3251,19 @@ only font/text/alignment changed to our style.
   1 after the TOC. Verified: ch1_5 26->25, ch6 89->82, merged 115->107, ZERO blank pages, no
   content merged (counts = old minus blanks). TOC now accurate (real layout, no post-strip needed).
 - _strip_blank_pages (C47) retained as a no-op safety net (removes 0 now).
+
+## C49 - Semiconductor loss: step 1 - vendored engine + adapter + consistency gate
+- Vendored 3 modules into backend/app/mode_b/semiconductor/: pfc_loss_model.py (analytic
+  loss/thermal engine, unchanged), pfc_component_intake.py (MANIFEST + validate_design gate),
+  pfc_visualization.py (4 figures; used later). 
+- adapter.py: SINGLE bridge design->engine. build_design_ops() sources the 9-point grid from
+  build_design_ops_table + step2/step5 (same source as every chapter); recomputes Iph_rms with
+  the approved L_phi. build_semi_cfg() feeds eta/PF/Po/Iin_rms/L_phi to the engine via override
+  curves keyed to the exact Vac points (no interpolation). verify_consistency() asserts engine
+  echoes (Vac/Po/Pin/eta/PF/Iin_rms/Ipk_ch/L_eff + structural Dpk) match our upstream values
+  per point within tol -> rejects silent drift. calculate_semiconductor_losses(): validate ->
+  sweep ALL 9 input voltages -> consistency gate -> per_point rows + worst-case summary + Tj pass.
+- Verified on real design (Vo393.7/fsw70k/nch2/L235/r0.2 + SiC parts): validation True,
+  consistency True (0 issues), L_eff=235uH every point, worst semi 65.4W@180V, Tj<<limits.
+  Committed self-test: python -m app.mode_b.semiconductor.adapter.
+- NEXT: step 2 GUI (3 component sub-screens + results), step 3 Chapter 7 documentation.
