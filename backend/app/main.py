@@ -1752,6 +1752,7 @@ class _DocReportReq(BaseModel):
     approved_design: Optional[Dict[str, Any]] = None
     step15_result:   Optional[Dict[str, Any]] = None
     step16_params:   Optional[Dict[str, Any]] = None
+    semiconductor:   Optional[Dict[str, Any]] = None   # {design, mosfet, diode, bridge, thermal, tj_limit} → Chapter 7
 
 
 def _num(v):
@@ -1921,7 +1922,14 @@ def doc_generate_report(req: _DocReportReq):
                 include_ch6     = False,   # Ch6 supplied by build_control_report below
             )
             ch6 = build_control_report(_control_inputs_from_step16(req.step16_params))
-            pdf = _merge_pdfs([ch1_5, ch6])
+            parts = [ch1_5, ch6]
+            if req.semiconductor:                          # Chapter 7 — Semiconductor Loss & Thermal
+                from app.mode_b.report_semiconductor import build_semiconductor_report
+                sc = req.semiconductor
+                parts.append(build_semiconductor_report(
+                    sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"],
+                    sc.get("tj_limit")))
+            pdf = _merge_pdfs(parts)
         else:
             pdf = agent.generate(
                 approved_design = req.approved_design,
@@ -1930,7 +1938,9 @@ def doc_generate_report(req: _DocReportReq):
             )
         pdf = _strip_blank_pages(pdf)
         project_id = req.state.get("project_id", "design")
-        if req.step16_params and req.approved_design and req.step15_result:
+        if req.step16_params and req.approved_design and req.step15_result and req.semiconductor:
+            label = "Steps1_17"
+        elif req.step16_params and req.approved_design and req.step15_result:
             label = "Steps1_16"
         elif req.step15_result and req.approved_design:
             label = "Steps1_15"

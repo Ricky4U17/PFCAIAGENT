@@ -3285,3 +3285,19 @@ only font/text/alignment changed to our style.
 - Verified: HTTP calculate (validation/consistency True, 9 pts, worst 65.4W) + figures (4 PNGs);
   tsc/vite build clean; App wiring passes confirmedState/approvedInductor/Capacitor.
 - NEXT: step 3 Chapter 7 documentation agent.
+
+## C51 - Semiconductor loss: step 3 - Chapter 7 documentation
+- report_semiconductor.py: build_semiconductor_report(design, mosfet, diode, bridge, thermal,
+  tj_limit) -> standalone Ch7 PDF (merged after Ch1-6, like build_control_report). Uses the SAME
+  adapter+engine as the GUI (identical numbers). Sections: 7.1 operating basis (9-pt grid w/
+  consistency PASS note), 7.2 components (mfr/part#/type), 7.3 bridge, 7.4 MOSFET (5 mechanisms),
+  7.5 diode, 7.6 thermal+Tj, 7.7 figures (viz 4 PNGs via backend= inject), 7.8 summary + efficiency
+  cross-check (P_system vs P_semi vs implied other). Losses tabulated at EVERY input voltage.
+  _img_path reads PNG into memory (temp dir gone before build). eq_box LaTeX = mathtext (sqrt{2}).
+- doc_report_builder: CH_COLORS[7] dark red.
+- main.py: _DocReportReq.semiconductor optional; combined endpoint appends ch7 = build_semiconductor_report
+  when present -> _merge_pdfs([ch1_5, ch6, ch7]); label Steps1_17.
+- client.ts docGenerateReport + semiconductor; SemiconductorSelection 'Download full report (Ch 1-7)'
+  button (gated on validation.ok) reconstructs step16_params + sends semiconductor block.
+- Verified: Ch7 standalone 10pp all sections no blanks; combined Ch1-7 161pp, ONE Ch6(p70) ONE Ch7(p152),
+  no blanks; frontend build clean; backend restarted --reload.

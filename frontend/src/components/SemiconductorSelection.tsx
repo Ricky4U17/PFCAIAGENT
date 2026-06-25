@@ -11,7 +11,7 @@
 import React, { useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { semiconductorCalculate, semiconductorFigures,
+import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          type SemiCalcResult, type SemiReqBody } from '../api/client'
 
 interface Props {
@@ -116,7 +116,7 @@ const inStyle: React.CSSProperties = { background: C.bg3, border: `1px solid ${C
 const fmtW = (n: number) => `${n.toFixed(2)} W`
 
 export const SemiconductorSelection: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, onBack, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign, onBack, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -145,6 +145,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [figs, setFigs] = useState<Record<string, string> | null>(null)
   const [busy, setBusy] = useState(false)
   const [figBusy, setFigBusy] = useState(false)
+  const [rptBusy, setRptBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const body = (): SemiReqBody => ({
@@ -168,6 +169,31 @@ export const SemiconductorSelection: React.FC<Props> = ({
           .catch(() => {}).finally(() => setFigBusy(false))
       }
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+
+  const downloadReport = async () => {
+    setRptBusy(true); setErr(null)
+    try {
+      const b = body()
+      const ai = approvedInductorDesign as any
+      const step16_params = {
+        L_uH: design.L_phi_uH, DCR_mOhm: Number(ai?.DCR_100C_mOhm ?? 28),
+        C_uF: approvedCapacitorDesign?.C_total_uF ?? 2350, ESR_mOhm: approvedCapacitorDesign?.ESR_parallel_mohm ?? 5,
+        Vout_V: design.vout, fsw_Hz: design.fsw, Pout_lo_W: design.pout_lo, Pout_hi_W: design.pout_hi,
+        eta_lo: 0.945, eta_hi: 0.965, nch: design.nch,
+      }
+      const blob = await docGenerateReport({
+        state: confirmedState, approved_design: approvedInductorDesign,
+        step15_result: approvedCapacitorDesign ? { ...approvedCapacitorDesign } : {},
+        step16_params,
+        semiconductor: { design: b.design, mosfet: b.mosfet, diode: b.diode, bridge: b.bridge,
+          thermal: b.thermal, tj_limit: b.tj_limit },
+      })
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_17.pdf`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 150)
+    } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 
   const setC = (which: Sub) => (k: string, v: any) => {
@@ -356,9 +382,14 @@ export const SemiconductorSelection: React.FC<Props> = ({
           <Btn variant="ghost" onClick={onBack}>← Back to Control Design</Btn>
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
         </div>
-        <Btn variant="primary" disabled={busy} onClick={calc}>
-          {busy ? '⏳ Calculating…' : '⚙ Calculate losses (all 9 line voltages)'}
-        </Btn>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Btn variant="success" disabled={rptBusy || !res?.validation.ok} onClick={downloadReport}>
+            {rptBusy ? '⏳ Generating…' : '📥 Download full report (Ch 1–7)'}
+          </Btn>
+          <Btn variant="primary" disabled={busy} onClick={calc}>
+            {busy ? '⏳ Calculating…' : '⚙ Calculate losses (all 9 line voltages)'}
+          </Btn>
+        </div>
       </div>
     </div>
   )

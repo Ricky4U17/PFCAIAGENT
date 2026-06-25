@@ -238,6 +238,7 @@ export const docGenerateReport = (req: {
   approved_design?: Record<string, unknown> | null
   step15_result?:   Record<string, unknown> | null
   step16_params?:   Record<string, unknown> | null
+  semiconductor?:   Record<string, unknown> | null
 }): Promise<Blob> =>
   fetch(`${BASE}/mode-b/documentation/generate-report`, {
     method:  'POST',
