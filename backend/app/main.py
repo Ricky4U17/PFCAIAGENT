@@ -384,6 +384,66 @@ def control_coefficients(req: _ComponentsReq):
     except Exception as e:
         log.exception("control coefficients"); raise HTTPException(500, str(e))
 
+# ── Chapter 7 — Semiconductor loss & thermal ──────────────────────────────────
+class _SemiReq(BaseModel):
+    design:  Dict[str, Any]                 # operating context (vin_min/max, pout_lo/hi, vout, fsw, fline, nch, r_input, L_phi_uH)
+    mosfet:  Dict[str, Any]
+    diode:   Dict[str, Any]
+    bridge:  Dict[str, Any]
+    thermal: Dict[str, Any]
+    tj_limit:     Optional[Dict[str, Any]] = None
+    selected_vac: Optional[float] = None
+
+@app.get("/mode-b/semiconductor/manifest", tags=["mode-b"])
+def semiconductor_manifest():
+    """Per-component parameter manifest (drives the confirmation/entry tables)."""
+    try:
+        from app.mode_b.semiconductor import pfc_component_intake as intake
+        return {kind: [p._asdict() for p in plist] for kind, plist in intake.MANIFEST.items()}
+    except Exception as e:
+        log.exception("semiconductor manifest"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/semiconductor/calculate", tags=["mode-b"])
+def semiconductor_calculate(req: _SemiReq):
+    """Validate the 3 parts, sweep all 9 input voltages, run the design-vs-engine
+    consistency gate, and return per-point losses + worst-case summary."""
+    try:
+        from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+        res = calculate_semiconductor_losses(req.design, req.mosfet, req.diode, req.bridge,
+                                             req.thermal, req.tj_limit)
+        res.pop("cfg", None)               # internal/report use only
+        return res
+    except Exception as e:
+        log.exception("semiconductor calculate"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/semiconductor/figures", tags=["mode-b"])
+def semiconductor_figures(req: _SemiReq):
+    """Render the four loss/thermal figures (base64 PNG) for a confirmed design."""
+    try:
+        import tempfile, base64, os
+        from app.mode_b.semiconductor.adapter import build_semi_cfg
+        from app.mode_b.semiconductor import (pfc_loss_model as engine,
+                                              pfc_component_intake as intake,
+                                              pfc_visualization as viz)
+        cfg, _ref = build_semi_cfg(req.design, req.mosfet, req.diode, req.bridge, req.thermal)
+        ok, _ = intake.validate_design(cfg)
+        if not ok:
+            raise HTTPException(422, "design incomplete — confirm all required component fields first")
+        sel = float(req.selected_vac) if req.selected_vac else float(cfg["run"]["vac_list"][0])
+        out = {}
+        with tempfile.TemporaryDirectory() as td:
+            files = viz.build_step4_visuals(cfg, selected_vac=sel, vac_list=cfg["run"]["vac_list"],
+                                            output_prefix=os.path.join(td, "semi"),
+                                            backend=engine, tj_limits=req.tj_limit)
+            for name, path in files.items():
+                with open(path, "rb") as f:
+                    out[name] = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        return {"figures": out, "selected_vac": sel}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("semiconductor figures"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:

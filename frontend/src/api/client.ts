@@ -369,3 +369,24 @@ export const getViewContract = (
 ): Promise<{ status: string; contract: ViewContract }> =>
   post<{ status: string; contract: ViewContract }>('/mode-b/step7/view-contract',
     { state, approved_design })
+
+// ── Chapter 7 — Semiconductor loss & thermal ──────────────────────────────────
+export interface SemiCalcResult {
+  validation:  { ok: boolean; issues: Array<Record<string, unknown>> }
+  consistency: { ok: boolean; issues: Array<Record<string, unknown>> } | null
+  per_point:   Array<Record<string, number>>
+  summary:     Record<string, number | boolean | Record<string, boolean>> | null
+}
+export interface SemiReqBody {
+  design:  Record<string, number>
+  mosfet:  Record<string, unknown>
+  diode:   Record<string, unknown>
+  bridge:  Record<string, unknown>
+  thermal: Record<string, unknown>
+  tj_limit?:     Record<string, number>
+  selected_vac?: number
+}
+export const semiconductorCalculate = (b: SemiReqBody) =>
+  post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
+export const semiconductorFigures = (b: SemiReqBody) =>
+  post<{ figures: Record<string, string>; selected_vac: number }>('/mode-b/semiconductor/figures', b)

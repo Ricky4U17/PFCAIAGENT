@@ -44,6 +44,18 @@ def build_design_ops(design: dict):
     return ops, s2, L_phi, iph
 
 
+# metadata kept with each part for the report but NOT passed to the engine dataclasses
+_META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url")
+
+def _clean_block(block: dict):
+    """Split a component block into (engine params, metadata). Drops metadata keys and any
+    empty/None values so the engine uses its built-in default for unset optional fields."""
+    block = dict(block or {})
+    meta = {k: block.pop(k) for k in list(block) if k in _META_KEYS}
+    params = {k: v for k, v in block.items() if v not in (None, "", [])}
+    return params, meta
+
+
 # ── 2. assemble the engine cfg from our design + the 3 confirmed parts ────────
 def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, thermal: dict):
     """Build the engine `cfg` dict. Every operating-point quantity comes from our grid and is
@@ -54,6 +66,8 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
     vac  = [round(float(v), 4) for v in ops[:, 0]]
     nch  = int(design["nch"]); vout = float(design["vout"]); fsw = float(design["fsw"])
     fline = float(design["fline"])
+    mos_p, mos_m = _clean_block(mosfet); dio_p, dio_m = _clean_block(diode)
+    br_p,  br_m  = _clean_block(bridge); th_p,  _     = _clean_block(thermal)
     cfg = {
         "spec": {
             "vo": vout, "fsw": fsw, "fline": fline, "nch": nch, "L": L_phi,
@@ -62,12 +76,12 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
             "po_curve":      [vac, [float(x) for x in ops[:, 1]]],
             "iin_rms_curve": [vac, [float(x) for x in s2["Iin_rms"]]],   # TOTAL input RMS
         },
-        "mosfet": dict(mosfet), "diode": dict(diode), "bridge": dict(bridge),
-        "thermal": dict(thermal),
+        "mosfet": mos_p, "diode": dio_p, "bridge": br_p, "thermal": th_p,
         "run": {"vac_list": vac},
     }
     ref = {
         "nch": nch, "L_phi_uH": L_phi * 1e6, "vout": vout,
+        "parts": {"mosfet": mos_m, "diode": dio_m, "bridge": br_m},
         "points": [{
             "Vac": vac[i], "Pout": float(ops[i, 1]), "eta": float(ops[i, 2]),
             "PF": float(ops[i, 3]), "Pin": float(s2["Pin"][i]),
@@ -113,6 +127,19 @@ def verify_consistency(rows: list, cfg: dict, ref: dict, tol: float = 0.02):
     return (len(issues) == 0), issues
 
 
+def _native(o):
+    """Recursively convert numpy scalars/arrays to plain Python so the result is JSON-safe."""
+    if isinstance(o, dict):
+        return {k: _native(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_native(v) for v in o]
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return _native(o.tolist())
+    return o
+
+
 # ── 4. the public entry point ────────────────────────────────────────────────
 def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
                                     bridge: dict, thermal: dict, tj_limit: dict | None = None,
@@ -131,8 +158,8 @@ def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
     ok, vissues = intake.validate_design(cfg)
     vissues_list = vissues.to_dict("records") if hasattr(vissues, "to_dict") else vissues
     if not ok:
-        return {"validation": {"ok": False, "issues": vissues_list},
-                "consistency": None, "per_point": [], "summary": None, "cfg": cfg}
+        return _native({"validation": {"ok": False, "issues": vissues_list},
+                        "consistency": None, "per_point": [], "summary": None, "cfg": cfg})
 
     rows = [engine.flatten_result(r) for r in engine.simulate_vac_sweep(cfg)]
     cok, cissues = verify_consistency(rows, cfg, ref, tol=tol)
@@ -156,9 +183,9 @@ def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
             "diode":  summary["Tj_DIODE_max"] <= tj_limit.get("diode", 1e9),
             "bridge": summary["Tj_BRIDGE_max"]<= tj_limit.get("bridge", 1e9),
         }
-    return {"validation": {"ok": True, "issues": []},
-            "consistency": {"ok": cok, "issues": cissues},
-            "per_point": rows, "summary": summary, "cfg": cfg}
+    return _native({"validation": {"ok": True, "issues": []},
+                    "consistency": {"ok": cok, "issues": cissues},
+                    "per_point": rows, "summary": summary, "cfg": cfg})
 
 
 # ── reference design + smoke test (run: python -m app.mode_b.semiconductor.adapter) ──

@@ -3267,3 +3267,21 @@ only font/text/alignment changed to our style.
   consistency True (0 issues), L_eff=235uH every point, worst semi 65.4W@180V, Tj<<limits.
   Committed self-test: python -m app.mode_b.semiconductor.adapter.
 - NEXT: step 2 GUI (3 component sub-screens + results), step 3 Chapter 7 documentation.
+
+## C50 - Semiconductor loss: step 2 - GUI + endpoints
+- Backend endpoints (main.py): GET /mode-b/semiconductor/manifest (MANIFEST -> entry forms),
+  POST /calculate (validate+sweep all 9 Vac+consistency gate -> per_point/summary; cfg dropped),
+  POST /figures (4 matplotlib PNGs as base64 via viz.build_step4_visuals with backend= injection).
+  _SemiReq model {design, mosfet, diode, bridge, thermal, tj_limit, selected_vac}.
+- adapter.py: _clean_block strips manufacturer/part_number metadata + drops empty fields before
+  the engine dataclasses (which reject unknown keys); _native() makes results JSON-safe.
+- client.ts: semiconductorCalculate/semiconductorFigures + SemiCalcResult/SemiReqBody types.
+- SemiconductorSelection.tsx (full rewrite): one page, 4 freely-switchable sub-tabs (Bridge/MOSFET/
+  Diode entry forms prefilled with reference SiC + manufacturer/part# fields + curves as comma X|Y
+  text; conditional fields via show(); Results). Operating context read-only from same fields as
+  ControlDesign + editable T_ambient/Rth_sa. Calculate -> validation+consistency banners, summary
+  cards (worst loss + Tj/limit), 9-row per-voltage table, 4 figures (lazy). buildBlock parses
+  form->engine block (num/curve/bool/select).
+- Verified: HTTP calculate (validation/consistency True, 9 pts, worst 65.4W) + figures (4 PNGs);
+  tsc/vite build clean; App wiring passes confirmedState/approvedInductor/Capacitor.
+- NEXT: step 3 Chapter 7 documentation agent.
