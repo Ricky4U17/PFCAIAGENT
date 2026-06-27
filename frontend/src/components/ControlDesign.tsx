@@ -284,9 +284,12 @@ export const ControlDesign: React.FC<Props> = ({
                   <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
                     {rptLoading ? '⏳ Generating…' : '📥 Download + Review (Chapters 1–6 + Appendices)'}
                   </Btn>
-                  <Btn variant="primary" disabled={!reportGen} onClick={onSelectSemiconductors}>
+                  <Btn variant="primary" onClick={onSelectSemiconductors}>
                     ✓ Approve &amp; go to Semiconductors →
                   </Btn>
+                </div>
+                <div style={{ fontSize:10.5, color:C.muted, textAlign:'right' }}>
+                  {reportGen ? 'Report downloaded.' : 'Reviewing the Ch 1–6 report is optional — the full Ch 1–7 report is generated on the Semiconductor page.'}
                 </div>
               </div>
             )}

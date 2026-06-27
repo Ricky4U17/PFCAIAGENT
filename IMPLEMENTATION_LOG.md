@@ -3312,3 +3312,9 @@ only font/text/alignment changed to our style.
   buildBlock: curve->{x,y} strings, num->string). Library fetched on mount. Empty -> 'coming soon'.
 - Verified: library endpoint returns 5 seed parts; frontend build clean; both endpoints 200 on :8000.
 - Windows note: uvicorn --reload flaky (hung reloads + dead-PID zombie socket on 8000); restart clean.
+
+## C53 - S7: ungate 'Approve & go to Semiconductors'
+- The Approve button was disabled={!reportGen} (required a successful Ch1-6 'Download + Review'
+  first) -> users reaching S7 were blocked. Removed the gate (always enabled): the comprehensive
+  Ch1-7 report is now generated on the Semiconductor page, so the Ch1-6 download is optional.
+  Added a one-line hint (Download is optional / full report on Semiconductor page). Build clean.
