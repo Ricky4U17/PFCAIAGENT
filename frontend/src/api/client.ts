@@ -442,3 +442,8 @@ export const inputProtectionNtc = (body: { design: Record<string, number>; cap?:
   post<NtcResult>('/mode-b/input-protection/ntc/calculate', body)
 export const inputProtectionMov = (body: { design: Record<string, number>; mosfet?: Record<string, unknown>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<MovResult>('/mode-b/input-protection/mov/calculate', body)
+export const inputProtectionReport = (body: { design: Record<string, number>; cap?: Record<string, unknown>
+    mosfet?: Record<string, unknown>; ntc_opts?: Record<string, unknown>; mov_opts?: Record<string, unknown> }): Promise<Blob> =>
+  fetch(`${BASE}/mode-b/input-protection/report`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.blob() })

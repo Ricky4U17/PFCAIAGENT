@@ -15,7 +15,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov,
+import { inputProtectionNtc, inputProtectionMov, inputProtectionReport,
          type NtcResult, type MovResult, type CatalogRow } from '../api/client'
 import type { CapacitorResult } from './Step15Capacitor'
 
@@ -125,6 +125,20 @@ export const InputProtection: React.FC<Props> = ({
   }
 
   useEffect(() => { calcNtc(); calcMov() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [rptBusy, setRptBusy] = useState(false)
+  const downloadReport = async () => {
+    setRptBusy(true); setErr(null)
+    try {
+      const blob = await inputProtectionReport({ design, cap,
+        mosfet: { vdss: Number(movOpts.device_vds) },
+        ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM } })
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = 'PFC_Input_Protection_Ch8_9.pdf'
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 150)
+    } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
+  }
 
   const verdictColor = (v: string) => v === 'OK' ? 'green' : v === 'TIGHT' ? 'amber' : 'red'
 
@@ -279,7 +293,12 @@ export const InputProtection: React.FC<Props> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 2px 24px' }}>
         <Btn variant="ghost" onClick={onBack}>← Back to semiconductors</Btn>
-        <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="success" disabled={rptBusy} onClick={downloadReport}>
+            {rptBusy ? '⏳ Generating…' : '📥 Download report (Ch 8–9)'}
+          </Btn>
+          <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
+        </div>
       </div>
     </div>
   )

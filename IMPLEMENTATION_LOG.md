@@ -3469,3 +3469,27 @@ Frontend tsc clean.
 
 NEXT: step 3 = report chapters — Chapter 8 NTC inrush (step-by-step) + Chapter 9 MOV compliance
 (IEC 61000-4-5, separate per user); fold NTC steady-state loss into the efficiency cross-check.
+
+---
+
+## C60 — Input protection step 3: report Chapters 8 (NTC) + 9 (MOV compliance) (2026-06-28)
+
+User: documentation agent should cover the input protection; MOV is the compliance-certification
+basis and must be a SEPARATE chapter.
+
+- NEW report_inputprotection.py (built from the same adapter the GUI uses):
+    Ch 8 — Inrush Limiting (NTC + bypass relay): 8.1 carried-in basis (V_ac, C_out, bus,
+      worst I_rms) · 8.2 cold-R sizing (worked + target sweep) · 8.3 pulse-energy survival
+      (E=½CVpk², max-C equiv) · 8.4 self-heat→why bypass (states steady-state contribution ≈0 W
+      to the efficiency budget) · 8.5 relay+precharge timing · 8.6 catalog screen.
+    Ch 9 — Surge Protection & Compliance (IEC/EN 61000-4-5), separate per user: 9.1 compliance
+      basis (LEVEL/CRITERION/LINE orthogonal) · 9.2 stress per coupling mode · 9.3 MCOV
+      (line-driven) · 9.4 load-line clamp/coordination · 9.5 what the criterion changes ·
+      9.6 candidate screen + placement · 9.7 compliance summary (certification record).
+- doc_report_builder.py: CH_COLORS entries for chapters 8 (olive) + 9 (deep blue).
+- main.py: _DocReportReq.input_protection → appends Ch 8+9 to the combined report (label
+  Steps1_19); NEW standalone POST /input-protection/report (_IpReportReq) → Ch 8+9 PDF.
+- client.ts inputProtectionReport(); InputProtection.tsx "Download report (Ch 8–9)" button.
+
+Fixes: mathtext rejects \ge / \tfrac / \text → \geq form / \frac / \mathrm. Verified standalone
+15 pp, entities resolved (Ω µ °), no box glyphs; /input-protection/report 200 application/pdf 72 KB.

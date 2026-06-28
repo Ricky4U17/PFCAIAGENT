@@ -532,6 +532,26 @@ def input_protection_mov(req: _MovReq):
     except Exception as e:
         log.exception("mov calculate"); raise HTTPException(500, str(e))
 
+class _IpReportReq(BaseModel):
+    design:   Dict[str, Any]
+    cap:      Dict[str, Any] = {}
+    mosfet:   Dict[str, Any] = {}
+    ntc_opts: Dict[str, Any] = {}
+    mov_opts: Dict[str, Any] = {}
+
+@app.post("/mode-b/input-protection/report", tags=["mode-b"])
+def input_protection_report(req: _IpReportReq):
+    """Standalone Chapters 8 (NTC inrush) + 9 (MOV surge & compliance) PDF."""
+    try:
+        from fastapi.responses import Response
+        from app.mode_b.report_inputprotection import build_inputprotection_report
+        pdf = build_inputprotection_report(req.design, req.cap or {}, req.mosfet or {},
+                                           req.ntc_opts or {}, req.mov_opts or {})
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": 'attachment; filename="PFC_Input_Protection_Ch8_9.pdf"'})
+    except Exception as e:
+        log.exception("input protection report"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:
@@ -1841,6 +1861,7 @@ class _DocReportReq(BaseModel):
     step15_result:   Optional[Dict[str, Any]] = None
     step16_params:   Optional[Dict[str, Any]] = None
     semiconductor:   Optional[Dict[str, Any]] = None   # {design, mosfet, diode, bridge, thermal, tj_limit} → Chapter 7
+    input_protection: Optional[Dict[str, Any]] = None  # {design, cap, mosfet, ntc_opts, mov_opts} → Chapters 8 (NTC) + 9 (MOV)
 
 
 def _num(v):
@@ -2017,6 +2038,12 @@ def doc_generate_report(req: _DocReportReq):
                 parts.append(build_semiconductor_report(
                     sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"],
                     sc.get("tj_limit")))
+            if req.input_protection:                        # Chapters 8 (NTC) + 9 (MOV compliance)
+                from app.mode_b.report_inputprotection import build_inputprotection_report
+                ip = req.input_protection
+                parts.append(build_inputprotection_report(
+                    ip["design"], ip.get("cap"), ip.get("mosfet"),
+                    ip.get("ntc_opts"), ip.get("mov_opts")))
             pdf = _merge_pdfs(parts)
         else:
             pdf = agent.generate(
@@ -2026,7 +2053,9 @@ def doc_generate_report(req: _DocReportReq):
             )
         pdf = _strip_blank_pages(pdf)
         project_id = req.state.get("project_id", "design")
-        if req.step16_params and req.approved_design and req.step15_result and req.semiconductor:
+        if req.step16_params and req.approved_design and req.step15_result and req.semiconductor and req.input_protection:
+            label = "Steps1_19"
+        elif req.step16_params and req.approved_design and req.step15_result and req.semiconductor:
             label = "Steps1_17"
         elif req.step16_params and req.approved_design and req.step15_result:
             label = "Steps1_16"

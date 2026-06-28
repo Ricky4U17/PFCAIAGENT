@@ -68,6 +68,8 @@ CH_COLORS = {
     5: colors.HexColor("#006064"),   # dark teal
     6: colors.HexColor("#263238"),   # dark slate
     7: colors.HexColor("#5D1A1A"),   # dark red (semiconductor loss & thermal)
+    8: colors.HexColor("#33691E"),   # olive (inrush / NTC)
+    9: colors.HexColor("#0D47A1"),   # deep blue (MOV surge & compliance)
 }
 
 def _mpl_c(c):
