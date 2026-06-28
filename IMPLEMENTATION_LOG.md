@@ -3412,3 +3412,31 @@ sink+P·(Rjc+Rcs)=Tj. Standalone Ch7 = 11 pp; entities render (Ω µ × √ ∑ 
 MOSFET total 14.18 W.
 
 NEXT: GUI for MOV + NTC inrush/surge selection (per user).
+
+---
+
+## C58 — Input protection (MOV + NTC) step 1: vendored engines + design adapter (2026-06-28)
+
+User (next-step request, scoped via AskUserQuestion): MOV + NTC selection in the GUI —
+DB+manual+upload, computing NTC inrush limiting, MOV surge protection, steady-state loss into
+the efficiency budget, and its own report chapter.
+
+Step 1 (this commit) — engines + data-consistent adapter (mirrors the semiconductor pattern):
+- NEW package backend/app/mode_b/inputprotection/ — vendored mov_surge_select.py (IEC
+  61000-4-5 combination-wave sizing: LEVEL→stress, CRITERION→gate, LINE→MCOV; load-line clamp)
+  and ntc_bypass_select.py (inrush R25, pulse-energy E=½CVpk², bypass-relay timing, self-heat).
+- NEW adapter.py: build_ntc_spec / build_mov_spec source every carried-in quantity from our
+  pipeline — V_ac range + worst-case I_in,rms from build_design_ops (the shared grid), C_out and
+  bus/cap-V-rating from the approved capacitor (Step 15), device V_ds from the SELECTED MOSFET
+  (semiconductors). Designer knobs (inrush target, IEC level/criterion, margins) are explicit
+  opts overrides. calculate_ntc / calculate_mov return JSON-safe sizing + catalog screen.
+
+Verified (reference design): NTC I_rms_worst = 20.96 A (= grid, matches the script example),
+E_cap = 163.8 J @ 2350µF/264Vac, R25_pick 6.84Ω, bypass 64 ms, MS35-7R passes. MOV MCOV class
+275 V, governing L-N differential; representative MOVs clamp ~673 V > 600 V gate → FAIL under
+criterion A (correct for a 650 V device — designer picks a lower-clamp part / criterion B).
+
+No MOV/NTC Excel DBs yet (only the engines' built-in catalogs) — DB ranking will start from
+those and wire vendor Excel when dropped in specs/Database.
+NEXT: step 2 = endpoints + GUI screen (3-source select for both families); step 3 = Chapter 8
+report + fold NTC steady loss into the efficiency cross-check.
