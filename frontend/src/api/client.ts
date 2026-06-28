@@ -397,8 +397,17 @@ export interface DbRankResult {
 export const semiconductorDbOptions = (kind: string) =>
   get<Record<string, string[]>>(`/mode-b/semiconductor/database/${kind}/options`)
 export const semiconductorDbRank = (kind: string,
-  body: { design: Record<string, number>; criteria: Record<string, unknown>; top?: number }) =>
+  body: { design: Record<string, number>; criteria: Record<string, unknown>; top?: number; mode?: string }) =>
   post<{ results: DbRankResult[] }>(`/mode-b/semiconductor/database/${kind}/rank`, body)
+export interface DsExtract {
+  block: Record<string, unknown>; found: string[]; missing: string[]
+  manufacturer: string | null; part_number: string | null; raw_sample: string
+}
+export const semiconductorExtract = (kind: string, file: File): Promise<DsExtract> => {
+  const fd = new FormData(); fd.append('kind', kind); fd.append('file', file)
+  return fetch(`${BASE}/mode-b/semiconductor/database/extract`, { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.json() })
+}
 export const semiconductorCalculate = (b: SemiReqBody) =>
   post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
 export const semiconductorFigures = (b: SemiReqBody) =>

@@ -6,7 +6,7 @@ Mode B: Steps 1-12 PDF report + Step 6 magnetic design
 from __future__ import annotations
 import logging, math
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -417,6 +417,7 @@ class _DbRankReq(BaseModel):
     design:   Dict[str, Any]
     criteria: Dict[str, Any] = {}
     top:      int = 10
+    mode:     str = "full"          # 'conduction' + mosfet → bottom-bypass MOSFET ranking
 
 @app.get("/mode-b/semiconductor/database/{kind}/options", tags=["mode-b"])
 def semiconductor_db_options(kind: str):
@@ -439,11 +440,26 @@ def semiconductor_db_rank(kind: str, req: _DbRankReq):
         from app.mode_b.semiconductor import database as db
         if kind not in ("mosfet", "diode", "bridge"):
             raise HTTPException(404, "unknown component kind")
-        return {"results": db.rank_by_loss(kind, req.design, req.criteria or {}, top=int(req.top))}
+        return {"results": db.rank_by_loss(kind, req.design, req.criteria or {},
+                                           top=int(req.top), mode=req.mode or "full")}
     except HTTPException:
         raise
     except Exception as e:
         log.exception("db rank"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/semiconductor/database/extract", tags=["mode-b"])
+async def semiconductor_datasheet_extract(kind: str = Form(...), file: UploadFile = File(...)):
+    """Extract loss-model parameters from an uploaded PDF datasheet (designer confirms after)."""
+    try:
+        from app.mode_b.semiconductor import datasheet
+        if kind not in ("mosfet", "diode", "bridge"):
+            raise HTTPException(404, "unknown component kind")
+        data = await file.read()
+        return datasheet.extract(data, kind)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("datasheet extract"); raise HTTPException(500, str(e))
 
 @app.post("/mode-b/semiconductor/calculate", tags=["mode-b"])
 def semiconductor_calculate(req: _SemiReq):

@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
-         semiconductorDbOptions, semiconductorDbRank,
+         semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
 
 interface Props {
@@ -46,7 +46,7 @@ const BRIDGE0: Record<string, any> = {
   vf_curve: { x: '1, 12, 24', y: '0.75, 0.95, 1.15' }, n_parallel: '2',
   rth_jc: '1.0', rth_cs: '0.5',
   rdson_bottom_25: '0.020', rdson_bottom_tj: { x: '25, 125', y: '1.0, 1.5' },
-  qg_bottom: '90e-9', n_parallel_bottom: '1',
+  qg_bottom: '90e-9', n_parallel_bottom: '1', bottom_part: '',
 }
 
 const MOSFET_FIELDS: Field[] = [
@@ -171,9 +171,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [dbOpts, setDbOpts] = useState<Record<string, Record<string, string[]>>>({})
   const [dbCrit, setDbCrit] = useState<Record<string, any>>({
     bridge: { v_min: '600', i_min: '15' }, mosfet: { v_min: '600', i_min: '15' }, diode: { v_min: '600', i_min: '10' },
+    bottom: { v_min: '550', i_min: '15' },
   })
   const [dbRes, setDbRes] = useState<Record<string, DbRankResult[] | null>>({})
   const [dbBusy, setDbBusy] = useState<Record<string, boolean>>({})
+  const [extBusy, setExtBusy] = useState<Record<string, boolean>>({})
+  const [extInfo, setExtInfo] = useState<Record<string, { found: string[]; missing: string[]; part: string } | null>>({})
   useEffect(() => {
     (['bridge', 'mosfet', 'diode'] as Sub[]).forEach(k =>
       semiconductorDbOptions(k).then(o => setDbOpts(s => ({ ...s, [k]: o }))).catch(() => {}))
@@ -181,11 +184,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const setWhole = (which: Sub, value: Record<string, any>) => {
     (which === 'mosfet' ? setMosfet : which === 'diode' ? setDiode : setBridge)(value as any)
   }
-  const setCrit = (which: Sub, k: string, v: any) => setDbCrit(s => ({ ...s, [which]: { ...s[which], [k]: v } }))
-  const runDbSearch = async (which: Sub) => {
-    setDbBusy(s => ({ ...s, [which]: true })); setErr(null)
+  const setCrit = (which: string, k: string, v: any) => setDbCrit(s => ({ ...s, [which]: { ...s[which], [k]: v } }))
+  // key = state slot for crit/results (a Sub, or 'bottom'); kind = DB table; mode = 'full' | 'conduction'
+  const runDbSearch = async (key: string, kind: Sub, mode: 'full' | 'conduction' = 'full') => {
+    setDbBusy(s => ({ ...s, [key]: true })); setErr(null)
     try {
-      const c = dbCrit[which] || {}; const criteria: Record<string, unknown> = {}
+      const c = dbCrit[key] || {}; const criteria: Record<string, unknown> = {}
       if (pnum(c.v_min) != null) criteria.v_min = pnum(c.v_min)
       if (pnum(c.i_min) != null) criteria.i_min = pnum(c.i_min)
       if (c.mfr) criteria.mfr = c.mfr
@@ -193,13 +197,36 @@ export const SemiconductorSelection: React.FC<Props> = ({
       if (c.package) criteria.package = c.package
       if (pnum(c.tj_min) != null) criteria.tj_min = pnum(c.tj_min)
       if (c.technology) criteria.technology = c.technology
-      const r = await semiconductorDbRank(which, { design, criteria, top: 10 })
-      setDbRes(s => ({ ...s, [which]: r.results }))
-    } catch (e) { setErr((e as Error).message) } finally { setDbBusy(s => ({ ...s, [which]: false })) }
+      const r = await semiconductorDbRank(kind, { design, criteria, top: 10, mode })
+      setDbRes(s => ({ ...s, [key]: r.results }))
+    } catch (e) { setErr((e as Error).message) } finally { setDbBusy(s => ({ ...s, [key]: false })) }
   }
   const pickDbPart = (which: Sub, r: DbRankResult) => {
     setWhole(which, blockToForm(r.block as Record<string, any>, FIELDS[which], BASE[which]))
     setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show the populated fields for review/edit
+  }
+  // Bottom bypass MOSFET (sync_bottom bridge): conduction-only, merge its fields into the bridge state
+  const pickBottomMosfet = (r: DbRankResult) => {
+    const b = r.block as any
+    setBridge(s => ({ ...s,
+      rdson_bottom_25: numToStr(b.rdson_bottom_25),
+      rdson_bottom_tj: curveToForm(b.rdson_bottom_tj),
+      qg_bottom: numToStr(b.qg_bottom),
+      n_parallel_bottom: numToStr(b.n_parallel_bottom),
+      bottom_part: `${r.manufacturer ?? ''} ${r.part_number ?? ''}`.trim(),
+    }))
+  }
+  const onExtract = async (which: Sub, file: File | undefined) => {
+    if (!file) return
+    setExtBusy(s => ({ ...s, [which]: true })); setErr(null)
+    try {
+      const r = await semiconductorExtract(which, file)
+      const cur = which === 'mosfet' ? mosfet : which === 'diode' ? diode : bridge
+      setWhole(which, blockToForm(r.block as Record<string, any>, FIELDS[which], cur))
+      setExtInfo(s => ({ ...s, [which]: { found: r.found, missing: r.missing,
+        part: `${r.manufacturer ?? ''} ${r.part_number ?? ''}`.trim() } }))
+      setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show populated fields for confirmation
+    } catch (e) { setErr((e as Error).message) } finally { setExtBusy(s => ({ ...s, [which]: false })) }
   }
 
   const body = (): SemiReqBody => ({
@@ -290,6 +317,67 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const rcell: React.CSSProperties = { padding: '3px 7px', fontSize: 11, borderBottom: `1px solid ${C.border}`,
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
 
+  const dbResultsTable = (results: DbRankResult[], lossLabel: string, onPick: (r: DbRankResult) => void,
+    note = "Loss ranked by the calc engine at this design's 9 operating points. Datasheet curves not in the DB " +
+           "(Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated — selecting a part fills the form for review/edit.") =>
+    results.length === 0
+      ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
+      : <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead><tr>{['#', `${lossLabel} loss`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
+              <th key={h} style={{ ...rcell, color: C.hint, textTransform: 'uppercase', fontSize: 9 }}>{h}</th>)}</tr></thead>
+            <tbody>{results.map((r, i) => (
+              <tr key={i}>
+                <td style={rcell}>{i + 1}</td>
+                <td style={{ ...rcell, fontWeight: 700, color: C.teal }}>{r.loss_W.toFixed(2)} W</td>
+                <td style={rcell}>{r.tj_max_C.toFixed(0)}°C</td>
+                <td style={rcell}>{r.v_rating ?? '—'}V / {r.i_rating ?? '—'}A</td>
+                <td style={rcell}>{(r.manufacturer ?? '').slice(0, 18)}</td>
+                <td style={rcell}>{r.part_number}{r.datasheet_url ? <a href={r.datasheet_url} target="_blank" rel="noreferrer" style={{ color: C.muted, marginLeft: 5 }}>↗</a> : null}</td>
+                <td style={rcell}><button onClick={() => onPick(r)} style={{
+                  padding: '2px 9px', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, fontWeight: 600,
+                  border: `1px solid ${C.teal}`, background: 'rgba(45,212,191,.12)', color: C.teal }}>Select</button></td>
+              </tr>))}</tbody>
+          </table>
+          <div style={{ fontSize: 9.5, color: C.muted, marginTop: 5 }}>{note}</div>
+        </div>
+
+  // Bottom bypass MOSFET search (conduction-only) shown inside the bridge manual form when topology = sync_bottom
+  const bottomMosfetPanel = () => {
+    const crit = dbCrit.bottom || {}; const results = dbRes.bottom
+    return (
+      <div style={{ marginTop: 12, padding: '10px 12px', border: `1px dashed ${C.teal}`, borderRadius: 8,
+        background: 'rgba(45,212,191,.05)' }}>
+        <div style={{ fontSize: 12, color: C.teal, fontWeight: 600, marginBottom: 2 }}>
+          Bottom bypass MOSFETs — select from database
+        </div>
+        <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+          These FETs replace the two bottom bridge diodes and commutate at line frequency, so they have
+          <b> conduction loss only</b> (no switching loss). Ranked by I²·R_DS(on) at the worst operating point.
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Voltage ≥ (V)<br />
+            <input style={critIn} value={crit.v_min ?? ''} onChange={e => setCrit('bottom', 'v_min', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A)<br />
+            <input style={critIn} value={crit.i_min ?? ''} onChange={e => setCrit('bottom', 'i_min', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Mfr<br />
+            <select style={critSel} value={crit.mfr ?? ''} onChange={e => setCrit('bottom', 'mfr', e.target.value)}>
+              <option value="">any</option>{(dbOpts.mosfet?.manufacturers ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Technology<br />
+            <select style={critSel} value={crit.technology ?? ''} onChange={e => setCrit('bottom', 'technology', e.target.value)}>
+              <option value="">any</option>{(dbOpts.mosfet?.technology ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          <Btn variant="primary" disabled={!!dbBusy.bottom} onClick={() => runDbSearch('bottom', 'mosfet', 'conduction')}>
+            {dbBusy.bottom ? '⏳ Ranking…' : '🔎 Find top 10 (lowest conduction loss)'}
+          </Btn>
+        </div>
+        {bridge.bottom_part && <div style={{ fontSize: 11, color: C.green, marginBottom: 6 }}>
+          ✓ selected bottom FET: <b>{bridge.bottom_part}</b> → R_DS(on)={bridge.rdson_bottom_25} Ω, ×{bridge.n_parallel_bottom}</div>}
+        {results && dbResultsTable(results, 'FET conduction', pickBottomMosfet,
+          'Conduction loss only (line-frequency commutation). Selecting a part fills the bottom-FET fields above.')}
+      </div>
+    )
+  }
+
   const compForm = (fields: Field[], state: Record<string, any>, which: Sub, title: string, devLoss?: [string, string]) => {
     const mode = srcMode[which]; const opts = dbOpts[which] || {}; const crit = dbCrit[which] || {}; const results = dbRes[which]
     return (
@@ -335,47 +423,39 @@ export const SemiconductorSelection: React.FC<Props> = ({
               <select style={critSel} value={crit.technology ?? ''} onChange={e => setCrit(which, 'technology', e.target.value)}>
                 <option value="">any</option>{(opts.technology ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
           )}
-          <Btn variant="primary" disabled={!!dbBusy[which]} onClick={() => runDbSearch(which)}>
+          <Btn variant="primary" disabled={!!dbBusy[which]} onClick={() => runDbSearch(which, which)}>
             {dbBusy[which] ? '⏳ Ranking…' : '🔎 Find top 10 (lowest loss)'}
           </Btn>
         </div>
-        {results && (results.length === 0
-          ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
-          : <div style={{ overflowX: 'auto' }}>
-              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                <thead><tr>{['#', `${which === 'mosfet' ? 'FET' : which} loss`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
-                  <th key={h} style={{ ...rcell, color: C.hint, textTransform: 'uppercase', fontSize: 9 }}>{h}</th>)}</tr></thead>
-                <tbody>{results.map((r, i) => (
-                  <tr key={i}>
-                    <td style={rcell}>{i + 1}</td>
-                    <td style={{ ...rcell, fontWeight: 700, color: C.teal }}>{r.loss_W.toFixed(2)} W</td>
-                    <td style={rcell}>{r.tj_max_C.toFixed(0)}°C</td>
-                    <td style={rcell}>{r.v_rating ?? '—'}V / {r.i_rating ?? '—'}A</td>
-                    <td style={rcell}>{(r.manufacturer ?? '').slice(0, 18)}</td>
-                    <td style={rcell}>{r.part_number}{r.datasheet_url ? <a href={r.datasheet_url} target="_blank" rel="noreferrer" style={{ color: C.muted, marginLeft: 5 }}>↗</a> : null}</td>
-                    <td style={rcell}><button onClick={() => pickDbPart(which, r)} style={{
-                      padding: '2px 9px', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, fontWeight: 600,
-                      border: `1px solid ${C.teal}`, background: 'rgba(45,212,191,.12)', color: C.teal }}>Select</button></td>
-                  </tr>))}</tbody>
-              </table>
-              <div style={{ fontSize: 9.5, color: C.muted, marginTop: 5 }}>
-                Loss ranked by the calc engine at this design's 9 operating points. Datasheet curves not in the DB
-                (Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated — selecting a part fills the Manual form for review/edit.
-              </div>
-            </div>)}
+        {results && dbResultsTable(results, which === 'mosfet' ? 'FET' : which, r => pickDbPart(which, r))}
       </>)}
 
       {mode === 'manual' && (
-        <div>{fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}</div>
+        <div>
+          {fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}
+          {which === 'bridge' && state.topology === 'sync_bottom' && bottomMosfetPanel()}
+        </div>
       )}
 
       {mode === 'upload' && (
         <div style={{ fontSize: 12, color: C.text }}>
-          <input type="file" accept=".pdf" disabled style={{ fontSize: 11 }} />
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
-            Datasheet upload + parameter extraction is coming next — for now use <b>Manual / external</b> to enter an
-            external part's values, or <b>From database</b> to pick a ranked part.
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+            Upload the part's PDF datasheet — the agent extracts the loss-model parameters it can read, then
+            opens the Manual form pre-filled for you to confirm/complete the values it could not find.
           </div>
+          <input type="file" accept=".pdf" disabled={!!extBusy[which]} style={{ fontSize: 11 }}
+            onChange={e => { onExtract(which, e.target.files?.[0]); e.currentTarget.value = '' }} />
+          {extBusy[which] && <span style={{ marginLeft: 8, fontSize: 11, color: C.teal }}>⏳ Extracting…</span>}
+          {extInfo[which] && (
+            <div style={{ marginTop: 8, fontSize: 11, color: C.text, background: C.bg3,
+              border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 10px' }}>
+              <div style={{ fontWeight: 600 }}>{extInfo[which]!.part || '(part not detected)'}</div>
+              <div style={{ color: C.green, marginTop: 3 }}>✓ extracted: {extInfo[which]!.found.join(', ') || '—'}</div>
+              {extInfo[which]!.missing.length > 0 &&
+                <div style={{ color: C.hint }}>needs manual entry: {extInfo[which]!.missing.join(', ')}</div>}
+              <div style={{ color: C.muted, marginTop: 3 }}>Switched to Manual — review every field, then Calculate.</div>
+            </div>
+          )}
         </div>
       )}
     </Card>)

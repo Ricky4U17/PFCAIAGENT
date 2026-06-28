@@ -3347,3 +3347,38 @@ only font/text/alignment changed to our style.
 - Verified: endpoints 200 over HTTP; build clean. Covers user tasks 1/2/3 (select by ratings -> top10
   lowest loss -> pick; external/upload option).
 - NEXT (optional): datasheet PDF upload + parameter extraction (the actual parse).
+
+---
+
+## C56 — Datasheet extraction + bottom bypass-MOSFET selection (2026-06-28)
+
+User: "build the datasheet extraction next. Also when designer selects mosfet across bottom
+diodes of bridge rectifier, i want designer to select mosfets as well. Also mosfets across
+bottom diodes of bridge rectifier has only conduction losses."
+
+Backend:
+- NEW `app/mode_b/semiconductor/datasheet.py` — offline PDF extractor (pypdf text +
+  label-anchored regex). `extract(pdf_bytes, kind)` -> {block, found, missing, raw_sample,
+  manufacturer, part_number}. MOSFET: tech(SiC)/vdss/rdson_25/qg/ciss/vth/qgd/eoss(2-pt)/rth_jc.
+  Diode: is_sic/vf_curve/qc|qrr/rth_jc. Bridge: vf_curve. Fixes: label alternation wrapped in
+  (?:…) so `|` doesn't match label-only (NoneType .group(1)); `_rth()` handles "K/W" & "°C/W".
+- `database.py` `rank_bottom_mosfets(design,crit,top)` — ranks MOSFETs by CONDUCTION loss only
+  (rds·tjf·max(Iin_rms)²; tjf 1.4 SiC/1.8 Si) and maps the pick to bridge bottom fields
+  (rdson_bottom_25/_tj, qg_bottom, n_parallel_bottom=1, rth_*_bottom). `rank_by_loss` gained
+  `mode` ('full'|'conduction'); conduction+mosfet routes to rank_bottom_mosfets.
+- `main.py`: `_DbRankReq.mode='full'` passed through; NEW POST
+  `/mode-b/semiconductor/database/extract` (Form kind + UploadFile file). Moved
+  UploadFile/File/Form into the top-level fastapi import (endpoint sits above the old 1619 import).
+
+Frontend:
+- `client.ts`: `semiconductorExtract(kind,file)` (multipart) + `DsExtract` type; `mode?` on
+  `semiconductorDbRank` body.
+- `SemiconductorSelection.tsx`: generalised `runDbSearch(key,kind,mode)`; extracted reusable
+  `dbResultsTable`. Upload mode now real — file -> extract -> pre-fills Manual form + shows
+  found/missing banner for confirmation. Bridge manual form, topology=sync_bottom: new
+  `bottomMosfetPanel()` (conduction-only DB search, key 'bottom') -> `pickBottomMosfet` merges
+  the FET into bridge bottom fields (keeps bridge identity; stores display-only `bottom_part`).
+
+Verified: backend+frontend compile; over HTTP on :8000 — extract returns 7/8 MOSFET fields
+(rth_jc=0.45 from "K/W"), conduction rank returns low-Rds(on) SiC FETs (~7.9W) mapped to
+rdson_bottom_25.

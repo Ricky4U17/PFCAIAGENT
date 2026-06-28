@@ -221,9 +221,38 @@ def to_block(rec, kind):
 
 
 # ── rank filtered candidates by computed loss at the design operating point ────
-def rank_by_loss(kind, design, crit, top=10, max_eval=120):
+def rank_bottom_mosfets(design, crit, top=10):
+    """Rank MOSFETs for the bridge's bottom (bypass) legs — CONDUCTION loss only (they commutate at
+    line frequency, no switching). P ≈ R_ds(on)(Tj)·I_in,rms²(worst). Mapped to the bridge block."""
+    from app.mode_b.semiconductor.adapter import build_design_ops
+    _, s2, _, _ = build_design_ops(design)
+    iin2 = float(max(s2["Iin_rms"])) ** 2
+    scored = []
+    for rec in filter_parts("mosfet", crit):
+        if not rec.get("rdson"):
+            continue
+        m = to_block(rec, "mosfet")
+        tjf = 1.4 if m["tech"] == "sic" else 1.8         # Rds(on) hot factor
+        loss = m["rdson_25"] * tjf * iin2                # total bottom conduction (n_parallel=1)
+        blk = {"rdson_bottom_25": m["rdson_25"], "rdson_bottom_tj": m["rdson_tj"],
+               "qg_bottom": m.get("qg", 60e-9), "n_parallel_bottom": 1,
+               "rth_jc_bottom": m["rth_jc"], "rth_cs_bottom": 0.3,
+               "manufacturer": rec.get("mfr"), "part_number": rec.get("part_number")}
+        scored.append({"manufacturer": rec.get("mfr"), "part_number": rec.get("part_number"),
+                       "technology": rec.get("technology"), "package": rec.get("package"),
+                       "mounting": rec.get("mounting"), "datasheet_url": rec.get("datasheet_url"),
+                       "v_rating": rec.get("vdss"), "i_rating": rec.get("id_25"),
+                       "loss_W": round(float(loss), 2), "tj_max_C": round(float(rec.get("tj_max") or 150), 1),
+                       "block": blk})
+    scored.sort(key=lambda x: x["loss_W"])
+    return scored[:top]
+
+def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full"):
     """Filter, then evaluate each candidate's loss across the 9 operating points and return the
-    `top` lowest-loss parts. Returns [{part…, block, loss_W, tj_max_C}]."""
+    `top` lowest-loss parts. Returns [{part…, block, loss_W, tj_max_C}].
+    mode='conduction' + kind='mosfet' → bottom (bypass) MOSFETs ranked by conduction loss only."""
+    if mode == "conduction" and kind == "mosfet":
+        return rank_bottom_mosfets(design, crit, top)
     from app.mode_b.semiconductor.adapter import build_semi_cfg
     from app.mode_b.semiconductor import pfc_loss_model as engine
     from app.mode_b.semiconductor.library import _SEED          # defaults for the other two blocks
