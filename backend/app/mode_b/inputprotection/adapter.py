@@ -102,12 +102,16 @@ def build_mov_spec(design: dict, mosfet: dict | None = None, cap: dict | None = 
     cap_v = opts.get("cap_v_rating")
     if cap_v is None:
         cap_v = cap.get("V_rating") or cap.get("v_rating_V") or cap.get("Vdc_rating") or 450.0
+    level = opts.get("level", 3)                          # engine keys are ints 1-4 or "X"
+    if isinstance(level, str):
+        level = int(level) if level.strip().isdigit() else level.strip().upper()
     return mov.Spec(
         vac_max=float(design.get("vin_max", 264)),
         vac_nom=float(opts.get("vac_nom", 230)),
-        level=opts.get("level", 3),
-        criterion=opts.get("criterion", "A"),
-        custom_v_ll=opts.get("custom_v_ll"), custom_v_le=opts.get("custom_v_le"),
+        level=level,
+        criterion=str(opts.get("criterion", "A")).strip().upper(),
+        custom_v_ll=(float(opts["custom_v_ll"]) if opts.get("custom_v_ll") not in (None, "") else None),
+        custom_v_le=(float(opts["custom_v_le"]) if opts.get("custom_v_le") not in (None, "") else None),
         common_mode_protection=bool(opts.get("common_mode_protection", True)),
         device_vds=vds, device_absmax=max(absmax, vds),
         cap_v_rating=float(cap_v),

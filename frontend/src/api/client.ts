@@ -412,3 +412,33 @@ export const semiconductorCalculate = (b: SemiReqBody) =>
   post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
 export const semiconductorFigures = (b: SemiReqBody) =>
   post<{ figures: Record<string, string>; selected_vac: number }>('/mode-b/semiconductor/figures', b)
+
+// ── input protection (MOV surge + NTC inrush) ────────────────────────────────
+export interface CatalogRow { name: string; ok: boolean; reasons: string[] }
+export interface NtcResult {
+  spec: Record<string, number>
+  result: {
+    vin_pk_max: number; r_total_min: number; r_parasitic: number; r25_required: number; r25_pick: number
+    e_cap: number; e_pulse_required: number; cmax_equiv_required: number; i_rms_worst: number
+    tau: number; t_bypass: number; relay_contact_v: number; relay_contact_a: number
+    sweep: [number, number][]; loss_rows: [number, number][]
+  }
+  catalog: CatalogRow[]
+  sources: Record<string, number>
+}
+export interface MovResult {
+  spec: Record<string, number>
+  stress: { v_le: number | null; v_ll: number | null; governing: string | null
+            paths: { name: string; mode: string; z: number; v_oc: number; i_sc: number }[] }
+  mcov: { required: number; advisory: number; class: number; v1ma: number }
+  criterion: { name: string; ride_through: boolean; gate_uses_absmax: boolean; dev_margin_V: number; energy_safety: number }
+  targets: { path: string; mode: string; z: number; v_oc: number; i_sc: number; v_drive: number
+             i_op: number; vc: number; imax_required: number; energy_8_20: number
+             device_gate: number; coord: string; cap_status: string }[]
+  catalog: CatalogRow[]
+  sources: Record<string, number>
+}
+export const inputProtectionNtc = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
+  post<NtcResult>('/mode-b/input-protection/ntc/calculate', body)
+export const inputProtectionMov = (body: { design: Record<string, number>; mosfet?: Record<string, unknown>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
+  post<MovResult>('/mode-b/input-protection/mov/calculate', body)

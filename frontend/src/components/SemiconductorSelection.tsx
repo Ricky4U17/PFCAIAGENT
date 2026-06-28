@@ -20,6 +20,7 @@ interface Props {
   approvedInductorDesign:  Record<string, unknown>
   approvedCapacitorDesign: CapacitorResult | null
   onBack:    () => void
+  onNext?:   () => void
   onRestart: () => void
 }
 
@@ -135,7 +136,7 @@ const inStyle: React.CSSProperties = { background: C.bg3, border: `1px solid ${C
 const fmtW = (n: number) => `${n.toFixed(2)} W`
 
 export const SemiconductorSelection: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, approvedCapacitorDesign, onBack, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign, onBack, onNext, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -603,6 +604,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
           <Btn variant="primary" disabled={busy} onClick={calc}>
             {busy ? '⏳ Calculating…' : '⚙ Calculate losses (all 9 line voltages)'}
           </Btn>
+          {onNext && <Btn variant="success" onClick={onNext}>Input protection →</Btn>}
         </div>
       </div>
     </div>

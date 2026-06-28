@@ -15,9 +15,10 @@ import { Step15Wizard } from './components/Step15Wizard'
 import { ControlDesign } from './components/ControlDesign'
 import { CapacitorSimAgent } from './components/CapacitorSimAgent'
 import { SemiconductorSelection } from './components/SemiconductorSelection'
+import { InputProtection } from './components/InputProtection'
 import type { CapacitorResult } from './components/Step15Capacitor'
 
-type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'capsim'|'step16'|'semiconductors'
+type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'capsim'|'step16'|'semiconductors'|'inputprotection'
 
 interface AppState {
   step: Step; loading: boolean; error: string|null; backendStatus: 'ok'|'error'|'checking'
@@ -84,6 +85,7 @@ const SS: Record<Step,string> = {
   step7:'mode-b / step-7-magnetic-design', step15:'mode-b / step-15-capacitor',
   capsim:'mode-b / dc-bus-cap-simulation', step16:'mode-b / step-16-control-design',
   semiconductors:'mode-b / chapter-7-semiconductor-selection',
+  inputprotection:'mode-b / input-protection-mov-ntc',
 }
 
 export default function App() {
@@ -305,6 +307,13 @@ export default function App() {
           approvedInductorDesign={s.approvedInductorDesign}
           approvedCapacitorDesign={s.approvedCapacitorDesign}
           onBack={() => setS(p=>({...p, step:'step16'}))}
+          onNext={() => setS(p=>({...p, step:'inputprotection'}))}
+          onRestart={restart} />}
+        {s.step==='inputprotection' && s.graphState && s.approvedInductorDesign && <InputProtection
+          confirmedState={s.graphState as Record<string,unknown>}
+          approvedInductorDesign={s.approvedInductorDesign}
+          approvedCapacitorDesign={s.approvedCapacitorDesign}
+          onBack={() => setS(p=>({...p, step:'semiconductors'}))}
           onRestart={restart} />}
 
         {s.loading && (

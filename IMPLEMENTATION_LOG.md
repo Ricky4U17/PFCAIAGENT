@@ -3440,3 +3440,32 @@ No MOV/NTC Excel DBs yet (only the engines' built-in catalogs) — DB ranking wi
 those and wire vendor Excel when dropped in specs/Database.
 NEXT: step 2 = endpoints + GUI screen (3-source select for both families); step 3 = Chapter 8
 report + fold NTC steady loss into the efficiency cross-check.
+
+---
+
+## C59 — Input protection (MOV + NTC) step 2: endpoints + GUI screen (2026-06-28)
+
+User: build the MOV/NTC GUI considering the two scripts; MOV is the compliance-certification
+basis and gets its own report chapter; vendor DB to be provided later.
+
+- main.py: POST /mode-b/input-protection/ntc/calculate ({design,cap,opts}) and
+  /mov/calculate ({design,mosfet,cap,opts}) wrapping calculate_ntc/calculate_mov.
+- adapter.py: coerce MOV level (str '3' → int 3, 'X' kept) and criterion/custom-X voltages so
+  GUI string opts validate against the engine.
+- client.ts: inputProtectionNtc/inputProtectionMov + NtcResult/MovResult/CatalogRow types.
+- NEW InputProtection.tsx — two tabs:
+    NTC: carried-in chips (V_ac, C_out from Step 15, bus, I_rms,worst from grid), designer knobs
+         (inrush target, margins, loop R), sizing chips (R25 pick, E_cap, pulse req, max-C, τ,
+         bypass delay, relay V/A), inrush sweep + self-heat tables, catalog screen (interim DB).
+    MOV: compliance banner (IEC 61000-4-5), carried-in chips (V_ac, device V_ds from MOSFET,
+         cap V), level/criterion/CM selectors, MCOV + per-path clamp/coordination table
+         (OK/TIGHT/FAIL), candidate screen.
+- App.tsx: new 'inputprotection' step after semiconductors; SemiconductorSelection got an
+  optional onNext → "Input protection →" button.
+
+Verified over HTTP: NTC R25_pick/E_cap/bypass sane; MOV level/criterion steer the verdict
+(criterion B passes all 6 catalog parts to abs-max, A is stricter), MCOV invariant 275 V.
+Frontend tsc clean.
+
+NEXT: step 3 = report chapters — Chapter 8 NTC inrush (step-by-step) + Chapter 9 MOV compliance
+(IEC 61000-4-5, separate per user); fold NTC steady-state loss into the efficiency cross-check.

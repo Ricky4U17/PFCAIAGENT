@@ -502,6 +502,36 @@ def semiconductor_figures(req: _SemiReq):
     except Exception as e:
         log.exception("semiconductor figures"); raise HTTPException(500, str(e))
 
+# ── input protection (MOV surge + NTC inrush) ────────────────────────────────
+class _NtcReq(BaseModel):
+    design: Dict[str, Any]
+    cap:    Dict[str, Any] = {}          # approved capacitor (C_total_uF, V_rating)
+    opts:   Dict[str, Any] = {}          # designer knobs (inrush target, margins, parasitics)
+
+class _MovReq(BaseModel):
+    design: Dict[str, Any]
+    mosfet: Dict[str, Any] = {}          # selected MOSFET (vdss → downstream withstand)
+    cap:    Dict[str, Any] = {}          # approved capacitor (V_rating)
+    opts:   Dict[str, Any] = {}          # designer knobs (IEC level, criterion, margins)
+
+@app.post("/mode-b/input-protection/ntc/calculate", tags=["mode-b"])
+def input_protection_ntc(req: _NtcReq):
+    """Size the NTC inrush limiter + bypass relay from the design grid + approved capacitor."""
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_ntc
+        return calculate_ntc(req.design, req.cap or {}, req.opts or {})
+    except Exception as e:
+        log.exception("ntc calculate"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/input-protection/mov/calculate", tags=["mode-b"])
+def input_protection_mov(req: _MovReq):
+    """Size the MOV(s) per IEC 61000-4-5 (test level + performance criterion); compliance basis."""
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_mov
+        return calculate_mov(req.design, req.mosfet or {}, req.cap or {}, req.opts or {})
+    except Exception as e:
+        log.exception("mov calculate"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:
