@@ -389,6 +389,16 @@ export interface SemiReqBody {
 }
 export const semiconductorLibrary = () =>
   get<Record<string, Array<Record<string, unknown>>>>('/mode-b/semiconductor/library')
+export interface DbRankResult {
+  manufacturer: string; part_number: string; technology: string | null; package: string | null
+  mounting: string | null; datasheet_url: string | null; v_rating: number | null; i_rating: number | null
+  loss_W: number; tj_max_C: number; block: Record<string, unknown>
+}
+export const semiconductorDbOptions = (kind: string) =>
+  get<Record<string, string[]>>(`/mode-b/semiconductor/database/${kind}/options`)
+export const semiconductorDbRank = (kind: string,
+  body: { design: Record<string, number>; criteria: Record<string, unknown>; top?: number }) =>
+  post<{ results: DbRankResult[] }>(`/mode-b/semiconductor/database/${kind}/rank`, body)
 export const semiconductorCalculate = (b: SemiReqBody) =>
   post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
 export const semiconductorFigures = (b: SemiReqBody) =>

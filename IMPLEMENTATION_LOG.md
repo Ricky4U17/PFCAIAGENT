@@ -3334,3 +3334,16 @@ only font/text/alignment changed to our style.
 - Endpoints: GET /semiconductor/database/{kind}/options, POST /database/{kind}/rank.
 - Verified: ranking returns sensible parts (low-Rdson SiC FETs ~12.9W, 40A bridges); JSON-safe.
 - NEXT: GUI 'From database' mode (filter + top-10 list + select) per component; datasheet upload.
+
+## C55 - Semiconductor database connected to GUI (all 3 components)
+- client.ts: semiconductorDbOptions(kind), semiconductorDbRank(kind,{design,criteria,top}), DbRankResult type.
+- SemiconductorSelection: replaced manual/library source toggle with 3-way per component:
+  '🔍 From database' | '✎ Manual / external' | '📄 Upload datasheet'.
+  Database mode: filter inputs (Voltage>=, Current>=, Tj>=, Manufacturer, Mounting, Footprint/package,
+  + Technology for mosfet) populated from /options; 'Find top 10 (lowest loss)' -> /rank -> ranked
+  table (loss/Tj/rating/mfr/part# + datasheet link + Select). Select -> blockToForm populates the
+  Manual form (switches to manual for review/edit) -> Calculate. Note that DB-missing curves are estimated.
+  Upload mode: file input provision + 'extraction coming next' (PDF parsing is the remaining piece).
+- Verified: endpoints 200 over HTTP; build clean. Covers user tasks 1/2/3 (select by ratings -> top10
+  lowest loss -> pick; external/upload option).
+- NEXT (optional): datasheet PDF upload + parameter extraction (the actual parse).

@@ -11,8 +11,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { semiconductorCalculate, semiconductorFigures, semiconductorLibrary, docGenerateReport,
-         type SemiCalcResult, type SemiReqBody } from '../api/client'
+import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
+         semiconductorDbOptions, semiconductorDbRank,
+         type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -165,11 +166,40 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [figBusy, setFigBusy] = useState(false)
   const [rptBusy, setRptBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [lib, setLib] = useState<Record<string, Record<string, any>[]>>({})
-  const [libMode, setLibMode] = useState<Record<string, boolean>>({ bridge: false, mosfet: false, diode: false })
-  useEffect(() => { semiconductorLibrary().then(setLib).catch(() => {}) }, [])
+  type SrcMode = 'database' | 'manual' | 'upload'
+  const [srcMode, setSrcMode] = useState<Record<string, SrcMode>>({ bridge: 'database', mosfet: 'database', diode: 'database' })
+  const [dbOpts, setDbOpts] = useState<Record<string, Record<string, string[]>>>({})
+  const [dbCrit, setDbCrit] = useState<Record<string, any>>({
+    bridge: { v_min: '600', i_min: '15' }, mosfet: { v_min: '600', i_min: '15' }, diode: { v_min: '600', i_min: '10' },
+  })
+  const [dbRes, setDbRes] = useState<Record<string, DbRankResult[] | null>>({})
+  const [dbBusy, setDbBusy] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    (['bridge', 'mosfet', 'diode'] as Sub[]).forEach(k =>
+      semiconductorDbOptions(k).then(o => setDbOpts(s => ({ ...s, [k]: o }))).catch(() => {}))
+  }, [])
   const setWhole = (which: Sub, value: Record<string, any>) => {
     (which === 'mosfet' ? setMosfet : which === 'diode' ? setDiode : setBridge)(value as any)
+  }
+  const setCrit = (which: Sub, k: string, v: any) => setDbCrit(s => ({ ...s, [which]: { ...s[which], [k]: v } }))
+  const runDbSearch = async (which: Sub) => {
+    setDbBusy(s => ({ ...s, [which]: true })); setErr(null)
+    try {
+      const c = dbCrit[which] || {}; const criteria: Record<string, unknown> = {}
+      if (pnum(c.v_min) != null) criteria.v_min = pnum(c.v_min)
+      if (pnum(c.i_min) != null) criteria.i_min = pnum(c.i_min)
+      if (c.mfr) criteria.mfr = c.mfr
+      if (c.mounting) criteria.mounting = c.mounting
+      if (c.package) criteria.package = c.package
+      if (pnum(c.tj_min) != null) criteria.tj_min = pnum(c.tj_min)
+      if (c.technology) criteria.technology = c.technology
+      const r = await semiconductorDbRank(which, { design, criteria, top: 10 })
+      setDbRes(s => ({ ...s, [which]: r.results }))
+    } catch (e) { setErr((e as Error).message) } finally { setDbBusy(s => ({ ...s, [which]: false })) }
+  }
+  const pickDbPart = (which: Sub, r: DbRankResult) => {
+    setWhole(which, blockToForm(r.block as Record<string, any>, FIELDS[which], BASE[which]))
+    setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show the populated fields for review/edit
   }
 
   const body = (): SemiReqBody => ({
@@ -255,7 +285,14 @@ export const SemiconductorSelection: React.FC<Props> = ({
     )
   }
 
-  const compForm = (fields: Field[], state: Record<string, any>, which: Sub, title: string, devLoss?: [string, string]) => (
+  const critIn: React.CSSProperties = { ...inStyle, width: 80 }
+  const critSel: React.CSSProperties = { ...inStyle, width: 'auto', maxWidth: 160 }
+  const rcell: React.CSSProperties = { padding: '3px 7px', fontSize: 11, borderBottom: `1px solid ${C.border}`,
+    fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
+
+  const compForm = (fields: Field[], state: Record<string, any>, which: Sub, title: string, devLoss?: [string, string]) => {
+    const mode = srcMode[which]; const opts = dbOpts[which] || {}; const crit = dbCrit[which] || {}; const results = dbRes[which]
+    return (
     <Card style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{title}</div>
@@ -267,31 +304,82 @@ export const SemiconductorSelection: React.FC<Props> = ({
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: C.muted }}>Source:</span>
-        {([['manual', 'Manual / external datasheet'], ['library', 'From library']] as [string, string][]).map(([m, lbl]) => {
-          const isLib = m === 'library'; const active = !!libMode[which] === isLib
-          return (
-            <button key={m} onClick={() => setLibMode(s => ({ ...s, [which]: isLib }))} style={{
+        {([['database', '🔍 From database'], ['manual', '✎ Manual / external'], ['upload', '📄 Upload datasheet']] as [SrcMode, string][])
+          .map(([m, lbl]) => (
+            <button key={m} onClick={() => setSrcMode(s => ({ ...s, [which]: m }))} style={{
               padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
-              border: `1px solid ${active ? C.teal : C.border}`, background: active ? 'rgba(45,212,191,.12)' : C.bg3,
-              color: active ? C.teal : C.muted }}>{lbl}</button>
-          )
-        })}
-        {libMode[which] && (
-          <select style={{ ...inStyle, width: 'auto', flex: 1, minWidth: 200 }} defaultValue=""
-            onChange={e => {
-              const part = (lib[which] ?? [])[Number(e.target.value)]
-              if (part) setWhole(which, blockToForm(part, FIELDS[which], BASE[which]))
-            }}>
-            <option value="">{(lib[which] ?? []).length ? 'Select a part…' : 'Library empty (coming soon)'}</option>
-            {(lib[which] ?? []).map((p, i) => <option key={i} value={i}>{p.manufacturer} — {p.part_number}</option>)}
-          </select>
-        )}
+              border: `1px solid ${mode === m ? C.teal : C.border}`, background: mode === m ? 'rgba(45,212,191,.12)' : C.bg3,
+              color: mode === m ? C.teal : C.muted }}>{lbl}</button>
+          ))}
       </div>
-      <div>
-        {fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}
-      </div>
-    </Card>
-  )
+
+      {mode === 'database' && (<>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Voltage ≥ (V)<br />
+            <input style={critIn} value={crit.v_min ?? ''} onChange={e => setCrit(which, 'v_min', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A)<br />
+            <input style={critIn} value={crit.i_min ?? ''} onChange={e => setCrit(which, 'i_min', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Tj ≥ (°C)<br />
+            <input style={critIn} value={crit.tj_min ?? ''} onChange={e => setCrit(which, 'tj_min', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Manufacturer<br />
+            <select style={critSel} value={crit.mfr ?? ''} onChange={e => setCrit(which, 'mfr', e.target.value)}>
+              <option value="">any</option>{(opts.manufacturers ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Mounting<br />
+            <select style={critSel} value={crit.mounting ?? ''} onChange={e => setCrit(which, 'mounting', e.target.value)}>
+              <option value="">any</option>{(opts.mounting ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          <label style={{ fontSize: 10.5, color: C.muted }}>Footprint / package<br />
+            <input style={{ ...critIn, width: 120 }} value={crit.package ?? ''} placeholder="e.g. TO247"
+              onChange={e => setCrit(which, 'package', e.target.value)} /></label>
+          {which === 'mosfet' && (
+            <label style={{ fontSize: 10.5, color: C.muted }}>Technology<br />
+              <select style={critSel} value={crit.technology ?? ''} onChange={e => setCrit(which, 'technology', e.target.value)}>
+                <option value="">any</option>{(opts.technology ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          )}
+          <Btn variant="primary" disabled={!!dbBusy[which]} onClick={() => runDbSearch(which)}>
+            {dbBusy[which] ? '⏳ Ranking…' : '🔎 Find top 10 (lowest loss)'}
+          </Btn>
+        </div>
+        {results && (results.length === 0
+          ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
+          : <div style={{ overflowX: 'auto' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead><tr>{['#', `${which === 'mosfet' ? 'FET' : which} loss`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
+                  <th key={h} style={{ ...rcell, color: C.hint, textTransform: 'uppercase', fontSize: 9 }}>{h}</th>)}</tr></thead>
+                <tbody>{results.map((r, i) => (
+                  <tr key={i}>
+                    <td style={rcell}>{i + 1}</td>
+                    <td style={{ ...rcell, fontWeight: 700, color: C.teal }}>{r.loss_W.toFixed(2)} W</td>
+                    <td style={rcell}>{r.tj_max_C.toFixed(0)}°C</td>
+                    <td style={rcell}>{r.v_rating ?? '—'}V / {r.i_rating ?? '—'}A</td>
+                    <td style={rcell}>{(r.manufacturer ?? '').slice(0, 18)}</td>
+                    <td style={rcell}>{r.part_number}{r.datasheet_url ? <a href={r.datasheet_url} target="_blank" rel="noreferrer" style={{ color: C.muted, marginLeft: 5 }}>↗</a> : null}</td>
+                    <td style={rcell}><button onClick={() => pickDbPart(which, r)} style={{
+                      padding: '2px 9px', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, fontWeight: 600,
+                      border: `1px solid ${C.teal}`, background: 'rgba(45,212,191,.12)', color: C.teal }}>Select</button></td>
+                  </tr>))}</tbody>
+              </table>
+              <div style={{ fontSize: 9.5, color: C.muted, marginTop: 5 }}>
+                Loss ranked by the calc engine at this design's 9 operating points. Datasheet curves not in the DB
+                (Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated — selecting a part fills the Manual form for review/edit.
+              </div>
+            </div>)}
+      </>)}
+
+      {mode === 'manual' && (
+        <div>{fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}</div>
+      )}
+
+      {mode === 'upload' && (
+        <div style={{ fontSize: 12, color: C.text }}>
+          <input type="file" accept=".pdf" disabled style={{ fontSize: 11 }} />
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
+            Datasheet upload + parameter extraction is coming next — for now use <b>Manual / external</b> to enter an
+            external part's values, or <b>From database</b> to pick a ranked part.
+          </div>
+        </div>
+      )}
+    </Card>)
+  }
 
   const Banner: React.FC<{ ok: boolean; okText: string; badText: string; issues?: any[] }>
     = ({ ok, okText, badText, issues }) => (
