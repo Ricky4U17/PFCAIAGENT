@@ -188,6 +188,21 @@ def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
                     "per_point": rows, "summary": summary, "cfg": cfg})
 
 
+def trace_point(design: dict, mosfet: dict, diode: dict, bridge: dict, thermal: dict,
+                vac: float | None = None):
+    """Converged intermediate quantities at ONE operating point (default: the worst-case loss
+    point) so the report can show each loss mechanism's step-by-step substitution with the
+    engine's OWN numbers. Returns the engine `trace` dict (JSON-safe)."""
+    cfg, _ = build_semi_cfg(design, mosfet, diode, bridge, thermal)
+    sp, mos, dio, br, th = engine.design_from_dict(cfg)
+    vac_list = cfg["run"]["vac_list"]
+    if vac is None:                                   # pick the worst-case semiconductor-loss point
+        rows = [engine.simulate_point(float(v), sp, mos, dio, br, th) for v in vac_list]
+        vac = float(max(rows, key=lambda r: r["P_SEMI_total"])["Vac"])
+    r = engine.simulate_point(float(vac), sp, mos, dio, br, th, return_trace=True)
+    return _native(r["trace"])
+
+
 # ── reference design + smoke test (run: python -m app.mode_b.semiconductor.adapter) ──
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,

@@ -223,7 +223,7 @@ class Spec:
     di_pp_peak_curve: Optional[tuple] = None # (Vac, di_pp_peak)
 
 # ======================================================================================
-def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False):
+def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_trace=False):
     Vo, fsw, Nch = sp.vo, sp.fsw, sp.nch
     Po  = float(curve(vac, *sp.po_curve)) if sp.po_curve else sp.po
     eta = float(curve(vac, *sp.eta_curve)) if sp.eta_curve else sp.eta
@@ -349,6 +349,44 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False):
             sc = Pbot_dev/max(float(np.mean(bp_bot)), 1e-12)
             rbb = transient_tj(bp_bot*sc, sp.fline, br.zth_foster, sink_br+Pbot_dev*br.rth_cs_bottom, span=span_half)
             if rbb: out["Tj_BRIDGE_bottom_peak"],out["Tj_BRIDGE_bottom_ripple"] = rbb[0],rbb[2]
+    if return_trace:
+        # Converged intermediate quantities for ONE operating point, so a report can show the
+        # step-by-step substitution with the engine's OWN numbers (not a re-derivation).
+        ipk = int(np.argmax(i_ch))                                   # peak-of-line line angle
+        rds_tj = float(mos.rdson(Tj_fet))                            # Rds(on) at Tj (nominal Id)
+        i_fet_rms_ch = float(np.sqrt(max(avg(ms_fet), 0.0)))         # per-channel FET RMS current
+        i_d_avg = avg(i_d_density)                                   # per-channel average diode current
+        n_top = br.n_parallel_top if br.topology == "sync_bottom" else br.n_parallel
+        out["trace"] = {
+            "Vac": vac, "Vpk": Vpk, "Vo": Vo, "fsw": fsw, "Nch": Nch,
+            "Iin_rms": Iin_rms, "Ipk_ch": Ipk_ch, "duty_pk": float(d[ipk]),
+            "Tj_fet": Tj_fet, "Tj_dio": Tj_dio, "Tj_brT": Tj_brT, "Tj_brB": Tj_brB,
+            "sink_main": sink_main, "Psemi_main": Psemi_main, "P_bridge": P_bridge,
+            # ---- MOSFET ----
+            "rds_25": mos.rdson_25, "rds_tj_factor": float(curve(Tj_fet, *mos._tjcoef())),
+            "rds_tj": rds_tj, "i_fet_rms_ch": i_fet_rms_ch,
+            "P_cond_fet_ch": P_cond_fet, "P_cond_fet_tot": Nch * P_cond_fet,
+            "i_on_pk": float(i_on[ipk]), "i_off_pk": float(i_off[ipk]),
+            "Esw_pk": float(Esw[ipk]), "Esw_avg": avg(Esw),
+            "P_sw_fet_ch": P_sw_fet, "P_sw_fet_tot": Nch * P_sw_fet,
+            "eoss_vo": float(mos.eoss(Vo)), "P_oss_ch": P_oss_fet, "P_oss_tot": Nch * P_oss_fet,
+            "qg": mos.qg, "vg_drive": mos.vg_drive, "P_gate_ch": P_gate, "P_gate_tot": Nch * P_gate,
+            "P_rr_fet_tot": Nch * P_rr_to_fet, "P_leak_fet_tot": Nch * P_leak_fet,
+            "P_fet_each": P_fet_each, "rth_jc_fet": mos.rth_jc, "rth_cs_fet": mos.rth_cs,
+            # ---- DIODE ----
+            "is_sic": dio.is_sic, "vf_d_pk": float(dio.vf(i_d_repr[ipk], Tj_dio)),
+            "i_d_avg": i_d_avg, "P_cond_dio_ch": P_cond_dio, "P_cond_dio_tot": Nch * P_cond_dio,
+            "qc": dio.qc, "qrr_eff": float(Qrr) if not dio.is_sic else 0.0,
+            "P_sw_dio_ch": P_sw_dio, "P_sw_dio_tot": Nch * P_sw_dio,
+            "P_dio_each": P_dio_each, "rth_jc_dio": dio.rth_jc, "rth_cs_dio": dio.rth_cs,
+            # ---- BRIDGE ----
+            "topology": br.topology, "n_top": n_top,
+            "vf_br_pk": float(br.vf(i_in[ipk] / max(n_top, 1), Tj_brT)),
+            "P_bridge_top": bl["top"], "P_bridge_bottom": bl["bottom"],
+            "rds_bot_tj": (br.rdson_bottom_25 * float(curve(Tj_brB, *br.rdson_bottom_tj)) / max(br.n_parallel_bottom, 1))
+                          if br.topology == "sync_bottom" else 0.0,
+            "rth_jc_br": br.rth_jc, "rth_cs_br": br.rth_cs,
+        }
     if return_waveforms:
         # total instantaneous device powers (each averages back to its reported total loss)
         if br.topology == "sync_bottom":

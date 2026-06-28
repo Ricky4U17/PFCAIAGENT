@@ -3382,3 +3382,33 @@ Frontend:
 Verified: backend+frontend compile; over HTTP on :8000 — extract returns 7/8 MOSFET fields
 (rth_jc=0.45 from "K/W"), conduction rank returns low-Rds(on) SiC FETs (~7.9W) mapped to
 rdson_bottom_25.
+
+---
+
+## C57 — Chapter 7 step-by-step worked loss calculations (2026-06-28)
+
+User: "documentation agent to add a chapter about semiconductor losses having detailed step
+by step calculation for each and every associated losses for all 3 components ... properly
+organized ... summary with graphs and tables showing details at each input voltages."
+
+Chapter 7 already had per-Vac tables (7.1–7.8) + 4 figures; the gap was a WORKED numeric
+substitution per loss mechanism. Added it sourced from the engine's OWN converged numbers
+(no re-derivation), so every worked line reconciles exactly with the sweep tables.
+
+- `pfc_loss_model.py` `simulate_point(..., return_trace=True)` — new opt-in: packages the
+  converged intermediates for one operating point into out["trace"] (Rds@Tj + tj-factor,
+  channel RMS current, Esw_avg/pk, Eoss(Vo), Qg/Vg, diode Vf@pk/Iavg/Qc-or-Qrr, bridge Vf@pk
+  + bottom Rds(Tj), sink temp + per-device P and Rθ chain). No change to existing outputs.
+- `adapter.py` `trace_point(design,parts…,vac=None)` — builds cfg, picks the worst-case
+  P_SEMI point (or a given Vac), returns the JSON-safe trace.
+- `report_semiconductor.py`: worked tables 7.3a (bridge), 7.4a (MOSFET — all 5 mechanisms:
+  conduction/switching/Eoss/reverse-recovery/gate+leak), 7.5a (diode cond+sw), 7.6a (junction
+  temps), each showing the substitution at the worst-case point + the all-channel total, placed
+  between the formula and the existing 9-point sweep table. Splash updated.
+
+Verified (reference design, worst point = 180 Vac): every worked line reconciles to the engine
+— Rds(Tj)·I²=3.63 W=P_cond_ch, fsw·Esw_avg=P_sw, fsw·Eoss=P_oss, ½VoQc·fsw=diode sw,
+sink+P·(Rjc+Rcs)=Tj. Standalone Ch7 = 11 pp; entities render (Ω µ × √ ∑ –), no box glyphs,
+MOSFET total 14.18 W.
+
+NEXT: GUI for MOV + NTC inrush/surge selection (per user).
