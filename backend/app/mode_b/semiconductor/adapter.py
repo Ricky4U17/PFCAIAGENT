@@ -45,7 +45,7 @@ def build_design_ops(design: dict):
 
 
 # metadata kept with each part for the report but NOT passed to the engine dataclasses
-_META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url")
+_META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url", "_estimated")
 
 def _clean_block(block: dict):
     """Split a component block into (engine params, metadata). Drops metadata keys and any

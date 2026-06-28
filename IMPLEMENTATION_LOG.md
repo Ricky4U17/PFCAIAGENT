@@ -3318,3 +3318,19 @@ only font/text/alignment changed to our style.
   first) -> users reaching S7 were blocked. Removed the gate (always enabled): the comprehensive
   Ch1-7 report is now generated on the Semiconductor page, so the Ch1-6 download is optional.
   Added a one-line hint (Download is optional / full report on Semiconductor page). Build clean.
+
+## C54 - Semiconductor local database: ingest + parse + map + rank (backend foundation)
+- database.py: parses the 3 Digi-Key-style Excel DBs (specs/Database) -> data/{bridge,mosfet,diode}.json.
+  Value parsers (p_volt/amp/res/charge/cap/vf/time/tjmax) handle the messy formats incl. BOTH ohm
+  representations (U+03A9 / U+2126 symbol AND text 'mOhm @ ...'). build_all() ingests
+  (bridge 981, mosfet 1311, diode 1399; mosfet 1255 with rdson+qg+vdss).
+- to_block(rec, kind): maps a DB part to an engine block using real datasheet scalars (Rdson, Qg,
+  Ciss, Vth, Vf, Io, trr) verbatim + ESTIMATES the missing loss/thermal params (rdson_tj curve by
+  tech, Eoss ~ k/Rdson, Rth_jc from Pd_max or package, Qrr ~ 0.5*trr*Io, Vf 2-pt curve), labelled
+  in block['_estimated']. So ranking is driven by real params; designer refines after picking.
+- filter_parts (v_min/i_min/mfr/mounting/package/tj_min/technology), options() for dropdowns,
+  rank_by_loss(kind, design, crit, top): filter -> cheap pre-sort -> evaluate each candidate's loss
+  across 9 Vac via the engine -> top-N lowest-loss (~1.2-1.5s). adapter _META_KEYS strips '_estimated'.
+- Endpoints: GET /semiconductor/database/{kind}/options, POST /database/{kind}/rank.
+- Verified: ranking returns sensible parts (low-Rdson SiC FETs ~12.9W, 40A bridges); JSON-safe.
+- NEXT: GUI 'From database' mode (filter + top-10 list + select) per component; datasheet upload.

@@ -413,6 +413,38 @@ def semiconductor_library():
     except Exception as e:
         log.exception("semiconductor library"); raise HTTPException(500, str(e))
 
+class _DbRankReq(BaseModel):
+    design:   Dict[str, Any]
+    criteria: Dict[str, Any] = {}
+    top:      int = 10
+
+@app.get("/mode-b/semiconductor/database/{kind}/options", tags=["mode-b"])
+def semiconductor_db_options(kind: str):
+    """Distinct manufacturers / mounting / package / technology for the filter dropdowns."""
+    try:
+        from app.mode_b.semiconductor import database as db
+        if kind not in ("mosfet", "diode", "bridge"):
+            raise HTTPException(404, "unknown component kind")
+        return db.options(kind)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("db options"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/semiconductor/database/{kind}/rank", tags=["mode-b"])
+def semiconductor_db_rank(kind: str, req: _DbRankReq):
+    """Filter the local DB by the designer's criteria and return the top-N lowest-loss parts
+    (loss computed for this design's operating point). Each result carries its engine block."""
+    try:
+        from app.mode_b.semiconductor import database as db
+        if kind not in ("mosfet", "diode", "bridge"):
+            raise HTTPException(404, "unknown component kind")
+        return {"results": db.rank_by_loss(kind, req.design, req.criteria or {}, top=int(req.top))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("db rank"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/semiconductor/calculate", tags=["mode-b"])
 def semiconductor_calculate(req: _SemiReq):
     """Validate the 3 parts, sweep all 9 input voltages, run the design-vs-engine
