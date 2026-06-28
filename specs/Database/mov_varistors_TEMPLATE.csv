@@ -1,0 +1,4 @@
+Part Number,Manufacturer,MCOV (Vac),V_1mA (V),Imax 8/20 (A),Vc @ Imax (V),Energy 2ms (J),Disc Diameter (mm),Type,Datasheet URL
+V20E275P,Littelfuse,275,430,6500,710,175,20,,
+S20K275,TDK / EPCOS,275,430,8000,710,195,20,,
+TMOV20R275,Littelfuse,275,430,6500,710,175,20,thermally protected,
