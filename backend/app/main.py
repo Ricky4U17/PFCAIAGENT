@@ -2032,6 +2032,14 @@ def doc_generate_report(req: _DocReportReq):
             )
             ch6 = build_control_report(_control_inputs_from_step16(req.step16_params))
             parts = [ch1_5, ch6]
+            # ONE inductance everywhere: Chapter 7 must use Chapter 3's finalized Lφ, never its own.
+            # Resolve it exactly as the inductor chapter does (confirmed_L_uH_sel → confirmed_L_uH →
+            # approved L_target_uH) and force it onto the semiconductor design before rendering.
+            _tsi = (req.state or {}).get("topology_specific_inputs", {}) or {}
+            _L_final = (_tsi.get("confirmed_L_uH_sel") or _tsi.get("confirmed_L_uH")
+                        or (req.approved_design or {}).get("L_target_uH"))
+            if req.semiconductor and _L_final:
+                req.semiconductor.setdefault("design", {})["L_phi_uH"] = float(_L_final)
             if req.semiconductor:                          # Chapter 7 — Semiconductor Loss & Thermal
                 from app.mode_b.report_semiconductor import build_semiconductor_report
                 sc = req.semiconductor

@@ -107,7 +107,7 @@ export const ControlDesign: React.FC<Props> = ({
   const app  = (confirmedState as any)?.intake?.application ?? {}
 
   const params = {
-    lphi_uH:   Number((approvedInductorDesign as any)?.L_target_uH   ?? 235),
+    lphi_uH:   Number(tsi.confirmed_L_uH_sel ?? tsi.confirmed_L_uH ?? (approvedInductorDesign as any)?.L_target_uH ?? 235),
     rl_mOhm:   Number((approvedInductorDesign as any)?.DCR_100C_mOhm ?? 28),
     co_uF:     approvedCapacitorDesign?.C_total_uF         ?? 2350,
     rc_mOhm:   approvedCapacitorDesign?.ESR_parallel_mohm  ?? 5,

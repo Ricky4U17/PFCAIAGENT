@@ -3526,3 +3526,28 @@ bridge + diode same pattern. Entities resolve, no glyph boxes, 11 pp.
 
 NOTE: if a real design shows L_φ ≠ Ch3, the frontend is passing a different approved-inductor L
 (L_target_uH) than Ch3's confirmed_L_uH — a data-path alignment, separate from this report fix.
+
+---
+
+## C62 — Single inductance throughout the report: Ch7 follows Ch3 (2026-06-29)
+
+User: the Chapter-3 inductance is the accurate, finalized value; Chapter 7 must NOT decide its
+own — once finalized in Ch3 it must be identical everywhere. Find & fix the bug.
+
+Bug: two independent L paths. Chapter 3 (generate_steps13_14) resolves Lφ from the state as
+`tsi.confirmed_L_uH_sel → confirmed_L_uH → approved.L_target_uH → 235` and uses it for ripple/B_dc.
+Chapter 7 took Lφ separately from the frontend's `approvedInductorDesign.L_target_uH ?? 235`
+(SemiconductorSelection.tsx) — a different key that can diverge (e.g. stale default 235 vs Ch3's
+confirmed 240).
+
+Fix — make Ch3's finalized Lφ authoritative everywhere:
+- main.py doc_generate_report (combined report): before rendering Ch7, resolve Lφ exactly as the
+  inductor chapter does from req.state.topology_specific_inputs and force it onto
+  req.semiconductor["design"]["L_phi_uH"]. The adapter/Table 7.1/engine then all use Ch3's value.
+- Frontend: SemiconductorSelection.tsx, InputProtection.tsx, ControlDesign.tsx now derive Lφ as
+  `tsi.confirmed_L_uH_sel ?? tsi.confirmed_L_uH ?? approvedInductorDesign.L_target_uH ?? 235`
+  (same order as Ch3) for the live GUI + standalone downloads.
+
+Verified: override unit cases (sel 240 over stale 235 → 240; confirmed 238.4 → 238.4; fallback
+approved 250 → 250); backend imports; frontend tsc clean. Same `state.topology_specific_inputs`
+source as generate_steps13_14.

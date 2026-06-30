@@ -151,7 +151,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
     fline:    Number(app.line_frequency_hz ?? 60),
     nch:      Number((confirmedState as any)?.selected_channels ?? 2),
     r_input:  Number(tsi.default_crest_ripple_ratio ?? 0.20),
-    L_phi_uH: Number((approvedInductorDesign as any)?.L_target_uH ?? 235),
+    // Lφ is finalized in Chapter 3 — use the SAME resolution (never a Chapter-7 value):
+    L_phi_uH: Number(tsi.confirmed_L_uH_sel ?? tsi.confirmed_L_uH ?? (approvedInductorDesign as any)?.L_target_uH ?? 235),
   }), [confirmedState, approvedInductorDesign])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sub, setSub] = useState<Sub>('bridge')
