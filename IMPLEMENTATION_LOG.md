@@ -3493,3 +3493,36 @@ basis and must be a SEPARATE chapter.
 
 Fixes: mathtext rejects \ge / \tfrac / \text → \geq form / \frac / \mathrm. Verified standalone
 15 pp, entities resolved (Ω µ °), no box glyphs; /input-protection/report 200 application/pdf 72 KB.
+
+---
+
+## C61 — Chapter 7 Table 7.1 consistency + fuller step-by-step loss calcs (2026-06-29)
+
+User: Table 7.1 should show input RMS + per-phase RMS current to 3 decimals (same as Ch2/Table
+2.7.2, same equations); ripple% and effective inductance don't match Chapter 3; currents must
+match Chapter 3; and the bridge/MOSFET/diode loss sections are too summary-style — need detailed
+step-by-step calculation.
+
+Root cause (verified numerically): currents already came from the canonical step2/step5 funcs
+(s2.Iin_rms == engine echo; iph == Step-5 per-phase) but were shown to 1-2 dp. The "ripple %"
+column showed the ENGINE's per-point `ripple_pk_%` (peak inductor ripple / channel peak, 37-58%),
+a different quantity than Chapter 3's ΔI_L,pp = Vin_pk·Dpk/(L·fsw) [A]. "L_eff" = L_phi = 235 µH
+(matches Ch3 L_target; label was just ambiguous).
+
+- report_semiconductor.py Table 7.1: now sources I_in,rms (total) and I_φ,rms (per-phase) from
+  s2/iph to 3 decimals; replaced "ripple %" with ΔI_L,pp (A) using the Chapter-3 formula (low-line
+  row = Ch3 headline value); relabeled L_eff → L_φ; added the I_φ,rms + ΔI_L,pp equations and a
+  "identical to Chapters 2,3 & 5" caption. Consistency NOTE now says L_φ.
+- 7.3 / 7.4 / 7.5 worked tables restructured into explicit 3-step form:
+  Step 1 operating currents (peak/RMS/avg, turn-on/off) → Step 2 device parameters at T_j
+  (Rds(Tj)=Rds25·k, E_sw/event peak+avg, E_oss, V_f, Q_c/Q_rr) → Step 3 per-mechanism loss ×Nch,
+  with bold sub-headers and totals. Added i_in(θ)/I_FET,rms/i_D(θ) equations. Fixed mathtext
+  (\tfrac/\text → \frac/\mathrm in the diode eq).
+
+Verified (render): Table 7.1 shows 3-dp currents + ΔI_L,pp (5.236 A @90V = Ch3) + L_φ 235µH;
+MOSFET 7.4a shows Step1 (Ipk 14.82A, Irms 7.111A, on/off 12.08/17.55A) → Step2 (Rds 71.8mΩ,
+Esw 42.81µJ, Eoss 5.91µJ) → Step3 (cond 7.26 / sw 5.99 / Coss 0.83 / gate 0.10 = 14.18 W);
+bridge + diode same pattern. Entities resolve, no glyph boxes, 11 pp.
+
+NOTE: if a real design shows L_φ ≠ Ch3, the frontend is passing a different approved-inductor L
+(L_target_uH) than Ch3's confirmed_L_uH — a data-path alignment, separate from this report fix.

@@ -84,21 +84,29 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     if res["consistency"] and res["consistency"]["ok"]:
         annotation(story, "NOTE",
             "Consistency gate: PASS — Vac, P_out, P_in, &#951;, PF, I_in,rms, I_pk and L&#966; match the "
-            "approved design at all nine points (L_eff = %s &#181;H everywhere)." % _f(L_phi * 1e6, 0), CH)
+            "approved design at all nine points (L&#966; = %s &#181;H everywhere)." % _f(L_phi * 1e6, 0), CH)
+    fsw = float(design["fsw"]); vout = float(design["vout"])
     body(story,
-        "The line current follows from the supplied efficiency and power factor, "
-        "I<sub>in,rms</sub> = P<sub>out</sub> / (&#951;&#183;V<sub>AC</sub>&#183;PF); the per-phase "
-        "inductor RMS is the value sized in Chapter 3. The duty law is the structural boost relation:", CH)
-    eq_box(story, [r"d(\theta)=1-\dfrac{V_{AC}\sqrt{2}\,\sin\theta}{V_{OUT}}",
-                   r"I_{in,rms}=\dfrac{P_{out}}{\eta\,V_{AC}\,PF},\quad I_{pk,ch}=\dfrac{\sqrt{2}\,I_{in,rms}}{N_{ch}}"],
+        "The total input RMS current follows from the supplied efficiency and power factor; the "
+        "per-phase inductor RMS is the Step-5 value (low-frequency + high-frequency ripple components "
+        "integrated over the half line cycle); the per-phase peak-to-peak inductor ripple and the "
+        "inductance L<sub>&#966;</sub> are the Chapter-3 quantities. All currents below use the SAME "
+        "equations as Chapters 2 and 5, to three decimals:", CH)
+    eq_box(story, [r"I_{in,rms}=\dfrac{P_{out}}{\eta\,V_{AC}\,PF},\qquad "
+                   r"I_{\varphi,rms}=\sqrt{\dfrac{1}{\pi}\int_0^{\pi}\left(i_{\varphi}^2+i_{hf}^2\right)d\theta}",
+                   r"d(\theta)=1-\dfrac{\sqrt{2}\,V_{AC}\sin\theta}{V_{OUT}},\qquad "
+                   r"\Delta I_{L,pp}=\dfrac{V_{in,pk}\,D_{pk}}{L_{\varphi}\,f_{sw}}"],
            number="7.1", ch=CH)
-    data_table(story, "7.1", "Operating Points (carried in from the approved design)",
-        "The nine-point grid every chapter shares; the loss engine consumes these verbatim.",
-        ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_ph,rms", "ripple %", "L_eff"],
-        [[f"{r['Vac']:.0f} V", f"{r['Po']:.0f} W", _f(r['eta_in_%'], 1), _f(r['PF_in'], 4),
-          f"{_f(r['Iin_rms'], 1)} A", f"{_f(iph[i], 2)} A", _f(r['ripple_pk_%'], 1),
-          f"{_f(r['L_eff_uH'], 0)} &#181;H"] for i, r in enumerate(rows)],
-        col_widths=[CW*0.10, CW*0.12, CW*0.10, CW*0.12, CW*0.14, CW*0.14, CW*0.12, CW*0.16], ch=CH)
+    data_table(story, "7.1", "Operating Points (identical to Chapters 2, 3 & 5)",
+        "Currents from the Step-2 / Step-5 equations (3 decimals). &#916;I<sub>L,pp</sub> and "
+        "L<sub>&#966;</sub> use the Chapter-3 formula and inductance, so the low-line &#916;I<sub>L,pp</sub> "
+        "equals the Chapter-3 headline value.",
+        ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_&#966;,rms", "&#916;I_L,pp", "L_&#966;"],
+        [[f"{s2['Vin_rms'][i]:.0f} V", f"{r['Po']:.0f} W", _f(r['eta_in_%'], 1), _f(r['PF_in'], 4),
+          f"{_f(s2['Iin_rms'][i], 3)} A", f"{_f(iph[i], 3)} A",
+          f"{_f(s2['Vin_pk'][i] * s2['Dpk'][i] / (L_phi * fsw), 3)} A", f"{_f(L_phi * 1e6, 0)} &#181;H"]
+         for i, r in enumerate(rows)],
+        col_widths=[CW*0.10, CW*0.12, CW*0.09, CW*0.11, CW*0.15, CW*0.15, CW*0.14, CW*0.13], ch=CH)
 
     # ── 7.2 Selected components ──────────────────────────────────────────────
     step_h(story, "7.2", "Selected Components", CH)
@@ -125,29 +133,41 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
          if is_sync else
          "Plain diode bridge: two diodes conduct the full input current at any instant. The loss is the "
          "forward-conduction loss of the conducting pair, integrated over the line cycle."), CH)
-    eq_box(story, [r"P_{bridge}=2\,\overline{\,V_f(i_{in})\,i_{in}\,}"
+    body(story,
+        "The rectified line current i<sub>in</sub>(&#952;) = &#8730;2&#183;I<sub>in,rms</sub>&#183;sin&#952; flows "
+        "through two series devices at every instant. The conduction loss is the forward-voltage drop "
+        "V<sub>f</sub>(i) times the current, averaged over the half line cycle and multiplied by the two "
+        "conducting devices. The worked calculation below goes current &#8594; device parameter &#8594; loss.", CH)
+    eq_box(story, [r"i_{in}(\theta)=\sqrt{2}\,I_{in,rms}\,\sin\theta",
+                   r"P_{bridge}=2\,\overline{\,V_f(i_{in})\,i_{in}\,}"
                    + (r"+\,\overline{\,R_{ds,bot}\,i_{in}^2\,}+P_{g,bot}" if is_sync else "")],
            number="7.3", ch=CH)
     if tr:
-        i_in_pk = (2 ** 0.5) * tr["Iin_rms"]
+        i_in_pk = (2 ** 0.5) * tr["Iin_rms"]; ntop = max(tr["n_top"], 1)
         wrows = [
-            ["Peak input current", f"&#8730;2 &#183; I<sub>in,rms</sub> = &#8730;2 &#183; {_f(tr['Iin_rms'],1)} A", f"{_f(i_in_pk,1)} A"],
+            ["<b>Step 1 — operating currents</b>", "", ""],
+            ["RMS line current (Table 7.1)", "carried in from the grid", f"{_f(tr['Iin_rms'],3)} A"],
+            ["Peak line current", f"i<sub>in,pk</sub> = &#8730;2 &#183; {_f(tr['Iin_rms'],3)} A", f"{_f(i_in_pk,3)} A"],
+            ["Per-device current", f"i<sub>in,pk</sub> / {ntop} device(s)", f"{_f(i_in_pk/ntop,3)} A"],
+            ["<b>Step 2 — device parameter at T<sub>j</sub></b>", "", ""],
             [f"V<sub>f</sub> at peak (T<sub>j</sub>={_f(tr['Tj_brT'],0)}{_DEG}C)",
-             f"from the V<sub>f</sub>(i) curve at {_f(i_in_pk / max(tr['n_top'],1),1)} A", f"{_f(tr['vf_br_pk'],3)} V"],
+             f"V<sub>f</sub>(i) curve at {_f(i_in_pk/ntop,3)} A", f"{_f(tr['vf_br_pk'],3)} V"],
         ]
         if is_sync:
             wrows += [["Bottom-FET R<sub>ds</sub>(T<sub>j</sub>)", f"R<sub>ds,bot</sub> at {_f(tr['Tj_brB'],0)}{_DEG}C",
                        f"{_f(tr['rds_bot_tj']*1e3,1)} m{_OHM}"],
-                      ["Top diodes (line-avg)", "2 &#183; mean(V<sub>f</sub> &#183; i<sub>in</sub>)", f"{_f(tr['P_bridge_top'])} W"],
+                      ["<b>Step 3 — loss</b>", "", ""],
+                      ["Top diodes (line-avg)", "2 &#183; mean(V<sub>f</sub>(i<sub>in</sub>) &#183; i<sub>in</sub>)", f"{_f(tr['P_bridge_top'])} W"],
                       ["Bottom MOSFETs", "mean(R<sub>ds,bot</sub> &#183; i<sub>in</sub><sup>2</sup>) + gate", f"{_f(tr['P_bridge_bottom'])} W"]]
         else:
-            wrows += [["Conduction loss (line-avg)", "2 &#183; mean(V<sub>f</sub> &#183; i<sub>in</sub>) over the cycle",
+            wrows += [["<b>Step 3 — loss</b>", "", ""],
+                      ["Conduction (2 devices, line-avg)", "2 &#183; mean(V<sub>f</sub>(i<sub>in</sub>) &#183; i<sub>in</sub>) over the half cycle",
                        f"{_f(tr['P_bridge_top'])} W"]]
-        wrows += [["Bridge total", "&#8721; above", f"{_f(tr['P_bridge'])} W"]]
-        data_table(story, "7.3a", "Bridge Loss — Worked Calculation",
-            f"Step-by-step substitution ({WC}). Two devices carry the full input current at every instant.",
+        wrows += [["<b>Bridge total</b>", "&#8721; Step 3", f"<b>{_f(tr['P_bridge'])} W</b>"]]
+        data_table(story, "7.3a", "Bridge Loss — Step-by-Step Worked Calculation",
+            f"Current &#8594; device parameter &#8594; loss ({WC}). Two devices carry the full input current at every instant.",
             ["Quantity", "Substitution", "Value"], wrows,
-            col_widths=[CW*0.30, CW*0.46, CW*0.24], ch=CH)
+            col_widths=[CW*0.32, CW*0.44, CW*0.24], ch=CH)
     data_table(story, "7.3", "Bridge Loss vs Line Voltage",
         "Conducting-pair loss at each operating point" + (" (top diodes + bottom MOSFETs)." if is_sync else "."),
         ["V_AC", "I_in,rms", "P_bridge (top)", "P_bridge (bottom)", "P_bridge total"],
@@ -162,39 +182,48 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "(turn-on + turn-off), output-capacitance (E<sub>oss</sub>) dissipation at hard turn-on, the "
         "share of diode reverse-recovery energy dumped into the FET, and gate-drive + leakage. All are "
         "integrated over the line cycle and multiplied by N<sub>ch</sub>.", CH)
-    eq_box(story, [r"P_{cond}=\overline{R_{ds(on)}(T_j,i)\,i^2\,d}",
+    eq_box(story, [r"I_{ch,pk}=\dfrac{\sqrt{2}\,I_{in,rms}}{N_{ch}},\quad "
+                   r"I_{FET,rms}=\sqrt{\overline{\,i^2\,d\,}},\quad R_{ds(on)}(T_j)=R_{ds,25}\,k(T_j)",
+                   r"P_{cond}=R_{ds(on)}(T_j)\,I_{FET,rms}^2,\quad "
                    r"P_{sw}=f_{sw}\,\overline{(E_{on}+E_{off})},\quad P_{oss}=f_{sw}\,E_{oss}(V_{OUT})",
-                   r"P_{FET}=P_{cond}+P_{sw}+P_{oss}+P_{rr}+P_{gate}+P_{leak}"],
+                   r"P_{FET}=N_{ch}\,(P_{cond}+P_{sw}+P_{oss}+P_{rr}+P_{gate}+P_{leak})"],
            number="7.4", ch=CH)
     if tr:
         nch = int(tr["Nch"]); fk = tr["fsw"] / 1e3
         fet_tot = (tr["P_cond_fet_tot"] + tr["P_sw_fet_tot"] + tr["P_oss_tot"]
                    + tr["P_rr_fet_tot"] + tr["P_gate_tot"] + tr["P_leak_fet_tot"])
-        data_table(story, "7.4a", "MOSFET Loss — Worked Calculation (per mechanism)",
-            f"Step-by-step substitution ({WC}); the last column is the all-channel ({nch}-channel) total. "
-            f"Intermediate values (R<sub>ds</sub> at T<sub>j</sub>, channel RMS current, switching energy) are the "
-            f"engine's own converged numbers, so each line reconciles exactly with the sweep table below.",
-            ["Mechanism", "Substitution at the worst-case point", f"Total ({nch} ch)"],
-            [["R<sub>ds(on)</sub> at T<sub>j</sub>",
-              f"{_f(tr['rds_25']*1e3,1)} m{_OHM} &#215; {_f(tr['rds_tj_factor'],2)} (T<sub>j</sub>={_f(tr['Tj_fet'],0)}{_DEG}C)",
+        data_table(story, "7.4a", "MOSFET Loss — Step-by-Step Worked Calculation",
+            f"Operating currents &#8594; T<sub>j</sub>-adjusted parameters &#8594; each loss mechanism ({WC}). "
+            f"Last column is the all-channel ({nch}-channel) total; every intermediate is the engine's own "
+            f"converged value, so the lines reconcile exactly with the sweep table below.",
+            ["Quantity", "Substitution at the worst-case point", f"Value / total ({nch} ch)"],
+            [["<b>Step 1 — operating currents</b>", "", ""],
+             ["Channel peak current", f"&#8730;2&#183;I<sub>in,rms</sub>/N<sub>ch</sub> = &#8730;2&#183;{_f(tr['Iin_rms'],3)}/{nch}", f"{_f(tr['Ipk_ch'],3)} A"],
+             ["Channel RMS (on-state)", "I<sub>FET,rms</sub> = &#8730;mean(i<sup>2</sup>&#183;d) over the line cycle", f"{_f(tr['i_fet_rms_ch'],3)} A"],
+             ["Turn-on / turn-off current", "i at the switching instants (peak of line)", f"{_f(tr['i_on_pk'],2)} / {_f(tr['i_off_pk'],2)} A"],
+             ["<b>Step 2 — parameters at T<sub>j</sub></b>", "", ""],
+             ["R<sub>ds(on)</sub> at T<sub>j</sub>",
+              f"{_f(tr['rds_25']*1e3,1)} m{_OHM} &#215; {_f(tr['rds_tj_factor'],3)} (T<sub>j</sub>={_f(tr['Tj_fet'],0)}{_DEG}C)",
               f"{_f(tr['rds_tj']*1e3,1)} m{_OHM}"],
-             ["Channel RMS current", "&#8730;mean(i<sup>2</sup>&#183;d) over the line cycle", f"{_f(tr['i_fet_rms_ch'],2)} A"],
+             ["Switching energy / event", f"E<sub>on</sub>+E<sub>off</sub> at peak {_uj(tr['Esw_pk'])}; cycle-avg", f"{_uj(tr['Esw_avg'])}"],
+             ["Output-cap energy", f"E<sub>oss</sub>(V<sub>OUT</sub>={_f(tr['Vo'],0)} V)", f"{_uj(tr['eoss_vo'])}"],
+             ["<b>Step 3 — per-mechanism loss (&#215; N<sub>ch</sub>)</b>", "", ""],
              ["1 · Conduction",
-              f"R<sub>ds</sub>(T<sub>j</sub>) &#183; I<sub>rms</sub><sup>2</sup> = {_f(tr['rds_tj']*1e3,1)}m{_OHM} &#215; ({_f(tr['i_fet_rms_ch'],2)}A)<sup>2</sup> &#215; {nch}",
+              f"R<sub>ds</sub>(T<sub>j</sub>)&#183;I<sub>FET,rms</sub><sup>2</sup> = {_f(tr['rds_tj']*1e3,1)}m{_OHM}&#215;({_f(tr['i_fet_rms_ch'],3)})<sup>2</sup>&#215;{nch}",
               f"{_f(tr['P_cond_fet_tot'])} W"],
              ["2 · Switching (E<sub>on</sub>+E<sub>off</sub>)",
-              f"f<sub>sw</sub> &#183; E<sub>sw,avg</sub> = {_f(fk,0)}kHz &#215; {_uj(tr['Esw_avg'])} &#215; {nch}",
+              f"f<sub>sw</sub>&#183;E<sub>sw,avg</sub> = {_f(fk,0)}kHz&#215;{_uj(tr['Esw_avg'])}&#215;{nch}",
               f"{_f(tr['P_sw_fet_tot'])} W"],
              ["3 · Output cap (E<sub>oss</sub>)",
-              f"f<sub>sw</sub> &#183; E<sub>oss</sub>(V<sub>OUT</sub>) = {_f(fk,0)}kHz &#215; {_uj(tr['eoss_vo'])} &#215; {nch}",
+              f"f<sub>sw</sub>&#183;E<sub>oss</sub> = {_f(fk,0)}kHz&#215;{_uj(tr['eoss_vo'])}&#215;{nch}",
               f"{_f(tr['P_oss_tot'])} W"],
              ["4 · Reverse-recovery share",
               "diode recovery energy into the FET (0 for a SiC diode)", f"{_f(tr['P_rr_fet_tot'])} W"],
              ["5 · Gate + leakage",
-              f"f<sub>sw</sub> &#183; Q<sub>g</sub> &#183; V<sub>g</sub> = {_f(fk,0)}kHz &#215; {_nc(tr['qg'])} &#215; {_f(tr['vg_drive'],0)}V &#215; {nch}",
+              f"f<sub>sw</sub>&#183;Q<sub>g</sub>&#183;V<sub>g</sub> = {_f(fk,0)}kHz&#215;{_nc(tr['qg'])}&#215;{_f(tr['vg_drive'],0)}V&#215;{nch}",
               f"{_f(tr['P_gate_tot'] + tr['P_leak_fet_tot'])} W"],
-             ["MOSFET total (all channels)", "&#8721; mechanisms 1&#8211;5", f"{_f(fet_tot)} W"]],
-            col_widths=[CW*0.24, CW*0.56, CW*0.20], ch=CH)
+             ["<b>MOSFET total (all channels)</b>", "&#8721; mechanisms 1&#8211;5", f"<b>{_f(fet_tot)} W</b>"]],
+            col_widths=[CW*0.26, CW*0.52, CW*0.22], ch=CH)
     data_table(story, "7.4", "MOSFET Loss Breakdown vs Line Voltage",
         "Per-mechanism MOSFET loss (all channels), at every input voltage.",
         ["V_AC", "Cond", "Switch", "Coss", "RR", "Gate+leak", "FET total"],
@@ -208,24 +237,34 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "The boost diode dissipates forward-conduction loss plus a switching term. For a SiC Schottky "
         "the switching term is the capacitive-charge loss &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>&#183;f<sub>sw</sub> "
         "(no real reverse recovery); for a Si diode it is the diode's share of the Q<sub>rr</sub> recovery energy.", CH)
-    eq_box(story, [r"P_{diode}=\overline{\,V_f(i)\,i_{D}\,}+P_{sw,D}"], number="7.5", ch=CH)
+    eq_box(story, [r"i_D(\theta)=i_{ch}(\theta)\,(1-d(\theta)),\quad "
+                   r"P_{cond}=\overline{\,V_f(i_D,T_j)\,i_{D}\,}",
+                   r"P_{sw,D}=\frac{1}{2}V_{OUT}\,Q_c\,f_{sw}\ \mathrm{(SiC)}\quad \mathrm{or}\quad "
+                   r"f_{sw}\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
+           number="7.5", ch=CH)
     if tr:
         nch = int(tr["Nch"])
         if tr["is_sic"]:
-            sw_sub = (f"&#189; &#183; V<sub>OUT</sub> &#183; Q<sub>c</sub> &#183; f<sub>sw</sub> = "
-                      f"&#189; &#215; {_f(tr['Vo'],0)}V &#215; {_nc(tr['qc'])} &#215; {_f(tr['fsw']/1e3,0)}kHz &#215; {nch}")
+            sw_sub = (f"&#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>&#183;f<sub>sw</sub> = "
+                      f"&#189;&#215;{_f(tr['Vo'],0)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}")
+            sw_param = ["Capacitive charge Q<sub>c</sub>", "SiC Schottky (no real reverse recovery)", _nc(tr['qc'])]
         else:
-            sw_sub = (f"Q<sub>rr</sub> recovery energy share (Q<sub>rr</sub>={_nc(tr['qrr_eff'])}) "
-                      f"&#215; V<sub>OUT</sub> &#215; f<sub>sw</sub>")
-        data_table(story, "7.5a", "Boost-Diode Loss — Worked Calculation",
-            f"Step-by-step substitution ({WC}); last column is the all-channel ({nch}-channel) total.",
-            ["Quantity", "Substitution at the worst-case point", f"Total ({nch} ch)"],
-            [[f"V<sub>f</sub> at peak I<sub>D</sub> (T<sub>j</sub>={_f(tr['Tj_dio'],0)}{_DEG}C)",
+            sw_sub = (f"f<sub>sw</sub>&#183;Q<sub>rr</sub>&#183;V<sub>OUT</sub> share (Q<sub>rr</sub>={_nc(tr['qrr_eff'])})")
+            sw_param = ["Recovery charge Q<sub>rr</sub>", "Si diode (diode-side share)", _nc(tr['qrr_eff'])]
+        data_table(story, "7.5a", "Boost-Diode Loss — Step-by-Step Worked Calculation",
+            f"Operating current &#8594; T<sub>j</sub>-adjusted parameters &#8594; loss ({WC}); last column is the "
+            f"all-channel ({nch}-channel) total.",
+            ["Quantity", "Substitution at the worst-case point", f"Value / total ({nch} ch)"],
+            [["<b>Step 1 — operating current</b>", "", ""],
+             ["Average diode current / ch", "i<sub>D</sub> = i<sub>ch</sub>(1&#8722;d); mean over the line cycle", f"{_f(tr['i_d_avg'],3)} A"],
+             ["<b>Step 2 — parameters at T<sub>j</sub></b>", "", ""],
+             [f"V<sub>f</sub> at peak I<sub>D</sub> (T<sub>j</sub>={_f(tr['Tj_dio'],0)}{_DEG}C)",
               "from the V<sub>f</sub>(i) curve", f"{_f(tr['vf_d_pk'],3)} V"],
-             ["Average diode current / ch", "mean(i<sub>D</sub>) over the line cycle", f"{_f(tr['i_d_avg'],2)} A"],
-             ["1 · Conduction", "mean(V<sub>f</sub>(i) &#183; i<sub>D</sub>) &#215; N<sub>ch</sub>", f"{_f(tr['P_cond_dio_tot'])} W"],
+             sw_param,
+             ["<b>Step 3 — loss (&#215; N<sub>ch</sub>)</b>", "", ""],
+             ["1 · Conduction", "mean(V<sub>f</sub>(i<sub>D</sub>)&#183;i<sub>D</sub>) &#215; N<sub>ch</sub>", f"{_f(tr['P_cond_dio_tot'])} W"],
              ["2 · Switching", sw_sub, f"{_f(tr['P_sw_dio_tot'])} W"],
-             ["Diode total (all channels)", "conduction + switching", f"{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W"]],
+             ["<b>Diode total (all channels)</b>", "conduction + switching", f"<b>{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W</b>"]],
             col_widths=[CW*0.28, CW*0.50, CW*0.22], ch=CH)
     data_table(story, "7.5", "Diode Loss vs Line Voltage",
         "Conduction + switching loss of the boost diode(s), at every input voltage.",
