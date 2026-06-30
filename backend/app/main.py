@@ -2038,6 +2038,50 @@ def _bias_L_curve(approved, L_final_uH, semi_design):
         return None
 
 
+def _add_pdf_outline(pdf_bytes):
+    """Add a navigable chapter/section outline (PDF bookmarks) over the WHOLE merged report.
+    The printed table of contents only covers Chapters 1-5 (Chapters 6-9 are merged in as separate
+    PDFs whose entries never reach it). Here we scan the final document for chapter splashes and
+    section headings and write a real outline so every chapter & section is in the index."""
+    try:
+        import fitz, re
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        chap_re = re.compile(r"CHAPTER\s+(\d+)\b")
+        sec_re = re.compile(r"(?m)^\s*(\d+\.\d+(?:\.\d+)?)\s*[—–-]\s*([A-Za-z(][^\n]{1,58})$")
+        toc = []; seen = set(); cur_chap = 0; last_lvl = 0
+        for pno in range(doc.page_count):
+            text = doc[pno].get_text()
+            mc = chap_re.search(text)
+            if mc and ("c", mc.group(1)) not in seen:
+                n = mc.group(1)
+                lines = [l.strip() for l in text.splitlines() if l.strip()]
+                title = ""
+                for j, l in enumerate(lines):
+                    if chap_re.search(l):
+                        title = " ".join(lines[j + 1:j + 3]); break
+                title = re.sub(r"\s+", " ", title)[:70].strip()
+                toc.append([1, f"Chapter {n} — {title}".strip(" —"), pno + 1])
+                seen.add(("c", n)); cur_chap = int(n); last_lvl = 1
+                continue
+            if not cur_chap:
+                continue
+            for m in sec_re.finditer(text):
+                num, ttl = m.group(1), m.group(2).strip()
+                # the section number must belong to the current chapter — Chapter 6 (control) carries
+                # internal "Step 7.x/8.x" headings that would otherwise hijack Chapter 7/8's entries.
+                if int(num.split(".")[0]) != cur_chap or ("s", num) in seen:
+                    continue
+                lvl = min(1 + num.count("."), last_lvl + 1)     # X.Y → 2, X.Y.Z → 3 (no level jumps)
+                toc.append([lvl, f"{num}  {ttl}", pno + 1]); seen.add(("s", num)); last_lvl = lvl
+        if toc:
+            doc.set_toc(toc)
+            out = doc.tobytes(deflate=True); doc.close(); return out
+        doc.close()
+    except Exception:
+        log.exception("add pdf outline")
+    return pdf_bytes
+
+
 @app.post("/mode-b/documentation/generate-report", tags=["documentation"])
 def doc_generate_report(req: _DocReportReq):
     """
@@ -2102,6 +2146,7 @@ def doc_generate_report(req: _DocReportReq):
                 step16_params   = req.step16_params,
             )
         pdf = _strip_blank_pages(pdf)
+        pdf = _add_pdf_outline(pdf)          # navigable index covering all chapters (incl. 6-9)
         project_id = req.state.get("project_id", "design")
         if req.step16_params and req.approved_design and req.step15_result and req.semiconductor and req.input_protection:
             label = "Steps1_19"

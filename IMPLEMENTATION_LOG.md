@@ -3614,3 +3614,23 @@ confirmed L (conservative). Now per-point.
 
 Verified: constant-L path unchanged (consistency PASS, 240 everywhere); bias path varies
 240→249 µH with consistency PASS; reference dual-power design lowest L at 180 V (max current).
+
+---
+
+## C68 — Report index for Ch6-9 + end-to-end verification (2026-06-29)
+
+User feedback (3 points): index missing details after Ch5; Ch7/8/9 used tables for step-by-step
+while earlier chapters use narrative+equations (and lacked model explanations); inductance was
+constant for all 9 voltages.
+
+- main.py _add_pdf_outline(): after merge+blank-strip, scans the final PDF for chapter splashes
+  and section headings and writes a navigable PDF outline covering ALL chapters. Sections are
+  scoped to the current chapter number so Chapter 6's internal "Step 7.x/8.x" control headings
+  don't hijack Chapter 7/8's entries. Called in doc_generate_report.
+- (C65 per-point bias L, C66 Ch7 narrative, C67 Ch8/9 narrative — see above.)
+
+End-to-end verify (real TP state, stale semi L=235): 177-page Steps1_19 PDF.
+(1) outline 129 entries, 9 chapters, Ch7 shows 7.1-7.8 + 7.4.1-7.4.5.
+(2) Table 7.1 L_φ varies 240→249 µH (bias roll-off; lowest at the 180 V max-current point).
+(3) Ch7/8/9 worked sections are narrative+equation with Model/Worked prose.
+(4) no stale 235 µH or 2200 µF anywhere.
