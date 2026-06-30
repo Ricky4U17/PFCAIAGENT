@@ -3725,3 +3725,29 @@ Protection and Input Filter pages.
     attenuation est.) and CM (CM choke/Y-cap, corner + leakage-current check) sections.
 
 Verified: 181-page report (R_CS in budget, corrected eta); frontend tsc + vite build clean.
+
+---
+
+## C74 — EMI input-filter design integrated (engine + adapter + endpoint + GUI) (2026-06-30)
+
+User: integrate the EMI filter script (E:\Loss Calculations\EMI) — accurate DM+CM synthesis
+considering f_sw, generated noise and EMI standards; must not affect any previous step.
+
+Vendored exactly like the MOV/NTC engines (pure, read-only consumer of upstream data):
+- backend/app/mode_b/inputfilter/emi_filter_design.py — conducted-EMI (DM+CM) synthesis: CISPR
+  11/32 + FCC 15.107 limit lines, IEC safety leakage ceilings (62368/60950/61010/60335/60601),
+  noise estimate (DM = ripple harmonics × bulk ESR; CM = C_para·dv/dt), required attenuation over
+  150 kHz–30 MHz, 1-or-2 LC stages, C_X/L_DM + leakage-bounded C_Y/L_CM, damping + Middlebrook
+  stability, feasibility feedback. --selftest + --verify pass (matches its reference PDF corners).
+- adapter.py: builds the engine DesignContext from our grid — PFC (V_ac/f_line/V_bus/P_out/eff/
+  f_sw/n_phases, worst-case inductor ripple from build_design_ops, bulk ESR from Step 15), MOV
+  committed Y-cap, NTC; designer EMIInputs (safety standard, compliance profile, margin, …).
+  Returns JSON-safe EMIResult + basis. emi_options() for the dropdowns.
+- main.py: GET /mode-b/input-filter/options, POST /mode-b/input-filter/design.
+- client.ts: inputFilterOptions / inputFilterDesign + EmiResult/EmiDesign types.
+- InputFilter.tsx rewritten to call the engine: carried-in chips, safety/compliance/margin/detector
+  selectors, required DM/CM attenuation, synthesized L_DM/C_X/L_CM/C_Y/damping, leakage +
+  Middlebrook checks, warnings + infeasibility feedback.
+
+Verified: selftest passes; HTTP options + design 200 (Class B, L_DM 6.3µH, C_X 4.7µF, L_CM 2.14mH,
+C_Y 31.7nF, leakage 3.15<3.5 mA); frontend tsc + vite build clean. No prior step touched.

@@ -539,6 +539,31 @@ class _IpReportReq(BaseModel):
     ntc_opts: Dict[str, Any] = {}
     mov_opts: Dict[str, Any] = {}
 
+class _EmiReq(BaseModel):
+    design:     Dict[str, Any]
+    cap:        Dict[str, Any] = {}     # approved capacitor (ESR for DM-noise estimate)
+    protection: Dict[str, Any] = {}     # {committed_y_cap_nf} from the protection stage
+    ntc:        Dict[str, Any] = {}     # {r25_pick} (bookkeeping)
+    opts:       Dict[str, Any] = {}     # safety_standard, compliance_profile, margin_db, …
+
+@app.get("/mode-b/input-filter/options", tags=["mode-b"])
+def input_filter_options():
+    """Safety standards + leakage limits and compliance profiles for the GUI dropdowns."""
+    try:
+        from app.mode_b.inputfilter.adapter import emi_options
+        return emi_options()
+    except Exception as e:
+        log.exception("emi options"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/input-filter/design", tags=["mode-b"])
+def input_filter_design(req: _EmiReq):
+    """Synthesize the conducted-EMI filter (DM + CM) for the confirmed PFC design."""
+    try:
+        from app.mode_b.inputfilter.adapter import calculate_emi
+        return calculate_emi(req.design, req.cap or {}, req.protection or {}, req.ntc or {}, req.opts or {})
+    except Exception as e:
+        log.exception("emi design"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/input-protection/report", tags=["mode-b"])
 def input_protection_report(req: _IpReportReq):
     """Standalone Chapters 8 (NTC inrush) + 9 (MOV surge & compliance) PDF."""

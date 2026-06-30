@@ -442,6 +442,25 @@ export const inputProtectionNtc = (body: { design: Record<string, number>; cap?:
   post<NtcResult>('/mode-b/input-protection/ntc/calculate', body)
 export const inputProtectionMov = (body: { design: Record<string, number>; mosfet?: Record<string, unknown>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<MovResult>('/mode-b/input-protection/mov/calculate', body)
+// ── input EMI filter (DM + CM conducted-emissions synthesis) ─────────────────
+export interface EmiResult {
+  feasible: boolean; conducted_class: string; detector: string; margin_db: number
+  leakage_limit_A: number; first_harmonic_hz: number; noise_source: string
+  dm_req_att_db: number; dm_req_att_f: number; cm_req_att_db: number; cm_req_att_f: number
+  dm_stages: number; cm_stages: number; dm_corner_hz: number; cm_corner_hz: number
+  c_x: number; l_dm: number; c_y_emi_total: number; c_y_system_total: number; l_cm: number
+  damp_r: number; damp_c: number; leakage_actual_A: number; xcap_discharge_s: number | null
+  stability_z0_dm: number; stability_rin_conv: number; stability_ok: boolean
+  warnings: string[]; feedback: string[]; provenance: Record<string, string>
+}
+export interface EmiDesign { result: EmiResult; basis: Record<string, number | null> }
+export const inputFilterOptions = (): Promise<{ safety_standards: string[]
+    leakage_mA: Record<string, number>; compliance_profiles: Record<string, string> }> =>
+  fetch(`${BASE}/mode-b/input-filter/options`).then(r => r.json())
+export const inputFilterDesign = (body: { design: Record<string, number>; cap?: Record<string, unknown>
+    protection?: Record<string, unknown>; ntc?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
+  post<EmiDesign>('/mode-b/input-filter/design', body)
+
 export const inputProtectionReport = (body: { design: Record<string, number>; cap?: Record<string, unknown>
     mosfet?: Record<string, unknown>; ntc_opts?: Record<string, unknown>; mov_opts?: Record<string, unknown> }): Promise<Blob> =>
   fetch(`${BASE}/mode-b/input-protection/report`, {
