@@ -25,6 +25,7 @@ interface Props {
   approvedCapacitorDesign?: CapacitorResult | null
   selectedMosfet?:         Record<string, unknown> | null
   onBack:    () => void
+  onNext?:   () => void
   onRestart: () => void
 }
 
@@ -68,7 +69,7 @@ const CatalogTable: React.FC<{ rows: CatalogRow[]; emptyNote: string }> = ({ row
 )
 
 export const InputProtection: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, approvedCapacitorDesign, selectedMosfet, onBack, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign, selectedMosfet, onBack, onNext, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -297,6 +298,7 @@ export const InputProtection: React.FC<Props> = ({
           <Btn variant="success" disabled={rptBusy} onClick={downloadReport}>
             {rptBusy ? '⏳ Generating…' : '📥 Download report (Ch 8–9)'}
           </Btn>
+          {onNext && <Btn variant="primary" onClick={onNext}>Input filter →</Btn>}
           <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
         </div>
       </div>

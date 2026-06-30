@@ -106,16 +106,18 @@ def canonical_ops_table(vin_min: float, vin_max: float,
     sizing engine and every report chapter must build their OPS arrays from
     this same table (directly or via build_design_ops_table) so that derived
     figures such as Iph_rms never diverge between Table 3.2.4 and Table 3.4.1."""
+    # High-line efficiencies lowered to realistic values (the loss-derived re-estimate in Ch 7.9
+    # showed the original 0.985–0.990 were optimistic vs the computed losses).
     return np.array([
         [vin_min,  pout_lo,  0.945, 0.9987],
         [110,      pout_lo,  0.955, 0.9986],
         [120,      pout_lo,  0.965, 0.9985],
         [132,      pout_lo,  0.975, 0.9980],
         [180,      pout_hi,  0.965, 0.9889],
-        [200,      pout_hi,  0.975, 0.9884],
-        [220,      pout_hi,  0.985, 0.9790],
-        [230,      pout_hi,  0.988, 0.9789],
-        [vin_max,  pout_hi,  0.990, 0.9520],
+        [200,      pout_hi,  0.970, 0.9884],
+        [220,      pout_hi,  0.973, 0.9790],
+        [230,      pout_hi,  0.975, 0.9789],
+        [vin_max,  pout_hi,  0.980, 0.9520],
     ], dtype=float)
 
 

@@ -2153,7 +2153,10 @@ def doc_generate_report(req: _DocReportReq):
                 _ad = req.approved_design or {}; _sp = req.step16_params or {}; _s15 = req.step15_result or {}
                 _extra = {
                     "dcr_mohm": _ad.get("DCR_100C_mOhm") or _sp.get("DCR_mOhm"),
-                    "rcs_mohm": (_ctrl.get("rcs") * 1e3) if _ctrl.get("rcs") else _sp.get("rcs_mOhm"),
+                    # R_CS: control selection → step16 → the control report's own 15 mΩ default,
+                    # so the §7.8 budget always accounts for the shunt loss (matching Chapter 6).
+                    "rcs_mohm": (_ctrl.get("rcs") * 1e3) if _ctrl.get("rcs")
+                                else (_sp.get("rcs_mOhm") or 15.0),
                     "esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
                 }
                 parts.append(build_semiconductor_report(

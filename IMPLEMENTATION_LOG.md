@@ -3704,3 +3704,24 @@ efficiency (2-stage interleaved) to be realistic.
     For the reference design 220/230/264 V are optimistic — matching the negative 7.8 Balance.
 
 Verified end-to-end: 181-page report, all three present; standalone + control builds clean.
+
+---
+
+## C73 — Ch7 round 4: R_CS in 7.8b, corrected efficiency, GUI input-protection + input-filter pages (2026-06-30)
+
+User (3 pts): (1) Table 7.8b didn't account for R_CS loss; (2) lower assumed efficiency at
+200/220/230/264 V to 97.0/97.3/97.5/98.0; (3) GUI top header stops at semiconductors — add Input
+Protection and Input Filter pages.
+
+(1) Root cause: the GUI's step16_params (from the semiconductor screen) carries no R_CS, so the
+    budget got rcs=None. main.py doc_generate_report now defaults rcs to 15 mΩ (matching the control
+    report's own default) when not supplied, so §7.8b always shows the R_CS column. Verified: R_CS
+    appears even with no rcs in the payload.
+(2) calculations.canonical_ops_table: eta 200→0.970, 220→0.973, 230→0.975, 264→0.980 (others kept).
+    The §7.9 optimistic flags drop accordingly.
+(3) Stepper.STEPS += Input Protection + Input Filter. App.tsx: new 'inputfilter' step (type, SS map,
+    render). InputProtection gains onNext → Input Filter. NEW InputFilter.tsx — EMI input-filter
+    starting page: carried-in context (Vac, Pout, fsw, ripple freq, Iin) + DM (X-cap/L_DM, corner +
+    attenuation est.) and CM (CM choke/Y-cap, corner + leakage-current check) sections.
+
+Verified: 181-page report (R_CS in budget, corrected eta); frontend tsc + vite build clean.

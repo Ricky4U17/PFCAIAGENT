@@ -47,6 +47,8 @@ export const STEPS = [
   {id:'step15',    icon:'🔋',  label:'DC Bus Capacitor'},
   {id:'step16',    icon:'chip',label:'Control Design'},   // uses ChipIcon SVG
   {id:'semiconductors', icon:'🔌', label:'Semiconductors'},
+  {id:'inputprotection', icon:'🛡️', label:'Input Protection'},
+  {id:'inputfilter',     icon:'🎚️', label:'Input Filter'},
 ]
 
 export const Stepper:React.FC<{current:string}> = ({current}) => {
