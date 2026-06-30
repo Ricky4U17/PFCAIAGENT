@@ -215,7 +215,7 @@ def _sec_13_1(story, D, S):
     story.append(Paragraph('Step 13.1) Reference Operating Point and Design Targets'
                            ' (Low Line, Full Load)', S['h2']))
     rows = [
-        ('V<sub>out</sub>', f"{D['Vout_V']:.0f} Vdc"),
+        ('V<sub>out</sub>', f"{D['Vout_V']:.1f} Vdc"),
         ('f<sub>sw</sub>', f"{D['fsw_Hz']/1e3:.0f} kHz"),
         ('V<sub>in,rms</sub> (low line)', f"{D['Vin_lo_rms']:.0f} Vac @ {D['f_line_Hz']:.0f} Hz"),
         ('V<sub>in,pk</sub> = &radic;2 &middot; V<sub>in,rms</sub>',

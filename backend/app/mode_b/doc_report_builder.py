@@ -1107,7 +1107,7 @@ def _ch2(story, state):
         [
             ["Input voltage (Low line)",    f"{vin_min:.0f} – 132 Vac @ {f_line:.0f} Hz"],
             ["Input voltage (High line)",   f"180 – {vin_max:.0f} Vac @ {f_line:.0f} Hz"],
-            ["Output voltage",              f"{vout:.0f} Vdc"],
+            ["Output voltage",              f"{vout:.1f} Vdc"],
             ["Output power (Low line)",     f"{pout_lo:.0f} W"],
             ["Output power (High line)",    f"{pout_hi:.0f} W"],
             ["Switching frequency",         f"{fsw/1e3:.0f} kHz"],
@@ -1632,7 +1632,7 @@ def _ch3(story, state, d):
     sub_h(story, "3.2.1", "Lφ sizing at low-line full load", 3)
     body(story,
         f"Sized at {int(Vin_rms[ref9])} V<sub>ac</sub>, "
-        f"V<sub>out</sub> = {vout:.0f} V<sub>dc</sub>, "
+        f"V<sub>out</sub> = {vout:.1f} V<sub>dc</sub>, "
         f"f<sub>sw</sub> = {fsw/1e3:.0f} kHz, r = {r_input*100:.1f} %.", 3)
     eq_box(story, [
         r"\Delta I_{in,pp} = r\, I_{in,pk}",

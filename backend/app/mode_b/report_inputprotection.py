@@ -57,7 +57,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         ["Quantity", "Symbol", "Value"],
         [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V"],
          ["High-line peak", "V<sub>in,pk</sub> = &#8730;2&#183;V<sub>ac,max</sub>", f"{_f(r['vin_pk_max'],1)} V"],
-         ["Regulated bus", "V<sub>bus</sub>", f"{_f(s['vout_bus'],0)} V"],
+         ["Regulated bus", "V<sub>bus</sub>", f"{_f(s['vout_bus'],1)} V"],
          ["Bulk capacitance (Step 15)", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F"],
          ["Worst-case input RMS (grid)", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A"]],
         col_widths=[CW*0.46, CW*0.30, CW*0.24], ch=CH)
@@ -126,7 +126,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"<b>Worked.</b> &#964; = {_f(r['r25_pick'],2)} {_OHM} &#215; {_f(s['cout']*1e6,0)} {_MU}F = "
         f"{_f(r['tau']*1e3,1)} ms, so closing the bypass after {_f(s['tau_multiple'],0)}&#183;&#964; = "
         f"<b>{_f(r['t_bypass']*1e3,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
-        f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],0)} V bus) and carry the "
+        f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],1)} V bus) and carry the "
         f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
     annotation(story, "NOTE",
         "Hot-restart caution: a quick OFF/ON leaves the NTC warm (lower R) → higher inrush than the cold "

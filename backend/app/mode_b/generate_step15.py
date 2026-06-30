@@ -139,7 +139,7 @@ def generate_step15_section(result: dict) -> list:
     # ── 15.1 Inputs ──────────────────────────────────────────────────────────
     story.append(Paragraph('Step 15.1) Design Inputs', S['h2']))
     story.append(_kv_tbl([
-        ('V<sub>out</sub>',         f"{inp.get('Vout_V',393):.0f} Vdc"),
+        ('V<sub>out</sub>',         f"{inp.get('Vout_V',393.7):.1f} Vdc"),
         ('f<sub>line</sub>',        f"{inp.get('f_line_Hz',60):.0f} Hz"),
         ('V<sub>dc,ripple</sub>',   f"{inp.get('Vdc_ripple_V',20):.0f} V pk-pk"),
         ('V<sub>dc,min</sub> (hold-up floor)', f"{inp.get('Vdc_min_V',290):.0f} V"),
@@ -559,7 +559,7 @@ def generate_step15_section(result: dict) -> list:
             ('L<sub>o</sub> — datasheet base life',         life_s),
             ('T<sub>max</sub> — max category temperature',  f"{temp_s}&deg;C"),
             ('T<sub>amb</sub> — capacitor ambient',         f"{Tamb_rpt}&deg;C"),
-            ('V<sub>out</sub> — operating bus voltage',     f"{Vout_rpt:.0f} Vdc"),
+            ('V<sub>out</sub> — operating bus voltage',     f"{Vout_rpt:.1f} Vdc"),
             ('V<sub>rated</sub> — cap voltage rating',      f"{ver.get('voltage_rating','450') if ver else '450'} V"),
             ('N — caps in parallel bank',                   str(qty_lt)),
             ('I<sub>LF,cap</sub> — low-freq ripple per cap', f"{I_lf} A"),

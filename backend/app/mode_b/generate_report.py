@@ -550,7 +550,7 @@ def generate_full_report(state: dict) -> bytes:
     story.append(mkt([["Parameter","Value"],
         ["Input voltage (Low line)",f"{p['vin_min']:.0f} \u2013 132 Vac @ {p['f_line']:.0f} Hz"],
         ["Input voltage (High line)",f"180 \u2013 {p['vin_max']:.0f} Vac @ {p['f_line']:.0f} Hz"],
-        ["Output voltage",f"{p['Vout']:.0f} Vdc"],
+        ["Output voltage",f"{p['Vout']:.1f} Vdc"],
         ["Output power (Low line)",f"{p['Pout_low']:.0f} W"],
         ["Output power (High line)",f"{p['Pout_high']:.0f} W"],
         ["Switching frequency",f"{p['fsw']/1e3:.0f} kHz"],
@@ -605,7 +605,7 @@ def generate_full_report(state: dict) -> bytes:
     # STEP 4
     ref=s4["ref_idx"]
     story+=[*h1("Step 4 \u2014 Calculate L\u03c6 at Low-Line Full Load"),sp(4),
-        P(f"Sized at {int(Vin_rms[ref])} Vac, V<sub>out</sub>={p['Vout']:.0f} Vdc, "
+        P(f"Sized at {int(Vin_rms[ref])} Vac, V<sub>out</sub>={p['Vout']:.1f} Vdc, "
           f"f<sub>sw</sub>={p['fsw']/1e3:.0f} kHz, r={p['r_input']*100:.1f} %.",S_BD),sp(4)]
     for lbl,ltx,fs,num in[
         ("",r"$\Delta I_{\rm in,pp}=r\cdot I_{\rm in,pk}="+
