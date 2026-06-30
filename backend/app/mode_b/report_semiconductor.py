@@ -165,7 +165,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     tj_limit = tj_limit or {"fet": 150, "diode": 150, "bridge": 130}
     res = calculate_semiconductor_losses(design, mosfet, diode, bridge, thermal, tj_limit)
     cfg, ref = build_semi_cfg(design, mosfet, diode, bridge, thermal)
-    ops, s2, L_phi, iph = build_design_ops(design)
+    ops, s2, L_phi, iph, L_pts = build_design_ops(design)
     rows = res["per_point"]; summ = res["summary"]
     meta = ref["parts"]
     is_sync = cfg["bridge"].get("topology") == "sync_bottom"
@@ -200,30 +200,37 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "carried in from the upstream chapters — not re-derived here. A consistency gate checks the "
         "engine's echoed operating point against those upstream values at every point, so the "
         "semiconductor numbers can never diverge from the rest of the design.", CH)
+    L_varies = len({round(float(x) * 1e6, 1) for x in L_pts}) > 1
     if res["consistency"] and res["consistency"]["ok"]:
         annotation(story, "NOTE",
             "Consistency gate: PASS — Vac, P_out, P_in, &#951;, PF, I_in,rms, I_pk and L&#966; match the "
-            "approved design at all nine points (L&#966; = %s &#181;H everywhere)." % _f(L_phi * 1e6, 0), CH)
+            "approved design at all nine points." + (
+                " L&#966; is bias-adjusted per operating point (see the L<sub>&#966;</sub> column)."
+                if L_varies else " (L&#966; = %s &#181;H everywhere.)" % _f(L_phi * 1e6, 0)), CH)
     fsw = float(design["fsw"]); vout = float(design["vout"])
     body(story,
         "The total input RMS current follows from the supplied efficiency and power factor; the "
         "per-phase inductor RMS is the Step-5 value (low-frequency + high-frequency ripple components "
-        "integrated over the half line cycle); the per-phase peak-to-peak inductor ripple and the "
-        "inductance L<sub>&#966;</sub> are the Chapter-3 quantities. All currents below use the SAME "
+        "integrated over the half line cycle). The per-phase peak-to-peak inductor ripple uses the "
+        "<b>per-operating-point</b> inductance L<sub>&#966;</sub>(V<sub>AC</sub>): a powder core's "
+        "permeability rolls off with DC bias (current), so the inductance is lowest at the "
+        "highest-current operating point and recovers toward the no-load value where the bias is "
+        "smaller. These are the Chapter-3 bias-adjusted inductances. All currents below use the SAME "
         "equations as Chapters 2 and 5, to three decimals:", CH)
     eq_box(story, [r"I_{in,rms}=\dfrac{P_{out}}{\eta\,V_{AC}\,PF},\qquad "
                    r"I_{\varphi,rms}=\sqrt{\dfrac{1}{\pi}\int_0^{\pi}\left(i_{\varphi}^2+i_{hf}^2\right)d\theta}",
                    r"d(\theta)=1-\dfrac{\sqrt{2}\,V_{AC}\sin\theta}{V_{OUT}},\qquad "
-                   r"\Delta I_{L,pp}=\dfrac{V_{in,pk}\,D_{pk}}{L_{\varphi}\,f_{sw}}"],
+                   r"\Delta I_{L,pp}=\dfrac{V_{in,pk}\,D_{pk}}{L_{\varphi}(V_{AC})\,f_{sw}}"],
            number="7.1", ch=CH)
     data_table(story, "7.1", "Operating Points (identical to Chapters 2, 3 & 5)",
-        "Currents from the Step-2 / Step-5 equations (3 decimals). &#916;I<sub>L,pp</sub> and "
-        "L<sub>&#966;</sub> use the Chapter-3 formula and inductance, so the low-line &#916;I<sub>L,pp</sub> "
-        "equals the Chapter-3 headline value.",
+        "Currents from the Step-2 / Step-5 equations (3 decimals). &#916;I<sub>L,pp</sub> uses the "
+        "bias-adjusted per-point inductance L<sub>&#966;</sub>(V<sub>AC</sub>) from Chapter 3 — "
+        "L<sub>&#966;</sub> is lowest where the peak current (DC bias) is highest and recovers as the "
+        "current falls.",
         ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_&#966;,rms", "&#916;I_L,pp", "L_&#966;"],
         [[f"{s2['Vin_rms'][i]:.0f} V", f"{r['Po']:.0f} W", _f(r['eta_in_%'], 1), _f(r['PF_in'], 4),
           f"{_f(s2['Iin_rms'][i], 3)} A", f"{_f(iph[i], 3)} A",
-          f"{_f(s2['Vin_pk'][i] * s2['Dpk'][i] / (L_phi * fsw), 3)} A", f"{_f(L_phi * 1e6, 0)} &#181;H"]
+          f"{_f(s2['Vin_pk'][i] * s2['Dpk'][i] / (L_pts[i] * fsw), 3)} A", f"{_f(L_pts[i] * 1e6, 0)} &#181;H"]
          for i, r in enumerate(rows)],
         col_widths=[CW*0.10, CW*0.12, CW*0.09, CW*0.11, CW*0.15, CW*0.15, CW*0.14, CW*0.13], ch=CH)
 

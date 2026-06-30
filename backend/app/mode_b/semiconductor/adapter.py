@@ -26,9 +26,11 @@ from app.mode_b.calculations import (
 
 # ── 1. operating grid: the single source of truth ────────────────────────────
 def build_design_ops(design: dict):
-    """Return (ops, s2, L_phi, iph) from THIS design's corners — identical to every
+    """Return (ops, s2, L_phi, iph, L_pts) from THIS design's corners — identical to every
     other chapter. ops cols = [Vin_rms, Pout, eta, PF, Iph_rms]; s2 carries Pin / Iin_rms /
-    Iin_pk / Dpk; L_phi is the per-channel inductance actually used (approved value if given).
+    Iin_pk / Dpk; L_phi is the nominal/scalar per-channel inductance; L_pts[H] is the per-operating-
+    point inductance (powder-core bias roll-off via design['L_phi_curve'], else constant = L_phi).
+    Iph_rms is recomputed with the per-point L so ripple tracks the real inductance at each line.
     """
     vin_min = float(design["vin_min"]);  vin_max = float(design["vin_max"])
     pout_lo = float(design["pout_lo"]);  pout_hi = float(design["pout_hi"])
@@ -37,11 +39,18 @@ def build_design_ops(design: dict):
     ops, L_auto = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input)
     # prefer the designer-approved inductor value; recompute Iph_rms with the L actually used
     L_phi = float(design["L_phi_uH"]) * 1e-6 if design.get("L_phi_uH") else L_auto
+    # per-operating-point inductance: powder cores roll off with DC bias, so L varies with line.
+    lc = design.get("L_phi_curve")
+    if lc:
+        xs = [float(p[0]) for p in lc]; ys = [float(p[1]) * 1e-6 for p in lc]
+        L_pts = np.array([float(np.interp(float(ops[i, 0]), xs, ys)) for i in range(len(ops))])
+    else:
+        L_pts = np.full(len(ops), L_phi)
     s2 = step2_input_params(vout, ops[:, :4])
-    iph = np.array([step5_phase_rms(s2["Vin_pk"][i], s2["Iin_pk"][i], L_phi, fsw, vout)[0]
+    iph = np.array([step5_phase_rms(s2["Vin_pk"][i], s2["Iin_pk"][i], L_pts[i], fsw, vout)[0]
                     for i in range(len(s2["Vin_rms"]))])
     ops = ops.copy(); ops[:, 4] = iph
-    return ops, s2, L_phi, iph
+    return ops, s2, L_phi, iph, L_pts
 
 
 # metadata kept with each part for the report but NOT passed to the engine dataclasses
@@ -62,7 +71,7 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
     handed to the engine via its override hooks (curves keyed by the exact Vac points, so the
     engine never interpolates). Returns (cfg, ref) where `ref` holds the upstream values the
     consistency gate checks against."""
-    ops, s2, L_phi, iph = build_design_ops(design)
+    ops, s2, L_phi, iph, L_pts = build_design_ops(design)
     vac  = [round(float(v), 4) for v in ops[:, 0]]
     nch  = int(design["nch"]); vout = float(design["vout"]); fsw = float(design["fsw"])
     fline = float(design["fline"])
@@ -75,6 +84,7 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
             "pf_curve":      [vac, [float(x) for x in ops[:, 3]]],
             "po_curve":      [vac, [float(x) for x in ops[:, 1]]],
             "iin_rms_curve": [vac, [float(x) for x in s2["Iin_rms"]]],   # TOTAL input RMS
+            "L_curve":       [vac, [float(x) for x in L_pts]],           # per-point bias inductance
         },
         "mosfet": mos_p, "diode": dio_p, "bridge": br_p, "thermal": th_p,
         "run": {"vac_list": vac},
@@ -87,7 +97,7 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
             "PF": float(ops[i, 3]), "Pin": float(s2["Pin"][i]),
             "Iin_rms": float(s2["Iin_rms"][i]), "Iin_pk": float(s2["Iin_pk"][i]),
             "Ipk_ch": float(s2["Iin_pk"][i]) / nch, "Iph_rms": float(iph[i]),
-            "Dpk": float(s2["Dpk"][i]),
+            "Dpk": float(s2["Dpk"][i]), "L_pt_uH": float(L_pts[i]) * 1e6,
         } for i in range(len(vac))],
     }
     return cfg, ref
@@ -111,7 +121,7 @@ def verify_consistency(rows: list, cfg: dict, ref: dict, tol: float = 0.02):
         ("PF",       "PF_in",     "PF",      lambda p: p["PF"]),
         ("Iin_rms",  "Iin_rms",   "Iin_rms", lambda p: p["Iin_rms"]),
         ("Ipk_ch",   "Ipk_ch",    "Ipk_ch",  lambda p: p["Ipk_ch"]),
-        ("L_eff_uH", "L_eff_uH",  "L_phi",   lambda p: ref["L_phi_uH"]),
+        ("L_eff_uH", "L_eff_uH",  "L_pt",    lambda p: p.get("L_pt_uH", ref["L_phi_uH"])),
     ]
     for i, (r, p) in enumerate(zip(rows, ref["points"])):
         for label, ekey, _rk, fexp in checks:

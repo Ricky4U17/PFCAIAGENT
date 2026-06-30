@@ -3592,3 +3592,25 @@ PFC_Report_..._Steps1_19.pdf (all chapters 1-9). Table 7.1 shows Lφ=240 µH at 
 consistency note "Lφ=240 µH everywhere" — the C62 override forced Ch7 to Ch3's value; NO 235µH or
 2200µF anywhere in 179 pages. Worked tables render at 90 V (diode 7.18 W, MOSFET 17.66 W) and
 180 V (diode 15.21 W, MOSFET 14.74 W) for all 3 components incl. thermal.
+
+---
+
+## C65 — Per-operating-point (bias-adjusted) inductance in Chapter 7 (2026-06-29)
+
+User: Chapter 7 used one inductance for all 9 voltages; powder-core L changes with input voltage
+and current (DC bias). Verified: correct that L rolls off with bias; Ch7 was using the constant
+confirmed L (conservative). Now per-point.
+
+- pfc_loss_model.py: Spec.L_curve (Vac, L[H]); simulate_point uses L_op = L_curve(vac) (CCM + DCM).
+- adapter.py: build_design_ops returns L_pts[] (per-point L from design['L_phi_curve'], else
+  constant); Iph_rms now computed with the per-point L. build_semi_cfg passes spec.L_curve and
+  stores L_pt_uH per point in ref; consistency gate checks engine L_eff against the per-point L.
+  Callers updated to the 5-tuple.
+- main.py: _bias_L_curve(approved, L_final, semi_design) — prefers the inductor chapter's
+  L_vs_Vin_table; else a linear-in-bias roll-off anchored L=L_final at the max-current point,
+  recovering toward no-load L0=A_L,nom·N². doc_generate_report injects design['L_phi_curve'].
+- report_semiconductor Table 7.1: L_φ column + ΔI_L,pp now per-point; note/eq say L_φ(V_AC) is
+  lowest at the highest-current point. L_varies fix (round in µH, not H).
+
+Verified: constant-L path unchanged (consistency PASS, 240 everywhere); bias path varies
+240→249 µH with consistency PASS; reference dual-power design lowest L at 180 V (max current).

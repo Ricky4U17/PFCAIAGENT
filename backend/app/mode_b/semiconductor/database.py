@@ -225,7 +225,7 @@ def rank_bottom_mosfets(design, crit, top=10):
     """Rank MOSFETs for the bridge's bottom (bypass) legs — CONDUCTION loss only (they commutate at
     line frequency, no switching). P ≈ R_ds(on)(Tj)·I_in,rms²(worst). Mapped to the bridge block."""
     from app.mode_b.semiconductor.adapter import build_design_ops
-    _, s2, _, _ = build_design_ops(design)
+    _, s2, *_ = build_design_ops(design)
     iin2 = float(max(s2["Iin_rms"])) ** 2
     scored = []
     for rec in filter_parts("mosfet", crit):

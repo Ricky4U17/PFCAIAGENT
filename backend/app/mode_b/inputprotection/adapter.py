@@ -25,7 +25,7 @@ from app.mode_b.semiconductor.adapter import build_design_ops
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _worst_iin_rms(design: dict) -> float:
     """Worst-case (maximum) total input RMS current across the 9-point grid."""
-    _, s2, _, _ = build_design_ops(design)
+    _, s2, *_ = build_design_ops(design)
     return float(max(s2["Iin_rms"]))
 
 

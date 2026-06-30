@@ -2001,6 +2001,43 @@ def doc_report_status(req: _DocStatusReq):
     except Exception as e:
         log.exception("doc_report_status"); raise HTTPException(500, str(e))
 
+def _bias_L_curve(approved, L_final_uH, semi_design):
+    """Per-operating-point inductance [[Vin_rms, L_uH], ...] for the powder-core bias roll-off.
+    Prefers the inductor chapter's L_vs_Vin_table; otherwise builds a linear-in-bias model anchored
+    so L = L_final at the highest-bias (low-line) point and recovers toward the no-load inductance
+    L0 = A_L,nom·N² as the peak current falls at higher line. Returns None when no inductance data is
+    available (the caller then keeps the single constant L, matching Chapter 3's own fallback)."""
+    approved = approved or {}
+    L0 = None
+    try:
+        if approved.get("AL_nom_total_nH") and approved.get("N"):
+            L0 = float(approved["AL_nom_total_nH"]) * float(approved["N"]) ** 2 / 1e3
+    except Exception:
+        L0 = None
+    # 1) explicit bias table from the magnetic design (authoritative)
+    lvt = approved.get("L_vs_Vin_table") or []
+    if lvt:
+        out = []
+        for r in lvt:
+            v = r.get("Vin_rms"); luh = r.get("L_full_nom_uH")
+            if luh is None and r.get("k_bias") is not None and L0:
+                luh = L0 * float(r["k_bias"])
+            if v is not None and luh is not None:
+                out.append([float(v), float(luh)])
+        return out or None
+    # 2) linear-in-bias roll-off from the no-load inductance + per-point peak current
+    if not (L0 and L_final_uH) or L0 <= float(L_final_uH):
+        return None
+    try:
+        from app.mode_b.semiconductor.adapter import build_design_ops
+        _, s2, *_ = build_design_ops({**semi_design, "L_phi_uH": float(L_final_uH)})
+        ipk = [float(x) for x in s2["Iin_pk"]]; vac = [float(x) for x in s2["Vin_rms"]]
+        ipk_max = max(ipk) or 1.0
+        return [[vac[i], L0 - (L0 - float(L_final_uH)) * (ipk[i] / ipk_max)] for i in range(len(vac))]
+    except Exception:
+        return None
+
+
 @app.post("/mode-b/documentation/generate-report", tags=["documentation"])
 def doc_generate_report(req: _DocReportReq):
     """
@@ -2040,6 +2077,11 @@ def doc_generate_report(req: _DocReportReq):
                         or (req.approved_design or {}).get("L_target_uH"))
             if req.semiconductor and _L_final:
                 req.semiconductor.setdefault("design", {})["L_phi_uH"] = float(_L_final)
+            if req.semiconductor:                          # per-operating-point bias inductance
+                _curve = _bias_L_curve(req.approved_design, _L_final,
+                                       req.semiconductor.get("design", {}))
+                if _curve:
+                    req.semiconductor["design"]["L_phi_curve"] = _curve
             if req.semiconductor:                          # Chapter 7 — Semiconductor Loss & Thermal
                 from app.mode_b.report_semiconductor import build_semiconductor_report
                 sc = req.semiconductor

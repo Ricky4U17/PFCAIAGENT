@@ -221,6 +221,9 @@ class Spec:
                                              #   channel current (e.g. 0.25). 0 = use L instead.
     di_pp_peak: float = 0.0                  # OR the peak-of-line ripple current directly [A pp]
     di_pp_peak_curve: Optional[tuple] = None # (Vac, di_pp_peak)
+    L_curve: Optional[tuple] = None          # (Vac, L[H]) per-operating-point inductance: powder cores
+                                             #   roll off with DC bias, so L varies with line/current.
+                                             #   When given it overrides the scalar L at each Vac.
 
 # ======================================================================================
 def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_trace=False):
@@ -243,11 +246,13 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
     Ipk_ch = SQRT2*Iin_rms/Nch
     i_ch = Ipk_ch*sint; i_in = SQRT2*Iin_rms*sint
     # ---- inductor ripple: from a supplied ripple spec if given, else from L ----
+    # L may be supplied per operating point (powder-core bias roll-off) via L_curve.
+    L_op = float(curve(vac, *sp.L_curve)) if sp.L_curve else sp.L
     d_pk = max(1.0 - Vpk/Vo, 1e-3)
     di_peak_req = (float(curve(vac, *sp.di_pp_peak_curve)) if sp.di_pp_peak_curve else sp.di_pp_peak) or 0.0
     if sp.pct_ripple > 0 and Ipk_ch > 0:
         di_peak_req = sp.pct_ripple*Ipk_ch
-    L_eff = (Vpk*d_pk/(di_peak_req*fsw)) if di_peak_req > 0 else sp.L   # back-out an effective L
+    L_eff = (Vpk*d_pk/(di_peak_req*fsw)) if di_peak_req > 0 else L_op   # back-out an effective L
     di = vin*d/(L_eff*fsw)
     dcm = i_ch < (di/2.0); ccm = ~dcm
 
@@ -260,7 +265,7 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
     i_d_density[ccm] = i_ch[ccm]*(1.0-d[ccm]); i_d_repr[ccm] = i_ch[ccm]
     if np.any(dcm):
         v = vin[dcm]; ich = np.maximum(i_ch[dcm],1e-9); Tsw = 1.0/fsw
-        ton = np.sqrt(ich*2.0*sp.L*Tsw*(Vo-v)/(v*Vo)); Ip = v*ton/sp.L; toff = Ip*sp.L/(Vo-v)
+        ton = np.sqrt(ich*2.0*L_op*Tsw*(Vo-v)/(v*Vo)); Ip = v*ton/L_op; toff = Ip*L_op/(Vo-v)
         d1 = np.clip(ton*fsw,0,1); d2 = np.clip(toff*fsw,0,1)
         ms_fet[dcm] = Ip**2*d1/3.0; ms_dio[dcm] = Ip**2*d2/3.0
         i_on[dcm] = 0.0; i_off[dcm] = Ip
