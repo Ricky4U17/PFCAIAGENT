@@ -71,13 +71,14 @@ def build_ntc_story(story, design, cap=None, opts=None):
     eq_box(story, [r"R_{total,cold}=\dfrac{V_{in,pk}}{I_{target}}",
                    r"R_{25}=(R_{total,cold}-R_{parasitic})\times k_{margin}"],
            number="8.2", ch=CH)
-    data_table(story, "8.2", "Cold-Resistance Sizing — Worked", f"At the inrush target {_f(s['i_inrush_target'],0)} A.",
-        ["Quantity", "Substitution", "Value"],
-        [["Min total cold R", f"{_f(r['vin_pk_max'],1)} V / {_f(s['i_inrush_target'],0)} A", f"{_f(r['r_total_min'],3)} {_OHM}"],
-         ["Known parasitics", "R<sub>line</sub>+R<sub>EMI</sub>+R<sub>ESR</sub>+R<sub>bridge</sub>", f"{_f(r['r_parasitic'],3)} {_OHM}"],
-         ["NTC R25 required", "R<sub>total</sub> &#8722; R<sub>parasitic</sub>", f"{_f(r['r25_required'],3)} {_OHM}"],
-         ["NTC R25 pick", f"&#215; {_f(s['r25_margin'],2)} margin", f"{_f(r['r25_pick'],3)} {_OHM}"]],
-        col_widths=[CW*0.30, CW*0.46, CW*0.24], ch=CH)
+    body(story,
+        f"<b>Worked.</b> The high-line peak is V<sub>in,pk</sub> = &#8730;2&#183;{_f(s['vac_max'],0)} = "
+        f"{_f(r['vin_pk_max'],1)} V. To hold the cold inrush at the {_f(s['i_inrush_target'],0)} A target the "
+        f"total cold resistance must be at least {_f(r['vin_pk_max'],1)} V / {_f(s['i_inrush_target'],0)} A = "
+        f"{_f(r['r_total_min'],3)} {_OHM}. Subtracting the known loop parasitics ({_f(r['r_parasitic'],3)} "
+        f"{_OHM}: line + EMI + ESR + bridge) leaves the NTC-alone requirement R<sub>25</sub> &#8805; "
+        f"{_f(r['r25_required'],3)} {_OHM}; applying the &#215;{_f(s['r25_margin'],2)} margin gives the pick "
+        f"<b>R<sub>25</sub> = {_f(r['r25_pick'],3)} {_OHM}</b> (choose the nearest standard value &#8805; this).", CH)
     data_table(story, "8.2b", "Inrush-Target Sweep", "Minimum total cold resistance for a range of inrush targets.",
         ["Target I (A)", "R<sub>min,total</sub> (" + _OHM + ")"],
         [[f"{_f(t,0)}", f"{_f(rr,3)}"] for t, rr in r["sweep"]],
@@ -92,14 +93,14 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "interchangeable through E = &#189;CV&#178;.", CH)
     eq_box(story, [r"E_{cap}=\frac{1}{2}\,C_{out}\,V_{in,pk}^{2}",
                    r"C_{max,equiv}=\dfrac{2\,E_{pulse}}{V_{ref}^{2}}"], number="8.3", ch=CH)
-    data_table(story, "8.3", "Pulse-Energy Requirement — Worked", "The accept-if-either datasheet filter.",
-        ["Quantity", "Substitution", "Value"],
-        [["Charge energy E<sub>cap</sub>", f"&#189; &#215; {_f(s['cout']*1e6,0)}{_MU}F &#215; ({_f(r['vin_pk_max'],1)} V)<sup>2</sup>",
-          f"{_f(r['e_cap'],1)} J"],
-         ["Required pulse rating", f"&#215; {_f(s['energy_margin'],2)} margin", f"&#8805; {_f(r['e_pulse_required'],1)} J"],
-         ["Equivalent max-C", f"2&#183;E<sub>pulse</sub> / ({_f(s['vref_pulse'],0)} V)<sup>2</sup>",
-          f"&#8805; {_f(r['cmax_equiv_required']*1e6,0)} {_MU}F"]],
-        col_widths=[CW*0.30, CW*0.46, CW*0.24], ch=CH)
+    body(story,
+        f"<b>Worked.</b> The bulk capacitor stores E<sub>cap</sub> = &#189;&#183;{_f(s['cout']*1e6,0)} {_MU}F&#183;"
+        f"({_f(r['vin_pk_max'],1)} V)&#178; = <b>{_f(r['e_cap'],1)} J</b> at the high-line peak. With the "
+        f"&#215;{_f(s['energy_margin'],2)} survival margin the part must be rated &#8805; "
+        f"{_f(r['e_pulse_required'],1)} J — or, equivalently, a maximum switchable capacitance "
+        f"&#8805; 2&#183;{_f(r['e_pulse_required'],1)} J / ({_f(s['vref_pulse'],0)} V)&#178; = "
+        f"{_f(r['cmax_equiv_required']*1e6,0)} {_MU}F at the {_f(s['vref_pulse'],0)} V vendor reference. "
+        f"Accept a part that meets <i>either</i> figure.", CH)
 
     # ── 8.4 self-heat / bypass ──
     step_h(story, "8.4", "Continuous Self-Heat → Why a Bypass Relay", CH)
@@ -116,14 +117,17 @@ def build_ntc_story(story, design, cap=None, opts=None):
 
     # ── 8.5 relay/timing ──
     step_h(story, "8.5", "Bypass Relay + Precharge Timing", CH)
+    body(story,
+        "<b>Model.</b> After the bulk capacitor has precharged through the NTC, a relay shorts the NTC out so "
+        "it carries current only during the startup pulse. The bus settles with the RC time constant "
+        "&#964; = R<sub>25</sub>&#183;C<sub>out</sub>; the bypass is closed after a few time constants.", CH)
     eq_box(story, [r"\tau=R_{25}\,C_{out},\qquad t_{bypass}=N_{\tau}\,\tau"], number="8.5", ch=CH)
-    data_table(story, "8.5", "Bypass Relay & Timing", "Close the bypass once the bus has settled.",
-        ["Quantity", "Substitution", "Value"],
-        [["Precharge &#964;", f"{_f(r['r25_pick'],2)}{_OHM} &#215; {_f(s['cout']*1e6,0)}{_MU}F", f"{_f(r['tau']*1e3,1)} ms"],
-         ["Bypass-close delay", f"{_f(s['tau_multiple'],0)} &#215; &#964;", f"{_f(r['t_bypass']*1e3,0)} ms"],
-         ["Relay contact voltage", f"&#215; margin over {_f(s['vout_bus'],0)} V bus", f"&#8805; {_f(r['relay_contact_v'],0)} V"],
-         ["Relay contact current", "continuous I<sub>in,rms</sub> (add AC1/DC headroom)", f"&#8805; {_f(r['relay_contact_a'],1)} A"]],
-        col_widths=[CW*0.30, CW*0.46, CW*0.24], ch=CH)
+    body(story,
+        f"<b>Worked.</b> &#964; = {_f(r['r25_pick'],2)} {_OHM} &#215; {_f(s['cout']*1e6,0)} {_MU}F = "
+        f"{_f(r['tau']*1e3,1)} ms, so closing the bypass after {_f(s['tau_multiple'],0)}&#183;&#964; = "
+        f"<b>{_f(r['t_bypass']*1e3,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
+        f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],0)} V bus) and carry the "
+        f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
     annotation(story, "NOTE",
         "Hot-restart caution: a quick OFF/ON leaves the NTC warm (lower R) → higher inrush than the cold "
         "calculation. Add a minimum re-enable cool-down, or verify warm-NTC inrush against the fuse and "
@@ -196,22 +200,36 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
     # ── 9.3 mcov ──
     step_h(story, "9.3", "Continuous Voltage (MCOV)", CH)
     body(story,
-        "The MCOV is set ONLY by the continuous worst-case line, independent of surge level and "
-        "criterion. It snaps up to the next standard varistor class.", CH)
-    data_table(story, "9.3", "MCOV Selection", "Line-driven; a surge-level change must not move this.",
-        ["Quantity", "Value"],
-        [["Required MCOV", f"{_f(mc['required'],0)} V<sub>ac</sub>"],
-         ["Standard class", f"{_f(mc['class'],0)} V<sub>ac</sub>"],
-         ["Nominal V<sub>1mA</sub> (&#8776;)", f"{_f(mc['v1ma'],0)} V"]],
-        col_widths=[CW*0.5, CW*0.5], ch=CH)
+        "<b>Model.</b> The maximum continuous operating voltage is set ONLY by the continuous worst-case "
+        "line, independent of the surge test level and the performance criterion — a varistor that "
+        "conducts at the line peak would overheat. It snaps up to the next standard varistor class.", CH)
+    body(story,
+        f"<b>Worked.</b> With the continuous worst-case line of {_f(s['vac_max'],0)} V<sub>ac</sub> and the "
+        f"binding margin, the required MCOV is {_f(mc['required'],0)} V<sub>ac</sub>; this snaps up to the "
+        f"standard <b>{_f(mc['class'],0)} V<sub>ac</sub></b> class, whose nominal varistor voltage is "
+        f"V<sub>1mA</sub> &#8776; {_f(mc['v1ma'],0)} V. Because it depends on the line alone, changing the "
+        f"surge level must not move this number.", CH)
 
     # ── 9.4 clamp ──
     step_h(story, "9.4", "Clamp / Coordination (Load-Line Let-Through)", CH)
     body(story,
-        "The let-through voltage is the intersection of the varistor V-I curve with the source load "
-        "line, with the surge riding on the line peak (phase superposition). The clamp must stay under "
-        "the criterion-set device gate.", CH)
+        "<b>Model.</b> The let-through (clamp) voltage is the operating point where the varistor's highly "
+        "non-linear V-I curve V = V<sub>1mA</sub>(I/1mA)<sup>1/&#945;</sup> meets the surge source load "
+        "line V = V<sub>drive</sub> &#8722; I&#183;Z. We solve that intersection rather than reading a "
+        "fixed datasheet clamp, because the actual clamp depends on the surge current the source can push. "
+        "The surge rides on the line peak (phase superposition), so V<sub>drive</sub> includes the line "
+        "peak. The clamp must stay under the criterion-set device gate.", CH)
     eq_box(story, [r"V=V_{1mA}\left(\dfrac{I}{1mA}\right)^{1/\alpha}=V_{drive}-I\,Z"], number="9.4", ch=CH)
+    _gov = next((t for t in tg if t["path"] == st.get("governing")), tg[0] if tg else None)
+    if _gov:
+        body(story,
+            f"<b>Worked (governing path — {_gov['path']}).</b> The drive voltage is V<sub>drive</sub> = "
+            f"{_f(_gov['v_drive'],0)} V through Z = {_f(_gov['z'],0)} {_OHM}; the V-I curve meets that load "
+            f"line at I<sub>op</sub> = {_f(_gov['i_op'],0)} A, giving a let-through clamp <b>V<sub>c</sub> = "
+            f"{_f(_gov['vc'],0)} V</b>. The criterion-{crit} device gate is {_f(_gov['device_gate'],0)} V, so "
+            f"the coordination verdict is <b>{_gov['coord']}</b>; the chosen part's 8/20 surge rating must "
+            f"also exceed the design target I<sub>max</sub> &#8805; {_f(_gov['imax_required'],0)} A. The full "
+            f"per-path picture is below.", CH)
     data_table(story, "9.4", "Per-Path Clamp & Coordination", "Let-through vs the device gate at each path.",
         ["Path", "V<sub>drive</sub> (V)", "I<sub>op</sub> (A)", "Clamp V<sub>c</sub> (V)",
          "I<sub>max</sub> req (A)", "Gate (V)", "Verdict"],
