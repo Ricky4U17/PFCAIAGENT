@@ -92,8 +92,11 @@ def build_step14(story, data: dict):
 
     # ── 14.1 (was 17.2) ───────────────────────────────────────────────────────
     sub_h(story, "14.1", "Compensator Optimization — Transient vs 120 Hz Rejection / THD", CH)
+    _co = d.get("cout_uF"); _l = d.get("lphi_uH")
+    _co_s = f"{float(_co):.0f} µF" if _co else "2200 µF"
+    _l_s = f"{float(_l):.0f} µH" if _l else "235 µH"
     body(story,
-        "The power components (C<sub>O</sub> = 2200 µF, L = 235 µH) are fixed and cannot be changed; "
+        f"The power components (C<sub>O</sub> = {_co_s}, L = {_l_s}) are fixed and cannot be changed; "
         "only the compensator pole/zero placement is free. Lowering the voltage-loop crossover "
         "improves 120 Hz rejection (lower THD) but enlarges and slows the load-transient response; "
         "raising it does the opposite. Four designs spanning this trade-off were evaluated by scaling "

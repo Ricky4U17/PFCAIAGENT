@@ -3571,3 +3571,24 @@ Verified (reference SiC @180Vac): P_FET_rr = 0.5512 W = Nch·½·Vo·Qc·fsw (ex
 MOSFET total 14.18→14.74 W, diode 15.76→15.21 W, P_SEMI unchanged 65.44 W; Tj_FET 74.2→74.5,
 Tj_DIODE →75.5 (diode cooler, FET warmer — correct). Si path still 85/15 split. Report renders
 clean, no glyph boxes.
+
+---
+
+## C64 — Worked loss+thermal at 90 V AND 180 V; end-to-end combined report; control-L hardcode (2026-06-29)
+
+User: generate the combined report end-to-end with a real state; show detailed step-by-step loss
+AND thermal for all 3 components at 90 VAC and 180 VAC; sweep tables keep all 9 voltages.
+
+- report_semiconductor.py: extracted 4 worked-table helpers (_bridge/_mosfet/_diode/_thermal_worked);
+  build_semiconductor_story now traces the grid points closest to 90 and 180 and emits each worked
+  table at BOTH (7.3a/b, 7.4a/b, 7.5a/b, 7.6a/b) — 8 worked tables; 9-point sweep tables unchanged.
+- Fixed a stale control-report hardcode: report_step14.py "power components (CO=2200µF, L=235µH)"
+  now reads cout_uF/lphi_uH from the data (injected in report_steps1_8.py from the control inputs),
+  so it tracks the finalized design.
+
+End-to-end verification: drove /mode-b/documentation/generate-report with a real TP state where
+Ch3 confirmed_L_uH_sel=240 but the semiconductor payload carried a STALE 235. Result: 179-page
+PFC_Report_..._Steps1_19.pdf (all chapters 1-9). Table 7.1 shows Lφ=240 µH at all 9 points and the
+consistency note "Lφ=240 µH everywhere" — the C62 override forced Ch7 to Ch3's value; NO 235µH or
+2200µF anywhere in 179 pages. Worked tables render at 90 V (diode 7.18 W, MOSFET 17.66 W) and
+180 V (diode 15.21 W, MOSFET 14.74 W) for all 3 components incl. thermal.

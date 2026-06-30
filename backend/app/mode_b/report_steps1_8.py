@@ -664,6 +664,7 @@ def build_story(inp: dict | None = None):
     build_step12(story, compute_step12_transient(inp, prior))
     s13 = compute_step13_thd(inp, prior)
     build_step13(story, s13)
+    s13["lphi_uH"] = inp.get("lphi_uH"); s13["cout_uF"] = inp.get("cout_uF")  # for the "fixed components" note
     build_step14(story, s13)
     build_appendices(story)
     while story and isinstance(story[0], PageBreak):
