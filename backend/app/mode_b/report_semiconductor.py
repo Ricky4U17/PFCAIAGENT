@@ -57,26 +57,33 @@ def _bridge_section(story, traces, is_sync):
     _W(story,
        "<b>Model.</b> The bridge rectifies the AC line; at every instant two devices in series carry "
        "the full rectified current i<sub>in</sub>(&#952;) = &#8730;2&#183;I<sub>in,rms</sub>&#183;sin&#952;. "
-       "Each drops a <i>current-dependent</i> forward voltage V<sub>f</sub>(i) read from its datasheet "
-       "V-I curve — at tens of amps the drop is well above the textbook 0.7 V, so a constant-V<sub>f</sub> "
-       "model would understate the loss. We integrate the V<sub>f</sub>(i)&#183;i product over the half "
-       "line cycle (both factors vary along the sinusoid) and double it for the conducting pair." +
-       (" For the sync-bottom variant the bottom legs are MOSFETs, adding an ohmic R<sub>ds</sub>&#183;i&#178; "
-        "term and a small line-frequency gate loss." if is_sync else ""))
-    eq_box(story, [r"i_{in}(\theta)=\sqrt{2}\,I_{in,rms}\,\sin\theta",
-                   r"P_{bridge}=2\,\overline{\,V_f(i_{in})\,i_{in}\,}"
+       "A diode's forward-drop conduction loss is V<sub>f</sub> times its <b>average</b> current (the "
+       "V<sub>f</sub>&#183;i product integrates to V<sub>f</sub>&#183;I<sub>avg</sub> for a fixed "
+       "V<sub>f</sub>) — <i>not</i> I<sub>rms</sub>, which would only apply to an ohmic "
+       "R<sub>d</sub>&#183;i&#178; term. Because V<sub>f</sub>(i) is itself current-dependent (read from "
+       "the datasheet V-I curve, well above the textbook 0.7 V at tens of amps), we integrate the exact "
+       "V<sub>f</sub>(i)&#183;i product over the half cycle rather than using a single point, and double "
+       "it for the conducting pair." +
+       (" For the sync-bottom variant the bottom legs are MOSFETs, adding an ohmic "
+        "R<sub>ds</sub>&#183;I<sub>rms</sub>&#178; term (resistive, so RMS-based) and a small "
+        "line-frequency gate loss." if is_sync else ""))
+    eq_box(story, [r"i_{in}(\theta)=\sqrt{2}\,I_{in,rms}\,\sin\theta,\qquad "
+                   r"I_{in,avg}=\frac{2}{\pi}\,\hat{i}_{in}=\frac{2\sqrt{2}}{\pi}\,I_{in,rms}",
+                   r"P_{bridge}=2\,\overline{\,V_f(i_{in})\,i_{in}\,}\;\approx\;2\,V_f\,I_{in,avg}"
                    + (r"+\,\overline{\,R_{ds,bot}\,i_{in}^2\,}+P_{g,bot}" if is_sync else "")],
            number="7.3", ch=CH)
     for vac, tr in traces:
-        i_in_pk = (2 ** 0.5) * tr["Iin_rms"]; ntop = max(tr["n_top"], 1)
+        i_in_pk = (2 ** 0.5) * tr["Iin_rms"]; i_avg = (2.0 / 3.141592653589793) * i_in_pk
+        ntop = max(tr["n_top"], 1)
         extra = (f" (top diodes {_f(tr['P_bridge_top'])} W + bottom MOSFETs {_f(tr['P_bridge_bottom'])} W)"
                  if is_sync else "")
         _W(story,
-           f"<b>At {vac:.0f} V<sub>AC</sub>:</b> I<sub>in,rms</sub> = {_f(tr['Iin_rms'],3)} A &#8658; "
-           f"peak i<sub>in,pk</sub> = &#8730;2&#183;{_f(tr['Iin_rms'],3)} = {_f(i_in_pk,3)} A "
-           f"({_f(i_in_pk/ntop,3)} A per device). At that current V<sub>f</sub> &#8776; "
-           f"{_f(tr['vf_br_pk'],3)} V (T<sub>j</sub> = {_f(tr['Tj_brT'],0)}{_DEG}C); the cycle-averaged "
-           f"conduction loss of the pair is <b>P<sub>bridge</sub> = {_f(tr['P_bridge'])} W</b>{extra}.")
+           f"<b>At {vac:.0f} V<sub>AC</sub>:</b> I<sub>in,rms</sub> = {_f(tr['Iin_rms'],3)} A, so the "
+           f"<b>average</b> rectified current is I<sub>in,avg</sub> = (2&#8730;2/&#960;)&#183;"
+           f"{_f(tr['Iin_rms'],3)} = {_f(i_avg,3)} A. The forward drop along the curve is V<sub>f</sub> "
+           f"&#8776; {_f(tr['vf_br_pk'],3)} V (T<sub>j</sub> = {_f(tr['Tj_brT'],0)}{_DEG}C); the "
+           f"average-current conduction loss of the conducting pair, V<sub>f</sub>(i)&#183;i integrated "
+           f"over the cycle, is <b>P<sub>bridge</sub> = {_f(tr['P_bridge'])} W</b>{extra}.")
 
 
 def _mosfet_section(story, traces):
@@ -263,6 +270,24 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             "approved design at all nine points." + (
                 " L&#966; is bias-adjusted per operating point (see the L<sub>&#966;</sub> column)."
                 if L_varies else " (L&#966; = %s &#181;H everywhere.)" % _f(L_phi * 1e6, 0)), CH)
+    annotation(story, "METHOD",
+        "<b>How the losses are computed — time domain.</b> Every loss in &#167; 7.3&#8211;7.6 is obtained by "
+        "integrating over the LINE cycle, not from a single peak or RMS figure. The half-line current "
+        "envelope is sampled at several hundred angles &#952;; at each angle the per-switching-cycle "
+        "waveforms — channel current, diode current, the turn-on/turn-off instants and the inductor "
+        "ripple &#916;I<sub>L</sub> — are reconstructed, the instantaneous loss is formed, then averaged "
+        "over the cycle and (for switching terms) scaled by f<sub>sw</sub>. This captures the sinusoidal "
+        "variation of current and duty that a peak/RMS shortcut misses, and it is why the "
+        "junction-temperature solve is iterated: R<sub>ds(on)</sub>, V<sub>f</sub> and E<sub>sw</sub> all "
+        "depend on the converged T<sub>j</sub>.", CH)
+    annotation(story, "NOTE",
+        "<b>CCM vs DCM.</b> At each line angle the converter is in continuous (CCM) or discontinuous "
+        "(DCM) conduction. DCM occurs where the channel current falls below half the inductor ripple — "
+        "near the line zero-crossings, and over a larger fraction of the cycle at high line / light load "
+        "(the current is small relative to &#916;I<sub>L</sub>). In DCM the inductor current is a triangle "
+        "with a dead-time, which raises the FET/diode RMS-to-average ratio, changes the switching "
+        "currents, and removes diode reverse recovery. The engine detects this per angle; the DCM "
+        "fraction of each operating point is the <b>DCM%</b> column below.", CH)
     fsw = float(design["fsw"]); vout = float(design["vout"])
     body(story,
         "The total input RMS current follows from the supplied efficiency and power factor; the "
@@ -283,12 +308,13 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "bias-adjusted per-point inductance L<sub>&#966;</sub>(V<sub>AC</sub>) from Chapter 3 — "
         "L<sub>&#966;</sub> is lowest where the peak current (DC bias) is highest and recovers as the "
         "current falls.",
-        ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_&#966;,rms", "&#916;I_L,pp", "L_&#966;"],
+        ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_&#966;,rms", "&#916;I_L,pp", "L_&#966;", "DCM%"],
         [[f"{s2['Vin_rms'][i]:.0f} V", f"{r['Po']:.0f} W", _f(r['eta_in_%'], 1), _f(r['PF_in'], 4),
           f"{_f(s2['Iin_rms'][i], 3)} A", f"{_f(iph[i], 3)} A",
-          f"{_f(s2['Vin_pk'][i] * s2['Dpk'][i] / (L_pts[i] * fsw), 3)} A", f"{_f(L_pts[i] * 1e6, 0)} &#181;H"]
+          f"{_f(s2['Vin_pk'][i] * s2['Dpk'][i] / (L_pts[i] * fsw), 3)} A", f"{_f(L_pts[i] * 1e6, 0)} &#181;H",
+          f"{_f(r['DCM_%'], 1)}"]
          for i, r in enumerate(rows)],
-        col_widths=[CW*0.10, CW*0.12, CW*0.09, CW*0.11, CW*0.15, CW*0.15, CW*0.14, CW*0.13], ch=CH)
+        col_widths=[CW*0.10, CW*0.11, CW*0.08, CW*0.10, CW*0.14, CW*0.14, CW*0.13, CW*0.11, CW*0.09], ch=CH)
 
     # ── 7.2 Selected components ──────────────────────────────────────────────
     step_h(story, "7.2", "Selected Components", CH)
@@ -301,6 +327,43 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         ["Block", "Manufacturer", "Part number", "Type"],
         [_part("bridge", "Bridge rectifier"), _part("mosfet", "Boost MOSFET"), _part("diode", "Boost diode")],
         col_widths=[CW*0.24, CW*0.26, CW*0.30, CW*0.20], ch=CH)
+    # detailed datasheet + application parameters (from the engine dataclasses, defaults included)
+    from app.mode_b.semiconductor import pfc_loss_model as _eng
+    import numpy as _np
+    _sp, _mos, _dio, _br, _th = _eng.design_from_dict(cfg)
+    _vo = float(design["vout"])
+    def _vf(c): return ", ".join(f"{y:.2f} V&#64;{x:.0f} A".replace("&#64;", "@") for x, y in zip(c[0], c[1]))
+    _eoss = float(_np.interp(_vo, _mos.eoss_at_v[0], _mos.eoss_at_v[1]))
+    _tco = _mos._tjcoef(); _khot = float(_np.interp(125, _tco[0], _tco[1])); _thot = float(_tco[0][-1])
+    prows = [
+        ["<b>Boost MOSFET</b>", "", ""],
+        ["Technology", _mos.tech.upper(), "channel material"],
+        [f"R<sub>ds(on)</sub> @25{_DEG}C", f"{_mos.rdson_25*1e3:.1f} m{_OHM}", f"&#215;{_khot:.2f} at {_thot:.0f}{_DEG}C (tempco)"],
+        ["Total gate charge Q<sub>g</sub>", f"{_mos.qg*1e9:.0f} nC", f"gate drive V<sub>g</sub> = {_mos.vg_drive:.0f} V"],
+        ["Input capacitance C<sub>iss</sub>", f"{_mos.ciss*1e12:.0f} pF", f"Q<sub>gd</sub> = {_mos.qgd*1e9:.1f} nC, V<sub>th</sub> = {_mos.vth:.1f} V"],
+        [f"Output-cap energy E<sub>oss</sub>(V<sub>OUT</sub>)", f"{_eoss*1e6:.2f} {_MU}J", f"at V<sub>OUT</sub> = {_vo:.0f} V"],
+        ["Gate resistor R<sub>g</sub>", f"{(_mos.rg_on or _mos.rg):.1f} {_OHM}", "drive-loop"],
+        [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_mos.rth_jc:.2f} / {_mos.rth_cs:.2f} {_DEG}C/W", "junction&#8594;case&#8594;sink"],
+        ["<b>Boost diode</b>", "", ""],
+        ["Type", "SiC Schottky" if _dio.is_sic else "Si", "recovery behaviour"],
+        ["Forward drop V<sub>f</sub>(i)", _vf(_dio.vf_curve), "datasheet V-I curve"],
+        ([f"Capacitive charge Q<sub>c</sub>", f"{_dio.qc*1e9:.0f} nC", "SiC: no Q<sub>rr</sub>"]
+         if _dio.is_sic else [f"Recovery charge Q<sub>rr</sub>", f"{_dio.qrr*1e9:.0f} nC", "Si reverse recovery"]),
+        [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_dio.rth_jc:.2f} / {_dio.rth_cs:.2f} {_DEG}C/W", ""],
+        ["<b>Bridge rectifier</b>", "", ""],
+        ["Topology", _br.topology, "diode or sync-bottom"],
+        ["Forward drop V<sub>f</sub>(i)", _vf(_br.vf_curve), "per device"],
+        ["Devices in parallel", f"{_br.n_parallel}", "shares the line current"],
+        [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_br.rth_jc:.2f} / {_br.rth_cs:.2f} {_DEG}C/W", ""],
+        ["<b>Thermal / application</b>", "", ""],
+        [f"Ambient T<sub>a</sub>", f"{_th.t_ambient:.0f} {_DEG}C", "worst-case"],
+        [f"Heatsink R<sub>&#952;sa</sub>", f"{_th.rth_sa:.2f} {_DEG}C/W", "sink&#8594;ambient (shared)"],
+    ]
+    data_table(story, "7.2b", "Selected-Component Datasheet & Application Parameters",
+        "The actual values fed to the loss engine (datasheet parameters as confirmed, engine defaults "
+        "shown where a field was left blank). These drive every calculation in &#167; 7.3&#8211;7.6.",
+        ["Parameter", "Value", "Note"], prows,
+        col_widths=[CW*0.36, CW*0.30, CW*0.34], ch=CH)
     annotation(story, "NOTE",
         "Datasheet parameters (R<sub>DS(on)</sub>, V<sub>f</sub> curves, Q<sub>g</sub>, E<sub>oss</sub>, "
         "R<sub>&#952;jc</sub> …) and the application inputs (gate drive, R<sub>g</sub>, R<sub>&#952;cs</sub>, "

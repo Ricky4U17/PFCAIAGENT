@@ -3634,3 +3634,25 @@ End-to-end verify (real TP state, stale semi L=235): 177-page Steps1_19 PDF.
 (2) Table 7.1 L_φ varies 240→249 µH (bias roll-off; lowest at the 180 V max-current point).
 (3) Ch7/8/9 worked sections are narrative+equation with Model/Worked prose.
 (4) no stale 235 µH or 2200 µF anywhere.
+
+---
+
+## C69 — Ch7 feedback: 7.2 component params, bridge avg-current, time-domain/DCM method (2026-06-29)
+
+User (3 pts): (1) Table 7.2 didn't show selected-component details; (2) bridge diode conduction
+should use AVERAGE current, not RMS — verify; (3) report doesn't explain the time-domain/DCM method.
+
+(2) Verified the engine is already correct: bridge loss = 2·mean(Vf(i)·i) = average-current basis
+(2·Vf·Iavg for fixed Vf, Iavg=0.900·Irms); only a dynamic-resistance Rd·i² term is RMS-based. No
+engine change; fixed the report presentation.
+
+- 7.2: new Table 7.2b "Selected-Component Datasheet & Application Parameters" — built from the engine
+  dataclasses (defaults included): MOSFET tech/Rds@25+tempco/Qg/Ciss+Qgd+Vth/Eoss@Vout/Rg/Rth;
+  diode type/Vf-curve/Qc(or Qrr)/Rth; bridge topology/Vf-curve/n_par/Rth; thermal Ta/Rth_sa.
+- 7.3: _bridge_section now states the Vf drop is average-current-based, adds the Iin,avg=(2√2/π)Irms
+  equation, and the worked lines show Iin,avg (18.01 A @90V) instead of emphasising peak/RMS.
+- 7.1: METHOD annotation (time-domain line-cycle integration, several-hundred-angle sampling, Tj
+  iteration) + CCM/DCM NOTE (DCM where i_ch < ½ΔIL — zero-crossings, high line/light load; triangle
+  with dead-time changes RMS/switching/removes recovery). Table 7.1 gains a DCM% column.
+
+Verified render: 7.2b params table, bridge Iin,avg, METHOD/DCM annotations, DCM% column; no box glyphs.
