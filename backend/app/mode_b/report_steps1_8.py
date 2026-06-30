@@ -350,6 +350,29 @@ def _build_step6(story, data):
            r"(10.59)^2\times0.015=112.15\times0.015=%.3f\ \mathrm{W\ per\ phase}" % s6["pdiss_hi_each"])
     _wstep(story, "Step 4 — High line total (2 phases):", r"2\times%.3f=%.3f\ \mathrm{W}"
            % (s6["pdiss_hi_each"], s6["pdiss_hi_total"]))
+    # full R_CS loss across all nine input voltages (from the shared operating grid)
+    try:
+        from app.mode_b.semiconductor.adapter import build_design_ops
+        _rcs = float(p.get("rcs") or s6.get("rcs_sel") or 0.015)
+        _nch = int(p.get("nch") or 2)
+        _d = {"vin_min": p.get("vin_min", 90), "vin_max": p.get("vin_max", 264),
+              "pout_lo": p.get("pout_lo", 1700), "pout_hi": p.get("pout_hi", 3600),
+              "vout": p.get("vout", 393.7), "fsw": p.get("fsw", 70000),
+              "nch": _nch, "r_input": p.get("r_input", 0.20)}
+        _ops, _s2, _Lp, _iph, _Lpts = build_design_ops(_d)
+        _rows = []
+        for i in range(len(_ops)):
+            _ip = float(_iph[i]); _pe = _ip * _ip * _rcs
+            _rows.append([f"{_ops[i, 0]:.0f} V", f"{_ip:.3f} A", f"{_pe:.3f} W", f"{_nch * _pe:.3f} W"])
+        body(story, "Across the full input range, the per-phase RMS current — and hence the shunt "
+                    "loss P<sub>R<sub>CS</sub></sub> = I<sub>&#966;,rms</sub>&#178;&#183;R<sub>CS</sub> "
+                    "— varies as below (the same operating grid used by every chapter):", C6)
+        data_table(story, "6.5", "R<sub>CS</sub> Power Loss vs Input Voltage (R<sub>CS</sub> = %.1f m&#937;)" % (_rcs * 1e3),
+            "Per-phase shunt loss and the total over %d channels, at every operating point." % _nch,
+            ["V_AC", "I<sub>&#966;,rms</sub>", "Per phase", "Total (%d ch)" % _nch],
+            _rows, col_widths=[CW*0.22, CW*0.26, CW*0.26, CW*0.26], ch=C6)
+    except Exception:
+        pass
     annotation(story, "DECISION",
         "R<sub>CS</sub> = 15 mΩ. Use a minimum 3 W, 4-terminal Kelvin metal-element current-sense "
         "shunt per phase (derate to 50% for thermal reliability). The Kelvin package eliminates PCB "

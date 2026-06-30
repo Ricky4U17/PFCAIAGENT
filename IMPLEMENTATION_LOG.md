@@ -3681,3 +3681,26 @@ User (5 pts): (1) 7.2 missing mfr/part; (2) Vout shown as 393/394 vs 393.7 — m
 
 Verified standalone Ch7: mfr/part shown, 393.7 throughout (no 394), RR annotation, loss-model
 summary, system loss budget + balance note; no glyph boxes.
+
+---
+
+## C72 — Ch7 feedback round 3: corrected Vout, R_CS loss vs V, efficiency re-estimate (2026-06-30)
+
+User (3 pts): (1) Vout can be refined in the control step (394→393.7 from std parts) — all chapters
+from then on must use the corrected value, not a hardcode; (2) after R_CS is confirmed, show its
+power loss at every input voltage; (3) once total loss is known, adjust the stored default
+efficiency (2-stage interleaved) to be realistic.
+
+(1) main.py doc_generate_report: resolve corrected Vout (step16 Vout_V → intake spec) and force it
+    onto state.intake, approved_design.Vout_V, step15.Vout_V and the semiconductor design BEFORE
+    rendering, so Ch1-9 all agree. Verified: intake=394 + control 393.7 → 393.7 everywhere, 0 stray
+    394 (dynamic, not hardcoded).
+(2) report_steps1_8 §6.5: after the R_CS verification, a 9-point table P_RCS = Iφ,rms²·R_CS (per
+    phase + ×Nch) across the full input range, built from the shared operating grid (build_design_ops).
+    main.py passes vin_min/vin_max/r_input into the control inputs.
+(3) report_semiconductor §7.9 "Efficiency Re-Estimate from Computed Losses": η_calc = Pout/(Pout +
+    P_semi + P_L,Cu + P_R_CS) per Vac — an UPPER bound (core/cap/control lower it). Table compares
+    assumed η vs η_calc and flags "optimistic" corners; RECOMMENDATION to lower the stored η there.
+    For the reference design 220/230/264 V are optimistic — matching the negative 7.8 Balance.
+
+Verified end-to-end: 181-page report, all three present; standalone + control builds clean.

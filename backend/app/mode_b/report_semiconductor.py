@@ -531,6 +531,37 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
            f"{_f(wr['P_SEMI_total'],1)} W ({100*wr['P_SEMI_total']/max(wr['P_SYSTEM_total'],1e-9):.0f}%), "
            f"the inductor copper {_f(plcu_w,1)} W, the current-sense resistors {_f(prcs_w,1)} W, leaving "
            f"{_f(wr['P_SYSTEM_total']-wr['P_SEMI_total']-plcu_w-prcs_w,1)} W for core + capacitor + control.")
+        # ── realistic efficiency derived from the computed losses ──
+        step_h(story, "7.9", "Efficiency Re-Estimate from Computed Losses", CH)
+        body(story,
+            "The operating grid carries an <i>assumed</i> efficiency curve (a stored default for the "
+            "2-stage interleaved stage). We now re-estimate it from the losses actually computed. The "
+            "accounted losses here &#8212; semiconductor + inductor copper + R<sub>CS</sub> &#8212; are a "
+            "<b>lower bound</b> on the total (core, capacitor ESR and control add more), so the "
+            "efficiency they imply is an <b>upper bound</b> on what is achievable. Where the assumed "
+            "efficiency exceeds this bound it is optimistic and the stored value should be lowered "
+            "toward (or below) the re-estimate.", CH)
+        eq_box(story, [r"\eta_{calc}(V_{AC})=\dfrac{P_{out}}{P_{out}+P_{semi}+P_{L,Cu}+P_{R_{CS}}}\;\geq\;\eta_{real}"],
+               number="7.9", ch=CH)
+        erows = []
+        for i, r in enumerate(rows):
+            iphi = float(iph[i]); po = float(r["Po"])
+            pacc = float(r["P_SEMI_total"]) + (nch * iphi * iphi * dcr if dcr else 0.0) + (nch * iphi * iphi * rcs if rcs else 0.0)
+            eta_calc = 100.0 * po / (po + pacc)
+            eta_ass = float(r["eta_in_%"])
+            flag = "&#10003;" if eta_ass <= eta_calc + 1e-6 else "optimistic"
+            erows.append([f"{r['Vac']:.0f} V", f"{_f(eta_ass,2)} %", f"&#8804; {_f(eta_calc,2)} %", flag])
+        data_table(story, "7.9", "Assumed vs Computed-Loss Efficiency",
+            "&#951;<sub>calc</sub> uses the accounted (computed) losses only, so it is an upper bound; the "
+            "true efficiency is lower once core + capacitor + control are added. &#8220;optimistic&#8221; "
+            "marks corners where the assumed &#951; already exceeds this bound.",
+            ["V_AC", "&#951; assumed", "&#951; &#8804; (computed-loss)", "Verdict"],
+            erows, col_widths=[CW*0.18, CW*0.27, CW*0.31, CW*0.24], ch=CH)
+        annotation(story, "RECOMMENDATION",
+            "Replace the stored efficiency for any corner flagged &#8220;optimistic&#8221; with a value at "
+            "or below &#951;<sub>calc</sub>, then re-run &#8212; the line current, the losses and the "
+            "Balance update consistently. This closes the loop between the assumed efficiency and the "
+            "physics-based loss model.", CH)
     else:
         data_table(story, "7.8b", "Loss Budget Cross-Check vs Line Voltage",
             "System loss from the supplied efficiency, the semiconductor share, and the implied remainder "

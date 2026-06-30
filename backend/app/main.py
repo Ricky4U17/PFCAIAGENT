@@ -2099,6 +2099,21 @@ def doc_generate_report(req: _DocReportReq):
         _validate_state(req.state)
         from app.mode_b.documentation_agent import DocumentationAgent
         from fastapi.responses import Response
+        # Corrected output voltage: the control step may refine Vout when standard parts are chosen
+        # (e.g. 394 → 393.7). From that point every chapter must use the corrected value — never a
+        # hardcoded one. Resolve it (control Vout_V → intake spec) and apply it to all data sources so
+        # the inductor, capacitor, control and semiconductor chapters all agree.
+        _app = (req.state or {}).get("intake", {}).get("application", {}) or {}
+        _vout = (req.step16_params or {}).get("Vout_V") or _app.get("output_bus_voltage_v")
+        if _vout:
+            _vout = float(_vout)
+            req.state.setdefault("intake", {}).setdefault("application", {})["output_bus_voltage_v"] = _vout
+            if req.approved_design is not None:
+                req.approved_design["Vout_V"] = _vout
+            if req.step15_result is not None:
+                req.step15_result.setdefault("Vout_V", _vout)
+            if req.semiconductor:
+                req.semiconductor.setdefault("design", {})["vout"] = _vout
         agent = DocumentationAgent(req.state)
         full = bool(req.step16_params and req.approved_design and req.step15_result)
         if full:
@@ -2111,7 +2126,12 @@ def doc_generate_report(req: _DocReportReq):
                 step16_params   = None,
                 include_ch6     = False,   # Ch6 supplied by build_control_report below
             )
-            ch6 = build_control_report(_control_inputs_from_step16(req.step16_params))
+            _ci = _control_inputs_from_step16(req.step16_params)
+            _ci.setdefault("vin_min", _num(_app.get("vin_rms_min")) or 90.0)
+            _ci.setdefault("vin_max", _num(_app.get("vin_rms_max")) or 264.0)
+            _ci.setdefault("r_input", _num((req.state.get("topology_specific_inputs", {}) or {})
+                                           .get("default_crest_ripple_ratio")) or 0.20)
+            ch6 = build_control_report(_ci)
             parts = [ch1_5, ch6]
             # ONE inductance everywhere: Chapter 7 must use Chapter 3's finalized Lφ, never its own.
             # Resolve it exactly as the inductor chapter does (confirmed_L_uH_sel → confirmed_L_uH →
