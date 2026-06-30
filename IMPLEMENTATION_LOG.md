@@ -3656,3 +3656,28 @@ engine change; fixed the report presentation.
   with dead-time changes RMS/switching/removes recovery). Table 7.1 gains a DCM% column.
 
 Verified render: 7.2b params table, bridge Iin,avg, METHOD/DCM annotations, DCM% column; no box glyphs.
+
+---
+
+## C70 — Ch7 feedback round 2: mfr/part, Vout consistency, diode RR, loss budget, model summary (2026-06-30)
+
+User (5 pts): (1) 7.2 missing mfr/part; (2) Vout shown as 393/394 vs 393.7 — make consistent;
+(3) verify diode reverse-recovery loss is calculated; (4) 7.8 should break down ALL losses
+(inductor, R_CS, …) vs total; (5) raise Ch7 presentation to thesis level.
+
+(1) The mfr/part path already works (meta from _clean_block → ref.parts → Table 7.2); it showed —
+    only because the reference parts carried no metadata. Verified renders when provided.
+(2) report_semiconductor: all Vout displays now 1-decimal (393.7) — _f(tr['Vo'],0)→1 (×3) and
+    7.2b _vo .0f→.1f. No more 394.
+(3) Verified: SiC diode P_D_sw=0 (no Q_rr, majority-carrier) with Q_c booked to FET; Si splits
+    Q_rr·Vout 85/15. Added a "REVERSE RECOVERY" annotation in 7.5 stating it explicitly (CCM-only).
+(4) 7.8 rewritten as a System Loss Budget: semiconductor + inductor copper (Nch·Iφ²·DCR) + R_CS
+    (Nch·Iφ²·R_CS) + Balance(=system−those=core+cap+control), per Vac + worst-case prose. New
+    `extra` param on build_semiconductor_report; doc_generate_report passes DCR (approved inductor),
+    R_CS (control inputs), ESR (Step 15). NOTE explains a NEGATIVE Balance at high line = the assumed
+    efficiency is optimistic there (the cross-check's purpose).
+(5) Added Table 7.2c "Loss-Model Summary" — each mechanism, model/method, and current basis
+    (average vs RMS vs switch-instant) — the thesis-level method overview up front.
+
+Verified standalone Ch7: mfr/part shown, 393.7 throughout (no 394), RR annotation, loss-model
+summary, system loss budget + balance note; no glyph boxes.

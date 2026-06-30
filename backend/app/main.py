@@ -2129,9 +2129,16 @@ def doc_generate_report(req: _DocReportReq):
             if req.semiconductor:                          # Chapter 7 — Semiconductor Loss & Thermal
                 from app.mode_b.report_semiconductor import build_semiconductor_report
                 sc = req.semiconductor
+                _ctrl = _control_inputs_from_step16(req.step16_params)   # for R_CS
+                _ad = req.approved_design or {}; _sp = req.step16_params or {}; _s15 = req.step15_result or {}
+                _extra = {
+                    "dcr_mohm": _ad.get("DCR_100C_mOhm") or _sp.get("DCR_mOhm"),
+                    "rcs_mohm": (_ctrl.get("rcs") * 1e3) if _ctrl.get("rcs") else _sp.get("rcs_mOhm"),
+                    "esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
+                }
                 parts.append(build_semiconductor_report(
                     sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"],
-                    sc.get("tj_limit")))
+                    sc.get("tj_limit"), extra=_extra))
             if req.input_protection:                        # Chapters 8 (NTC) + 9 (MOV compliance)
                 from app.mode_b.report_inputprotection import build_inputprotection_report
                 ip = req.input_protection
