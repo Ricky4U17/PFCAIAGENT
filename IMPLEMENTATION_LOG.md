@@ -3551,3 +3551,23 @@ Fix — make Ch3's finalized Lφ authoritative everywhere:
 Verified: override unit cases (sel 240 over stale 235 → 240; confirmed 238.4 → 238.4; fallback
 approved 250 → 250); backend imports; frontend tsc clean. Same `state.topology_specific_inputs`
 source as generate_steps13_14.
+
+---
+
+## C63 — SiC diode Qc capacitive loss moved to the MOSFET (2026-06-29)
+
+User (after the RR-loss review): move the SiC diode's Qc capacitive switching loss to the MOSFET,
+where it physically dissipates (the diode junction-cap charge is charged through the FET channel
+at the MOSFET's hard turn-on).
+
+Was a defensible bookkeeping choice flagged in the RR check — now corrected for accurate per-device Tj.
+- pfc_loss_model.py simulate_point: for is_sic, P_rr_to_fet = fsw·½·Vo·Qc·k_qc (booked to the FET);
+  P_sw_dio = fsw·e_fr only (diode keeps just its forward-recovery energy). Si path unchanged.
+- report_semiconductor.py: 7.4 THEORY + mechanism relabeled "Diode charge into FET" (Si Qrr OR
+  SiC Qc, both heat the FET); 7.5 body/eq/worked table now state SiC switching = e_fr only with Qc
+  booked to §7.4.
+
+Verified (reference SiC @180Vac): P_FET_rr = 0.5512 W = Nch·½·Vo·Qc·fsw (exact); P_D_sw = 0;
+MOSFET total 14.18→14.74 W, diode 15.76→15.21 W, P_SEMI unchanged 65.44 W; Tj_FET 74.2→74.5,
+Tj_DIODE →75.5 (diode cooler, FET warmer — correct). Si path still 85/15 split. Report renders
+clean, no glyph boxes.

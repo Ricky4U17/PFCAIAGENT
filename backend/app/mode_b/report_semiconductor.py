@@ -180,8 +180,10 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     annotation(story, "THEORY",
         "The MOSFET loss is the sum of five mechanisms: ohmic conduction, hard-switching crossover "
         "(turn-on + turn-off), output-capacitance (E<sub>oss</sub>) dissipation at hard turn-on, the "
-        "share of diode reverse-recovery energy dumped into the FET, and gate-drive + leakage. All are "
-        "integrated over the line cycle and multiplied by N<sub>ch</sub>.", CH)
+        "diode charge dumped into the FET at turn-on (a Si diode's reverse-recovery energy, or a SiC "
+        "Schottky's junction-capacitance charge Q<sub>c</sub> &#8212; both are charged through the FET "
+        "channel and so heat the MOSFET), and gate-drive + leakage. All are integrated over the line "
+        "cycle and multiplied by N<sub>ch</sub>.", CH)
     eq_box(story, [r"I_{ch,pk}=\dfrac{\sqrt{2}\,I_{in,rms}}{N_{ch}},\quad "
                    r"I_{FET,rms}=\sqrt{\overline{\,i^2\,d\,}},\quad R_{ds(on)}(T_j)=R_{ds,25}\,k(T_j)",
                    r"P_{cond}=R_{ds(on)}(T_j)\,I_{FET,rms}^2,\quad "
@@ -217,8 +219,11 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
              ["3 · Output cap (E<sub>oss</sub>)",
               f"f<sub>sw</sub>&#183;E<sub>oss</sub> = {_f(fk,0)}kHz&#215;{_uj(tr['eoss_vo'])}&#215;{nch}",
               f"{_f(tr['P_oss_tot'])} W"],
-             ["4 · Reverse-recovery share",
-              "diode recovery energy into the FET (0 for a SiC diode)", f"{_f(tr['P_rr_fet_tot'])} W"],
+             ["4 · Diode charge into FET",
+              (f"SiC diode Q<sub>c</sub> at FET turn-on: &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>&#183;f<sub>sw</sub> = "
+               f"&#189;&#215;{_f(tr['Vo'],0)}V&#215;{_nc(tr['qc'])}&#215;{_f(fk,0)}kHz&#215;{nch}") if tr['is_sic']
+              else "Si diode reverse-recovery energy share into the FET",
+              f"{_f(tr['P_rr_fet_tot'])} W"],
              ["5 · Gate + leakage",
               f"f<sub>sw</sub>&#183;Q<sub>g</sub>&#183;V<sub>g</sub> = {_f(fk,0)}kHz&#215;{_nc(tr['qg'])}&#215;{_f(tr['vg_drive'],0)}V&#215;{nch}",
               f"{_f(tr['P_gate_tot'] + tr['P_leak_fet_tot'])} W"],
@@ -235,19 +240,21 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     step_h(story, "7.5", "Boost Diode Loss", CH)
     body(story,
         "The boost diode dissipates forward-conduction loss plus a switching term. For a SiC Schottky "
-        "the switching term is the capacitive-charge loss &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>&#183;f<sub>sw</sub> "
-        "(no real reverse recovery); for a Si diode it is the diode's share of the Q<sub>rr</sub> recovery energy.", CH)
+        "there is no minority-carrier reverse recovery; its junction-capacitance charge Q<sub>c</sub> is "
+        "charged through the MOSFET at turn-on, so that loss is booked to the MOSFET (&#167; 7.4) and the "
+        "diode's own switching term is just its forward-recovery energy E<sub>fr</sub> (often "
+        "negligible). For a Si diode the switching term is the diode-side share of the Q<sub>rr</sub> "
+        "recovery energy (the larger share goes to the FET).", CH)
     eq_box(story, [r"i_D(\theta)=i_{ch}(\theta)\,(1-d(\theta)),\quad "
                    r"P_{cond}=\overline{\,V_f(i_D,T_j)\,i_{D}\,}",
-                   r"P_{sw,D}=\frac{1}{2}V_{OUT}\,Q_c\,f_{sw}\ \mathrm{(SiC)}\quad \mathrm{or}\quad "
-                   r"f_{sw}\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
+                   r"P_{sw,D}=f_{sw}\,E_{fr}\ \mathrm{(SiC,\ Q_c\ booked\ to\ FET)}\quad \mathrm{or}\quad "
+                   r"f_{sw}\,(1-k)\,\overline{Q_{rr}\,V_{OUT}}\ \mathrm{(Si)}"],
            number="7.5", ch=CH)
     if tr:
         nch = int(tr["Nch"])
         if tr["is_sic"]:
-            sw_sub = (f"&#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>&#183;f<sub>sw</sub> = "
-                      f"&#189;&#215;{_f(tr['Vo'],0)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}")
-            sw_param = ["Capacitive charge Q<sub>c</sub>", "SiC Schottky (no real reverse recovery)", _nc(tr['qc'])]
+            sw_sub = "forward-recovery E<sub>fr</sub> only &#8212; Q<sub>c</sub> is booked to the MOSFET turn-on (&#167; 7.4)"
+            sw_param = ["Capacitive charge Q<sub>c</sub> &#8594; FET", "SiC: Q<sub>c</sub> dissipates in the MOSFET, not the diode", _nc(tr['qc'])]
         else:
             sw_sub = (f"f<sub>sw</sub>&#183;Q<sub>rr</sub>&#183;V<sub>OUT</sub> share (Q<sub>rr</sub>={_nc(tr['qrr_eff'])})")
             sw_param = ["Recovery charge Q<sub>rr</sub>", "Si diode (diode-side share)", _nc(tr['qrr_eff'])]

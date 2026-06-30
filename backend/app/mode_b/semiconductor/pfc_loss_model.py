@@ -281,7 +281,12 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         P_cond_dio = avg(dio.vf(i_d_repr, Tj_dio)*i_d_density + dio.rd*ms_dio)
         didt = mos.didt(i_off, Vo); Qrr = dio.qrr_eff(i_off, didt, Tj_dio)
         if dio.is_sic:
-            P_sw_dio = fsw*(0.5*Vo*dio.qc*dio.k_qc + dio.e_fr); P_rr_to_fet = 0.0
+            # SiC Schottky: no minority-carrier reverse recovery. Its junction-capacitance charge
+            # Qc is charged through the MOSFET channel at the MOSFET's hard turn-on, so that
+            # 1/2*Vo*Qc energy is dissipated in the FET (not the diode). The diode keeps only its
+            # forward-recovery energy e_fr.
+            P_rr_to_fet = fsw*0.5*Vo*dio.qc*dio.k_qc
+            P_sw_dio = fsw*dio.e_fr
         else:
             E_rec = Qrr*Vo
             P_rr_to_fet = fsw*avg(dio.rr_fet_frac*E_rec*rr_active)
