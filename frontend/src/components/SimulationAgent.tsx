@@ -18,10 +18,12 @@ interface Props {
   selMaterial:    string
   selGrade:       string
   onBack:         () => void
+  /** Ring + 3D canvas captures posted up from the viewer, for embedding in the design report. */
+  onViews?:       (v: { ring?: string; threeD?: string }) => void
 }
 
 export const SimulationAgent: React.FC<Props> = ({
-  result, confirmedState, matType, selMaterial, selGrade, onBack,
+  result, confirmedState, matType, selMaterial, selGrade, onBack, onViews,
 }) => {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
@@ -57,6 +59,18 @@ export const SimulationAgent: React.FC<Props> = ({
     }
   }
   useEffect(() => () => roRef.current?.disconnect(), [])
+
+  // Receive the viewer's Ring + 3D canvas captures (posted from inside the iframe) and lift them
+  // to the wizard so the report generator can embed them. Namespaced key avoids clashing with the
+  // step7-contract message channel.
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      const v = (ev?.data as any)?.__sim_report_views
+      if (v && (v.ring || v.threeD)) onViews?.({ ring: v.ring, threeD: v.threeD })
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [onViews])
 
   // Fetch the package (for the viewer) AND step7's authoritative view-contract (for the
   // headline scalars) once when this page mounts.

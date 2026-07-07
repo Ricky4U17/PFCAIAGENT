@@ -24,6 +24,7 @@ h1{font-size:18px;margin:0 0 10px;color:#fff}h2{font-size:12.5px;margin:13px 0 7
     <div class="field"><label><span>Warm-up view</span><strong id="warmV">–</strong></label><input id="warmMin" type="range" min="1" max="60" step="1" value="20"></div>
     <div class="row"><button id="play">▶ Play half cycle</button><button id="reset">Reset</button></div>
     <div class="row" style="margin-top:6px"><button id="presetLo">Low-line spec</button><button id="presetHi">High-line spec</button></div>
+    <div class="row" style="margin-top:6px"><button id="capViews" title="Capture the Ring and 3D winding views into the design report">📸 Save Ring + 3D to report</button></div>
     <h2>Operating plane (Vin × load)</h2>
     <canvas id="planeC" width="328" height="178"></canvas>
     <div class="sub" id="planeNote" style="margin-top:4px"></div>
@@ -606,11 +607,30 @@ function Viewer(ev,doc){
   var _D7a=(typeof window!=='undefined')&&window.__STEP7_DATA__;
   if(_D7a&&_D7a.acceptance){var a7=_D7a.acceptance;acc={verdict:a7.verdict,nChecked:(a7.rows||[]).length,rows:(a7.rows||[]).map(function(r){return {name:r.name,have:true,val:r.val,ok:r.ok,limTxt:r.limTxt};})};accSrc='';accReasons=a7.reasons||[];}
   const accHtml='<div style="margin-bottom:4px"><b style="color:'+(acc.verdict==='APPROVE'?'#22c55e':acc.verdict==='REJECT'?'#ef4444':'#9ca3af')+'">'+acc.verdict+'</b>'+(acc.nChecked?'':' (no upstream limits set)')+accSrc+'</div>'+acc.rows.map(r=>{const c=(r.ok==null)?'#9ca3af':(r.ok?'#22c55e':'#ef4444');const mk=(r.ok==null)?'—':(r.ok?'✓':'✗');return '<div><span style="color:'+c+'">'+mk+'</span> '+r.name+': '+r.val+' <span style="color:#9ca3af">('+r.limTxt+')</span></div>';}).join('')+(accReasons.length?'<div style="margin-top:4px;color:#fca5a5">'+accReasons.map(function(x){return '• '+x;}).join('<br>')+'</div>':'');$('accPanel').innerHTML=accHtml;}
+ /* ---------- capture the Ring + 3D views as PNGs for the design report ----------
+    Both are drawn on the 2D #fieldC canvas (the 3D uses the canvas-2D wireframe fallback — the
+    WebGL canvas has no preserveDrawingBuffer, so toDataURL there would be blank). Drawing is
+    synchronous so the temporary geo switch never paints on screen; render() restores the live view. */
+ function captureReportViews(){
+  if(!_last)return null; var fc=$('fieldC'); if(!fc||!fc.toDataURL)return null;
+  var out={},savedGeo=geo;
+  try{drawRing(_last.op,_last.f);out.ring=fc.toDataURL('image/png');}catch(e){}
+  try{hideGL3();drawWire3D(_last.op,_last.f);out.threeD=fc.toDataURL('image/png');}catch(e){}
+  geo=savedGeo; try{render();}catch(e){}
+  return (out.ring||out.threeD)?out:null;
+ }
+ function postReportViews(){try{var v=captureReportViews();if(v&&global.parent&&global.parent!==global)global.parent.postMessage({__sim_report_views:v},'*');return v;}catch(e){return null;}}
  function mount(){
+  /* Defensive: if the Play/Reset control row is ever missing, recreate it so the animation is
+     always available (the button is otherwise static markup near the operating-point controls). */
+  if(!$('play')){var _wm=$('warmMin'),_host=_wm&&_wm.closest?_wm.closest('.field'):null;
+   if(_host&&_host.parentNode){var _r=doc.createElement('div');_r.className='row';
+    _r.innerHTML='<button id="play">▶ Play half cycle</button><button id="reset">Reset</button>';
+    _host.parentNode.insertBefore(_r,_host.nextSibling);}}
   $('vin').min=cfg.vinMin;$('vin').max=cfg.vinMax;$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);
   const v=ev.validation, srcCls=ev.pkg.__preview?'warn':'fea', srcTxt=ev.pkg.__preview?'SOURCE: preview example (no upstream package)':'SOURCE: injected field-package';
   const wire=cu.wire, wireTxt=`${wire.type} · ${wire.strands}×${wire.strandDia_mm}mm${(wire.parallel>1)?'×'+wire.parallel+'p':''}`;
-  _buildTiles();   // design-value + source tiles, rendered UNDER the view (#provRow)
+  try{_buildTiles();}catch(e){}   // design-value + source tiles, rendered UNDER the view (#provRow) — guarded so a tile error can't strip the controls below
   $('planeNote').innerHTML='Green = within spec · red = beyond (hypothetical) · gray = 133–179 V gap.';
   $('noteBox').innerHTML=(v.ok?'':'<b style="color:#fecaca">Validation: '+v.errors.join('; ')+'</b>');
   $('vin').addEventListener('input',render);$('load').addEventListener('input',render);$('phase').addEventListener('input',()=>{phase=+$('phase').value/1000;render()});$('warmMin').addEventListener('input',render);
@@ -618,13 +638,16 @@ function Viewer(ev,doc){
   $('presetHi').addEventListener('click',()=>{$('vin').value=Math.round(Math.min(230,cfg.vinMax));$('load').value=Math.round(Math.min(cfg.specHighLineMaxPct,100));render()});
   (doc.querySelectorAll('.fbtn')||[]).forEach(b=>b.addEventListener('click',()=>{doc.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.f;render()}));
   (doc.querySelectorAll('.gbtn')||[]).forEach(b=>b.addEventListener('click',()=>{doc.querySelectorAll('.gbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');geo=b.dataset.g;render()}));
-  $('play').addEventListener('click',()=>{playing=!playing;$('play').textContent=playing?'❚❚ Pause':'▶ Play half cycle';$('play').classList.toggle('active',playing);if(playing){last=performance.now();raf=requestAnimationFrame(loop)}else cancelAnimationFrame(raf)});
-  $('reset').addEventListener('click',()=>{$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);phase=0.5;$('phase').value=500;mode='flux';geo='cross';doc.querySelectorAll('.fbtn').forEach((x,i)=>x.classList.toggle('active',i===0));doc.querySelectorAll('.gbtn').forEach((x,i)=>x.classList.toggle('active',i===0));render()});
+  var _play=$('play'); if(_play)_play.addEventListener('click',()=>{playing=!playing;$('play').textContent=playing?'❚❚ Pause':'▶ Play half cycle';$('play').classList.toggle('active',playing);if(playing){last=performance.now();raf=requestAnimationFrame(loop)}else cancelAnimationFrame(raf)});
+  var _reset=$('reset'); if(_reset)_reset.addEventListener('click',()=>{$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);phase=0.5;$('phase').value=500;mode='flux';geo='cross';doc.querySelectorAll('.fbtn').forEach((x,i)=>x.classList.toggle('active',i===0));doc.querySelectorAll('.gbtn').forEach((x,i)=>x.classList.toggle('active',i===0));render()});
   const fc=$('fieldC');if(fc&&fc.addEventListener){fc.addEventListener('pointerdown',e=>{if(geo!=='threeD')return;drag3=true;lx=e.clientX;ly=e.clientY;});window.addEventListener&&window.addEventListener('pointerup',()=>{drag3=false;});fc.addEventListener('pointermove',e=>{if(!drag3||geo!=='threeD')return;yaw+=(e.clientX-lx)*0.01;pitch=clamp(pitch+(e.clientY-ly)*0.01,-1.4,1.4);lx=e.clientX;ly=e.clientY;render();});}
   function loop(now){const dt=(now-last)/1000;last=now;phase=(phase+dt/1.6)%1;$('phase').value=Math.round(phase*1000);render();if(playing)raf=requestAnimationFrame(loop)}
   // Phase C (Option B): receive step7's contract from the parent and re-render with its values.
-  window.addEventListener('message',function(mev){if(mev&&mev.data&&mev.data.__step7_contract){window.__STEP7_DATA__=mev.data.__step7_contract;try{_buildTiles();render();}catch(e){}}});
-  render();
+  window.addEventListener('message',function(mev){if(mev&&mev.data&&mev.data.__step7_contract){window.__STEP7_DATA__=mev.data.__step7_contract;try{_buildTiles();render();try{postReportViews();}catch(e){}}catch(e){}}});
+  try{render();}catch(e){}
+  // capture Ring + 3D for the report: once now, and on demand from the button
+  var _cap=$('capViews'); if(_cap)_cap.addEventListener('click',function(){postReportViews();_cap.textContent='📸 Saved ✓';setTimeout(function(){_cap.textContent='📸 Save Ring + 3D to report';},1400);});
+  try{postReportViews();}catch(e){}
   // hover crosshair + value tooltip on the time/field graphs
   _hover('lossC',function(){drawLoss(_last.op,_last.wf,_last.wfRef);},function(){return _last.wf.half;},'t',function(p){return 't '+p.t.toFixed(2)+' ms · Pcore '+p.Pcore.toFixed(2)+' W · Pcu '+p.Pcu.toFixed(2)+' W';});
   _hover('ltC',function(){drawL(_last.op,_last.wf,_last.wfRef);},function(){return _last.wf.half;},'t',function(p){return 't '+p.t.toFixed(2)+' ms · L '+((p.L_uH)||0).toFixed(1)+' µH';});

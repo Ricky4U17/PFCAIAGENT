@@ -3751,3 +3751,52 @@ Vendored exactly like the MOV/NTC engines (pure, read-only consumer of upstream 
 
 Verified: selftest passes; HTTP options + design 200 (Class B, L_DM 6.3µH, C_X 4.7µF, L_CM 2.14mH,
 C_Y 31.7nF, leakage 3.15<3.5 mA); frontend tsc + vite build clean. No prior step touched.
+
+## C75 — NTC ICL vendor database integrated (2026-07-06)
+
+Wire the 997-part NTC inrush-current-limiter Excel (specs/Database/ICL_Database.xlsx) into the
+Input-Protection NTC selector, mirroring the semiconductor database agent.
+- backend/app/mode_b/inputprotection/database.py: ingest ICL_Database.xlsx → normalized records;
+  build_all() stores a LOCAL xlsx copy + icl.json cache under inputprotection/data/; load()
+  self-bootstraps. screen_catalog(s,r) returns the same (name, ok, reasons) contract as the built-in
+  catalog. R25 = real datasheet value (hard inrush screen); pulse energy ESTIMATED from disc diameter
+  (E≈0.30·d² J, flagged). Ranks PASS-first, smallest adequate disc, R25 nearest the pick. Plus
+  options()/filter_parts()/rank().
+- ntc_bypass_select.screen_catalog now prefers the DB, falls back to NTC_CATALOG.
+- report_inputprotection.py (8.6) + InputProtection.tsx notes updated to the estimated-energy caveat.
+Verified: calculate_ntc → 12 PASS parts (Ametherm/TDK 29–31mm discs); report builds; tsc clean.
+
+## C76 — MOV vendor database pipeline wired (ready for MOV_Database.xlsx) (2026-07-06)
+
+No filled MOV vendor Excel exists yet (only the template), so the pipeline is built to go live the
+moment a real file lands, without regressing today.
+- database.py MOV section: ingest_mov/build_mov/load_mov/options_mov + screen_catalog_mov(s, gov,
+  mcov_req, pol) — same (name, ok, reasons) contract as the engine screen; all real datasheet scalars
+  (MCOV, V_1mA, Imax 8/20, Vc@Imax) so no estimates. Ranks PASS-first then lowest let-through. Live
+  source is a filled MOV_Database.xlsx / mov_varistors.xlsx only; TEMPLATE excluded → screen returns
+  [] and the engine keeps its richer 6-part built-in catalog.
+- mov_surge_select.screen_catalog prefers the DB, falls back to the extracted _screen_builtin;
+  self_test #3 targets _screen_builtin (data-source-independent). Self-test passes.
+
+## C77 — Magnetics sim viewer: Ring+3D into the report + Play-button hardening (2026-07-06)
+
+Two Simulation-Agent (pfc_sim_agent_v14.html) improvements requested by the designer.
+1) Ring + 3D winding views embedded in the magnetics documentation:
+   - pfc_sim_agent_v14.html: captureReportViews() renders the Ring (2D) and 3D (canvas-2D wireframe
+     fallback — the WebGL canvas lacks preserveDrawingBuffer so its toDataURL is blank) to PNG data
+     URIs from #fieldC, synchronously (no on-screen flicker; render() restores the live view).
+     postReportViews() posts {__sim_report_views} to the parent; auto-runs on mount + on step7
+     contract, plus a "📸 Save Ring + 3D to report" button.
+   - SimulationAgent.tsx: message listener lifts the captures via new onViews prop.
+   - Step7Wizard.tsx: simViews state, passed to SimulationAgent (onViews) and ReviewMagnetics.
+   - ReviewMagnetics.tsx: includes sim_views in the report payload's approved_design.
+   - generate_steps13_14.py: _img_from_datauri() (defensive base64→ReportLab Image) + new
+     _sec_14_9_2_winding_views() embedding Ring + 3D side-by-side; called from the build guarded and
+     INDEPENDENT of the 14.9 cross-check (which can early-return). Absent/bad captures skip silently.
+2) Play-button hardening on the viewer: guarded _buildTiles()/render() so a tile/render error can no
+   longer abort mount() before the control wiring; play/reset wiring guarded with existence checks;
+   and mount() recreates the Play/Reset row if #play is ever missing.
+Verified: backend builds a real PDF with the winding-views section (both + ring-only); frontend tsc
+clean; embedded sim-HTML JS syntax-checked (0 errors). Could NOT reproduce the missing Play button
+from source (it is present + wired); the hardening self-heals whatever stripped it at runtime — needs
+an in-app confirmation.

@@ -51,6 +51,7 @@ interface Props {
   allCandidates:  any[]
   winding:        string
   step8:          any
+  simViews?:      { ring?: string; threeD?: string } | null
   onBack:         () => void
   onRestart:      () => void
   onSimAgent?:    () => void
@@ -59,7 +60,7 @@ interface Props {
 
 export const ReviewMagnetics: React.FC<Props> = ({
   result, confirmedState, matType, selMaterial, selGrade,
-  allCandidates, winding, step8, onBack, onRestart, onSimAgent, onApprove,
+  allCandidates, winding, step8, simViews, onBack, onRestart, onSimAgent, onApprove,
 }) => {
   const [rptLoading, setRptLoad] = useState(false)
   const [rptError,   setRptError] = useState<string | null>(null)
@@ -875,6 +876,9 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
           ...result,
           material_key:   result.material_key || (matType === 'powder' ? selMaterial : selGrade),
           all_candidates: allCandidates,
+          // Ring + 3D winding captures (present only if the designer opened the Simulation Agent);
+          // the backend embeds them in Step 14.9.2 and silently skips when absent.
+          ...(simViews && (simViews.ring || simViews.threeD) ? { sim_views: simViews } : {}),
         },
       })
       const url = URL.createObjectURL(blob)

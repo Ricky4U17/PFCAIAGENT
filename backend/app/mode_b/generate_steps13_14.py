@@ -151,6 +151,25 @@ def _mpl_to_image(fig, width_mm=170):
     return Image(buf, width=w, height=h)
 
 
+def _img_from_datauri(uri, width_mm=105):
+    """Decode a base64 PNG/JPEG data URI (a canvas capture from the Simulation-Agent viewer) into
+    an aspect-preserved ReportLab Image flowable. Returns None on any problem (fully defensive so a
+    bad/absent capture can never break the report)."""
+    try:
+        import base64
+        if not uri or not isinstance(uri, str) or 'base64,' not in uri:
+            return None
+        raw = base64.b64decode(uri.split('base64,', 1)[1])
+        from PIL import Image as PILImage
+        pw, ph = PILImage.open(io.BytesIO(raw)).size
+        if not pw or not ph:
+            return None
+        w = width_mm * mm
+        return Image(io.BytesIO(raw), width=w, height=w * ph / pw)
+    except Exception:
+        return None
+
+
 # ── Physics helpers ───────────────────────────────────────────────────────────
 def _Bac_pk_t(Vac_rms, Vbus, N, Ae_m2, fsw, f_line=60, n_pts=500):
     """Return (t_s, Bac_pk_T) arrays over half line cycle."""
@@ -1735,6 +1754,41 @@ def _sec_14_9_sim_verification(story, approved_design, state, S):
         "(PFC_Inductor_Engine_Equations.pdf).", S['note']))
 
 
+def _sec_14_9_2_winding_views(story, approved_design, S):
+    """Step 14.9.2 — Ring cross-section + 3D winding views captured from the Simulation-Agent
+    viewer. INDEPENDENT of the 14.9 cross-check (which may early-return): the images embed whenever
+    the payload carries them. Present only when the designer opened the Simulation-Agent page, which
+    posts the canvas captures into the report payload; absent/bad captures degrade silently."""
+    views    = (approved_design or {}).get('sim_views') or {}
+    ring_img = _img_from_datauri(views.get('ring'),   width_mm=82)
+    td_img   = _img_from_datauri(views.get('threeD'), width_mm=82)
+    if not (ring_img or td_img):
+        return
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph('Step 14.9.2) Winding geometry — Simulation-Agent views', S['h3']))
+    story.append(Paragraph(
+        "Ring cross-section and 3D view of the wound core, captured from the interactive "
+        "Simulation-Agent field viewer at the design operating point. The ring view shows the "
+        "layer-by-layer bundle packing around the bore; the 3D view shows the winding wrapping "
+        "the assembled core stack.", S['body']))
+    story.append(Spacer(1, 2*mm))
+    imgs = [(ring_img, 'Ring cross-section'), (td_img, '3D view')]
+    imgs = [(im, cap) for im, cap in imgs if im is not None]
+    if len(imgs) == 2:
+        cw = (PAGE_W - LM - RM) / 2
+        body_row = [imgs[0][0], imgs[1][0]]
+        cap_row  = [Paragraph(imgs[0][1], S['note']), Paragraph(imgs[1][1], S['note'])]
+        t = Table([body_row, cap_row], colWidths=[cw, cw])
+        t.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                               ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                               ('TOPPADDING', (0, 0), (-1, -1), 2),
+                               ('BOTTOMPADDING', (0, 0), (-1, -1), 2)]))
+        story.append(KeepTogether(t))
+    else:
+        for im, cap in imgs:
+            story.append(KeepTogether([im, Paragraph(cap, S['note'])]))
+
+
 def generate_steps13_14_pdf(approved_design: dict, state: dict) -> bytes:
     """Generate Steps 13–14 PDF bytes."""
     D = _resolve_params(approved_design, state)
@@ -1780,6 +1834,10 @@ def generate_steps13_14_pdf(approved_design: dict, state: dict) -> bytes:
     _sec_14_8_design_review(story, D, S)           # audit checklist + narrative
     try:                                           # 14.9 — independent sim-agent cross-check
         _sec_14_9_sim_verification(story, approved_design, state, S)
+    except Exception:
+        pass
+    try:                                           # 14.9.2 — captured Ring + 3D winding views
+        _sec_14_9_2_winding_views(story, approved_design, S)
     except Exception:
         pass
 
