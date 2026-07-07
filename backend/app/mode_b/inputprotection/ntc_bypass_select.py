@@ -180,7 +180,18 @@ NTC_CATALOG = [
 
 
 def screen_catalog(s: Spec, r: NtcResult):
-    """Return rows: (name, pass/fail, reasons)."""
+    """Return rows: (name, pass/fail, reasons).
+
+    Prefer the real vendor ICL database (ICL_Database.xlsx via `database.screen_catalog`); fall
+    back to the built-in representative catalog below only if that database is unavailable.
+    """
+    try:
+        from . import database as db
+        rows = db.screen_catalog(s, r)
+        if rows:
+            return rows
+    except Exception:
+        pass
     out = []
     for name, r25, imax, ejoule, cmax in NTC_CATALOG:
         reasons = []

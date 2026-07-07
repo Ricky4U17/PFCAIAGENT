@@ -10,8 +10,8 @@
  *     from the selected MOSFET; the bulk-cap V rating from the approved capacitor.
  *
  * Every carried-in quantity is shown read-only; only the designer knobs (inrush
- * target, IEC level/criterion, margins) are editable. Part selection runs against the
- * engines' built-in catalogs for now (the vendor NTC/MOV database attaches here later).
+ * target, IEC level/criterion, margins) are editable. NTC part selection runs against the
+ * vendor ICL database (ICL_Database.xlsx); the MOV catalog is still the engine's built-in.
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
@@ -214,8 +214,10 @@ export const InputProtection: React.FC<Props> = ({
               </div>
               <CatalogTable rows={ntcRes.catalog} emptyNote="No catalog parts loaded." />
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Built-in representative catalog — your vendor NTC database attaches here later. The NTC steady-state
-                loss is folded into the efficiency cross-check; the sizing is documented step-by-step in its chapter.
+                Screened against the vendor ICL database (ICL_Database.xlsx). R25 is the real datasheet value;
+                pulse energy is estimated from the disc diameter — confirm energy / max-C on the datasheet before
+                ordering. The NTC steady-state loss is folded into the efficiency cross-check; the sizing is
+                documented step-by-step in its chapter.
               </div>
             </>)}
           </div>

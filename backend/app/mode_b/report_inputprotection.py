@@ -137,7 +137,8 @@ def build_ntc_story(story, design, cap=None, opts=None):
     step_h(story, "8.6", "Candidate Screen", CH)
     data_table(story, "8.6", "Catalog Screen",
         f"Accept if R25 &#8805; {_f(r['r25_pick'],2)} {_OHM} and pulse rating &#8805; {_f(r['e_pulse_required'],0)} J "
-        "(or the equivalent max-C). Representative values — confirm on the live datasheet.",
+        "(or the equivalent max-C). Screened against the vendor ICL database; R25 is the datasheet "
+        "value, pulse energy is estimated from disc diameter — confirm energy / max-C on the datasheet.",
         ["Verdict", "Candidate part", "Notes"],
         [["PASS" if c["ok"] else "FAIL", c["name"], "; ".join(c["reasons"])[:120]] for c in cat] or [["—", "no catalog", "—"]],
         col_widths=[CW*0.12, CW*0.40, CW*0.48], ch=CH)
