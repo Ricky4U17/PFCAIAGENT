@@ -302,7 +302,23 @@ def effective_alpha(v1ma: float, vc_imax: float, imax: float) -> float:
 
 
 def screen_catalog(s: Spec, gov: Path, mcov_req: float, pol: CritPolicy):
-    """Screen parts for the GOVERNING (highest-current) path."""
+    """Screen parts for the GOVERNING (highest-current) path.
+
+    Prefer the real vendor MOV database (`database.screen_catalog_mov`) when a filled workbook is
+    present; otherwise fall back to the built-in representative catalog below.
+    """
+    try:
+        from . import database as db
+        rows = db.screen_catalog_mov(s, gov, mcov_req, pol)
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return _screen_builtin(s, gov, mcov_req, pol)
+
+
+def _screen_builtin(s: Spec, gov: Path, mcov_req: float, pol: CritPolicy):
+    """Representative built-in catalog screen (fallback / self-test reference)."""
     out = []
     v_drive = gov.v_oc + (v_line_peak(s) if s.phase_superposition else 0.0)
     for name, mcov, v1ma, imax, vc_max, e2ms in MOV_CATALOG:
@@ -476,9 +492,9 @@ def self_test():
     gov_b = max(resolve_stress(sb)[0], key=lambda p: p.i_sc)
     mc = resolve_mcov(sa)[0]
     res_a = dict((n, ok) for n, ok, _ in
-                 screen_catalog(sa, gov_a, mc, CRITERION_POLICY["A"]))
+                 _screen_builtin(sa, gov_a, mc, CRITERION_POLICY["A"]))
     res_b = dict((n, ok) for n, ok, _ in
-                 screen_catalog(sb, gov_b, mc, CRITERION_POLICY["B"]))
+                 _screen_builtin(sb, gov_b, mc, CRITERION_POLICY["B"]))
     part = "Littelfuse V20E275P / UltraMOV 20mm 275V"
     assert res_a[part] is False, "expected FAIL under criterion A"
     assert res_b[part] is True, "expected PASS under criterion B"
