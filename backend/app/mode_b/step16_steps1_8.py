@@ -216,9 +216,16 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     # 6.5 power dissipation
     pdiss_lo1 = p["iphi_rms_lo"]**2 * rcs_sel
     pdiss_hi1 = p["iphi_rms_hi"]**2 * rcs_sel
+    # Numeric Method-2 band (V_EA within the preferred 4.0–5.0 V window, both lines):
+    # V_EA,eff rises with R_CS, so the lower bound is @4.0 V and the upper @5.0 V.
+    m2_lo = max(rcs_m2(c["riac_fr"], 4.0 - c["vea_min"], pmax_nch_lo),
+                rcs_m2(c["riac_hv"], 4.0 - c["vea_min"], pmax_nch_hi))
+    m2_hi = min(rcs_m2(c["riac_fr"], 5.0 - c["vea_min"], pmax_nch_lo),
+                rcs_m2(c["riac_hv"], 5.0 - c["vea_min"], pmax_nch_hi))
     out["step6"] = {
         "pmax_nch_lo": pmax_nch_lo, "pmax_nch_hi": pmax_nch_hi,
         "rcs1_ll": rcs1_ll, "rcs1_hl": rcs1_hl, "den_common": den_common,
+        "m2_lo": m2_lo, "m2_hi": m2_hi,
         "m2_rows": m2_rows, "rcs_sel": rcs_sel,
         "vee_ll": vee_ll, "vee_hl": vee_hl,
         "vea_max_ll": vee_ll + c["vea_min"], "vea_max_hl": vee_hl + c["vea_min"],
@@ -230,7 +237,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
              f"{rcs_m2(c['riac_hv'],3.4,pmax_nch_hi)*1e3:.2f} mΩ", "Lower V_EA bound"],
             ["AND9925 Eq. 11 @ V_EA=5.0 V", f"{rcs_m2(c['riac_fr'],4.4,pmax_nch_lo)*1e3:.2f} mΩ",
              f"{rcs_m2(c['riac_hv'],4.4,pmax_nch_hi)*1e3:.2f} mΩ", "Upper V_EA bound"],
-            ["Selected: R_CS = 15 mΩ", "✓ inside overlap", "✓ inside overlap", "Lowest std value in zone"],
+            [f"Selected: R_CS = {rcs_sel*1e3:.1f} mΩ", "✓ inside overlap", "✓ inside overlap",
+             "Designer selection" if p.get("rcs") else "Lowest std value in zone"],
         ],
         "verify_rows": [
             ["Low line", f"{vee_ll:.4f} V", f"{vee_ll+c['vea_min']:.4f} V",

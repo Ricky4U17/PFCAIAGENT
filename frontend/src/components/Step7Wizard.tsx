@@ -132,8 +132,8 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   // Incremented every time user opens the Review tab — forces ReviewMagnetics to
   // remount with the currently-selected candidate's data (never stale).
   const [reviewKey, setReviewKey] = useState(0)
-  // Ring + 3D winding captures from the Simulation-Agent viewer, carried into the report payload.
-  const [simViews, setSimViews] = useState<{ ring?: string; threeD?: string } | null>(null)
+  // Ring / thermal-ring / 3D winding captures from the Simulation-Agent viewer, carried into the report payload.
+  const [simViews, setSimViews] = useState<{ ring?: string; ring_thermal?: string; threeD?: string } | null>(null)
 
   // Load material comparison once
   useEffect(() => {

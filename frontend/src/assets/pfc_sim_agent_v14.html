@@ -275,7 +275,7 @@ function Viewer(ev,doc){
  const Brad=ev.Brad, windowGeom=ev.windowGeom, specMaxPct=ev.specMaxPct, crestIL=ev.crestIL, MU0=4e-7*Math.PI;
  let mode='flux',geo='cross',playing=false,phase=0.5,raf=null,last=0,yaw=0.7,pitch=0.42,drag3=false,lx=0,ly=0;let wcCache=null,wcWarm=null;function getWC(w){if(wcCache&&wcWarm===w)return wcCache;wcWarm=w;wcCache=ev.worstCase(w);return wcCache;}
  const CM={flux:[[0,[10,22,55]],[.28,[34,120,205]],[.55,[40,205,150]],[.78,[245,205,60]],[1,[235,60,40]]],core:[[0,[12,12,22]],[.4,[150,60,12]],[.72,[245,150,30]],[1,[255,242,160]]],copper:[[0,[40,52,80]],[.4,[150,110,50]],[.72,[235,150,40]],[1,[255,205,95]]],thermal:[[0,[20,45,95]],[.45,[40,165,205]],[.74,[245,205,70]],[1,[232,55,40]]]};
- function cmap(n,t){const s=CM[n];t=clamp(t,0,1);for(let i=0;i<s.length-1;i++){if(t<=s[i+1][0]){const f=(t-s[i][0])/(s[i+1][0]-s[i][0]||1),a=s[i][1],b=s[i+1][1];return`rgb(${lerp(a[0],b[0],f)|0},${lerp(a[1],b[1],f)|0},${lerp(a[2],b[2],f)|0})`}}const e=s[s.length-1][1];return`rgb(${e[0]},${e[1]},${e[2]})`}
+ function cmap(n,t){const s=CM[n];t=clamp(t,0,1);for(let i=0;i<s.length-1;i++){if(t<=s[i+1][0]){let f=(t-s[i][0])/(s[i+1][0]-s[i][0]||1);f=f*f*(3-2*f);const a=s[i][1],b=s[i+1][1];return`rgb(${lerp(a[0],b[0],f)|0},${lerp(a[1],b[1],f)|0},${lerp(a[2],b[2],f)|0})`}}const e=s[s.length-1][1];return`rgb(${e[0]},${e[1]},${e[2]})`}
  function sym(ctx,x,y,r,col,type){ctx.beginPath();ctx.fillStyle=col;ctx.arc(x,y,r,0,7);ctx.fill();ctx.lineWidth=.7;ctx.strokeStyle='rgba(255,255,255,.55)';ctx.stroke();ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=.9;ctx.beginPath();if(type==='x'){const k=r*.62;ctx.moveTo(x-k,y-k);ctx.lineTo(x+k,y+k);ctx.moveTo(x+k,y-k);ctx.lineTo(x-k,y+k)}else{ctx.arc(x,y,r*.3,0,7)}ctx.stroke()}
  function colorbar(ctx,W,H,name,vmin,vmax){const bx=W-22,by=44,bh=H-130;for(let i=0;i<bh;i++){ctx.fillStyle=cmap(name,1-i/bh);ctx.fillRect(bx,by+i,12,1)}ctx.fillStyle='#cbd5e1';ctx.font='10.5px Segoe UI';const u=name==='flux'?' T':name==='thermal'?' °C':'';ctx.fillText((name==='flux'?vmax.toFixed(2):vmax.toFixed(0))+u,bx-4,by-7)}
  function fieldSetup(op,f){let valAt,vmin=0,vmax;
@@ -320,9 +320,14 @@ function Viewer(ev,doc){
   const crowd=ev.crowdPeak,wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2,lI=op.Pcu_dc/4+op.Pcu_ac*wIn/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wOut/sw4,lmx=Math.max(lI,lO,1e-9),sR=Math.max(od*px*0.42,2.4);
   var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
   let placed=0;for(let L=0;L<_nl&&placed<_tot;L++){const rr=(geom.rin-(L+0.5)*od)*px,cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed);for(let i=0;i<cnt;i++){const a=i/cnt*2*Math.PI+L*0.4;sym(ctx,cx+rr*Math.cos(a),cy+rr*Math.sin(a),sR,(mode==='copper')?cmap('copper',lI/lmx):'#2a6fb0','x')}placed+=cnt}
-  const rO=(geom.rout+od*0.8)*px;for(let i=0;i<N;i++){const a=i/N*2*Math.PI;sym(ctx,cx+rO*Math.cos(a),cy+rO*Math.sin(a),sR,(mode==='copper')?cmap('copper',lO/lmx):'#1a1a1a','dot')}
+  /* outer (OD) winding: same TOTAL pass count as the bore (every turn crosses OD once), packed by
+     each outer layer's own circumference capacity — was hardcoded to N dots in a single layer,
+     which under-counted bifilar/trifilar windings and never showed a 2nd outer layer. */
+  let placedO=0,outerLayers=0;
+  for(let L=0;placedO<_tot&&L<8;L++){const rmm=geom.rout+(L+0.5)*od,capO=Math.max(1,Math.floor(2*Math.PI*rmm/od)),cnt=Math.min(capO,_tot-placedO),rr=rmm*px;
+   for(let i=0;i<cnt;i++){const a=i/cnt*2*Math.PI+L*0.35;sym(ctx,cx+rr*Math.cos(a),cy+rr*Math.sin(a),sR,(mode==='copper')?cmap('copper',lO/lmx):'#1a1a1a','dot')}placedO+=cnt;outerLayers=L+1}
   ctx.strokeStyle='rgba(148,163,184,.45)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(cx,cy,Math.max(holeR,0.1)*px,0,7);ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle='#cbd5e1';ctx.font='11px Segoe UI';ctx.fillText('⊗ bore ('+wg.layersNeeded+'L · '+(wg.passes||N)+(wg.nParallel>1?' passes, '+wg.nParallel+'×'+N:' turns')+') · ⊙ outer',14,H-30);ctx.fillText('K_u '+(wg.Ku*100).toFixed(0)+'% · residual bore Ø'+(2*holeR).toFixed(1)+'mm',14,H-14);
+  ctx.fillStyle='#cbd5e1';ctx.font='11px Segoe UI';ctx.fillText('⊗ bore ('+wg.layersNeeded+'L · '+(wg.passes||N)+(wg.nParallel>1?' passes, '+wg.nParallel+'×'+N:' turns')+') · ⊙ outer ('+outerLayers+'L · '+placedO+')',14,H-30);ctx.fillText('K_u '+(wg.Ku*100).toFixed(0)+'% · residual bore Ø'+(2*holeR).toFixed(1)+'mm',14,H-14);
   if(wg.overfull){ctx.fillStyle='#fecaca';ctx.fillText('⚠ K_u>1',cx+60,H-14)}colorbar(ctx,W,H,mode,vmin,vmax)}
  function fr2(ctx,W,H,m,title){ctx.fillStyle='#0b1220';ctx.fillRect(0,0,W,H);ctx.fillStyle='#e5e7eb';ctx.font='11.5px Segoe UI';ctx.fillText(title,8,13);ctx.strokeStyle='rgba(148,163,184,.25)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(m.l,m.t);ctx.lineTo(m.l,H-m.b);ctx.lineTo(W-m.r,H-m.b);ctx.stroke()}
  function tks(ctx,W,H,m,xmin,xmax,ymin,ymax,nx,ny,xd,yd){ctx.fillStyle='#9ca3af';ctx.font='9px Segoe UI';ctx.strokeStyle='rgba(148,163,184,.12)';ctx.lineWidth=1;for(let i=0;i<=nx;i++){const v=xmin+(xmax-xmin)*i/nx,x=m.l+(W-m.l-m.r)*i/nx;ctx.fillText(v.toFixed(xd),x-9,H-m.b+11)}for(let i=0;i<=ny;i++){const v=ymin+(ymax-ymin)*i/ny,y=H-m.b-(H-m.t-m.b)*i/ny;ctx.fillText(v.toFixed(yd),3,y+3);ctx.beginPath();ctx.moveTo(m.l,y);ctx.lineTo(W-m.r,y);ctx.stroke()}}
@@ -440,7 +445,7 @@ function Viewer(ev,doc){
       push(path[p][0]*cph+dx*od/2,path[p][1]+dy*od/2,path[p][0]*sph+dz*od/2,dx,dy,dz,path[p][0],1);}}
     for(let p=0;p<Mq;p++){const q=(p+1)%Mq;for(let s=0;s<K;s++){const s2=(s+1)%K;
      quad(base+p*K+s,base+q*K+s,base+q*K+s2,base+p*K+s2);}}
-    placed++;if(placed>=N)break;}}
+    placed++;if(placed>=_tot)break;}}   /* draw ALL passes (N×nParallel), not only the first N — layers 2/3 were truncated */
   return {pos:new Float32Array(P),nrm:new Float32Array(Nv),vR:R,vM:M,
           mat:new Float32Array(M),idx:new Uint16Array(I),nVert:vi};}
  function tryInitGL(){try{
@@ -547,15 +552,25 @@ function Viewer(ev,doc){
      pcA+=Pco;puA+=Pcu;if(Bx>bm)bm=Bx;if(H>hc)hc=H;if(Pco>pci)pci=Pco;if(Pcu>pui)pui=Pcu;}
    return {W:W,half:wa.t_ms[n-1],ls:ls,Pcore_avg:pcA/n,Pcu_avg:puA/n,Ptot_avg:(pcA+puA)/n,Bmax:bm,Hcrest:hc,PcoreInst:pci,PcuInst:pui};
  }
+ var _rc=null; /* per-operating-point cache: op/waveform/acceptance depend only on (vin,load,warm) —
+    NOT on the half-cycle phase — so during Play only the instantaneous field f is recomputed each
+    frame. This keeps the animation at full frame rate (smooth colour transitions). */
  function render(){const vin=+$('vin').value,lf=+$('load').value/100,warmMin=+$('warmMin').value;$('warmV').textContent=warmMin+' min';
-  const op=ev.opPoint(vin,lf,warmMin),f=ev.inst(op,phase),wf=ev.waveform(op),wg=windowGeom();
-  // Phase C: drive the loss / B–H / L(t) graphs from step7's per-Vin waveform, INTERPOLATED across
-  // Vin and SCALED with load → animates continuously, equals step7 at the design point.
-  var _s7d=_s7sample(vin,lf);
-  if(_s7d){wf.W=_s7d.W;wf.half=_s7d.half;wf.pcMax=_s7d.PcoreInst;wf.puMax=_s7d.PcuInst;
-    wf.lMin=Math.min.apply(null,_s7d.W.map(function(p){return p.L_uH;}));
-    wf.lMax=Math.max.apply(null,_s7d.W.map(function(p){return p.L_uH;}));}
-  const inSpec=drawPlane(vin,lf*100);const smp=specMaxPct(vin),refLf=(smp===null?1:smp/100),opRef=ev.opPoint(vin,refLf,warmMin),wfRef=ev.waveform(opRef);
+  const _key=vin+'|'+lf+'|'+warmMin+'|'+((typeof window!=='undefined'&&window.__STEP7_DATA__)?1:0);
+  const _opChanged=!(_rc&&_rc.key===_key);
+  if(_opChanged){
+   const op0=ev.opPoint(vin,lf,warmMin),wf0=ev.waveform(op0),wg0=windowGeom();
+   // Phase C: drive the loss / B–H / L(t) graphs from step7's per-Vin waveform, INTERPOLATED across
+   // Vin and SCALED with load → animates continuously, equals step7 at the design point.
+   var _s7d0=_s7sample(vin,lf);
+   if(_s7d0){wf0.W=_s7d0.W;wf0.half=_s7d0.half;wf0.pcMax=_s7d0.PcoreInst;wf0.puMax=_s7d0.PcuInst;
+     wf0.lMin=Math.min.apply(null,_s7d0.W.map(function(p){return p.L_uH;}));
+     wf0.lMax=Math.max.apply(null,_s7d0.W.map(function(p){return p.L_uH;}));}
+   const smp0=specMaxPct(vin),refLf0=(smp0===null?1:smp0/100),opRef0=ev.opPoint(vin,refLf0,warmMin),wfRef0=ev.waveform(opRef0);
+   _rc={key:_key,op:op0,wf:wf0,wg:wg0,s7d:_s7d0,refLf:refLf0,wfRef:wfRef0};
+  }
+  const op=_rc.op,wf=_rc.wf,wg=_rc.wg,_s7d=_rc.s7d,refLf=_rc.refLf,wfRef=_rc.wfRef,f=ev.inst(op,phase);
+  const inSpec=drawPlane(vin,lf*100);
   if(geo!=='threeD')hideGL3();(geo==='cross'?drawCross:geo==='ring'?drawRing:draw3D)(op,f);drawLoss(op,wf,wfRef);drawTemp(op);drawL(op,wf,wfRef);
   _last={op:op,f:f,wf:wf,wfRef:wfRef,refLf:refLf,vin:vin};
   $('kIc').textContent=op.Ic.toFixed(2)+' A';$('kL').textContent=(f.L_inst*1e6).toFixed(1)+' µH';$('kBp').textContent=(f.Bmean*ev.crowdPeak).toFixed(3)+' T';$('kH').textContent=f.H.toFixed(1)+' Oe';
@@ -601,20 +616,23 @@ function Viewer(ev,doc){
   $('vinV').textContent=vin+' Vac';$('phV').textContent=f.t_ms.toFixed(2)+' ms';$('loadV').textContent=(lf*100).toFixed(0)+' % · '+(lf*cfg.Prated).toFixed(0)+' W';
   $('modeBadge').textContent=(geo==='cross'?'Cross-section':'Ring')+' · '+({flux:'Flux B',copper:'Cu loss',core:'Core loss',thermal:'T'}[mode]);
   $('caption').textContent=(wf.dcmFrac>0.5?'⚠ DCM-dominant at this load (CCM model invalid). ':'')+(inSpec?'':'Beyond spec envelope (hypothetical). ');
+  if(_opChanged){ /* acceptance verdict depends only on the operating point — skip the DOM rebuild on phase-only (Play) frames */
   const wc=getWC(warmMin),TIER={analytic:'T1',computed:'T1',input:'T0',fea:'T2',measured:'T3'};
   let acc=ev.evaluateAcceptance(wc),accSrc=' · worst-case scan',accReasons=[];
   // Option B: use step7's AUTHORITATIVE design verdict (passed + fail_reasons) when posted.
   var _D7a=(typeof window!=='undefined')&&window.__STEP7_DATA__;
   if(_D7a&&_D7a.acceptance){var a7=_D7a.acceptance;acc={verdict:a7.verdict,nChecked:(a7.rows||[]).length,rows:(a7.rows||[]).map(function(r){return {name:r.name,have:true,val:r.val,ok:r.ok,limTxt:r.limTxt};})};accSrc='';accReasons=a7.reasons||[];}
-  const accHtml='<div style="margin-bottom:4px"><b style="color:'+(acc.verdict==='APPROVE'?'#22c55e':acc.verdict==='REJECT'?'#ef4444':'#9ca3af')+'">'+acc.verdict+'</b>'+(acc.nChecked?'':' (no upstream limits set)')+accSrc+'</div>'+acc.rows.map(r=>{const c=(r.ok==null)?'#9ca3af':(r.ok?'#22c55e':'#ef4444');const mk=(r.ok==null)?'—':(r.ok?'✓':'✗');return '<div><span style="color:'+c+'">'+mk+'</span> '+r.name+': '+r.val+' <span style="color:#9ca3af">('+r.limTxt+')</span></div>';}).join('')+(accReasons.length?'<div style="margin-top:4px;color:#fca5a5">'+accReasons.map(function(x){return '• '+x;}).join('<br>')+'</div>':'');$('accPanel').innerHTML=accHtml;}
+  const accHtml='<div style="margin-bottom:4px"><b style="color:'+(acc.verdict==='APPROVE'?'#22c55e':acc.verdict==='REJECT'?'#ef4444':'#9ca3af')+'">'+acc.verdict+'</b>'+(acc.nChecked?'':' (no upstream limits set)')+accSrc+'</div>'+acc.rows.map(r=>{const c=(r.ok==null)?'#9ca3af':(r.ok?'#22c55e':'#ef4444');const mk=(r.ok==null)?'—':(r.ok?'✓':'✗');return '<div><span style="color:'+c+'">'+mk+'</span> '+r.name+': '+r.val+' <span style="color:#9ca3af">('+r.limTxt+')</span></div>';}).join('')+(accReasons.length?'<div style="margin-top:4px;color:#fca5a5">'+accReasons.map(function(x){return '• '+x;}).join('<br>')+'</div>':'');$('accPanel').innerHTML=accHtml;}}
  /* ---------- capture the Ring + 3D views as PNGs for the design report ----------
     Both are drawn on the 2D #fieldC canvas (the 3D uses the canvas-2D wireframe fallback — the
     WebGL canvas has no preserveDrawingBuffer, so toDataURL there would be blank). Drawing is
     synchronous so the temporary geo switch never paints on screen; render() restores the live view. */
  function captureReportViews(){
   if(!_last)return null; var fc=$('fieldC'); if(!fc||!fc.toDataURL)return null;
-  var out={},savedGeo=geo;
+  var out={},savedGeo=geo,savedMode=mode;
   try{drawRing(_last.op,_last.f);out.ring=fc.toDataURL('image/png');}catch(e){}
+  try{mode='thermal';drawRing(_last.op,_last.f);out.ring_thermal=fc.toDataURL('image/png');}catch(e){}
+  mode=savedMode;
   try{hideGL3();drawWire3D(_last.op,_last.f);out.threeD=fc.toDataURL('image/png');}catch(e){}
   geo=savedGeo; try{render();}catch(e){}
   return (out.ring||out.threeD)?out:null;
@@ -641,7 +659,7 @@ function Viewer(ev,doc){
   var _play=$('play'); if(_play)_play.addEventListener('click',()=>{playing=!playing;$('play').textContent=playing?'❚❚ Pause':'▶ Play half cycle';$('play').classList.toggle('active',playing);if(playing){last=performance.now();raf=requestAnimationFrame(loop)}else cancelAnimationFrame(raf)});
   var _reset=$('reset'); if(_reset)_reset.addEventListener('click',()=>{$('vin').value=clamp(cfg.vinDefault,cfg.vinMin,cfg.vinMax);$('load').value=clamp(cfg.loadDefaultPct,10,120);$('warmMin').value=clamp(cool.warmupMinutesDefault||20,1,60);phase=0.5;$('phase').value=500;mode='flux';geo='cross';doc.querySelectorAll('.fbtn').forEach((x,i)=>x.classList.toggle('active',i===0));doc.querySelectorAll('.gbtn').forEach((x,i)=>x.classList.toggle('active',i===0));render()});
   const fc=$('fieldC');if(fc&&fc.addEventListener){fc.addEventListener('pointerdown',e=>{if(geo!=='threeD')return;drag3=true;lx=e.clientX;ly=e.clientY;});window.addEventListener&&window.addEventListener('pointerup',()=>{drag3=false;});fc.addEventListener('pointermove',e=>{if(!drag3||geo!=='threeD')return;yaw+=(e.clientX-lx)*0.01;pitch=clamp(pitch+(e.clientY-ly)*0.01,-1.4,1.4);lx=e.clientX;ly=e.clientY;render();});}
-  function loop(now){const dt=(now-last)/1000;last=now;phase=(phase+dt/1.6)%1;$('phase').value=Math.round(phase*1000);render();if(playing)raf=requestAnimationFrame(loop)}
+  function loop(now){const dt=(now-last)/1000;last=now;phase=(phase+dt/4.8)%1;$('phase').value=Math.round(phase*1000);render();if(playing)raf=requestAnimationFrame(loop)}
   // Phase C (Option B): receive step7's contract from the parent and re-render with its values.
   window.addEventListener('message',function(mev){if(mev&&mev.data&&mev.data.__step7_contract){window.__STEP7_DATA__=mev.data.__step7_contract;try{_buildTiles();render();try{postReportViews();}catch(e){}}catch(e){}}});
   try{render();}catch(e){}

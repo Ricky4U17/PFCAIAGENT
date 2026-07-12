@@ -51,7 +51,7 @@ interface Props {
   allCandidates:  any[]
   winding:        string
   step8:          any
-  simViews?:      { ring?: string; threeD?: string } | null
+  simViews?:      { ring?: string; ring_thermal?: string; threeD?: string } | null
   onBack:         () => void
   onRestart:      () => void
   onSimAgent?:    () => void
@@ -1075,6 +1075,9 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
                 ...result,
                 material_key:   result.material_key || (matType === 'powder' ? selMaterial : selGrade),
                 all_candidates: allCandidates,
+                // REPORT COMPLETENESS: the approved design carries the Simulation-Agent captures so
+                // every later full-report generation can embed the Ch4 winding/thermal images.
+                ...(simViews && (simViews.ring || simViews.threeD) ? { sim_views: simViews } : {}),
               })}>
                 ✓ Approve &amp; Go to Capacitor Sizing
               </Btn>

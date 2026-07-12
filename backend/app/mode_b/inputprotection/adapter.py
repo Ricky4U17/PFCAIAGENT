@@ -81,13 +81,28 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
 
 
 def calculate_ntc(design: dict, cap: dict | None = None, opts: dict | None = None) -> dict:
-    """Size the NTC inrush limiter + bypass relay; returns sizing + catalog screen (JSON-safe)."""
+    """Size the NTC inrush limiter + bypass relay; returns sizing + catalog screen (JSON-safe).
+
+    opts.selected_part (a part number from the ICL DB) recalculates the design around that
+    specific NTC (actual inrush peak, RC precharge timing, energy margin) → out["selected"]."""
+    opts = opts or {}
     s = build_ntc_spec(design, cap, opts)
     r = ntc.compute(s)
     screen = [{"name": n, "ok": bool(ok), "reasons": rs} for n, ok, rs in ntc.screen_catalog(s, r)]
-    return _native({"spec": s, "result": r, "catalog": screen,
-                    "sources": {"cout_uF": s.cout * 1e6, "i_rms_worst": s.i_rms_worst,
-                                "vac_max": s.vac_max, "vout_bus": s.vout_bus}})
+    out = {"spec": s, "result": r, "catalog": screen,
+           "sources": {"cout_uF": s.cout * 1e6, "i_rms_worst": s.i_rms_worst,
+                       "vac_max": s.vac_max, "vout_bus": s.vout_bus}}
+    try:                                             # rich, selectable candidates from the ICL DB
+        from . import database as db
+        out["candidates"] = db.rank(s, r, top=12)
+        sel_pn = (opts.get("selected_part") or "").strip()
+        if sel_pn:
+            rec = db.find_part(sel_pn)
+            if rec:
+                out["selected"] = db.selected_metrics(s, r, rec)
+    except Exception:
+        pass                                          # DB unavailable → sizing + built-in screen only
+    return _native(out)
 
 
 # ── MOV surge protector ───────────────────────────────────────────────────────

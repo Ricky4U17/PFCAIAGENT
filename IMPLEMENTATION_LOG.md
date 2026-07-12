@@ -3800,3 +3800,52 @@ Verified: backend builds a real PDF with the winding-views section (both + ring-
 clean; embedded sim-HTML JS syntax-checked (0 errors). Could NOT reproduce the missing Play button
 from source (it is present + wired); the hardening self-heals whatever stripped it at runtime — needs
 an in-app confirmation.
+
+## C78 — Designer review round: 14 improvements/corrections (2026-07-12)
+
+From "specs/Improvments and Corrections.docx". All 14 items implemented:
+1) Sim Agent play smoothness: render() now caches op/waveform/acceptance per (vin,load,warm) —
+   phase-only frames recompute just the instantaneous field (full frame rate); playback slowed
+   3× (1.6→4.8 s per half cycle); cmap smoothstep interpolation.
+2) Sim Agent 3D: GL mesh drew only N turns (placed>=N) — now draws ALL passes (N×nParallel), so
+   bifilar/trifilar layers 2/3 are complete.
+3) Ring view outer (OD): was hardcoded N dots in one layer — now packs the full pass count by each
+   outer layer's own circumference capacity, with layer count in the label.
+4) Report Ch4 §4.1: embeds the Simulation-Agent Ring capture (flux) + a NEW thermal-gradient ring
+   capture side-by-side as Figure 4.1 (matplotlib cross-section stays as 4.1b/fallback).
+   captureReportViews() also captures mode='thermal'; sim_views carries {ring, ring_thermal, threeD};
+   the Approve payload now includes sim_views (REPORT COMPLETENESS rule).
+5) Holdup time: step15_capacitor read ap['holdup_time_ms'] but the intake key is hold_up_time_ms —
+   always fell back to 20 ms. Fixed (canonical key first); /step15/capacitor-calc default now
+   state-derived too.
+6) Control S2 R_CS: valid band now = intersection of Method-1 (AN4165) and Method-2 (AND9925 V_EA
+   4–5 V, numeric m2_lo/m2_hi added to step6); options = standard values in band; recommended =
+   lowest standard in band (never the 15 mΩ engine placeholder). JS studio no longer sticky-selects
+   15 (rcsUser flag; injected S2 selection marks user-chosen). combined_rows shows actual selection.
+7) Ripple reconciliation: control tool now displays pk-pk 2f bus ripple (2×peak + ESR step) in the
+   Screen-4 table + card, and the 4b live-step metrics line shows the settled 2f ripple pk-pk —
+   same definition/value as the DC-bus capacitor page (THD math still uses the peak internally).
+8) 4c tables: .tableWrap.noscroll (no max-height/overflow) on allCompBom + marginTable.
+9) Schematic screen text: FLEX2 note removed; "(live values)" dropped; "Screen 7/7 ·
+   Schematic & Report" label removed; download button → "Download & Review Report".
+10) Report 5.3 false red: _interp_esr returned None when the chosen voltage class had <2 entries →
+    500 mΩ bank fallback → collapsed thermal I_rated → false FAIL. Now falls back to nearest
+    voltage rating (exact-C first, then C-interp at nearest V). DB-wide sweep: 0 false FAILs.
+    Verdict row now states the actual criterion (I/cap ≤ I_rated at N/9 + T_cap).
+11) Semiconductor DB filters: i_min defaults derive from the calculated worst-case Iin,rms
+    (bridge/mosfet/bottom = ceil(worstIin); diode per-phase), shown in the filter label.
+12) sync_bottom n_parallel: engine reads n_parallel_top for top diodes in sync_bottom topology but
+    the GUI sets n_parallel — adapter now maps it through (27.4→24.4→22.4 W for 1/2/4).
+13) PFC diode sw/RR losses: GUI results table adds "D cond" and "D sw/RR" columns (engine's
+    P_D_cond/P_D_sw) + explanatory note (report §7.5 already documents the physics).
+14) NTC selection: database.find_part()/selected_metrics() recalc the design around the selected
+    part's real R25 (actual inrush, τ/bypass, energy margin); adapter returns candidates (rich) +
+    selected; InputProtection NTC tab has a selectable candidates table + selected card; report
+    §8.7 "Selected NTC — design recalculated" added.
+15) Input-protection full report: page button now calls documentation/generate-report with
+    state+approved_design+step15_result+input_protection; the endpoint's non-full branch now
+    appends the protection/EMI chapters (was dropped without step16_params); filename labeled
+    _InputProtection.
+Verified: tsc clean; embedded JS of both HTML tools syntax-checked; backend modules import; live
+endpoint tests (control/components R_CS band, capacitor-calc holdup, thermal-table sweep 0 false
+FAILs, sync_bottom n_parallel sweep, NTC selected recalc, full-report 200 with protection chapters).

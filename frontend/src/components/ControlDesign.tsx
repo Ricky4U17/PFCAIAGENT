@@ -51,7 +51,7 @@ export const ControlDesign: React.FC<Props> = ({
   const WIZ_NEXT: Record<string, Scr> = { s4: 's5', s5: 's6', s6: 's7' }
   const WIZ_PREV: Record<string, Scr> = { s4: 's3', s5: 's4', s6: 's5', s7: 's6' }
   const WIZ_LABEL: Record<string, string> = {
-    s5: 'Screen 5/7 · Transient', s6: 'Screen 6/7 · iTHD', s7: 'Screen 7/7 · Schematic & Report',
+    s5: 'Screen 5/7 · Transient', s6: 'Screen 6/7 · iTHD',   // s7 shows no label (designer request)
   }
   // S4 sub-screens — freely switchable via a sub-tab bar (not gated)
   const SUB_ORDER: Sub[] = ['cur', 'vol', 'res']
@@ -282,7 +282,7 @@ export const ControlDesign: React.FC<Props> = ({
                 )}
                 <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                   <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
-                    {rptLoading ? '⏳ Generating…' : '📥 Download + Review (Chapters 1–6 + Appendices)'}
+                    {rptLoading ? '⏳ Generating…' : '📥 Download & Review Report'}
                   </Btn>
                   <Btn variant="primary" onClick={onSelectSemiconductors}>
                     ✓ Approve &amp; go to Semiconductors →

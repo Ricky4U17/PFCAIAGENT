@@ -196,6 +196,54 @@ def screen_catalog(s, r, top: int = 12):
     return [(name, ok, reasons) for _, name, ok, reasons, _ in scored[:top]]
 
 
+def find_part(part_number: str):
+    """Exact part-number lookup (case-insensitive) in the ICL database. None if absent."""
+    pn = (part_number or "").strip().lower()
+    if not pn:
+        return None
+    for rec in load():
+        if str(rec.get("part_number", "")).strip().lower() == pn:
+            return rec
+    return None
+
+
+def selected_metrics(s, r, rec):
+    """Recalculate the inrush design around a SPECIFIC selected NTC part.
+
+    Uses the part's real R25 in place of the generic pick: actual cold inrush peak, precharge
+    RC timing and bypass delay, plus the (estimated) pulse-energy margin. Returns a JSON-safe
+    dict for the GUI card and the report's 'selected part' section."""
+    r25 = rec.get("r25")
+    if r25 is None:
+        return None
+    r_total   = float(r25) + r.r_parasitic
+    i_inrush  = r.vin_pk_max / max(r_total, 1e-9)
+    tau       = float(r25) * s.cout
+    t_bypass  = s.tau_multiple * tau
+    e_est     = rec.get("energy_est_J")
+    e_margin  = (float(e_est) / r.e_cap) if (e_est and r.e_cap > 0) else None
+    checks = {
+        "r25_ok":    float(r25) >= r.r25_required,
+        "energy_ok": (float(e_est) >= r.e_pulse_required) if e_est else None,
+        "imax_note": (rec.get("imax") is not None and rec["imax"] < r.i_rms_worst),
+    }
+    return {
+        "part_number":   rec.get("part_number"), "mfr": rec.get("mfr"),
+        "r25_ohm":       float(r25),
+        "imax_A":        rec.get("imax"),
+        "diameter_mm":   rec.get("diameter_mm"),
+        "energy_est_J":  e_est,
+        "datasheet_url": rec.get("datasheet_url"),
+        "i_inrush_actual_A": round(i_inrush, 2),
+        "r_total_cold_ohm":  round(r_total, 3),
+        "tau_ms":            round(tau * 1e3, 2),
+        "t_bypass_ms":       round(t_bypass * 1e3, 1),
+        "energy_margin":     round(e_margin, 2) if e_margin is not None else None,
+        "checks":            checks,
+        "meets_target":      i_inrush <= s.i_inrush_target * 1.001,
+    }
+
+
 def rank(s, r, top: int = 12):
     """Rich variant of screen_catalog: full records + verdict, for GUI cards / future use."""
     scored = []

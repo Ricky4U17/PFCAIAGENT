@@ -70,6 +70,7 @@ CH_COLORS = {
     7: colors.HexColor("#5D1A1A"),   # dark red (semiconductor loss & thermal)
     8: colors.HexColor("#33691E"),   # olive (inrush / NTC)
     9: colors.HexColor("#0D47A1"),   # deep blue (MOV surge & compliance)
+    10: colors.HexColor("#4A148C"),  # purple (EMI filter)
 }
 
 def _mpl_c(c):
@@ -417,6 +418,24 @@ def _fig_img(fig, width_mm=150):
     plt.close(fig)
     buf.seek(0)
     return Image(buf, width=width_mm*mm, height=width_mm*mm*(h_in/max(w_in, 0.1)))
+
+
+def _img_from_datauri(uri, width_mm=82):
+    """Decode a base64 PNG/JPEG data URI (a canvas capture from the Simulation-Agent viewer) into
+    an aspect-preserved Image flowable. None on any problem — fully defensive."""
+    try:
+        import base64
+        from PIL import Image as PILImage
+        if not uri or not isinstance(uri, str) or "base64," not in uri:
+            return None
+        raw = base64.b64decode(uri.split("base64,", 1)[1])
+        pw, ph = PILImage.open(io.BytesIO(raw)).size
+        if not pw or not ph:
+            return None
+        w = width_mm * mm
+        return Image(io.BytesIO(raw), width=w, height=w * ph / pw)
+    except Exception:
+        return None
 
 
 def _fig_winding_cross_section(d):
@@ -2854,12 +2873,38 @@ def _ch4(story, state, d):
         f"Approved core: <b>{part} × {stacks}</b>  |  N = <b>{N}</b> turns  |  "
         f"Assembled: OD = {wo:.1f} mm, height = {wh:.1f} mm.", 4)
 
+    # Simulation-Agent live captures (accurate per-layer winding turns + thermal gradient).
+    # Present when the designer opened the Simulation Agent page; the schematic matplotlib
+    # cross-section below stays as the always-available fallback view.
+    _sv       = d.get("sim_views") or {}
+    _ring_img = _img_from_datauri(_sv.get("ring"), width_mm=82)
+    _th_img   = _img_from_datauri(_sv.get("ring_thermal"), width_mm=82)
+    if _ring_img or _th_img:
+        _pair = [(im, cap) for im, cap in
+                 [(_ring_img, "Flux-density field"), (_th_img, "Temperature gradient")] if im]
+        if len(_pair) == 2:
+            _cw2 = CW / 2
+            _t = Table([[_pair[0][0], _pair[1][0]]], colWidths=[_cw2, _cw2])
+            _t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                    ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+            story.append(_t)
+        else:
+            story.append(_pair[0][0])
+        fig_caption(story,
+            f"Figure 4.1 — Wound-core ring view captured from the Simulation-Agent field viewer: "
+            f"exact per-layer winding turns (⊗ bore / ⊙ outer) around the {stacks}-core stack. "
+            "Left: flux-density field at the operating point. "
+            + ("Right: the same view with the temperature gradient and thermal details. "
+               if _th_img else "")
+            + "Colour scales and turn counts are identical to the designer's GUI.", 4)
+
     # Item 19 — 2D winding cross-section (top view with turns + radial cut).
     _wfig = _fig_winding_cross_section(d)
     if _wfig:
         story.append(_wfig)
         fig_caption(story,
-            f"Figure 4.1 — Winding cross-section. Left: toroid top view with the {N} turns "
+            f"Figure 4.1{'b' if (_ring_img or _th_img) else ''} — Winding cross-section (schematic). "
+            f"Left: toroid top view with the {N} turns "
             "distributed around the core. Right: radial cross-section of one turn over the "
             f"{stacks}-core stack, showing the wire bundle over the core window.", 4)
 
@@ -3473,7 +3518,9 @@ def _ch5(story, state, s15):
             srows,
             col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.13, CW*0.13, CW*0.13, CW*0.13],
             worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
+        _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         verdict_row(story, "Ripple-current rating (all 9 points)",
+            f"I/cap ≤ I<sub>rated</sub> at {_n_pass}/{len(tt)} points; "
             f"T<sub>cap,max</sub> = {thermal.get('worst_case_T_C','—')} °C "
             f"≤ {thermal.get('temp_rating_C','—')} °C",
             "PASS" if thermal.get("all_ripple_pass") else "VERIFY", ch=5)

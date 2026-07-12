@@ -18,8 +18,8 @@ interface Props {
   selMaterial:    string
   selGrade:       string
   onBack:         () => void
-  /** Ring + 3D canvas captures posted up from the viewer, for embedding in the design report. */
-  onViews?:       (v: { ring?: string; threeD?: string }) => void
+  /** Ring / thermal-ring / 3D canvas captures posted up from the viewer, for the design report. */
+  onViews?:       (v: { ring?: string; ring_thermal?: string; threeD?: string }) => void
 }
 
 export const SimulationAgent: React.FC<Props> = ({
@@ -66,7 +66,7 @@ export const SimulationAgent: React.FC<Props> = ({
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
       const v = (ev?.data as any)?.__sim_report_views
-      if (v && (v.ring || v.threeD)) onViews?.({ ring: v.ring, threeD: v.threeD })
+      if (v && (v.ring || v.threeD)) onViews?.({ ring: v.ring, ring_thermal: v.ring_thermal, threeD: v.threeD })
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)

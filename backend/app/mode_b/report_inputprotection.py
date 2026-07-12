@@ -134,7 +134,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "capacitor I&#178;t.", CH)
 
     # ── 8.6 candidates ──
-    step_h(story, "8.6", "Candidate Screen", CH)
+    step_h(story, "8.6", "Candidate Screen" + (" and Selection" if out.get("selected") else ""), CH)
     data_table(story, "8.6", "Catalog Screen",
         f"Accept if R25 &#8805; {_f(r['r25_pick'],2)} {_OHM} and pulse rating &#8805; {_f(r['e_pulse_required'],0)} J "
         "(or the equivalent max-C). Screened against the vendor ICL database; R25 is the datasheet "
@@ -142,6 +142,45 @@ def build_ntc_story(story, design, cap=None, opts=None):
         ["Verdict", "Candidate part", "Notes"],
         [["PASS" if c["ok"] else "FAIL", c["name"], "; ".join(c["reasons"])[:120]] for c in cat] or [["—", "no catalog", "—"]],
         col_widths=[CW*0.12, CW*0.40, CW*0.48], ch=CH)
+
+    # ── 8.7 designer-selected NTC — design recalculated around the actual part ──
+    sel = out.get("selected")
+    if sel:
+        step_h(story, "8.7", "Selected NTC — Design Recalculated for the Actual Part", CH)
+        body(story,
+            f"The designer selected <b>{sel.get('mfr','')} {sel.get('part_number','')}</b> "
+            f"(R<sub>25</sub> = {_f(sel['r25_ohm'],1)} {_OHM}, &#216;{_f(sel.get('diameter_mm'),0)} mm disc). "
+            "All inrush and precharge figures below use the PART's real cold resistance rather than "
+            "the generic pick.", CH)
+        eq_box(story, [
+            rf"I_{{inrush}} = \dfrac{{V_{{in,pk}}}}{{R_{{25}}+R_{{par}}}} = "
+            rf"\dfrac{{{r['vin_pk_max']:.1f}}}{{{sel['r_total_cold_ohm']:.2f}}} = {sel['i_inrush_actual_A']:.1f}\ \mathrm{{A}}",
+            rf"\tau = R_{{25}}\,C_{{out}} = {sel['tau_ms']:.1f}\ \mathrm{{ms}},\qquad "
+            rf"t_{{bypass}} = {s['tau_multiple']:.0f}\,\tau = {sel['t_bypass_ms']:.0f}\ \mathrm{{ms}}",
+        ], number="8.7", ch=CH)
+        _chk = sel.get("checks") or {}
+        data_table(story, "8.7", "Selected Part — Recalculated Design Values",
+            "Actual-part figures vs the design targets. Verdict: "
+            + ("MEETS the inrush target." if sel.get("meets_target") else "EXCEEDS the inrush target — pick a larger R25."),
+            ["Quantity", "Value", "Check"],
+            [["Part", f"{sel.get('mfr','')} {sel.get('part_number','')}", "designer-selected"],
+             ["R<sub>25</sub>", f"{_f(sel['r25_ohm'],1)} {_OHM}",
+              ("&#8805; required " + _f(r['r25_required'],2) + f" {_OHM} " + ("&#10003;" if _chk.get('r25_ok') else "&#10007;"))],
+             ["Cold inrush peak (actual)", f"{_f(sel['i_inrush_actual_A'],1)} A",
+              f"target &#8804; {_f(s['i_inrush_target'],0)} A " + ("&#10003;" if sel.get('meets_target') else "&#10007;")],
+             ["Pulse energy (est. from &#216;)", f"~{_f(sel.get('energy_est_J'),0)} J",
+              f"&#8805; {_f(r['e_pulse_required'],0)} J req "
+              + ("&#10003;" if _chk.get('energy_ok') else ("&#10007;" if _chk.get('energy_ok') is False else "verify"))
+              + f" (margin {_f(sel.get('energy_margin'),2)}&#215; E_cap)"],
+             ["Precharge &#964; / bypass delay", f"{_f(sel['tau_ms'],1)} ms / {_f(sel['t_bypass_ms'],0)} ms",
+              "close relay after settle"],
+             ["Steady I<sub>max</sub>", f"{_f(sel.get('imax_A'),1)} A",
+              ("below I<sub>rms</sub> — OK, bypassed after precharge" if _chk.get('imax_note') else "&#8212;")]],
+            col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
+        annotation(story, "NOTE",
+            "The pulse-energy figure is estimated from the disc diameter; confirm the Joule (or "
+            "max-switchable-capacitance) rating and the R25 tolerance on the live datasheet before "
+            "release.", CH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

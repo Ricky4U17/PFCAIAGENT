@@ -60,6 +60,7 @@
   .card.gd .v{color:var(--good)} .card.bd .v{color:var(--bad)}
   @media (max-width:760px){.cards{grid-template-columns:1fr 1fr}}
   .tableWrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+  .tableWrap.noscroll{max-height:none;overflow:visible}
   table{width:100%;border-collapse:collapse;font-size:12px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} th{background:#16233b;color:#d5dffa;position:sticky;top:0;z-index:2}
   td.std{color:var(--good);font-weight:700} td.calcv{color:var(--muted)}
   .canvasWrap{background:#0a111f;border:1px solid var(--line);border-radius:12px;padding:8px;position:relative}
@@ -305,7 +306,7 @@
       <div class="panel" data-sub="res">
         <h2>Final Control-Loop Components — all selected values</h2>
         <div class="small" style="margin-bottom:6px">Consolidated read-only summary of every control-loop component selected across the current- and voltage-loop sub-screens, plus the R<sub>CS</sub> / CS-filter network and FB divider.</div>
-        <div class="tableWrap"><table id="allCompBom"></table></div>
+        <div class="tableWrap noscroll"><table id="allCompBom"></table></div>
       </div>
 
       <div class="panel" data-sub="res">
@@ -324,7 +325,7 @@
       <div class="panel" data-sub="res">
         <h2>Stability Scorecard — all operating points, standard values</h2>
         <div class="cards" id="cards2"></div>
-        <div class="tableWrap" style="margin-top:10px"><table id="marginTable"></table></div>
+        <div class="tableWrap noscroll" style="margin-top:10px"><table id="marginTable"></table></div>
       </div>
       <div class="panel" data-sub="cur">
         <h2>Current Loop T<sub>i</sub>(s) — 10 Hz to 500 kHz</h2>
@@ -414,12 +415,11 @@
   <!-- ================= SCREEN 5 ================= -->
   <section id="screen5" class="screen">
     <div class="panel">
-      <h2>Application Schematic — FAN9672 Pin Networks (live values)</h2>
+      <h2>Application Schematic — FAN9672 Pin Networks</h2>
       <div class="inline" style="margin-bottom:8px">
         <div class="seg"><button id="modeLow2" class="active">Low Line (FR)</button><button id="modeHigh2">High Line (HV)</button></div>
         <span class="small" style="margin-left:10px">Schematic shows the components for the selected line range.</span>
       </div>
-      <div class="note">Topology per the FLEX2 front-end reference (sheet 2). <span style="color:var(--warn);font-weight:700">Amber values</span> are taken live from your selections on Screens 1–2; grey "(typ)" parts are not sized by this tool.</div>
       <div class="schemWrap"><div id="schemSvg"></div></div>
       <h3 style="margin-top:12px">Components that change between Low Line (FR) and High Line (HV)</h3>
       <div class="tableWrap" style="max-height:none"><table id="lineDiffTable"></table></div>
@@ -470,7 +470,7 @@ function nearestList(v,ser,n=7){if(!(v>0))return[];const d=Math.floor(Math.log10
   return all.slice(0,n).sort((a,b)=>a-b)}
 
 /* ============ state ============ */
-const state={mode:'low',phil:'shared',rcsSel:15,bom:{},vType:'type3',cType:'T2'};
+const state={mode:'low',phil:'shared',rcsSel:15,rcsUser:false,bom:{},vType:'type3',cType:'T2'};
 function bomGet(key,calcVal,ser){
   const e=state.bom[key];
   if(e&&!e.auto&&Number.isFinite(e.val))return e.val;
@@ -1262,6 +1262,10 @@ function renderRCS(p){
   const g=rcsCalc(p);
   const custom=parseFloat($('rcsCustom').value);
   if(Number.isFinite(custom)&&custom>0)state.rcsSel=custom;
+  // Until the designer explicitly picks a value (chip / custom / injected S2 selection), follow the
+  // CALCULATED recommendation — never a sticky 15 mΩ placeholder (15 is a standard value, so the
+  // old !SHUNTS.includes guard silently kept it selected forever).
+  else if(!state.rcsUser)state.rcsSel=g.rec?Math.round(g.rec*1e4)/10:(SHUNTS.includes(state.rcsSel)?state.rcsSel:15);
   else if(!SHUNTS.includes(state.rcsSel))state.rcsSel=g.rec?Math.round(g.rec*1e4)/10:15;
   // chips
   const ch=$('rcsChips');ch.innerHTML='';
@@ -1270,7 +1274,7 @@ function renderRCS(p){
     const b=document.createElement('button');b.className='chip'+(inz?' inz':'')+((!Number.isFinite(custom)&&Math.abs(s-state.rcsSel)<1e-9)?' selC':'');
     b.textContent=s+' mΩ';
     if(g.rec&&Math.abs(s*1e-3-g.rec)<1e-9){const sp=document.createElement('span');sp.className='st';sp.textContent='★';b.appendChild(sp)}
-    b.onclick=()=>{$('rcsCustom').value='';state.rcsSel=s;recalc()};
+    b.onclick=()=>{$('rcsCustom').value='';state.rcsSel=s;state.rcsUser=true;recalc()};
     ch.appendChild(b);
   }
   // zone bar
@@ -1508,9 +1512,13 @@ function renderScreen4(p,dci,dcv){
     const iecPass=i3<=IEC_A[3]&&i5<=IEC_A[5]&&i7<=IEC_A[7];
     return{op,veaEff,...t,i1,i3,i5,i7,iecPass};
   });
-  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple,pk 120 Hz</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th><th>I₁ (A)</th><th>IEC 61000-3-2<br>Class A</th></tr>';
+  // pk-pk 2f bus ripple = 2×peak capacitive term + ESR step — the SAME quantity (and value) the
+  // DC-bus capacitor simulation page reports, so the two pages can be compared directly.
+  const vpp2f=(Vr,pout)=>2*Vr+2*pout*p.rc/p.vout;
+  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple 120 Hz (pk-pk)</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th><th>I₁ (A)</th><th>IEC 61000-3-2<br>Class A</th></tr>';
   for(const r of rows){
-    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(r.Vr,2)} V (${fmt(100*r.Vr/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td><td>${fmt(r.i1,1)}</td><td><span class="pill ${r.iecPass?'ok':'bad'}">${r.iecPass?'PASS':'FAIL'}</span></td></tr>`;
+    const vpp=vpp2f(r.Vr,r.op.pout);
+    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(vpp,2)} V (${fmt(100*vpp/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td><td>${fmt(r.i1,1)}</td><td><span class="pill ${r.iecPass?'ok':'bad'}">${r.iecPass?'PASS':'FAIL'}</span></td></tr>`;
   }
   $('thdTable').innerHTML=th;
   // IEC 61000-3-2 Class A compliance — worst-case odd-harmonic current vs limit
@@ -1536,7 +1544,7 @@ function renderScreen4(p,dci,dcv){
     <div class="card"><div class="k">Worst iTHD₃ — low line</div><div class="v">${fmt(wLL.thd3,2)} %</div><div class="u">@ ${wLL.op.vac} Vac · rej ${fmt(wLL.rej,1)} dB</div></div>
     <div class="card"><div class="k">Worst iTHD₃ — high line</div><div class="v">${fmt(wHL.thd3,2)} %</div><div class="u">@ ${wHL.op.vac} Vac · rej ${fmt(wHL.rej,1)} dB</div></div>
     <div class="card ${wRej.rej>=20?'gd':'bd'}"><div class="k">Worst 120 Hz rejection</div><div class="v">${fmt(wRej.rej,1)} dB</div><div class="u">floor 20 dB · @ ${wRej.op.vac} Vac</div></div>
-    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(rows.find(r=>r.op.vac===180).Vr,2)} V</div><div class="u">${fmt(100*rows.find(r=>r.op.vac===180).Vr/p.vout,2)} % of V_OUT</div></div>
+    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(vpp2f(rows.find(r=>r.op.vac===180).Vr,POUT_HI),2)} V pk-pk</div><div class="u">${fmt(100*vpp2f(rows.find(r=>r.op.vac===180).Vr,POUT_HI)/p.vout,2)} % of V_OUT · C + ESR, as on the DC-bus cap page</div></div>
     <div class="card ${iecAll?'gd':'bd'}"><div class="k">IEC 61000-3-2 (Class A)</div><div class="v">${iecAll?'PASS':'FAIL'}</div><div class="u">3rd/5th/7th vs 2.30/1.14/0.77 A</div></div>`;
   drawThdPlot(rows,p);
 }
@@ -2367,8 +2375,10 @@ function renderLive(p,dci,dcv,mg,mgv,sc){
     dip=Math.abs(d.pk); rec=d.rec; dipPct=100*dip/p.vout;
     drawStepPlot([{op:{vac:180,pout:POUT_HI,line:'HL'},yr}],band,p,'liveStep');
   }
+  // settled 2f bus ripple (pk-pk, C + ESR) — same definition/value as the DC-bus capacitor page
+  const vppSettle=POUT_HI/(2*Math.PI*60*p.vout*p.co)+2*POUT_HI*p.rc/p.vout;
   $('liveMetrics').innerHTML=dcv.err?`<span style="color:var(--bad)">${dcv.err}</span>`
-    :`Peak deviation <b>${fmt(dip,1)} V</b> (${fmt(dipPct,2)} % of V_OUT) · recovery to ±1 % <b>${fmt(rec*1e3,0)} ms</b> · voltage-loop PM <b>${fmt(mgv.pm,1)}°</b> → ringing ${mgv.pm>=55?'minimal':mgv.pm>=45?'some':'high'}.`;
+    :`Peak deviation <b>${fmt(dip,1)} V</b> (${fmt(dipPct,2)} % of V_OUT) · recovery to ±1 % <b>${fmt(rec*1e3,0)} ms</b> · voltage-loop PM <b>${fmt(mgv.pm,1)}°</b> → ringing ${mgv.pm>=55?'minimal':mgv.pm>=45?'some':'high'}. After settling the bus still carries the 2f ripple: <b>${fmt(vppSettle,1)} V pk-pk</b> at 100 % load (C + ESR — matches the DC-bus capacitor page; the ΔV(t) trace above excludes it by definition).`;
   // ── current-loop tracking + iTHD contribution (worst corner HL) ──
   const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk, rcs=state.rcsSel*1e-3;
   const veaEff=rcs*den*((POUT_HI/p.nch)*p.kmax)/(p.krm*12e6);
@@ -2537,7 +2547,7 @@ window.setPythonValues = function(p){
   // Sync visible Pout and eta fields to current mode values
   $('pout').value = (state.mode==='low') ? POUT_LO : POUT_HI;
   $('eta').value  = (state.mode==='low') ? ETA_LO  : ETA_HI;
-  if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; const el=$('rcsCustom'); if(el) el.value=v; } }
+  if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; state.rcsUser=true; const el=$('rcsCustom'); if(el) el.value=v; } }
   recalc();
 };
 

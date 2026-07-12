@@ -21,22 +21,43 @@ def _load_db() -> dict:
 
 
 def _interp_esr(esr_db: dict, val_uF: int, vrating: int) -> Optional[float]:
-    """Return ESR (mΩ) for val_uF at vrating, interpolating if exact not in DB."""
+    """Return ESR (mΩ) for val_uF at vrating, interpolating if exact not in DB.
+
+    Falls back to the NEAREST available voltage rating before giving up — ESR varies only
+    mildly with voltage class, and returning None here used to punt the whole bank to a
+    500 mΩ placeholder that collapsed the thermal I_rated and flagged false ripple FAILs."""
     vkey = str(vrating)
     # Exact match
     exact = esr_db.get(str(val_uF), {})
     if vkey in exact:
         return float(exact[vkey])
-    # Collect known (C, ESR) pairs at this voltage rating
-    pts = []
-    for c_key, v_dict in esr_db.items():
-        if vkey in v_dict:
-            try:
-                pts.append((int(c_key), float(v_dict[vkey])))
-            except (ValueError, TypeError):
-                pass
+    # Same capacitance at the nearest available voltage rating
+    if exact:
+        try:
+            vk = min(exact.keys(), key=lambda k: abs(int(k) - int(vrating)))
+            return float(exact[vk])
+        except (ValueError, TypeError):
+            pass
+
+    def _pts_at(vk: str):
+        pts = []
+        for c_key, v_dict in esr_db.items():
+            if vk in v_dict:
+                try:
+                    pts.append((int(c_key), float(v_dict[vk])))
+                except (ValueError, TypeError):
+                    pass
+        return pts
+
+    # Collect known (C, ESR) pairs at this voltage rating; else at the nearest voltage with data
+    pts = _pts_at(vkey)
     if len(pts) < 2:
-        return None
+        volt_keys = sorted({vk for v in esr_db.values() for vk in v
+                            if str(vk).isdigit() and len(_pts_at(vk)) >= 2},
+                           key=lambda k: abs(int(k) - int(vrating)))
+        if not volt_keys:
+            return None
+        pts = _pts_at(volt_keys[0])
     # Fit K = ESR × C (log-linear relationship)
     K = sum(c * e for c, e in pts) / len(pts)
     return K / val_uF if val_uF > 0 else None
@@ -472,7 +493,9 @@ def run_capacitor_design(state: dict) -> dict:
     f_line     = float(ap.get("nominal_line_frequency_hz", 60))
     Vdc_ripple = float(tsi.get("dc_bus_ripple_vpp",        20.0))
     Vdc_min    = float(ap.get("holdup_vmin_v",             290.0))
-    t_hold_ms  = float(ap.get("holdup_time_ms",            20.0))
+    # canonical intake key is hold_up_time_ms (intake/schema.py); the old holdup_time_ms spelling
+    # never matched, silently forcing the 20 ms default over the designer's spec-page value.
+    t_hold_ms  = float(ap.get("hold_up_time_ms", ap.get("holdup_time_ms", 20.0)))
     t_hold_s   = t_hold_ms / 1000.0
     Vout_max   = float(tsi.get("Vout_max_V",               Vout * 1.10))
 

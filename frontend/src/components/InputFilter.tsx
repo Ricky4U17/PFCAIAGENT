@@ -10,7 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { inputFilterOptions, inputFilterDesign, type EmiDesign } from '../api/client'
+import { inputFilterOptions, inputFilterDesign, inputFilterReport, type EmiDesign } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -81,6 +81,25 @@ export const InputFilter: React.FC<Props> = ({
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   useEffect(() => { run() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [rptBusy, setRptBusy] = useState(false)
+  const downloadReport = async () => {
+    setRptBusy(true); setErr(null)
+    try {
+      const o: Record<string, unknown> = {
+        safety_standard: opts.safety_standard, compliance_profile: Number(opts.compliance_profile),
+        margin_db: Number(opts.margin_db), c_para_earth_pf: Number(opts.c_para_earth_pf),
+        sw_rise_time_ns: Number(opts.sw_rise_time_ns), bleeder_r_ohm: Number(opts.bleeder_r_ohm),
+      }
+      if (opts.detector) o.detector = opts.detector
+      const blob = await inputFilterReport({ design, cap,
+        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: o })
+      const url = URL.createObjectURL(blob); const a = document.createElement('a')
+      a.href = url; a.download = 'PFC_Input_EMI_Filter_Ch10.pdf'
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 150)
+    } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
+  }
 
   const r = res?.result
   return (
@@ -176,7 +195,12 @@ export const InputFilter: React.FC<Props> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 2px 24px' }}>
         <Btn variant="ghost" onClick={onBack}>← Back to input protection</Btn>
-        <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="success" disabled={rptBusy || !r} onClick={downloadReport}>
+            {rptBusy ? '⏳ Generating…' : '📥 Download report (Ch 10)'}
+          </Btn>
+          <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
+        </div>
       </div>
     </div>
   )

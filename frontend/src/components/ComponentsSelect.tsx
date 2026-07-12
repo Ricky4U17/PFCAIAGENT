@@ -130,7 +130,9 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
             </span>
           </div>
           <div style={{ fontSize: 10.5, color: C.muted, marginTop: 6 }}>
-            Method-1 (AN4165): LL {data.rcs.m1_ll_mohm} mΩ / HL {data.rcs.m1_hl_mohm} mΩ. {data.rcs.note}
+            Method-1 (AN4165): LL {data.rcs.m1_ll_mohm} mΩ / HL {data.rcs.m1_hl_mohm} mΩ
+            {data.rcs.m2_lo_mohm != null && <> · Method-2 (AND9925, V_EA 4–5 V): {data.rcs.m2_lo_mohm}–{data.rcs.m2_hi_mohm} mΩ</>}
+            . {data.rcs.note}
           </div>
         </Card>
 

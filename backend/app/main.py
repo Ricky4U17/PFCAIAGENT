@@ -335,17 +335,30 @@ def control_components(req: _ComponentsReq):
             {"name": "Gain-control resistor", "symbol": "R_GC", "value": ohm(s8["r_gc_sel"]), "role": "LPT gain align"},
             {"name": "LPK series resistor", "symbol": "R_LPK", "value": ohm(R_LPK), "role": "LPK series (fixed)"},
         ]
+        # Valid R_CS window = intersection of BOTH calculation methods (same as the studio tool):
+        #   Method 1 (AN4165 Eq.31)  — V_RM headroom upper limit at both lines
+        #   Method 2 (AND9925 Eq.11) — V_EA within the preferred 4.0–5.0 V window at both lines
         m1_ll, m1_hl = s6["rcs1_ll"], s6["rcs1_hl"]
-        rcs_max = min(m1_ll, m1_hl)
-        rcs_min = 0.85 * rcs_max
-        rec_mohm = round(s6["rcs_sel"] * 1e3, 2)
-        STD_MOHM = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
-        rcs_opts = sorted(set([v for v in STD_MOHM if rcs_min * 1e3 <= v <= rcs_max * 1e3] + [rec_mohm]))
+        m1_hi = min(m1_ll, m1_hl)
+        m2_lo, m2_hi = s6["m2_lo"], s6["m2_hi"]
+        rcs_min = m2_lo
+        rcs_max = min(m1_hi, m2_hi)
+        if rcs_max <= rcs_min:                       # degenerate overlap → fall back to Method 1
+            rcs_min, rcs_max = 0.85 * m1_hi, m1_hi
+        STD_MOHM = [8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 25, 30]
+        rcs_opts = [v for v in STD_MOHM if rcs_min * 1e3 - 1e-9 <= v <= rcs_max * 1e3 + 1e-9]
+        # recommended = LOWEST standard value inside the window (min dissipation, V_EA nearest 4 V);
+        # never the engine's 15 mΩ placeholder default.
+        rec_mohm = rcs_opts[0] if rcs_opts else round((rcs_min + rcs_max) / 2 * 1e3, 2)
+        if not rcs_opts:
+            rcs_opts = [rec_mohm]
         rcs = {
             "min_mohm": round(rcs_min * 1e3, 2), "max_mohm": round(rcs_max * 1e3, 2),
             "recommended_mohm": rec_mohm, "options_mohm": rcs_opts,
             "m1_ll_mohm": round(m1_ll * 1e3, 2), "m1_hl_mohm": round(m1_hl * 1e3, 2),
-            "note": "Valid band satisfies the AN4165 (Method-1) VRM limit at both HL and LL.",
+            "m2_lo_mohm": round(m2_lo * 1e3, 2), "m2_hi_mohm": round(m2_hi * 1e3, 2),
+            "note": "Valid band is the intersection of Method-1 (AN4165 V_RM limit) and "
+                    "Method-2 (AND9925 V_EA 4–5 V window) at both HL and LL.",
         }
         # standard E6 capacitor values (pF) offered in every cap dropdown
         CAP_PF = [100, 150, 220, 330, 470, 680, 1000, 1500, 2200, 3300, 4700, 6800,
@@ -563,6 +576,19 @@ def input_filter_design(req: _EmiReq):
         return calculate_emi(req.design, req.cap or {}, req.protection or {}, req.ntc or {}, req.opts or {})
     except Exception as e:
         log.exception("emi design"); raise HTTPException(500, str(e))
+
+@app.post("/mode-b/input-filter/report", tags=["mode-b"])
+def input_filter_report(req: _EmiReq):
+    """Standalone Chapter 10 — Input EMI Filter PDF."""
+    try:
+        from fastapi.responses import Response
+        from app.mode_b.report_inputfilter import build_inputfilter_report
+        pdf = build_inputfilter_report(req.design, req.cap or {}, req.protection or {},
+                                       req.ntc or {}, req.opts or {})
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": 'attachment; filename="PFC_Input_EMI_Filter_Ch10.pdf"'})
+    except Exception as e:
+        log.exception("emi report"); raise HTTPException(500, str(e))
 
 @app.post("/mode-b/input-protection/report", tags=["mode-b"])
 def input_protection_report(req: _IpReportReq):
@@ -1398,7 +1424,7 @@ _STANDARD_CAP_UF = [
 
 class _CapCalcReq(BaseModel):
     state:           dict
-    t_hold_ms:       float = 20.0    # hold-up time (ms)
+    t_hold_ms:       Optional[float] = None   # hold-up time (ms); default = spec-page hold_up_time_ms
     V_min_holdup_V:  float = 300.0   # min bus voltage at end of hold-up
     ripple_pct:      float = 2.0     # peak-to-peak ripple as % of Vout
     V_rating:        int   = 450     # capacitor voltage rating (V)
@@ -1422,7 +1448,9 @@ def step15_capacitor_calc(req: _CapCalcReq):
     Pout    = max(Pout_lo, Pout_hi)   # size for worst-case (highest) power
     f_line  = float(ap.get('nominal_line_frequency_hz', 60))
 
-    t_hold = req.t_hold_ms / 1000.0
+    # default hold-up = the designer's spec-page value (intake hold_up_time_ms), not a fixed 20 ms
+    t_hold = (req.t_hold_ms if req.t_hold_ms is not None
+              else float(ap.get('hold_up_time_ms', 20.0))) / 1000.0
     V_min  = req.V_min_holdup_V
     if V_min >= Vout:
         raise HTTPException(400, "V_min_holdup_V must be less than Vout")
@@ -1887,6 +1915,7 @@ class _DocReportReq(BaseModel):
     step16_params:   Optional[Dict[str, Any]] = None
     semiconductor:   Optional[Dict[str, Any]] = None   # {design, mosfet, diode, bridge, thermal, tj_limit} → Chapter 7
     input_protection: Optional[Dict[str, Any]] = None  # {design, cap, mosfet, ntc_opts, mov_opts} → Chapters 8 (NTC) + 9 (MOV)
+    input_filter:     Optional[Dict[str, Any]] = None  # {design, cap, protection, ntc, opts} → Chapter 10 (EMI filter)
 
 
 def _num(v):
@@ -2193,6 +2222,14 @@ def doc_generate_report(req: _DocReportReq):
                 parts.append(build_inputprotection_report(
                     ip["design"], ip.get("cap"), ip.get("mosfet"),
                     ip.get("ntc_opts"), ip.get("mov_opts")))
+            if req.input_filter:                            # Chapter 10 — EMI filter
+                from app.mode_b.report_inputfilter import build_inputfilter_report
+                f = req.input_filter
+                # if Vout was corrected upstream, the EMI design should use the same bus voltage
+                if _vout:
+                    f.setdefault("design", {})["vout"] = _vout
+                parts.append(build_inputfilter_report(
+                    f["design"], f.get("cap"), f.get("protection"), f.get("ntc"), f.get("opts")))
             pdf = _merge_pdfs(parts)
         else:
             pdf = agent.generate(
@@ -2200,10 +2237,31 @@ def doc_generate_report(req: _DocReportReq):
                 step15_result   = req.step15_result,
                 step16_params   = req.step16_params,
             )
+            # The input-protection / EMI-filter chapters are independent of the control chapter —
+            # append them even without step16_params (e.g. the full report generated from the
+            # Input Protection page), so that page is never limited to Ch 8-9 alone.
+            _extra = []
+            if req.input_protection:
+                from app.mode_b.report_inputprotection import build_inputprotection_report
+                ip = req.input_protection
+                _extra.append(build_inputprotection_report(
+                    ip["design"], ip.get("cap"), ip.get("mosfet"),
+                    ip.get("ntc_opts"), ip.get("mov_opts")))
+            if req.input_filter:
+                from app.mode_b.report_inputfilter import build_inputfilter_report
+                f = req.input_filter
+                if _vout:
+                    f.setdefault("design", {})["vout"] = _vout
+                _extra.append(build_inputfilter_report(
+                    f["design"], f.get("cap"), f.get("protection"), f.get("ntc"), f.get("opts")))
+            if _extra:
+                pdf = _merge_pdfs([pdf] + _extra)
         pdf = _strip_blank_pages(pdf)
         pdf = _add_pdf_outline(pdf)          # navigable index covering all chapters (incl. 6-9)
         project_id = req.state.get("project_id", "design")
-        if req.step16_params and req.approved_design and req.step15_result and req.semiconductor and req.input_protection:
+        if req.step16_params and req.approved_design and req.step15_result and req.semiconductor and req.input_protection and req.input_filter:
+            label = "Steps1_20"
+        elif req.step16_params and req.approved_design and req.step15_result and req.semiconductor and req.input_protection:
             label = "Steps1_19"
         elif req.step16_params and req.approved_design and req.step15_result and req.semiconductor:
             label = "Steps1_17"
@@ -2215,6 +2273,8 @@ def doc_generate_report(req: _DocReportReq):
             label = "Steps1_14"
         else:
             label = "Steps1_12"
+        if req.input_protection and "Steps1_19" not in label and "Steps1_20" not in label:
+            label += "_InputProtection"          # protection chapters appended without the control chain
         filename = f"PFC_Report_{project_id}_{label}.pdf"
         return Response(
             content    = pdf,

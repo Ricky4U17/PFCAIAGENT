@@ -171,9 +171,21 @@ export const SemiconductorSelection: React.FC<Props> = ({
   type SrcMode = 'database' | 'manual' | 'upload'
   const [srcMode, setSrcMode] = useState<Record<string, SrcMode>>({ bridge: 'database', mosfet: 'database', diode: 'database' })
   const [dbOpts, setDbOpts] = useState<Record<string, Record<string, string[]>>>({})
-  const [dbCrit, setDbCrit] = useState<Record<string, any>>({
-    bridge: { v_min: '600', i_min: '15' }, mosfet: { v_min: '600', i_min: '15' }, diode: { v_min: '600', i_min: '10' },
-    bottom: { v_min: '550', i_min: '15' },
+  // Worst-case input RMS current across the two power corners (same η/PF map the Review page
+  // uses: 90 V/η0.945/PF0.9987 low line, 180 V/η0.965/PF0.9889 high line). The DB current filters
+  // default to ≥ this CALCULATED value — never a hardcoded 15 A — and stay designer-editable.
+  const worstIin = useMemo(() => Math.max(
+    design.pout_lo / (0.945 * design.vin_min * 0.9987),
+    design.pout_hi / (0.965 * 180 * 0.9889),
+  ), [design])
+  const [dbCrit, setDbCrit] = useState<Record<string, any>>(() => {
+    const iw = String(Math.ceil(worstIin))                       // line-current devices
+    const iph = String(Math.ceil(worstIin / Math.max(design.nch, 1)))  // per-phase devices
+    return {
+      bridge: { v_min: '600', i_min: iw }, mosfet: { v_min: '600', i_min: iw },
+      diode: { v_min: '600', i_min: iph },
+      bottom: { v_min: '550', i_min: iw },
+    }
   })
   const [dbRes, setDbRes] = useState<Record<string, DbRankResult[] | null>>({})
   const [dbBusy, setDbBusy] = useState<Record<string, boolean>>({})
@@ -360,7 +372,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
           <label style={{ fontSize: 10.5, color: C.muted }}>Voltage ≥ (V)<br />
             <input style={critIn} value={crit.v_min ?? ''} onChange={e => setCrit('bottom', 'v_min', e.target.value)} /></label>
-          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A)<br />
+          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A) — worst I<sub>in,rms</sub> ≈ {worstIin.toFixed(1)} A<br />
             <input style={critIn} value={crit.i_min ?? ''} onChange={e => setCrit('bottom', 'i_min', e.target.value)} /></label>
           <label style={{ fontSize: 10.5, color: C.muted }}>Mfr<br />
             <select style={critSel} value={crit.mfr ?? ''} onChange={e => setCrit('bottom', 'mfr', e.target.value)}>
@@ -407,7 +419,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
           <label style={{ fontSize: 10.5, color: C.muted }}>Voltage ≥ (V)<br />
             <input style={critIn} value={crit.v_min ?? ''} onChange={e => setCrit(which, 'v_min', e.target.value)} /></label>
-          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A)<br />
+          <label style={{ fontSize: 10.5, color: C.muted }}>Current ≥ (A) — worst I<sub>in,rms</sub> ≈ {worstIin.toFixed(1)} A{which === 'diode' ? ` (${design.nch} phases)` : ''}<br />
             <input style={critIn} value={crit.i_min ?? ''} onChange={e => setCrit(which, 'i_min', e.target.value)} /></label>
           <label style={{ fontSize: 10.5, color: C.muted }}>Tj ≥ (°C)<br />
             <input style={critIn} value={crit.tj_min ?? ''} onChange={e => setCrit(which, 'tj_min', e.target.value)} /></label>
@@ -557,7 +569,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
             {res.validation.ok && (
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'Diode', 'Bridge', 'SEMI', 'Tj FET', 'Tj D', 'Tj Br']
+                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'D cond', 'D sw/RR', 'Diode', 'Bridge', 'SEMI', 'Tj FET', 'Tj D', 'Tj Br']
                     .map((h, i) => <th key={h} style={{ ...th, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
                   <tbody>
                     {res.per_point.map((r, i) => (
@@ -567,6 +579,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
                         <td style={cell}>{r['eta_in_%'].toFixed(1)}</td>
                         <td style={cell}>{r.PF_in.toFixed(4)}</td>
                         <td style={cell}>{r.P_FET_total.toFixed(2)}</td>
+                        <td style={cell}>{((r as any).P_D_cond ?? 0).toFixed(2)}</td>
+                        <td style={cell}>{((r as any).P_D_sw ?? 0).toFixed(2)}</td>
                         <td style={cell}>{r.P_DIODE_total.toFixed(2)}</td>
                         <td style={cell}>{r.P_BRIDGE_total.toFixed(2)}</td>
                         <td style={{ ...cell, fontWeight: 700 }}>{r.P_SEMI_total.toFixed(2)}</td>
@@ -577,6 +591,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     ))}
                   </tbody>
                 </table>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 5 }}>
+                  D cond / D sw/RR = PFC boost-diode conduction vs switching loss (all channels). For a Si diode
+                  the switching term is its share of the Q<sub>rr</sub> reverse-recovery energy; for SiC Schottky
+                  there is no minority-carrier recovery — the Q<sub>c</sub> charging energy is booked to the MOSFET,
+                  so the diode's own term is near zero (see report §7.5).
+                </div>
               </div>
             )}
             {figBusy && <div style={{ color: C.muted, fontSize: 11, marginTop: 10 }}>Rendering figures…</div>}

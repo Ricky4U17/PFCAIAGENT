@@ -239,6 +239,8 @@ export const docGenerateReport = (req: {
   step15_result?:   Record<string, unknown> | null
   step16_params?:   Record<string, unknown> | null
   semiconductor?:   Record<string, unknown> | null
+  input_protection?: Record<string, unknown> | null
+  input_filter?:     Record<string, unknown> | null
 }): Promise<Blob> =>
   fetch(`${BASE}/mode-b/documentation/generate-report`, {
     method:  'POST',
@@ -289,7 +291,7 @@ export interface SelComp { key: string; name: string; symbol: string; role: stri
 export interface ControlComponents {
   fixed: FixedComp[]
   rcs: { min_mohm: number; max_mohm: number; recommended_mohm: number; options_mohm: number[]
-         m1_ll_mohm: number; m1_hl_mohm: number; note: string }
+         m1_ll_mohm: number; m1_hl_mohm: number; m2_lo_mohm?: number; m2_hi_mohm?: number; note: string }
   selectable: SelComp[]
   r_ls: { default_kohm: number; calc_kohm: number; options_kohm: number[]; role: string }
 }
@@ -415,6 +417,19 @@ export const semiconductorFigures = (b: SemiReqBody) =>
 
 // ── input protection (MOV surge + NTC inrush) ────────────────────────────────
 export interface CatalogRow { name: string; ok: boolean; reasons: string[] }
+export interface NtcCandidate {
+  mfr?: string; part_number?: string; r25?: number; imax?: number; diameter_mm?: number
+  energy_est_J?: number; datasheet_url?: string; ok: boolean; reasons: string[]
+  energy_margin?: number | null
+}
+export interface NtcSelected {
+  part_number?: string; mfr?: string; r25_ohm: number; imax_A?: number; diameter_mm?: number
+  energy_est_J?: number; datasheet_url?: string
+  i_inrush_actual_A: number; r_total_cold_ohm: number; tau_ms: number; t_bypass_ms: number
+  energy_margin?: number | null
+  checks?: { r25_ok?: boolean; energy_ok?: boolean | null; imax_note?: boolean }
+  meets_target?: boolean
+}
 export interface NtcResult {
   spec: Record<string, number>
   result: {
@@ -424,6 +439,8 @@ export interface NtcResult {
     sweep: [number, number][]; loss_rows: [number, number][]
   }
   catalog: CatalogRow[]
+  candidates?: NtcCandidate[]
+  selected?: NtcSelected | null
   sources: Record<string, number>
 }
 export interface MovResult {
@@ -460,6 +477,11 @@ export const inputFilterOptions = (): Promise<{ safety_standards: string[]
 export const inputFilterDesign = (body: { design: Record<string, number>; cap?: Record<string, unknown>
     protection?: Record<string, unknown>; ntc?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<EmiDesign>('/mode-b/input-filter/design', body)
+export const inputFilterReport = (body: { design: Record<string, number>; cap?: Record<string, unknown>
+    protection?: Record<string, unknown>; ntc?: Record<string, unknown>; opts?: Record<string, unknown> }): Promise<Blob> =>
+  fetch(`${BASE}/mode-b/input-filter/report`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.blob() })
 
 export const inputProtectionReport = (body: { design: Record<string, number>; cap?: Record<string, unknown>
     mosfet?: Record<string, unknown>; ntc_opts?: Record<string, unknown>; mov_opts?: Record<string, unknown> }): Promise<Blob> =>

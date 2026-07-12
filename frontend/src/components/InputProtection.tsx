@@ -15,8 +15,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov, inputProtectionReport,
-         type NtcResult, type MovResult, type CatalogRow } from '../api/client'
+import { inputProtectionNtc, inputProtectionMov, docGenerateReport,
+         type NtcResult, type MovResult, type CatalogRow, type NtcCandidate } from '../api/client'
 import type { CapacitorResult } from './Step15Capacitor'
 
 interface Props {
@@ -103,10 +103,16 @@ export const InputProtection: React.FC<Props> = ({
   const [ntcRes, setNtcRes] = useState<NtcResult | null>(null)
   const [ntcBusy, setNtcBusy] = useState(false)
   const setN = (k: string, v: string) => setNtcOpts(s => ({ ...s, [k]: v }))
-  const calcNtc = async () => {
+  const calcNtc = async (optsOverride?: Record<string, string>) => {
+    const opts = optsOverride ?? ntcOpts
     setNtcBusy(true); setErr(null)
-    try { setNtcRes(await inputProtectionNtc({ design, cap, opts: ntcOpts })) }
+    try { setNtcRes(await inputProtectionNtc({ design, cap, opts })) }
     catch (e) { setErr((e as Error).message) } finally { setNtcBusy(false) }
+  }
+  // designer picks a specific NTC from the ICL catalog → recalc the design around that part
+  const selectNtc = (pn: string) => {
+    const opts = { ...ntcOpts, selected_part: pn }
+    setNtcOpts(opts); calcNtc(opts)
   }
 
   // ── MOV ──
@@ -128,14 +134,20 @@ export const InputProtection: React.FC<Props> = ({
   useEffect(() => { calcNtc(); calcMov() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [rptBusy, setRptBusy] = useState(false)
+  // FULL report: all previous chapters (design basis, magnetics, DC-bus capacitor) + the
+  // input-protection chapters — not only Ch 8–9.
   const downloadReport = async () => {
     setRptBusy(true); setErr(null)
     try {
-      const blob = await inputProtectionReport({ design, cap,
-        mosfet: { vdss: Number(movOpts.device_vds) },
-        ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM } })
+      const blob = await docGenerateReport({
+        state:           confirmedState as Record<string, unknown>,
+        approved_design: approvedInductorDesign as Record<string, unknown>,
+        step15_result:   approvedCapacitorDesign ? ({ ...approvedCapacitorDesign } as Record<string, unknown>) : {},
+        input_protection: { design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
+          ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM } },
+      })
       const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = 'PFC_Input_Protection_Ch8_9.pdf'
+      a.href = url; a.download = `PFC_Report_${(confirmedState as any)?.project_id ?? 'design'}_incl_InputProtection.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 150)
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
@@ -209,15 +221,66 @@ export const InputProtection: React.FC<Props> = ({
                     <tr key={i}><td style={cell}>{num(rh, 2)}</td><td style={cell}>{num(pl, 1)}</td></tr>))}</tbody></table>
                 </div>
               </div>
+              {ntcRes.selected && (
+                <div style={{ background: C.tealL, border: `1px solid ${C.teal}66`, borderRadius: 8,
+                  padding: '10px 12px', marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: C.teal, textTransform: 'uppercase', fontWeight: 700,
+                    letterSpacing: '.05em', marginBottom: 6 }}>
+                    Selected NTC — design recalculated for the actual part
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Chip k="Part" v={`${ntcRes.selected.mfr ?? ''} ${ntcRes.selected.part_number ?? ''}`} />
+                    <Chip k="R25 (actual)" v={`${num(ntcRes.selected.r25_ohm, 1)} Ω`} />
+                    <Chip k="Cold inrush (actual)" v={`${num(ntcRes.selected.i_inrush_actual_A, 1)} A ${ntcRes.selected.meets_target ? '✓' : '✗ > target'}`} />
+                    <Chip k="τ / bypass delay" v={`${num(ntcRes.selected.tau_ms, 1)} / ${num(ntcRes.selected.t_bypass_ms, 0)} ms`} />
+                    <Chip k="Energy margin (est.)" v={ntcRes.selected.energy_margin != null ? `${num(ntcRes.selected.energy_margin, 2)}× E_cap` : '—'} />
+                  </div>
+                </div>
+              )}
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
                 Catalog screen — R25 ≥ {num(ntcRes.result.r25_pick, 2)} Ω and pulse rating ≥ {num(ntcRes.result.e_pulse_required, 0)} J
+                — click Select to base the design on a part
               </div>
-              <CatalogTable rows={ntcRes.catalog} emptyNote="No catalog parts loaded." />
+              {(ntcRes.candidates?.length ?? 0) > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <thead><tr>{['', '', 'Mfr / Part', 'R25 (Ω)', 'Ø (mm)', 'I_max (A)', 'E est. (J)', 'Notes'].map((h, i) =>
+                      <th key={i} style={{ ...cell, color: C.hint, textTransform: 'uppercase', fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                    <tbody>{(ntcRes.candidates as NtcCandidate[]).map((c, i) => {
+                      const isSel = ntcRes.selected?.part_number === c.part_number
+                      return (
+                        <tr key={i} style={isSel ? { background: 'rgba(45,212,191,.08)' } : undefined}>
+                          <td style={cell}>{c.ok ? <Badge color="green">PASS</Badge> : <Badge color="red">FAIL</Badge>}</td>
+                          <td style={cell}>
+                            <Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectNtc(c.part_number ?? '')}>
+                              {isSel ? '✓ Selected' : 'Select'}
+                            </Btn>
+                          </td>
+                          <td style={{ ...cell, whiteSpace: 'normal', fontWeight: 600, color: c.ok ? C.text : C.muted }}>
+                            {c.mfr} {c.datasheet_url
+                              ? <a href={(c.datasheet_url.startsWith('//') ? 'https:' : '') + c.datasheet_url} target="_blank"
+                                   rel="noreferrer" style={{ color: C.accent }}>{c.part_number}</a>
+                              : c.part_number}
+                          </td>
+                          <td style={cell}>{num(c.r25, 1)}</td>
+                          <td style={cell}>{num(c.diameter_mm, 0)}</td>
+                          <td style={cell}>{num(c.imax, 1)}</td>
+                          <td style={cell}>{num(c.energy_est_J, 0)}</td>
+                          <td style={{ ...cell, whiteSpace: 'normal', color: C.muted, fontSize: 10 }}>
+                            {(c.reasons ?? []).slice(0, 2).map((x, k) => <div key={k}>– {x}</div>)}</td>
+                        </tr>
+                      )
+                    })}</tbody>
+                  </table>
+                </div>
+              ) : (
+                <CatalogTable rows={ntcRes.catalog} emptyNote="No catalog parts loaded." />
+              )}
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
                 Screened against the vendor ICL database (ICL_Database.xlsx). R25 is the real datasheet value;
                 pulse energy is estimated from the disc diameter — confirm energy / max-C on the datasheet before
-                ordering. The NTC steady-state loss is folded into the efficiency cross-check; the sizing is
-                documented step-by-step in its chapter.
+                ordering. Selecting a part recalculates the inrush/precharge numbers around its actual R25 and
+                documents the selection in the report (§8.7).
               </div>
             </>)}
           </div>
@@ -298,7 +361,7 @@ export const InputProtection: React.FC<Props> = ({
         <Btn variant="ghost" onClick={onBack}>← Back to semiconductors</Btn>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="success" disabled={rptBusy} onClick={downloadReport}>
-            {rptBusy ? '⏳ Generating…' : '📥 Download report (Ch 8–9)'}
+            {rptBusy ? '⏳ Generating…' : '📥 Download full report (incl. previous steps)'}
           </Btn>
           {onNext && <Btn variant="primary" onClick={onNext}>Input filter →</Btn>}
           <Btn variant="ghost" onClick={onRestart}>Restart</Btn>

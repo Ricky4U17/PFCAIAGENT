@@ -77,6 +77,12 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
     fline = float(design["fline"])
     mos_p, mos_m = _clean_block(mosfet); dio_p, dio_m = _clean_block(diode)
     br_p,  br_m  = _clean_block(bridge); th_p,  _     = _clean_block(thermal)
+    # In sync_bottom topology the engine reads n_parallel_top for the TOP diodes and ignores
+    # n_parallel — but the GUI's "Devices in parallel" field sets n_parallel. Map it through so
+    # paralleling devices lowers the per-device drop/loss in BOTH bridge topologies.
+    if (br_p.get("topology") == "sync_bottom" and "n_parallel_top" not in br_p
+            and br_p.get("n_parallel")):
+        br_p["n_parallel_top"] = int(br_p["n_parallel"])
     cfg = {
         "spec": {
             "vo": vout, "fsw": fsw, "fline": fline, "nch": nch, "L": L_phi,
