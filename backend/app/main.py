@@ -1666,7 +1666,7 @@ class _CapLifetimeReq(BaseModel):
     state:          dict
     part_number:    str
     qty:            int   = 1
-    Tamb_C:         float = 45.0    # ambient temperature (°C)
+    Tamb_C:         float = 50.0    # ambient temperature (°C) — spec worst-case default
 
 @app.post("/mode-b/step15/cap-lifetime", tags=["mode-b"])
 def step15_cap_lifetime(req: _CapLifetimeReq):

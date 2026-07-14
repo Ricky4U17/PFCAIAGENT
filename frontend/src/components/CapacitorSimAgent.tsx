@@ -117,9 +117,15 @@ export const CapacitorSimAgent: React.FC<Props> = ({
     const iRated  = cap?.I_rated_A ?? null
     const tempMaxC  = Number(cap?.temp_rating_C ?? 105)            // rated category max (hotspot limit)
     const lifeTempC = Number(cap?.lifetime_temp_C ?? tempMaxC)    // temp L0 is rated at (Arrhenius ref)
-    const Rth       = Number(cap?.Rth_ca_CW ?? 18)               // °C/W from package type (10 snap / 15 radial)
+    // °C/W: part value when a DB part was chosen; else by package/series text — the SAME
+    // 10 (snap-in/screw) / 15 (radial) model Step 15 uses. (The old 18 fallback ran ~1.8×
+    // hotter than the page whenever no specific part was selected.)
+    const pkgTxt = `${cap?.series ?? result.series ?? ''} ${(cap as any)?.package ?? ''}`.toLowerCase()
+    const Rth    = Number(cap?.Rth_ca_CW ?? (/(snap|screw)/.test(pkgTxt) ? 10 : 15))
     const rippleHf  = Number(cap?.ripple_hf_A ?? 0)               // rated HF ripple → frequency multiplier
-    const freqMult  = (rippleHf > 0 && iRated) ? +(rippleHf / Number(iRated)).toFixed(3) : 1.4
+    // K_hf ≥ 1 always: a handful of DB rows carry an HF rating BELOW the 120 Hz rating
+    // (data quirk), which would INFLATE Ieq by 1/K_hf and falsely fail the margin.
+    const freqMult  = (rippleHf > 0 && iRated) ? Math.max(1, +(rippleHf / Number(iRated)).toFixed(3)) : 1.4
     const L0      = parseLifeHours(cap?.lifetime) ?? 5000
 
     // Step-15 governing lifetime → calibration anchor for the sim's Arrhenius model.
@@ -162,7 +168,10 @@ export const CapacitorSimAgent: React.FC<Props> = ({
           C_uF, Vrated_V: Vrated,
           ESR_120_ohm:  esr120 > 0 ? esr120 : null,
           tanDelta:     null,
-          ESR_HF_ohm:   null,            // tool falls back to ESR@120 (conservative)
+          // HF ESR = 0.595 × ESR@120 — the SAME HF/LF ratio Step 15's lifetime Method 1 uses.
+          // (Passing null made the tool fall back to the full 120 Hz ESR for the HF loss term,
+          //  overheating the hotspot ~1.7× on the HF component vs the selection page.)
+          ESR_HF_ohm:   esr120 > 0 ? +(esr120 * 0.595).toFixed(4) : null,
           rippleRating_A: iRated ?? 0,
           freqMult_HF:  freqMult,        // ripple_hf_A / ripple_120hz_A from the datasheet (DB)
           tempMult:     1.0,
@@ -183,9 +192,12 @@ export const CapacitorSimAgent: React.FC<Props> = ({
         // mirrors upstream check (I_per_cap ≤ I_rated); N/A if the part has no rating
         Imargin_min_pct: iRated ? 0 : null,
         Thot_max_C:      tempMaxC,       // cap must stay within its rated category max temp
-        // 15-year lifetime gate. The sim's life is calibrated to Step 15's governing 3-method
-        // value (via lifeAnchor_h), so this PASS/FAIL is consistent with the upstream verdict.
-        life_min_h:      15 * 8760,
+        // 15-year lifetime gate ONLY when the sim's Arrhenius is calibrated to Step 15's
+        // governing 3-method value (lifeAnchor_h). Without the anchor (e.g. a suggested
+        // configuration approved without picking a DB part), the raw L0-default model would
+        // falsely FAIL "Lifetime (at hotspot)" — lifetime is owned upstream by Step 15's
+        // 3-method model, so the un-calibrated check is informational (N/A), not a gate.
+        life_min_h:      lifeAnchor_h ? 15 * 8760 : null,
         Vderate_max_pct: 90,             // consistent with the 1.12× voltage-derate rule
       },
     }

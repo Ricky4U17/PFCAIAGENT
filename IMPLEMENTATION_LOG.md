@@ -3898,3 +3898,31 @@ Verified: DB rebuild 981/1311/1399; curve anchor == selected part's point; share
 PDF text contains Figure 7.3 / 7.3.1 / AS3220010 / 22.5× margin / ESTIMATED / @125 / per-package /
 Foster; adapter smoke passes; live doc endpoint 200 → 9.7 MB Steps1_19 with the Ch8→Ch7 inrush
 cross-check; tsc clean.
+
+## C81 — Step 15 ↔ DC-bus CapSim agreement (hotspot + ripple-margin false FAILs) (2026-07-13)
+
+Designer observed: selected cap passes all 3 lifetime methods + ripple margin on the Step-15
+page but the simulation page fails "hotspot" and "Ripple-I margin". VERIFIED (sweep of 1816
+~2350 µF/450 V bank configs): 229 margin flips + hotspot/lifetime flips. Root causes and fixes:
+1) HF ripple-current model unified: step15_capacitor (calc_operating_point + thermal table) now
+   uses the SAME standard boost-diode RMS identity as the sim — I_LF = P/(√2·Vout),
+   I_D,rms² = 8√2·P_in²/(3π·V_ac·PF²·V_out), I_HF = √(I_D²−I_o²−I_LF²)/√N (PF + nch from state).
+   The old 16/(12π) coefficient understated HF ~2× (sim/page = 2.03×). Verified: page and sim
+   currents now IDENTICAL at the corner (6.466/7.604 A). C_required unchanged (voltage-based).
+2) CapacitorSimAgent package: ESR_HF_ohm = 0.595×ESR@120 (Step-15 Method-1 ratio; null had made
+   the tool use full LF ESR at HF), K_hf clamped ≥1 (11 EGXM rows carry HF rating < 120 Hz rating
+   → 1/K_hf inflated Ieq), Rth fallback 18 → package-based 10 (snap/screw)/15 (radial) matching
+   the page model when no DB part was chosen.
+3) "Fails at hotspot" root cause: the sim's Lifetime check (basis label "at hotspot") ran the
+   RAW L0-default Arrhenius against a hard 15-yr gate whenever the Step-15 3-method calibration
+   anchor was missing (suggested config approved without picking a DB part → lifetime fetch
+   skipped). Per the original invariant (lifetime owned upstream), life_min_h is now set only
+   when lifeAnchor_h exists; un-calibrated = informational N/A.
+4) Ambient unified: Step-15 lifetime panel default 45 → intake ambient_temp_c_max (50, same as
+   the sim's judgment corner); cap-lifetime endpoint default 45 → 50.
+5) Report equations updated to the new decomposition: doc_report_builder §5.3 eq_box (Io/ILF/
+   ID²/IHF÷√N with PF and N shown; thermal table rows now carry PF, dict carries n_phases) and
+   generate_step15 15.6 formula line + Io column header.
+Verified: page↔sim currents identical; disagreement sweeps now 0/1816 (both directions, both
+checks); run_capacitor_design/verify_configuration/thermal table OK (5×470 passes, 9 rows);
+step15 section PDF renders; live doc report 200 (Steps1_15, 5.25 MB); tsc clean.

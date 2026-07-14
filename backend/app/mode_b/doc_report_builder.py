@@ -3477,11 +3477,17 @@ def _ch5(story, state, s15):
         _rth = float(thermal.get("Rth_ca_CW", 15) or 15)
         _vinpk = _hr['Vin_rms'] * math.sqrt(2)
         # First: where the bank ripple current comes from (DC, 120 Hz LF, switching HF).
+        # SAME model as the DC-bus capacitor simulation page (standard boost-diode RMS identity
+        # with √N interleave reduction), so this chapter and the simulation agree by construction.
+        _npha = int(thermal.get("n_phases", 2) or 2)
+        _pf_h = float(_hr.get("PF", 0.99) or 0.99)
         eq_box(story, [
-            rf"I_{{dc}} = \dfrac{{P_{{out}}}}{{\eta\,V_{{out}}}} = {_hr['I_dc_A']:.3f}\ \mathrm{{A}}",
-            rf"I_{{LF}} = \dfrac{{I_{{dc}}}}{{\sqrt{{2}}}} = {_hr['I_LF_A']:.3f}\ \mathrm{{A}}\quad(120\ \mathrm{{Hz}})",
-            rf"I_{{HF}} = \sqrt{{\,I_{{dc}}^2\,\dfrac{{16\,V_{{out}}}}{{6\,V_{{in,pk}}\,2\pi}} - I_{{LF}}^2\,}} "
-            rf"= {_hr['I_HF_A']:.3f}\ \mathrm{{A}}\quad(\mathrm{{switching}})",
+            rf"I_{{o}} = \dfrac{{P_{{out}}}}{{V_{{out}}}} = {_hr['I_dc_A']:.3f}\ \mathrm{{A}},\qquad "
+            rf"I_{{LF}} = \dfrac{{P_{{out}}}}{{\sqrt{{2}}\,V_{{out}}}} = {_hr['I_LF_A']:.3f}\ \mathrm{{A}}\quad(120\ \mathrm{{Hz}})",
+            rf"I_{{D,rms}}^2 = \dfrac{{8\sqrt{{2}}\,P_{{in}}^2}}{{3\pi\,V_{{ac}}\,PF^2\,V_{{out}}}}"
+            rf"\qquad(P_{{in}} = P_{{out}}/\eta,\ PF = {_pf_h:.4f})",
+            rf"I_{{HF}} = \dfrac{{\sqrt{{\,I_{{D,rms}}^2 - I_o^2 - I_{{LF}}^2\,}}}}{{\sqrt{{N}}}} "
+            rf"= {_hr['I_HF_A']:.3f}\ \mathrm{{A}}\quad(\mathrm{{switching}},\ N = {_npha}\ \mathrm{{phases}})",
         ], heading=f"Capacitor ripple-current decomposition at {_hr['Vin_rms']:.0f} Vac "
                    f"(V_in,pk = {_vinpk:.1f} V, V_out = 393 V)", ch=5)
         eq_box(story, [

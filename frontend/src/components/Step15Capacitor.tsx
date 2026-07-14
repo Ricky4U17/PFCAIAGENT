@@ -84,7 +84,10 @@ export const Step15Capacitor: React.FC<Props> = ({
   const [fOpTemp,     setFOpTemp]    = useState<string|null>(null)
   const [fTolerance,  setFTolerance] = useState<string|null>(null)
   const [fLifetime,   setFLifetime]  = useState<string|null>(null)
-  const [fAmbientC,   setFAmbientC]  = useState<number>(45)   // ambient temperature for lifetime
+  // ambient for lifetime — defaults to the SPEC worst-case ambient (the same value the DC-bus
+  // capacitor simulation page judges at), so both pages evaluate identical conditions
+  const [fAmbientC,   setFAmbientC]  = useState<number>(() =>
+    Number((confirmedState as any)?.intake?.thermal?.ambient_temp_c_max ?? 50))
 
   // Filter state — Dimensions
   const [fLeadSpacing, setFLeadSpacing] = useState<number|null>(null)

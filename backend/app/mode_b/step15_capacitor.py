@@ -69,16 +69,25 @@ def calc_operating_point(
     Vin_rms: float, Pout: float, eta: float,
     Vout: float, f_line: float,
     Vdc_ripple: float, Vdc_min: float, t_hold_s: float,
+    pf: float = 0.99, n_phases: int = 2,
 ) -> dict:
     """Full Step 15 calc for one operating point."""
     Vin_pk  = math.sqrt(2) * Vin_rms
 
-    # Step 15.6 — RMS currents
-    I_dc    = Pout / (eta * Vout)
-    I_LF    = I_dc / math.sqrt(2)
-    denom   = 6 * Vin_pk * 2 * math.pi
-    I_HF    = math.sqrt(max(0.0, I_dc**2 * 16 * Vout / denom - I_LF**2)) if denom > 0 else 0.0
-    I_total = math.sqrt(I_LF**2 + I_HF**2)
+    # Step 15.6 — RMS currents. SAME model as the DC-bus capacitor SIMULATION page, so both
+    # pages judge identical stress:
+    #   LF (2·f_line): I_LF = P_out/(√2·V_out)
+    #   HF (switching): standard boost-diode RMS identity minus the DC and LF components,
+    #   with √N interleave reduction:
+    #     I_D,rms² = 8√2·P_in²/(3π·V_ac·PF²·V_out),   I_HF = √(I_D,rms² − I_o² − I_LF²)/√N
+    # (The previous 16/(12π) coefficient understated the HF current ≈2× vs this identity,
+    #  which made Step 15 pass parts the simulation page then failed on hotspot/margin.)
+    Pin     = Pout / max(eta, 1e-9)
+    I_o     = Pout / Vout
+    I_LF    = Pout / (math.sqrt(2) * Vout)
+    ID2     = 8 * math.sqrt(2) * Pin * Pin / (3 * math.pi * Vin_rms * pf * pf * Vout)
+    I_HF    = math.sqrt(max(0.0, ID2 - I_o**2 - I_LF**2)) / math.sqrt(max(n_phases, 1))
+    I_total = math.hypot(I_LF, I_HF)
 
     # Step 15.2 — hold-up capacitance
     C_holdup_F  = (2 * Pout * t_hold_s) / (Vout**2 - Vdc_min**2)
@@ -427,14 +436,17 @@ def calculate_thermal_table(
             esr_inv += row["qty"] / esr_each
     ESR_par = (1.0 / esr_inv) if esr_inv > 0 else 500.0  # mΩ fallback
 
+    n_phases = int(state.get("selected_channels") or 2)
     table = []
     for (Vin_rms, Pout, eta, PF) in _DEFAULT_OPS_9:
-        Vin_pk  = math.sqrt(2) * Vin_rms
-        I_dc    = Pout / (eta * Vout)
-        I_LF    = I_dc / math.sqrt(2)
-        denom   = 6 * Vin_pk * 2 * math.pi
-        I_HF    = math.sqrt(max(0.0, I_dc**2 * 16 * Vout / denom - I_LF**2)) if denom > 0 else 0.0
-        I_total = math.sqrt(I_LF**2 + I_HF**2)
+        # SAME HF ripple-current model as calc_operating_point / the simulation page
+        Pin     = Pout / max(eta, 1e-9)
+        I_o     = Pout / Vout
+        I_dc    = I_o                       # output DC current (basis of the decomposition)
+        I_LF    = Pout / (math.sqrt(2) * Vout)
+        ID2     = 8 * math.sqrt(2) * Pin * Pin / (3 * math.pi * Vin_rms * PF * PF * Vout)
+        I_HF    = math.sqrt(max(0.0, ID2 - I_o**2 - I_LF**2)) / math.sqrt(max(n_phases, 1))
+        I_total = math.hypot(I_LF, I_HF)
 
         # Correct: X caps in parallel → each carries I_total / X
         I_per_cap   = I_total / max(total_count, 1)
@@ -452,6 +464,7 @@ def calculate_thermal_table(
         table.append({
             "Vin_rms":          Vin_rms,
             "Pout_W":           Pout,
+            "PF":               PF,
             "I_dc_A":           round(I_dc,        3),
             "I_LF_A":           round(I_LF,        3),
             "I_HF_A":           round(I_HF,        3),
@@ -476,6 +489,7 @@ def calculate_thermal_table(
         "temp_rating_C":    temp_rating,
         "Rth_ca_CW":        Rth_ca,
         "ESR_parallel_mohm": round(ESR_par, 1),
+        "n_phases":         n_phases,
     }
 
 
@@ -499,10 +513,11 @@ def run_capacitor_design(state: dict) -> dict:
     t_hold_s   = t_hold_ms / 1000.0
     Vout_max   = float(tsi.get("Vout_max_V",               Vout * 1.10))
 
+    nch = int(state.get("selected_channels") or 2)
     worst = calc_operating_point(180, Pout_high, 0.965, Vout, f_line,
-                                  Vdc_ripple, Vdc_min, t_hold_s)
+                                  Vdc_ripple, Vdc_min, t_hold_s, pf=0.9889, n_phases=nch)
     low   = calc_operating_point(90,  Pout_low,  0.945, Vout, f_line,
-                                  Vdc_ripple, Vdc_min, t_hold_s)
+                                  Vdc_ripple, Vdc_min, t_hold_s, pf=0.9987, n_phases=nch)
 
     # Step 15.4 — C required
     candidates = {

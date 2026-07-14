@@ -260,17 +260,21 @@ def generate_step15_section(result: dict) -> list:
     story.append(PageBreak())
     story.append(Paragraph('Step 15.6) Capacitor RMS Current — All 9 Operating Points', S['h2']))
     story.append(Paragraph(
-        'I<sub>dc</sub> = P<sub>out</sub> / (&eta; &middot; V<sub>out</sub>) &nbsp;&nbsp;'
-        'I<sub>LF</sub> = I<sub>dc</sub> / &radic;2 &nbsp;&nbsp;'
-        'I<sub>HF</sub> = &radic;(I<sub>dc</sub><super>2</super> &middot; 16V<sub>out</sub> / '
-        '(6V<sub>in,pk</sub> &middot; 2&pi;) &minus; I<sub>LF</sub><super>2</super>) &nbsp;&nbsp;'
+        # SAME decomposition as the DC-bus capacitor simulation page (standard boost-diode RMS
+        # identity, √N interleave reduction) — the two pages agree by construction.
+        'I<sub>o</sub> = P<sub>out</sub> / V<sub>out</sub> &nbsp;&nbsp;'
+        'I<sub>LF</sub> = P<sub>out</sub> / (&radic;2 &middot; V<sub>out</sub>) &nbsp;&nbsp;'
+        'I<sub>D,rms</sub><super>2</super> = 8&radic;2 &middot; P<sub>in</sub><super>2</super> / '
+        '(3&pi; &middot; V<sub>ac</sub> &middot; PF<super>2</super> &middot; V<sub>out</sub>) &nbsp;&nbsp;'
+        'I<sub>HF</sub> = &radic;(I<sub>D,rms</sub><super>2</super> &minus; I<sub>o</sub><super>2</super> '
+        '&minus; I<sub>LF</sub><super>2</super>) / &radic;N &nbsp;&nbsp;'
         'I<sub>total</sub> = &radic;(I<sub>LF</sub><super>2</super> + I<sub>HF</sub><super>2</super>)',
         S['body']))
     story.append(Spacer(1, 2*mm))
 
     th_tbl = th.get("thermal_table", [])
     hdr6 = ['V<sub>in</sub>\n(Vac)', 'P<sub>out</sub>\n(W)', '&eta;',
-            'I<sub>dc</sub>\n(A)', 'I<sub>LF</sub>\n(A)',
+            'I<sub>o</sub>\n(A)', 'I<sub>LF</sub>\n(A)',
             'I<sub>HF</sub>\n(A)', 'I<sub>total</sub>\n(A)']
     rows6 = [[Paragraph(h, S['tbl_hdr']) for h in hdr6]]
     WC_VIN = 180; LL_VIN = 90
