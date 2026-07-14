@@ -38,6 +38,31 @@ def _f(x, n=2):
     return f"{float(x):.{n}f}"
 
 
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "semiconductor", "assets")
+
+def _config_schematic(topology, n_parallel):
+    """(Image, caption) for the selected bridge configuration; (None, None) if asset missing."""
+    if topology == "sync_bottom":
+        name, cap = ("schematic_3_dual_bridge_bypass_mosfets.png",
+                     "Dual split bridges with bypass MOSFETs on the bottom legs: each package's AC "
+                     "pins are shorted (one package per line conductor), the top arms are the "
+                     "paralleled diode pairs, and Q1/Q2 bypass the bottom return path at line "
+                     "frequency. Q1 and Q2 must never be enhanced simultaneously (L–N short).")
+    elif int(n_parallel or 1) >= 2:
+        name, cap = ("schematic_2_dual_bridge_parallel_diodes.png",
+                     "Dual split-bridge arrangement: each package's two AC pins are shorted (BR1 on "
+                     "Neutral, BR2 on Line), so every conduction arm is a matched diode pair inside "
+                     "one package and each package permanently dissipates one arm's loss.")
+    else:
+        name, cap = ("schematic_1_single_bridge.png",
+                     "Conventional single full-bridge rectifier: two diodes in series conduct at "
+                     "every instant; all bridge loss is concentrated in one package.")
+    path = os.path.join(_ASSETS, name)
+    if not os.path.exists(path):
+        return None, None
+    return _img_path(path, width=CW * 0.72), cap
+
+
 def _uj(x):
     return f"{float(x) * 1e6:.2f} {_MU}J"
 
@@ -75,7 +100,11 @@ def _bridge_section(story, traces, is_sync):
     for vac, tr in traces:
         i_in_pk = (2 ** 0.5) * tr["Iin_rms"]; i_avg = (2.0 / 3.141592653589793) * i_in_pk
         ntop = max(tr["n_top"], 1)
-        extra = (f" (top diodes {_f(tr['P_bridge_top'])} W + bottom MOSFETs {_f(tr['P_bridge_bottom'])} W)"
+        _bd = float(tr.get('P_bridge_bd_share', 0.0) or 0.0)
+        extra = ((f" (top diodes {_f(tr['P_bridge_top'])} W + bottom MOSFETs {_f(tr['P_bridge_bottom'])} W"
+                  + (f" + bottom-diode crest share {_f(_bd)} W — the FET drop exceeds the diode knee "
+                     "near the line crest, so the bridge's bottom diodes conduct part of the current"
+                     if _bd > 0.05 else "") + ")")
                  if is_sync else "")
         _W(story,
            f"<b>At {vac:.0f} V<sub>AC</sub>:</b> I<sub>in,rms</sub> = {_f(tr['Iin_rms'],3)} A, so the "
@@ -363,15 +392,28 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_mos.rth_jc:.2f} / {_mos.rth_cs:.2f} {_DEG}C/W", "junction&#8594;case&#8594;sink"],
         ["<b>Boost diode</b>", "", ""],
         ["Type", "SiC Schottky" if _dio.is_sic else "Si", "recovery behaviour"],
-        ["Forward drop V<sub>f</sub>(i)", _vf(_dio.vf_curve), "datasheet V-I curve"],
+        ["Forward drop V<sub>f</sub>(i) @25{}C".format(_DEG), _vf(_dio.vf_curve), "datasheet V-I curve"],
+    ] + ([[f"Forward drop V<sub>f</sub>(i) @{_dio.vf_thot:.0f}{_DEG}C", _vf(_dio.vf_curve_hot),
+           "hot curve — per-point Tj interpolation"]] if _dio.vf_curve_hot is not None else []) + [
         ([f"Capacitive charge Q<sub>c</sub>", f"{_dio.qc*1e9:.0f} nC", "SiC: no Q<sub>rr</sub>"]
          if _dio.is_sic else [f"Recovery charge Q<sub>rr</sub>", f"{_dio.qrr*1e9:.0f} nC", "Si reverse recovery"]),
         [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_dio.rth_jc:.2f} / {_dio.rth_cs:.2f} {_DEG}C/W", ""],
         ["<b>Bridge rectifier</b>", "", ""],
         ["Topology", _br.topology, "diode or sync-bottom"],
-        ["Forward drop V<sub>f</sub>(i)", _vf(_br.vf_curve), "per device"],
-        ["Devices in parallel", f"{_br.n_parallel}", "shares the line current"],
-        [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_br.rth_jc:.2f} / {_br.rth_cs:.2f} {_DEG}C/W", ""],
+        ["Forward drop V<sub>f</sub>(i) @25{}C".format(_DEG), _vf(_br.vf_curve), "per device"],
+    ] + ([[f"Forward drop V<sub>f</sub>(i) @{_br.vf_thot:.0f}{_DEG}C", _vf(_br.vf_curve_hot),
+           "hot curve — per-point Tj interpolation"]] if _br.vf_curve_hot is not None else []) + [
+        ["Devices in parallel", f"{_br.n_parallel_top if _br.topology=='sync_bottom' else _br.n_parallel}",
+         "packages share one arm each (split arrangement)" ],
+    ] + ([[ "Worst-die share derate", f"{_br.share_worst:.2f}",
+            "arm V<sub>f</sub> evaluated at the hottest die's current"]]
+         if _br.share_worst else []) + [
+        [f"R<sub>&#952;jc</sub> / R<sub>&#952;cs</sub>", f"{_br.rth_jc:.2f} / {_br.rth_cs:.2f} {_DEG}C/W",
+         "package-level (per-package thermal)"],
+    ] + ([[ "Surge ratings I<sub>FSM</sub> / I&#178;t",
+            f"{_f(bridge.get('ifsm_A'),0)} A / {_f(bridge.get('i2t_A2s'),0)} A&#178;s",
+            "verified vs Ch-8 inrush in &#167;7.3.1"]]
+         if bridge.get("ifsm_A") and bridge.get("i2t_A2s") else []) + [
         ["<b>Thermal / application</b>", "", ""],
         [f"Ambient T<sub>a</sub>", f"{_th.t_ambient:.0f} {_DEG}C", "worst-case"],
         [f"Heatsink R<sub>&#952;sa</sub>", f"{_th.rth_sa:.2f} {_DEG}C/W", "sink&#8594;ambient (shared)"],
@@ -386,6 +428,20 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "R<sub>&#952;jc</sub> …) and the application inputs (gate drive, R<sub>g</sub>, R<sub>&#952;cs</sub>, "
         "T<sub>ambient</sub>, R<sub>&#952;sa</sub>) confirmed on the selection screen are used as-is; the "
         "validation gate blocks the calculation until every required field is present.", CH)
+    # typ/max provenance: parts picked from the local DB carry an _estimated list naming which
+    # loss/thermal parameters were estimated (vs read verbatim from the datasheet columns).
+    _est_lines = []
+    for _lbl, _blk in (("Bridge", bridge), ("MOSFET", mosfet), ("Diode", diode)):
+        _e = (_blk or {}).get("_estimated")
+        if _e:
+            _est_lines.append(f"<b>{_lbl}</b>: {', '.join(str(x) for x in _e)}")
+    if _est_lines:
+        annotation(story, "PITFALL",
+            "The following parameters were ESTIMATED by the component database (the anchor scalars "
+            "are the datasheet MAX values; curve shapes / thermal figures are generic): "
+            + " &#183; ".join(_est_lines)
+            + ". Replace them with the part's real datasheet curves (incl. the hot V<sub>f</sub> "
+            "curve) on the manual form before sign-off.", CH)
     data_table(story, "7.2c", "Loss-Model Summary — what is computed and how",
         "Every loss mechanism in &#167; 7.3&#8211;7.6, the model used, and the current basis. All are "
         "evaluated by time-domain integration over the line cycle (&#167; 7.1).",
@@ -402,13 +458,55 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
 
     # ── 7.3 Bridge rectifier ─────────────────────────────────────────────────
     step_h(story, "7.3", "Bridge Rectifier Loss", CH)
+    # configuration schematic — selected by the designer's topology + parallel-device choice
+    _cfg_img, _cfg_cap = _config_schematic(_br.topology, _br.n_parallel_top if is_sync else _br.n_parallel)
+    if _cfg_img is not None:
+        story.append(_cfg_img)
+        body(story, f"<i>Figure 7.3 — Selected bridge configuration. {_cfg_cap}</i>", CH)
     _bridge_section(story, traces, is_sync)
+    _has_bd = any(r.get("P_BRIDGE_bottom_bd", 0) > 0.01 for r in rows)
     data_table(story, "7.3", "Bridge Loss vs Line Voltage",
         "Conducting-pair loss at each operating point" + (" (top diodes + bottom MOSFETs)." if is_sync else "."),
         ["V_AC", "I_in,rms", "P_bridge (top)", "P_bridge (bottom)", "P_bridge total"],
         [[f"{r['Vac']:.0f} V", f"{_f(r['Iin_rms'],1)} A", f"{_f(r['P_BRIDGE_top'])} W",
           f"{_f(r['P_BRIDGE_bottom'])} W", f"{_f(r['P_BRIDGE_total'])} W"] for r in rows],
         col_widths=[CW*0.14, CW*0.18, CW*0.22, CW*0.24, CW*0.22], ch=CH)
+    if _has_bd:
+        annotation(story, "NOTE",
+            "The total includes a bottom-diode crest share (the bypass-FET ohmic drop exceeds the "
+            "diode knee near the line crest, so the bridge's bottom diodes conduct part of the "
+            "return current): worst case "
+            f"{max(r.get('P_BRIDGE_bottom_bd', 0) for r in rows):.2f} W. A lower hot "
+            "R<sub>DS(on)</sub> restores full FET conduction.", CH)
+
+    # ── surge-withstand verification (ties Chapter 7 to Chapter 8's inrush limit) ──
+    _ifsm = bridge.get("ifsm_A"); _i2t = bridge.get("i2t_A2s")
+    _inr = extra.get("inrush_pk_A"); _tau = extra.get("inrush_tau_ms")
+    if _ifsm or _i2t:
+        sub_h(story, "7.3.1", "Surge-current withstand vs the Chapter-8 inrush limit", CH)
+        _srows = []
+        if _ifsm:
+            _srows.append(["I<sub>FSM</sub> (8.3 ms half-sine)", f"{_f(_ifsm,0)} A",
+                           (f"NTC-limited inrush peak {_f(_inr,1)} A → "
+                            f"{float(_ifsm)/max(float(_inr),1e-9):.1f}× margin"
+                            if _inr else "compare vs the Chapter-8 NTC-limited inrush peak")])
+        if _i2t:
+            if _inr and _tau:
+                # exponential precharge decay: ∫i²dt = I_pk²·τ/2
+                _ev = float(_inr)**2 * (float(_tau)/1e3)/2.0
+                _srows.append(["I&#178;t rating", f"{_f(_i2t,0)} A&#178;s",
+                               f"inrush event I&#178;t = I<sub>pk</sub>&#178;&#183;&#964;/2 = "
+                               f"{_f(_ev,1)} A&#178;s → {float(_i2t)/max(_ev,1e-9):.1f}× margin"])
+            else:
+                _srows.append(["I&#178;t rating", f"{_f(_i2t,0)} A&#178;s",
+                               "compare vs I<sub>pk</sub>&#178;&#183;&#964;/2 of the Chapter-8 precharge"])
+        data_table(story, "7.3.1", "Bridge Surge Ratings vs Inrush Event",
+            ("Inrush figures carried in from the Chapter-8 NTC design"
+             + (f" ({extra.get('inrush_part')})" if extra.get("inrush_part") else "")
+             + "." if _inr else
+             "Enter the Chapter-8 NTC result (generate the full report) to evaluate the margins."),
+            ["Rating", "Value", "Check"], _srows,
+            col_widths=[CW*0.30, CW*0.22, CW*0.48], ch=CH)
 
     # ── 7.4 MOSFET ───────────────────────────────────────────────────────────
     step_h(story, "7.4", "Boost MOSFET Loss", CH)
@@ -448,6 +546,13 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
           ("PASS" if (r['Tj_FET'] <= tj_limit['fet'] and r['Tj_DIODE'] <= tj_limit['diode']
                       and r['Tj_BRIDGE_top'] <= tj_limit['bridge']) else "CHECK")] for r in rows],
         col_widths=[CW*0.14, CW*0.16, CW*0.16, CW*0.18, CW*0.18, CW*0.18], ch=CH)
+    annotation(story, "NOTE",
+        "Bridge junction temperatures use PER-PACKAGE dissipation (total diode loss / number of "
+        "packages) through the package-level R<sub>&#952;jc</sub> — for the split dual-bridge "
+        "arrangement each package permanently carries one arm. Values above are cycle-averaged "
+        "steady state; the line-frequency junction ripple (the 8.3 ms conduction bursts against "
+        "the package Z<sub>&#952;</sub>(t)) adds only a few &#176;C for these packages and is "
+        "evaluated only when a Foster Z<sub>&#952;</sub> network is supplied (zth_foster).", CH)
 
     # ── 7.7 Figures ──────────────────────────────────────────────────────────
     step_h(story, "7.7", "Loss and Temperature vs Line Voltage", CH)

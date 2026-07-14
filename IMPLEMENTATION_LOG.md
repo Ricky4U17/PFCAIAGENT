@@ -3849,3 +3849,52 @@ From "specs/Improvments and Corrections.docx". All 14 items implemented:
 Verified: tsc clean; embedded JS of both HTML tools syntax-checked; backend modules import; live
 endpoint tests (control/components R_CS band, capacitor-calc holdup, thermal-table sweep 0 false
 FAILs, sync_bottom n_parallel sweep, NTC selected recalc, full-report 200 with protection chapters).
+
+## C79 — Bridge-rectifier loss-model accuracy (items 1-3 from the config review) (2026-07-12)
+
+From the "Bridge Rectifier Configuration" review (specs/Bridge Rectifier COnfiguration/):
+1) Two-temperature multi-point Vf curves (pfc_loss_model Diode + Bridge): new optional
+   vf_curve_hot + vf_thot (default 125°C); vf(i,Tj) interpolates per current point between the
+   cold and hot datasheet curves — captures the NTC threshold AND PTC series resistance, which
+   the single vf_tco scalar could not (fallback unchanged when no hot curve; same pattern as
+   eon_curve_hot). GUI: optional "V_f vs I_f @125°C" curve fields for diode + bridge.
+2) Per-PACKAGE bridge thermal: Tj_bridge now uses (top + bottom-diode share)/n_packages through
+   the package-level rth_jc — the old per-DIE split (total/ndev_top) understated a single
+   bridge's rise ~2x and couldn't represent the split dual-bridge arrangement. n_packages =
+   n_parallel (diode topology; split config) or n_parallel_top (sync_bottom). Transient Zth
+   section updated to the same per-package power.
+3) Crest FET/diode sharing in sync_bottom: the bottom loss is no longer pure i²R — a vectorized
+   bisection solves the parallel node v/rb + n_top·i_diode(v) = i(θ) per line angle against the
+   INVERTED forward curve at the converged bridge Tj, so the bridge's bottom diodes take current
+   past the knee (marginal Rds(on), hot FET, line crest). New keys: bottom_bd / P_BRIDGE_bottom_bd
+   / trace P_bridge_bd_share + n_packages_br + P_bridge_per_pkg; report §7.3 mentions the share.
+Verified (GBJ40L06 curves, 20 A rms): vf interp exact at 25/75/125°C + scalar fallback; sharing
+0 W @5&20 mΩ (just below knee — matches the review's "marginal" call), 3.2 W @40 mΩ with FET loss
+clamped 16→7.7 W (diode clamp physics); three-config end-to-end: single 30.5 W/Tj 142°C,
+split-dual 27.8 W/100°C, +bypass 24.1 W/82.5°C with 0.71 W crest bd share at the hot converged
+point; adapter smoke test passes; both report topologies build; tsc clean.
+
+## C80 — Bridge config: part-driven data, surge verification, derates, config schematics (2026-07-13)
+
+Follow-up to C79 (items 4-5 + designer requests):
+- Part-driven Vf data (no GBJ40L06 hardcode anywhere): database.to_block now builds a 3-point
+  knee curve ANCHORED on the selected part's own datasheet (Vf max @ If) point (shape flagged
+  estimated); hot curves entered on the manual form; nothing in the calc path references any
+  specific part.
+- Item 4 — surge verification: bridge GUI fields ifsm_A / i2t_A2s (adapter treats them as check
+  metadata, not engine params); report §7.3.1 verifies IFSM vs the Ch-8 NTC-limited inrush peak
+  and I²t vs the precharge event I²t = Ipk²·τ/2, with margins; the doc endpoint computes the NTC
+  result (selected part when set) and passes inrush_pk_A/tau_ms/part into Ch-7's extra.
+- Item 5 — accuracy polish: Bridge.share_worst (worst-die current fraction; arm Vf evaluated at
+  the hottest die's current, clamped [1/n, 1]) + GUI field; §7.2b lists hot-curve rows, the share
+  derate, surge ratings, and a PITFALL annotation naming every DB-ESTIMATED parameter (typ/max
+  provenance); §7.6 note documents per-package thermal + Zth(8.3 ms) ripple policy.
+- Config schematics in documentation: the 3 reviewed schematics copied to
+  backend/app/mode_b/semiconductor/assets/; report §7.3 embeds the one matching the design
+  selection (single / split-dual by n_parallel / bypass-MOSFET by topology) as Figure 7.3 with a
+  configuration-specific caption.
+Verified: DB rebuild 981/1311/1399; curve anchor == selected part's point; share_worst 28.7→29.4
+→30.3 W (None/0.6/0.75); all 3 config reports build with schematic embedded (21 images, sync);
+PDF text contains Figure 7.3 / 7.3.1 / AS3220010 / 22.5× margin / ESTIMATED / @125 / per-package /
+Foster; adapter smoke passes; live doc endpoint 200 → 9.7 MB Steps1_19 with the Ch8→Ch7 inrush
+cross-check; tsc clean.

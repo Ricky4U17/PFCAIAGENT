@@ -126,6 +126,8 @@ class Mosfet:
 class Diode:
     vf_curve: tuple = ((1.0,3.0,12.0,24.0),(1.15,1.35,1.6,1.9))
     vf_tco: float = 0.0; vf_tref: float = 25.0
+    vf_curve_hot: Optional[tuple] = None       # V-I curve at vf_thot (datasheet hot curve, e.g. 125C)
+    vf_thot: float = 125.0
     rd: float = 0.0
     is_sic: bool = True
     qc: float = 23e-9
@@ -140,7 +142,15 @@ class Diode:
     zth_foster: list = field(default_factory=list)
     k_vf: float = 1.0; k_qrr: float = 1.0; k_qc: float = 1.0
     def vf(self, i, Tj=25.0):
-        return (curve(np.maximum(i,0.0),*self.vf_curve) + self.vf_tco*(Tj-self.vf_tref))*self.k_vf
+        # Two-temperature model (preferred): interpolate per current point between the cold and hot
+        # datasheet curves — captures the NTC threshold AND the PTC series resistance, which a
+        # single vf_tco scalar cannot (the curves converge/cross at high current). Falls back to
+        # the scalar tempco when no hot curve is supplied (same pattern as eon_curve_hot).
+        v = curve(np.maximum(i,0.0),*self.vf_curve)
+        if self.vf_curve_hot is not None:
+            f = np.clip((Tj-self.vf_tref)/max(self.vf_thot-self.vf_tref, 1e-9), 0.0, None)
+            return (v + (curve(np.maximum(i,0.0),*self.vf_curve_hot)-v)*f)*self.k_vf
+        return (v + self.vf_tco*(Tj-self.vf_tref))*self.k_vf
     def qrr_eff(self, If, didt, Tj):
         if self.is_sic: return self.qc*self.k_qc
         q = curve(didt,*self.qrr_didt_curve) if self.qrr_didt_curve is not None else self.qrr
@@ -152,8 +162,15 @@ class Diode:
 class Bridge:
     topology: str = "diode"
     vf_curve: tuple = ((1.0,10.0,25.0),(0.8,1.0,1.2))
-    vf_tco: float = 0.0; vf_tref: float = 25.0; rd: float = 0.0
+    vf_tco: float = 0.0; vf_tref: float = 25.0
+    vf_curve_hot: Optional[tuple] = None       # V-I curve at vf_thot (datasheet hot curve, e.g. 125C)
+    vf_thot: float = 125.0
+    rd: float = 0.0
     n_parallel: int = 1; n_parallel_top: int = 1; n_parallel_bottom: int = 1
+    # Worst-die share of the arm current for paralleled dies (imperfect sharing derate).
+    # None = ideal 1/n split. E.g. 0.6 for a 60/40 worst-case split of a 2-die arm: the arm
+    # voltage is set by the hottest die, v_arm = vf(share_worst * i_arm).
+    share_worst: Optional[float] = None
     rdson_bottom_25: float = 0.020; rdson_bottom_tj: tuple = ((25,125),(1.0,1.5))
     qg_bottom: float = 0.0; vg_bottom: float = 12.0          # bottom sync-FET gate (line-freq)
     qrr: float = 0.0
@@ -162,23 +179,59 @@ class Bridge:
     zth_foster: list = field(default_factory=list)
     k_vf: float = 1.0; k_rdson: float = 1.0
     def vf(self, i, Tj=25.0):
-        return (curve(np.maximum(i,0.0),*self.vf_curve) + self.vf_tco*(Tj-self.vf_tref))*self.k_vf
+        # Two-temperature model (see Diode.vf): interpolate between the cold and hot datasheet
+        # curves per current point; scalar vf_tco fallback when no hot curve is given.
+        v = curve(np.maximum(i,0.0),*self.vf_curve)
+        if self.vf_curve_hot is not None:
+            f = np.clip((Tj-self.vf_tref)/max(self.vf_thot-self.vf_tref, 1e-9), 0.0, None)
+            return (v + (curve(np.maximum(i,0.0),*self.vf_curve_hot)-v)*f)*self.k_vf
+        return (v + self.vf_tco*(Tj-self.vf_tref))*self.k_vf
     def loss(self, i_in, Tj_top, Tj_bot, fline, Vpk):
         mean = lambda a: float(np.mean(a))
         # Optional line-frequency bridge recovery. Normally NEGLIGIBLE vs the switching stage and
         # independent of current waveform -- a placeholder, not a high-fidelity recovery model.
         rr = 2.0*self.qrr*Vpk*(2.0*fline)
         if self.topology == "sync_bottom":
-            it = i_in/self.n_parallel_top
-            rb = self.rdson_bottom_25*curve(Tj_bot,*self.rdson_bottom_tj)*self.k_rdson/self.n_parallel_bottom
-            top = mean(self.vf(it,Tj_top)*i_in + (self.rd/self.n_parallel_top)*i_in**2)
-            bot = mean(rb*i_in**2)
+            n_top = max(self.n_parallel_top, 1)
+            # worst-die current fraction: ideal 1/n unless a sharing derate is declared
+            a_top = min(max(self.share_worst or 1.0/n_top, 1.0/n_top), 1.0)
+            it = i_in*a_top
+            rb = max(self.rdson_bottom_25*curve(Tj_bot,*self.rdson_bottom_tj)*self.k_rdson
+                     / max(self.n_parallel_bottom,1), 1e-6)
+            top = mean(self.vf(it,Tj_top)*i_in + (self.rd*a_top)*i_in**2)
+            # ── crest FET/diode sharing ─────────────────────────────────────────────
+            # The bridge's bottom diode pair sits in PARALLEL with the bypass-FET channel. When
+            # the ohmic drop i*rb approaches the diode knee (marginal Rds(on), hot FET, line
+            # crest) the diodes conduct part of the current. Solve the node voltage v at every
+            # line angle:  v/rb + n_top*i_diode(v) = i(theta), with i_diode(v) the INVERSE of the
+            # per-device forward curve at the bridge junction temperature (incl. per-device rd).
+            # Vectorized bisection; v is bounded by [0, rb*i] (all-FET solution).
+            i_pts = np.asarray(self.vf_curve[0], dtype=float)
+            v_pts = np.asarray(self.vf(i_pts, Tj_top), dtype=float) + self.rd*i_pts
+            lo = np.zeros_like(i_in); hi = rb*np.maximum(i_in, 0.0)
+            for _ in range(28):
+                mid = 0.5*(lo+hi)
+                over = (mid/rb + n_top*np.interp(mid, v_pts, i_pts, left=0.0)) > i_in
+                hi = np.where(over, mid, hi); lo = np.where(over, lo, mid)
+            v = 0.5*(lo+hi)
+            i_fet = v/rb; i_bd = np.maximum(i_in - i_fet, 0.0)
+            bot    = mean(v*i_fet)          # bypass-FET channel share
+            bot_bd = mean(v*i_bd)           # bottom-diode share (nonzero only past the knee)
             gate_bot = self.qg_bottom*self.vg_bottom*2.0*fline*self.n_parallel_bottom
-            return {"total": top+bot+gate_bot+rr, "top": top+rr, "bottom": bot+gate_bot,
-                    "ndev_top": self.n_parallel_top, "ndev_bot": self.n_parallel_bottom}
-        idev = i_in/self.n_parallel
-        tot = 2.0*mean(self.vf(idev,Tj_top)*i_in + (self.rd/self.n_parallel)*i_in**2) + rr
-        return {"total": tot, "top": tot, "bottom": 0.0, "ndev_top": 2*self.n_parallel, "ndev_bot": 0}
+            return {"total": top+bot+bot_bd+gate_bot+rr, "top": top+rr, "bottom": bot+gate_bot,
+                    "bottom_bd": bot_bd,
+                    "ndev_top": n_top, "ndev_bot": self.n_parallel_bottom,
+                    # bridge PACKAGES carrying the diode losses (thermal is per package)
+                    "n_packages": n_top}
+        n_par = max(self.n_parallel, 1)
+        a = min(max(self.share_worst or 1.0/n_par, 1.0/n_par), 1.0)   # worst-die share derate
+        idev = i_in*a
+        tot = 2.0*mean(self.vf(idev,Tj_top)*i_in + (self.rd*a)*i_in**2) + rr
+        # 'diode' topology: n_parallel=1 is one package; n_parallel=2 is the split dual-bridge
+        # arrangement (each package permanently carries ONE arm = total/2).
+        return {"total": tot, "top": tot, "bottom": 0.0, "bottom_bd": 0.0,
+                "ndev_top": 2*n_par, "ndev_bot": 0,
+                "n_packages": n_par}
     def power_theta(self, i_in, Tj_top, Tj_bot):
         """Per-device instantaneous power shape vs line angle (for transient Tj). Scaled to the
         per-device average by the caller, so duty bookkeeping stays consistent with loss()."""
@@ -317,8 +370,15 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             sink_br = sink_main
         Tj_fet_n = sink_main + P_fet_each*(mos.rth_jc+mos.rth_cs)
         Tj_dio_n = sink_main + P_dio_each*(dio.rth_jc+dio.rth_cs)
-        Ptop_dev = bl["top"]/max(bl["ndev_top"],1); Pbot_dev = (bl["bottom"]/max(bl["ndev_bot"],1)) if bl["ndev_bot"] else 0.0
-        Tj_brT_n = sink_br + Ptop_dev*(br.rth_jc+br.rth_cs)
+        # Bridge thermal is per PACKAGE: rth_jc on a bridge datasheet (e.g. GBJ: 2 C/W heatsinked)
+        # is a package-level number, so it multiplies the loss dissipated in ONE package — the
+        # total diode loss (top arms + any bottom-diode share) split across n_packages. The old
+        # per-DIE split (total/ndev_top) understated a single bridge's rise ~2x and could not
+        # represent the split dual-bridge arrangement at all.
+        n_pkg = max(bl.get("n_packages", 1), 1)
+        Ppkg_br = (bl["top"] + bl.get("bottom_bd", 0.0))/n_pkg
+        Pbot_dev = (bl["bottom"]/max(bl["ndev_bot"],1)) if bl["ndev_bot"] else 0.0
+        Tj_brT_n = sink_br + Ppkg_br*(br.rth_jc+br.rth_cs)
         Tj_brB_n = sink_br + Pbot_dev*(br.rth_jc_bottom+br.rth_cs_bottom) if bl["ndev_bot"] else sink_br
         if (abs(Tj_fet_n-Tj_fet)<0.05 and abs(Tj_dio_n-Tj_dio)<0.05
                 and abs(Tj_brT_n-Tj_brT)<0.05 and abs(Tj_brB_n-Tj_brB)<0.05):
@@ -333,6 +393,7 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         "P_FET_coss":Nch*P_oss_fet, "P_FET_rr":Nch*P_rr_to_fet, "P_FET_leak":Nch*P_leak_fet,
         "P_DIODE_total":P_dio_total, "P_D_cond":Nch*P_cond_dio, "P_D_sw":Nch*P_sw_dio,
         "P_BRIDGE_total":P_bridge, "P_BRIDGE_top":bl["top"], "P_BRIDGE_bottom":bl["bottom"],
+        "P_BRIDGE_bottom_bd":bl.get("bottom_bd",0.0),   # bottom-diode share past the FET knee
         "P_gate_driver":P_gate_total,
         "P_SEMI_total":P_semi, "P_SYSTEM_total":P_system, "P_OTHER_implied":P_system-P_semi,
         "Tj_FET":Tj_fet, "Tj_DIODE":Tj_dio, "Tj_BRIDGE_top":Tj_brT, "Tj_BRIDGE_bottom":Tj_brB,
@@ -352,8 +413,8 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
     if br.zth_foster:
         bp_top, bp_bot = br.power_theta(i_in, Tj_brT, Tj_brB)
         if bl["top"] > 0 and bl["ndev_top"]:
-            sc = Ptop_dev/max(float(np.mean(bp_top)), 1e-12)
-            rbt = transient_tj(bp_top*sc, sp.fline, br.zth_foster, sink_br+Ptop_dev*br.rth_cs, span=span_half)
+            sc = Ppkg_br/max(float(np.mean(bp_top)), 1e-12)   # per-PACKAGE power (matches steady Tj)
+            rbt = transient_tj(bp_top*sc, sp.fline, br.zth_foster, sink_br+Ppkg_br*br.rth_cs, span=span_half)
             if rbt: out["Tj_BRIDGE_top_peak"],out["Tj_BRIDGE_top_ripple"] = rbt[0],rbt[2]
         if bl["ndev_bot"] and bp_bot is not None and Pbot_dev > 0:
             sc = Pbot_dev/max(float(np.mean(bp_bot)), 1e-12)
@@ -393,6 +454,8 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             "topology": br.topology, "n_top": n_top,
             "vf_br_pk": float(br.vf(i_in[ipk] / max(n_top, 1), Tj_brT)),
             "P_bridge_top": bl["top"], "P_bridge_bottom": bl["bottom"],
+            "P_bridge_bd_share": bl.get("bottom_bd", 0.0),
+            "n_packages_br": max(bl.get("n_packages", 1), 1), "P_bridge_per_pkg": Ppkg_br,
             "rds_bot_tj": (br.rdson_bottom_25 * float(curve(Tj_brB, *br.rdson_bottom_tj)) / max(br.n_parallel_bottom, 1))
                           if br.topology == "sync_bottom" else 0.0,
             "rth_jc_br": br.rth_jc, "rth_cs_br": br.rth_cs,

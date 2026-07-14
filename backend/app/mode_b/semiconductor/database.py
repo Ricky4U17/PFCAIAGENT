@@ -163,11 +163,15 @@ def filter_parts(kind, crit):
 
 # ── DB record → engine block (real scalars + labelled estimates) ──────────────
 def _vf_curve(vf, vf_if):
-    """A 2-point Vf(If) curve from the single datasheet (Vf @ If) point + a slope estimate."""
+    """A 3-point Vf(If) knee curve anchored on the SELECTED part's own datasheet (Vf max @ If)
+    point. Generic Si junction shape (sharp knee, then quasi-linear resistive region) — the
+    anchor point is real, the shape is an ESTIMATE (flagged); replace with the full datasheet
+    curve (incl. the hot 125°C curve) via the manual form for sign-off accuracy."""
     if not vf or not vf_if: return None
-    lo_i = max(0.5, vf_if * 0.2)
-    lo_v = max(0.3, vf - 0.25)         # ~0.25 V drop from rated point to low current (estimate)
-    return [[round(lo_i, 2), round(vf_if, 2)], [round(lo_v, 3), round(vf, 3)]]
+    i1 = max(0.3, vf_if * 0.05); v1 = max(0.35, vf - 0.35)      # knee
+    i2 = max(i1 * 2, vf_if * 0.4); v2 = max(v1 + 0.05, vf - 0.12)  # mid resistive region
+    return [[round(i1, 2), round(i2, 2), round(vf_if, 2)],
+            [round(v1, 3), round(v2, 3), round(vf, 3)]]
 
 _PKG_RTH = {"TO247": 0.5, "TO-247": 0.5, "TO264": 0.45, "TO220": 1.0, "TO-220": 1.0,
             "DPAK": 1.6, "D2PAK": 1.0, "DDPAK": 1.2, "TO252": 1.6, "TO-252": 1.6}

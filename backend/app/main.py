@@ -2213,6 +2213,21 @@ def doc_generate_report(req: _DocReportReq):
                                 else (_sp.get("rcs_mOhm") or 15.0),
                     "esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
                 }
+                if req.input_protection:            # Ch-8 inrush → §7.3.1 bridge surge verification
+                    try:
+                        from app.mode_b.inputprotection.adapter import calculate_ntc
+                        _ip0 = req.input_protection
+                        _ntc = calculate_ntc(_ip0["design"], _ip0.get("cap"), _ip0.get("ntc_opts"))
+                        _nsel = _ntc.get("selected")
+                        if _nsel:                    # designer-selected NTC → its actual figures
+                            _extra["inrush_pk_A"]   = _nsel.get("i_inrush_actual_A")
+                            _extra["inrush_tau_ms"] = _nsel.get("tau_ms")
+                            _extra["inrush_part"]   = f"{_nsel.get('mfr','')} {_nsel.get('part_number','')}".strip()
+                        else:                        # generic pick: target inrush + picked-R25 tau
+                            _extra["inrush_pk_A"]   = _ntc["spec"].get("i_inrush_target")
+                            _extra["inrush_tau_ms"] = _ntc["result"]["tau"] * 1e3
+                    except Exception:
+                        pass
                 parts.append(build_semiconductor_report(
                     sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"],
                     sc.get("tj_limit"), extra=_extra))
