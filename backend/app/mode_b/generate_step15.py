@@ -532,27 +532,34 @@ def generate_step15_section(result: dict) -> list:
         story.append(_tbl(rows10, [80*mm, 45*mm, 45*mm]))
         story.append(Spacer(1, 6*mm))
 
-    # ── 15.11–15.16 Lifetime calculation (three methods) ─────────────────────
+    # ── 15.9–15.11 Life Time Period (manufacturer lifetime model) ─────────────
+    # Designer decision 2026-07-14: the manufacturer's own published lifetime model is the SOLE
+    # lifetime criterion ("Life Time Period"). The former Methods 1/2 (max-tan-δ ESR Arrhenius
+    # screens) remain internal bounds only and are no longer documented.
     lt = result.get("lifetime")
     if lt:
         story.append(PageBreak())
-        _h1_band('Step 15.9–15.16) Capacitor Lifetime Analysis', story, S)
-        Tamb_rpt = lt.get('Tamb_C', 45)
+        _h1_band('Step 15.9–15.11) Capacitor Life Time Period', story, S)
+        Tamb_rpt = lt.get('Tamb_C', 50)
         Vout_rpt = lt.get('Vout_V', 393)
+        m3 = lt.get('method3', {})
         story.append(Paragraph(
             'Aluminium-electrolytic lifetime is governed by electrolyte evaporation — an '
-            'Arrhenius process whose rate doubles every 10&deg;C (Arrhenius rule). '
-            'Three independent methods are evaluated; the <b>minimum</b> result is the governing '
-            'conservative estimate. Pass threshold: &ge; 15 years.',
+            'Arrhenius process whose rate doubles every 10&deg;C. The <b>Life Time Period</b> is '
+            'evaluated with the manufacturer\'s own published lifetime model — the same basis on '
+            'which the endurance rating L<sub>o</sub> and the ripple/temperature multipliers are '
+            'specified: L = L<sub>o</sub>&middot;f(T)&middot;f(I)&middot;f(V), where f(T) is the '
+            'ambient-based 10-K rule, f(I) credits the rated-ripple self-heating &Delta;T<sub>o</sub> '
+            'built into L<sub>o</sub>, and f(V) is the (capped) voltage-derating factor. '
+            'Pass threshold: &ge; 15 years. Values beyond ~15 years should be read as '
+            '"&ge; 15 yr with margin" — seal and electrolyte aging dominate beyond that horizon '
+            'and manufacturers do not extrapolate further.',
             S['body']))
         story.append(Spacer(1, 3*mm))
 
         # Step 15.9 — inputs table
         story.append(Paragraph('Step 15.9) Lifetime Inputs and Operating Conditions', S['h2']))
-        m1 = lt.get('method1',{}); m3 = lt.get('method3',{})
         cap_s = ver.get('cap_specs',[]) if ver else []
-        Lo_h  = result.get('inputs',{})
-        # Get Lo and Tmax from first cap spec
         cs0   = cap_s[0] if cap_s else {}
         life_s = cs0.get('lifetime','—')
         temp_s = cs0.get('temp_rating_C','—')
@@ -568,129 +575,48 @@ def generate_step15_section(result: dict) -> list:
             ('N — caps in parallel bank',                   str(qty_lt)),
             ('I<sub>LF,cap</sub> — low-freq ripple per cap', f"{I_lf} A"),
             ('I<sub>HF,cap</sub> — high-freq ripple per cap', f"{I_hf} A"),
-            ('ESR<sub>LF</sub> from datasheet',             f"{m1.get('esr_lf_ohm','—')} &Omega;"),
-            ('ESR<sub>HF</sub> from datasheet (0.595&times;ESR<sub>LF</sub>)', f"{m1.get('esr_hf_ohm','—')} &Omega;"),
-            ('R<sub>th</sub> — thermal resistance cap-to-air', '10 &deg;C/W (snap-in)'),
             ('I<sub>o</sub> — rated ripple (LF reference)', f"{ver.get('I_rated_per_cap_A','—') if ver else '—'} A"),
         ], S))
-        story.append(Spacer(1, 5*mm))
         story.append(Spacer(1, 4*mm))
 
-        # Per-method detail
-        for m_key, step_label, desc in [
-            ('method1', 'Step 15.12 — Method 1: Arrhenius from Datasheet ESR',
-             'Self-heating computed from the manufacturer-published 100 Hz ESR and HF impedance. '
-             'Core temperature T<sub>core</sub> = T<sub>amb</sub> + I<sup>2</sup>&middot;ESR&middot;R<sub>th</sub>. '
-             'Voltage derating (V<sub>o</sub>/V)<sup>3</sup> applied.'),
-            ('method2', 'Step 15.13 — Method 2: Arrhenius from tan-δ ESR (conservative)',
-             'ESR derived from dissipation factor: ESR<sub>LF</sub> = tan-&delta; / (2&pi;&middot;120&middot;C). '
-             'Uses worst-case tan-&delta; — conservative bound for parts without a published ESR.'),
-            ('method3', 'Step 15.14–15.15 — Method 3: Manufacturer Model',
-             'Full model: L = L<sub>o</sub>&middot;f(T)&middot;f(I)&middot;f(V). '
-             'Ripple converted to rated frequency; self-heating anchored to datasheet &Delta;T<sub>o</sub>.'),
-        ]:
-            m = lt.get(m_key, {})
-            if not m: continue
-            story.append(Paragraph(step_label, S['h2']))
-            story.append(Paragraph(desc, S['body']))
-            story.append(Spacer(1, 2*mm))
-
-            if m_key == 'method3':
-                params = [
-                    ('I<sub>eq</sub> (ripple at rated freq.)', f"{m.get('I_eq_A','—')} A"),
-                    ('&Delta;T<sub>j</sub> (core rise)',       f"{m.get('dTj_C','—')} &deg;C"),
-                    ('T<sub>core</sub>',                       f"{m.get('T_core_C','—')} &deg;C"),
-                    ('f(T) — temperature factor',              f"{m.get('f_T','—')}&times;"),
-                    ('f(I) — ripple factor',                   f"{m.get('f_I','—')}&times;"),
-                    ('f(V) — voltage factor',                  f"{m.get('f_V','—')}&times;"),
-                ]
-            else:
-                params = [
-                    ('ESR<sub>LF</sub> used',       f"{m.get('esr_lf_ohm','—')} &Omega;"),
-                    ('ESR<sub>HF</sub> used',       f"{m.get('esr_hf_ohm','—')} &Omega;"),
-                    ('P self-heating per cap',      f"{m.get('P_W','—')} W"),
-                    ('&Delta;T<sub>core</sub>',     f"{m.get('dT_C','—')} &deg;C"),
-                    ('T<sub>core</sub>',            f"{m.get('T_core_C','—')} &deg;C"),
-                    ('Temperature factor',          f"{m.get('temp_factor','—')}&times;"),
-                    ('Voltage factor (V<sub>o</sub>/V)<sup>3</sup>', f"{m.get('volt_factor','—')}&times;"),
-                ]
-
-            life_yr = m.get('life_years_uncapped', m.get('life_years','—'))
-            params.append(('Calculated life', f"<b>{life_yr} yr</b>"))
-            data = [[Paragraph(k, S['body']), Paragraph(str(v), S['eq'])] for k, v in params]
-            t = Table(data, colWidths=[85*mm, 85*mm])
-            t.setStyle(TableStyle([
-                ('ROWBACKGROUNDS', (0,0), (-1,-1), [WHITE, STRIPE]),
-                ('GRID', (0,0), (-1,-1), 0.3, RULE),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('TOPPADDING', (0,0), (-1,-1), 3),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-                ('LEFTPADDING', (0,0), (-1,-1), 6),
-            ]))
-            story.append(t)
-            story.append(Spacer(1, 4*mm))
-
-        # Three-method comparison table (matches document Table 7)
-        story.append(Paragraph('Step 15.16) Three-Method Lifetime Comparison', S['h2']))
+        # Step 15.10 — the worked model
+        story.append(Paragraph('Step 15.10) Life Time Period — Manufacturer Model', S['h2']))
         story.append(Paragraph(
-            f'One capacitor of the bank, worst-case, T<sub>amb</sub> = {Tamb_rpt}&deg;C, '
-            f'V<sub>out</sub> = {Vout_rpt:.0f} V. '
-            f'All three methods must exceed the 15-year design target.',
+            'L = L<sub>o</sub>&middot;f(T)&middot;f(I)&middot;f(V). Ripple is converted to the rated '
+            'frequency basis (I<sub>eq</sub>); the self-heating rise &Delta;T<sub>j</sub> is compared '
+            'against the datasheet rated-ripple rise &Delta;T<sub>o</sub> inside f(I), so operating at '
+            'the rated ripple costs no life relative to the endurance test condition.',
             S['body']))
         story.append(Spacer(1, 2*mm))
-
-        hdr_lt = ['Method', 'ESR basis / heating', 'T<sub>core</sub>', 'Life (temp+V)', 'Pass?']
-        rows_lt = [[Paragraph(h, S['tbl_hdr']) for h in hdr_lt]]
-        m_min = lt.get('min_life_years', 0)
-        for m_key, m_short, m_basis in [
-            ('method1', 'Method 1 — Datasheet ESR',
-             f"ESR {lt.get('method1',{}).get('esr_lf_ohm','—')} &Omega; &rarr; &Delta;T {lt.get('method1',{}).get('dT_C','—')}&deg;C"),
-            ('method2', 'Method 2 — tan-&delta; ESR (worst case)',
-             f"ESR {lt.get('method2',{}).get('esr_lf_ohm','—')} &Omega; &rarr; &Delta;T {lt.get('method2',{}).get('dT_C','—')}&deg;C"),
-            ('method3', 'Method 3 — Manufacturer model',
-             f"f(T)={lt.get('method3',{}).get('f_T','—')}&times; f(I)={lt.get('method3',{}).get('f_I','—')}&times; f(V)={lt.get('method3',{}).get('f_V','—')}&times;"),
-        ]:
-            m   = lt.get(m_key, {})
-            yr  = m.get('life_years_uncapped', m.get('life_years','—'))
-            tc  = m.get('T_core_C','—')
-            ok  = float(str(yr).replace('>','')) >= 15 if str(yr).replace('>','').replace('.','').isdigit() else False
-            is_gov = (m_key == lt.get('governing_method','').lower().replace(' ','').replace('-','')[0:7])
-            rows_lt.append([
-                Paragraph(f"{'★ ' if is_gov else ''}{m_short}", S['tbl_cell_l']),
-                Paragraph(m_basis, S['tbl_cell_l']),
-                Paragraph(f"{tc}&deg;C", S['tbl_cell']),
-                Paragraph(f"<b>{yr} yr</b>", S['tbl_cell']),
-                Paragraph('PASS' if ok else 'FAIL', S['tbl_cell']),
-            ])
-        cw_lt  = [44*mm, 58*mm, 22*mm, 28*mm, 18*mm]
-        t_lt   = Table(rows_lt, colWidths=cw_lt)
-        ts_lt  = TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),NAVY),('TEXTCOLOR',(0,0),(-1,0),WHITE),
-            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),8.5),
-            ('ALIGN',(0,0),(-1,-1),'CENTER'),('ALIGN',(0,1),(1,-1),'LEFT'),
-            ('FONTNAME',(0,1),(-1,-1),'Helvetica'),
-            ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,STRIPE]),
-            ('GRID',(0,0),(-1,-1),0.3,RULE),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
-            ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
-        ])
-        # Highlight governing row
-        gov_idx = {'method1':1,'method2':2,'method3':3}.get(
-            'method'+lt.get('governing_method','Method 1')[-1], 1)
-        ts_lt.add('BACKGROUND', (0, gov_idx), (-1, gov_idx), LIGHT)
-        ts_lt.add('TEXTCOLOR',  (0, gov_idx), (-1, gov_idx), NAVY)
-        ts_lt.add('FONTNAME',   (0, gov_idx), (-1, gov_idx), 'Helvetica-Bold')
-        t_lt.setStyle(ts_lt)
-        story.append(t_lt)
+        params = [
+            ('I<sub>eq</sub> (ripple at rated freq.)', f"{m3.get('I_eq_A','—')} A"),
+            ('&Delta;T<sub>j</sub> (core rise)',       f"{m3.get('dTj_C','—')} &deg;C"),
+            ('T<sub>core</sub>',                       f"{m3.get('T_core_C','—')} &deg;C"),
+            ('f(T) — temperature factor',              f"{m3.get('f_T','—')}&times;"),
+            ('f(I) — ripple factor',                   f"{m3.get('f_I','—')}&times;"),
+            ('f(V) — voltage factor',                  f"{m3.get('f_V','—')}&times;"),
+            ('Life Time Period', f"<b>{m3.get('life_years_uncapped', m3.get('life_years','—'))} yr</b>"),
+        ]
+        data = [[Paragraph(k, S['body']), Paragraph(str(v), S['eq'])] for k, v in params]
+        t = Table(data, colWidths=[85*mm, 85*mm])
+        t.setStyle(TableStyle([
+            ('ROWBACKGROUNDS', (0,0), (-1,-1), [WHITE, STRIPE]),
+            ('GRID', (0,0), (-1,-1), 0.3, RULE),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(t)
         story.append(Spacer(1, 3*mm))
 
-        # Governing result banner
+        # Step 15.11 — result banner
         min_yr_v = lt.get('min_life_years', 0)
         pass_v   = lt.get('pass_15yr', False)
         story.append(Paragraph(
-            f"<b>Governing (minimum) life = {min_yr_v} yr ({lt.get('governing_method','—')}) — "
+            f"<b>Life Time Period = {min_yr_v} yr — "
             f"{'PASS' if pass_v else 'FAIL'} &ge; 15-year target.</b> "
-            f"T<sub>amb</sub> = {Tamb_rpt}&deg;C.",
+            f"T<sub>amb</sub> = {Tamb_rpt}&deg;C, V<sub>out</sub> = {Vout_rpt:.0f} V.",
             S['note']))
         story.append(Spacer(1, 6*mm))
 

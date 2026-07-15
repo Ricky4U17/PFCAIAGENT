@@ -3926,3 +3926,29 @@ page but the simulation page fails "hotspot" and "Ripple-I margin". VERIFIED (sw
 Verified: page↔sim currents identical; disagreement sweeps now 0/1816 (both directions, both
 checks); run_capacitor_design/verify_configuration/thermal table OK (5×470 passes, 9 rows);
 step15 section PDF renders; live doc report 200 (Steps1_15, 5.25 MB); tsc clean.
+
+## C82 — Lifetime criterion = manufacturer model only, renamed "Life Time Period" (2026-07-14)
+
+Designer decision (after the 450HXK470MEPASN35X35 analysis): Methods 1/2 (max-tan-δ ESR Arrhenius
+screens) are structurally pessimistic — they use the max-spec ESR and charge the full self-heat
+against L0 which already includes rated ripple — and were failing every real part. Method 3 (the
+manufacturer's own published model, basis of the endurance rating and multiplier tables) is now
+the SOLE lifetime criterion, renamed "Life Time Period".
+- step15_cap_db.calculate_lifetime: pass_15yr / min_life_years / governing_method now derive from
+  Method 3 only (new key life_years; m1/m2 stay in the payload as INTERNAL bounds, not shown).
+  m3 renamed "Life Time Period (manufacturer model)".
+- Step15Capacitor.tsx: 3-row method table → single "Life Time Period" row (manufacturer model,
+  T_core, life, ≥15yr) + renamed banner + ">15 yr read as ≥15 with margin" note; summary strip
+  label renamed.
+- CapacitorSimAgent.tsx: lifeNote "m1 · m2 · m3 → governing" → "Life Time Period X yr
+  (manufacturer model)"; tile heading "Lifetime 3-method" → "Life Time Period". Anchor unchanged
+  (min_life_years = M3 now).
+- generate_step15.py: Steps 15.9–15.16 three-method section → Steps 15.9–15.11 "Capacitor Life
+  Time Period" (inputs + worked manufacturer model + result banner); M1/M2 subsections and the
+  Three-Method Comparison table removed.
+- doc_report_builder _ch5 §5.4: renamed "Capacitor Life Time Period (Manufacturer Lifetime
+  Model)"; M1/M2 worked derivations + "Lifetime by Method" table removed; single result table +
+  verdict row; bank-summary margin row renamed.
+Verified: 450HXK470 ×4 @390 V → Life Time Period 65.8 yr PASS (was min-gate 9.7 yr FAIL);
+standalone + ch5 PDFs contain "Life Time Period" and zero mentions of Method 1/2; live endpoint
+returns the new verdict; tsc clean.

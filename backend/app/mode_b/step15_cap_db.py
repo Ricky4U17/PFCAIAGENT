@@ -113,18 +113,23 @@ def calculate_lifetime(
         'life_years_uncapped': round(L3_h / HOURS_PER_YEAR, 1),
     }
 
-    # ── Governing (minimum) ───────────────────────────────────────────────
-    lives = [m1['life_years'], m2['life_years'], m3['life_years']]
-    min_yr = min(lives)
-    gov_idx = lives.index(min_yr)
-    gov_names = ['Method 1', 'Method 2', 'Method 3']
+    # ── Life Time Period — the pass criterion ─────────────────────────────
+    # Method 3 (the manufacturer's own published model) is the ONLY passing criterion: it is the
+    # basis on which the endurance rating L0 and the ripple/temperature multipliers are defined,
+    # and it correctly credits the rated-ripple self-heating baked into L0 (f_I term). Methods 1
+    # and 2 remain in the payload as INTERNAL conservative bounds (max-tan-δ ESR + they charge the
+    # full self-heat against L0 twice) — they are not shown in the GUI or the documentation and
+    # do not gate the design. Designer decision 2026-07-14.
+    m3['name'] = 'Life Time Period (manufacturer model)'
+    life_yr = m3['life_years']            # display-capped at 200 yr above
 
     return {
-        'method1': m1, 'method2': m2, 'method3': m3,
-        'min_life_years': round(min_yr, 1),
-        'min_life_hours': round(min_yr * HOURS_PER_YEAR),
-        'pass_15yr': min_yr >= LIFE_TARGET_YR,
-        'governing_method': gov_names[gov_idx],
+        'method1': m1, 'method2': m2, 'method3': m3,   # m1/m2 = internal bounds only
+        'life_years': round(life_yr, 1),               # "Life Time Period"
+        'min_life_years': round(life_yr, 1),           # legacy alias (sim anchor, verdicts)
+        'min_life_hours': round(life_yr * HOURS_PER_YEAR),
+        'pass_15yr': life_yr >= LIFE_TARGET_YR,
+        'governing_method': 'Life Time Period',
         'Tamb_C': Tamb, 'Vout_V': Vout,
         'qty': qty,
         'I_LF_per_cap_A': round(I_LF, 4),

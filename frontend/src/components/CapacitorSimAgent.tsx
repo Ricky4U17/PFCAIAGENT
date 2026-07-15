@@ -128,12 +128,12 @@ export const CapacitorSimAgent: React.FC<Props> = ({
     const freqMult  = (rippleHf > 0 && iRated) ? Math.max(1, +(rippleHf / Number(iRated)).toFixed(3)) : 1.4
     const L0      = parseLifeHours(cap?.lifetime) ?? 5000
 
-    // Step-15 governing lifetime → calibration anchor for the sim's Arrhenius model.
+    // Step-15 "Life Time Period" (manufacturer model — the sole lifetime criterion) →
+    // calibration anchor for the sim's Arrhenius model.
     const govYears = Number(life?.min_life_years)
     const lifeAnchor_h = govYears > 0 ? govYears * 8760 : null
-    const lf = (m: any) => (m && m.life_years != null ? `${Number(m.life_years).toFixed(0)}` : '—')
     const lifeNote = life
-      ? `m1 ${lf(life.method1)} · m2 ${lf(life.method2)} · m3 ${lf(life.method3)} yr → governing ${govYears > 0 ? govYears.toFixed(1) : '—'} yr`
+      ? `Life Time Period ${govYears > 0 ? govYears.toFixed(1) : '—'} yr (manufacturer model)`
       : null
 
     return {
@@ -267,8 +267,8 @@ export const CapacitorSimAgent: React.FC<Props> = ({
     if (P.design && P.design.lifeNote) {
       html += '<div style="font:11px var(--mono);color:var(--muted);margin-top:12px;line-height:1.6;' +
         'background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px">' +
-        '<b style="color:var(--text)">Lifetime 3-method, @' + num(P.design.lifeTamb_C, 0) + ' °C:</b><br>' +
-        P.design.lifeNote + '.<br>The simulation life is calibrated to the governing value, then varies ' +
+        '<b style="color:var(--text)">Life Time Period @' + num(P.design.lifeTamb_C, 0) + ' °C:</b><br>' +
+        P.design.lifeNote + '.<br>The simulation life is calibrated to this value, then varies ' +
         'with the operating point you select.</div>';
     }
     html += '</div>';

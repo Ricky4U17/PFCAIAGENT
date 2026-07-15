@@ -3555,53 +3555,29 @@ def _ch5(story, state, s15):
         except Exception:
             life = None
 
-    if life and life.get("method1"):
-        step_h(story, "5.4", "Capacitor Lifetime Analysis (Arrhenius Model)", 5)
+    if life and life.get("method3"):
+        # Designer decision 2026-07-14: the manufacturer's own published lifetime model is the
+        # SOLE lifetime criterion, documented as "Life Time Period". The former Methods 1/2
+        # (max-tan-δ ESR Arrhenius screens) stay internal and are no longer documented.
+        step_h(story, "5.4", "Capacitor Life Time Period (Manufacturer Lifetime Model)", 5)
         annotation(story, "THEORY",
-            "Electrolytic lifetime follows the Arrhenius rule — every 10 °C reduction in core "
-            "temperature doubles life: L = L<sub>0</sub> · 2<sup>(T<sub>max</sub>−T<sub>core</sub>)/10</sup> · "
-            "(V<sub>rated</sub>/V<sub>op</sub>)<sup>n</sup>, where L<sub>0</sub> is the datasheet "
-            "endurance rating at T<sub>max</sub>.", 5)
+            "Electrolytic lifetime is governed by electrolyte evaporation — an Arrhenius process "
+            "whose rate doubles every 10 °C. The <b>Life Time Period</b> uses the manufacturer's "
+            "own published model — the same basis on which the endurance rating L<sub>0</sub> and "
+            "the ripple/temperature multipliers are specified: "
+            "L = L<sub>0</sub> · f(T) · f(I) · f(V). f(T) is the ambient-based 10-K rule, f(I) "
+            "credits the rated-ripple self-heating ΔT<sub>o</sub> already built into the "
+            "endurance test, and f(V) is the capped voltage-derating factor. Values beyond "
+            "~15 years should be read as \"≥ 15 yr with margin\" — manufacturers do not "
+            "extrapolate further.", 5)
 
-        # Items 2f/2g — explain R_th and T_core, then work each method end to end.
         _ilf = float(wc.get("I_LF_A", 0) or 0) / max(_qty, 1)
         _ihf = float(wc.get("I_HF_A", 0) or 0) / max(_qty, 1)
-        _m1 = life["method1"]
-        _Rth = (float(_m1.get("dT_C", 0) or 0) / float(_m1.get("P_W", 1) or 1)) \
-               if float(_m1.get("P_W", 0) or 0) else 15.0
-        annotation(story, "CONCEPT",
-            f"<b>R<sub>th</sub></b> is the capacitor's case-to-ambient thermal resistance — "
-            f"≈ {_Rth:.0f} °C/W for this radial-leaded aluminium electrolytic (snap-in / screw "
-            "types are lower, ≈ 10 °C/W, thanks to their larger case surface). "
-            "<b>T<sub>core</sub></b> is the capacitor's internal hot-spot temperature: "
-            "T<sub>core</sub> = T<sub>amb</sub> + ΔT, where ΔT = P<sub>ripple</sub> · R<sub>th</sub>. "
-            "The three methods differ only in how they estimate the ripple ESR — and therefore "
-            "P<sub>ripple</sub> — so each gives a slightly different ΔT and T<sub>core</sub>. "
-            "Method 2 (worst-case tan-δ ESR) runs hottest and gives the shortest, governing life.", 5)
         body(story,
             f"Per-capacitor worst-case ripple currents (bank ÷ {_qty} caps): "
             f"I<sub>LF</sub> = {_ilf:.3f} A (120 Hz) and I<sub>HF</sub> = {_ihf:.3f} A (switching); "
-            f"ambient T<sub>amb</sub> = 50 °C; R<sub>th</sub> = {_Rth:.0f} °C/W.", 5)
+            f"ambient T<sub>amb</sub> = 50 °C.", 5)
 
-        def _life_steps(m):
-            el = float(m.get("esr_lf_ohm", 0) or 0); eh = float(m.get("esr_hf_ohm", 0) or 0)
-            P  = float(m.get("P_W", 0) or 0); dT = float(m.get("dT_C", 0) or 0)
-            tc = float(m.get("T_core_C", 0) or 0)
-            fT = float(m.get("temp_factor", 0) or 0); fV = float(m.get("volt_factor", 0) or 0)
-            lh = float(m.get("life_hours", 0) or 0)
-            L0 = lh / (fT * fV) if (fT and fV) else 0.0
-            eq_box(story, [
-                rf"P = I_{{LF}}^2\,\mathrm{{ESR}}_{{LF}} + I_{{HF}}^2\,\mathrm{{ESR}}_{{HF}} "
-                rf"= {_ilf:.3f}^2({el:.4f}) + {_ihf:.3f}^2({eh:.4f}) = {P:.4f}\ \mathrm{{W}}",
-                rf"\Delta T = P\,R_{{th}} = {P:.4f}\times{_Rth:.0f} = {dT:.1f}\,^\circ\mathrm{{C}}"
-                rf"\ \Rightarrow\ T_{{core}} = 50 + {dT:.1f} = {tc:.1f}\,^\circ\mathrm{{C}}",
-                rf"f_T = 2^{{(T_{{max}}-T_{{core}})/10}} = {fT:.2f},\qquad "
-                rf"f_V = (V_{{rated}}/V_{{op}})^{{3}} = {fV:.3f}",
-                rf"L = L_0\,f_T\,f_V = {L0:,.0f}\times{fT:.2f}\times{fV:.3f} = {lh:,.0f}\ \mathrm{{h}}"
-                rf"\ ({m.get('life_years','—')}\ \mathrm{{yr}})",
-            ], heading=m.get("name", "—"), ch=5)
-        _life_steps(life["method1"])
-        _life_steps(life["method2"])
         _m3 = life.get("method3", {}) or {}
         if _m3:
             _Tmax = float(sel.get("temp_rating_C", 105) or 105)
@@ -3630,7 +3606,7 @@ def _ch5(story, state, s15):
                 rf"= 5(2.37)(1 - {Vout:.0f}/{_Vr:.0f}) + 1 = {_fv3:.3f}\quad(\leq k_v = {_kv})",
                 rf"L = L_0\,f_T\,f_I\,f_V = {_L03:,.0f}\times{_ft3:.2f}\times{_fi3:.3f}\times{_fv3:.3f} "
                 rf"= {_l3h:,.0f}\ \mathrm{{h}}\ ({float(_m3.get('life_years',0) or 0):.1f}\ \mathrm{{yr}})",
-            ], heading=_m3.get("name", "Method 3 — Manufacturer Model"), ch=5)
+            ], heading="Life Time Period — manufacturer lifetime model", ch=5)
             body(story,
                 "Constants (radial-leaded aluminium): k<sub>LF</sub>, k<sub>HF</sub> are the "
                 "low-/high-frequency ripple-current multipliers; ΔT<sub>o</sub> = 10 °C is the rated "
@@ -3639,22 +3615,16 @@ def _ch5(story, state, s15):
                 "Note f<sub>T</sub> here uses T<sub>amb</sub> (not T<sub>core</sub>), per the "
                 "manufacturer model.", 5)
 
-        def _mrow(m):
-            lh = m.get("life_hours")
-            return [m.get("name", "—"),
-                    f"{m.get('T_core_C','—')} °C",
-                    f"{lh:,} h" if isinstance(lh, (int, float)) else "—",
-                    f"{m.get('life_years','—')} yr"]
-        gov = life.get("governing_method", "")
-        gi  = {"Method 1": 0, "Method 2": 1, "Method 3": 2}.get(gov)
-        data_table(story, "5.4.1", "Lifetime by Method — Governing (Minimum) Highlighted",
-            "Core temperature and projected service life by each estimation method, at the "
-            "worst-case (90 Vac low-line) ripple-current loading.",
-            ["Method", "Core temp", "Life (hours)", "Life (years)"],
-            [_mrow(life["method1"]), _mrow(life["method2"]), _mrow(life["method3"])],
-            col_widths=[CW*0.46, CW*0.16, CW*0.20, CW*0.18],
-            worst_rows=[gi] if gi is not None else None, ch=5)
-        verdict_row(story, f"Service-life target (governing: {gov})",
+        data_table(story, "5.4.1", "Life Time Period — Result",
+            "Core temperature and projected service life from the manufacturer lifetime model, at "
+            "the worst-case ripple-current loading.",
+            ["Quantity", "Core temp", "Life (hours)", "Life Time Period"],
+            [["Manufacturer model — f(T)·f(I)·f(V)",
+              f"{_m3.get('T_core_C','—')} °C",
+              (f"{_m3.get('life_hours'):,} h" if isinstance(_m3.get('life_hours'), (int, float)) else "—"),
+              f"{life.get('min_life_years','—')} yr"]],
+            col_widths=[CW*0.46, CW*0.16, CW*0.20, CW*0.18], ch=5)
+        verdict_row(story, "Life Time Period (≥ 15-year target)",
             f"{life.get('min_life_years','—')} yr projected",
             "PASS" if life.get("pass_15yr") else "REVIEW", ch=5)
 
@@ -3676,7 +3646,7 @@ def _ch5(story, state, s15):
                          f"{thermal.get('worst_case_T_C','—')} °C / {thermal.get('temp_rating_C','—')} °C",
                          "PASS" if thermal.get('all_ripple_pass') else "VERIFY"])
         if life:
-            _mar.append(["Service life vs 15-year target",
+            _mar.append(["Life Time Period vs 15-year target",
                          f"{life.get('min_life_years','—')} yr projected",
                          "PASS" if life.get('pass_15yr') else "REVIEW"])
         data_table(story, "5.5.1", "Approved Capacitor Bank — Design Margins",

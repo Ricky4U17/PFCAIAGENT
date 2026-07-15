@@ -606,31 +606,26 @@ export const Step15Capacitor: React.FC<Props> = ({
                 </div>
                 {lifetime && !loadingLifetime && (
                   <>
-                    {/* Three-method table */}
+                    {/* Life Time Period — the manufacturer's own lifetime model is the sole
+                        passing criterion (designer decision 2026-07-14). */}
                     <div style={{border:`0.5px solid ${C.border}`,borderRadius:7,overflow:'hidden',marginBottom:8}}>
                       <table style={{width:'100%',borderCollapse:'collapse',fontSize:10}}>
                         <thead>
                           <tr style={{background:C.bg4,borderBottom:`0.5px solid ${C.border}`}}>
-                            <th style={{padding:'5px 8px',textAlign:'left',color:C.hint,fontWeight:400}}>Method</th>
+                            <th style={{padding:'5px 8px',textAlign:'left',color:C.hint,fontWeight:400}}>Life Time Period</th>
                             <th style={{padding:'5px 8px',textAlign:'right',color:C.hint,fontWeight:400}}>T_core</th>
                             <th style={{padding:'5px 8px',textAlign:'right',color:C.hint,fontWeight:400}}>Life (yr)</th>
                             <th style={{padding:'5px 8px',textAlign:'center',color:C.hint,fontWeight:400}}>≥15yr</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {[
-                            {key:'method1', m:lifetime.method1},
-                            {key:'method2', m:lifetime.method2},
-                            {key:'method3', m:lifetime.method3},
-                          ].map(({key, m}) => {
-                            const isMin = m.life_years === lifetime.min_life_years
-                            const pass  = m.life_years >= 15
+                          {(() => {
+                            const m = lifetime.method3
+                            const pass = m.life_years >= 15
                             return (
-                              <tr key={key} style={{borderBottom:`0.5px solid ${C.border}`,
-                                background:isMin?C.amberL:C.bg3}}>
-                                <td style={{padding:'5px 8px',fontSize:10,
-                                  color:isMin?C.amber:C.muted,fontWeight:isMin?600:400}}>
-                                  {isMin?'★ ':''}{m.name.split('—')[0].trim()}
+                              <tr style={{background:C.bg3}}>
+                                <td style={{padding:'5px 8px',fontSize:10,color:C.text,fontWeight:600}}>
+                                  Manufacturer model — f(T)·f(I)·f(V)
                                 </td>
                                 <td style={{padding:'5px 8px',textAlign:'right',
                                   fontFamily:'IBM Plex Mono,monospace'}}>
@@ -639,9 +634,7 @@ export const Step15Capacitor: React.FC<Props> = ({
                                 <td style={{padding:'5px 8px',textAlign:'right',
                                   fontFamily:'IBM Plex Mono,monospace',fontWeight:600,
                                   color:pass?C.green:C.red}}>
-                                  {key==='method3'
-                                    ? (m.life_years_uncapped > 100 ? '>100' : m.life_years)
-                                    : m.life_years}
+                                  {m.life_years_uncapped > 100 ? '>100' : m.life_years}
                                 </td>
                                 <td style={{padding:'5px 8px',textAlign:'center',fontWeight:600,
                                   color:pass?C.green:C.red}}>
@@ -649,19 +642,24 @@ export const Step15Capacitor: React.FC<Props> = ({
                                 </td>
                               </tr>
                             )
-                          })}
+                          })()}
                         </tbody>
                       </table>
                     </div>
 
-                    {/* Governing result banner */}
+                    {/* Result banner */}
                     <div style={{padding:'8px 12px',borderRadius:7,fontSize:11,fontWeight:600,
                       background:lifetime.pass_15yr?C.greenL:C.redL,
                       border:`0.5px solid ${lifetime.pass_15yr?C.green:C.red}44`,
                       color:lifetime.pass_15yr?C.green:C.red}}>
                       {lifetime.pass_15yr
-                        ? `✓ Min life = ${lifetime.min_life_years} yr (${lifetime.governing_method}) — PASS ≥ 15 yr target`
-                        : `⚠ Min life = ${lifetime.min_life_years} yr (${lifetime.governing_method}) — FAIL < 15 yr target`}
+                        ? `✓ Life Time Period = ${lifetime.min_life_years} yr — PASS ≥ 15 yr target`
+                        : `⚠ Life Time Period = ${lifetime.min_life_years} yr — FAIL < 15 yr target`}
+                    </div>
+                    <div style={{fontSize:9.5,color:C.muted,marginTop:5}}>
+                      Manufacturer lifetime model (ambient-based 10-K rule × ripple factor f(I) vs the
+                      rated-ripple self-heat × voltage factor). Values beyond ~15 years should be read
+                      as "≥ 15 yr with margin" — vendors do not extrapolate further.
                     </div>
                   </>
                 )}
@@ -847,7 +845,7 @@ export const Step15Capacitor: React.FC<Props> = ({
                     {lifetime && (
                       <span style={{marginLeft:10,fontWeight:600,
                         color:lifetime.pass_15yr?C.green:C.red}}>
-                        · Life={lifetime.min_life_years}yr ({lifetime.governing_method})
+                        · Life Time Period={lifetime.min_life_years}yr
                         {lifetime.pass_15yr?' ✓':' ✗ FAIL <15yr'}
                       </span>
                     )}
