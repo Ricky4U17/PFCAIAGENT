@@ -442,16 +442,36 @@ def generate_step15_section(result: dict) -> list:
         story.append(Paragraph('Step 15.9) Power Dissipation & Temperature Rise — All 9 Operating Points',
                                S['h2']))
         temp_rating = th.get("temp_rating_C", 85)
+        _tamb9 = th.get("T_amb_C", 50)
         story.append(Paragraph(
             f'Temp rating: {temp_rating}&deg;C &nbsp;|&nbsp; '
             f'R<sub>th,ca</sub> = {th.get("Rth_ca_CW","—")} &deg;C/W &nbsp;|&nbsp; '
-            f'T<sub>amb</sub> = 50&deg;C &nbsp;|&nbsp; '
+            f'T<sub>amb</sub> = {_tamb9}&deg;C &nbsp;|&nbsp; '
             f'I per cap = I<sub>total</sub> / X  (X = number of caps)',
             S['note']))
+        # vendor-implied ESR(T) model — the resistance basis of P_diss / ΔT / T_cap below
+        _em = th.get("esr_model") or {}
+        if _em:
+            story.append(Spacer(1, 1.5*mm))
+            story.append(Paragraph(
+                'ESR model (vendor-implied, temperature-corrected): the datasheet tan-&delta; ESR is a '
+                'MAX at 20&deg;C/120 Hz, while the electrolyte resistance is strongly NTC. ESR is '
+                'interpolated exponentially in CORE temperature between two anchors from the part\'s own '
+                f'datasheet row — <b>{_em.get("esr20_mohm","—")} m&Omega; @20&deg;C</b> (tan-&delta; max) and '
+                f'<b>{_em.get("esr_hot_mohm","—")} m&Omega; @{_em.get("T_hot_C","—"):.0f}&deg;C</b> '
+                '(= &Delta;T<sub>0</sub>/(I<sub>rated</sub>&sup2;&middot;R<sub>th</sub>), the resistance the '
+                'vendor\'s own rated-ripple thermal design implies) — and the core temperature is solved '
+                'self-consistently (T<sub>core</sub> = T<sub>amb</sub> + P&middot;R<sub>th</sub>). The '
+                'allowed ripple uses the temperature multiplier '
+                f'K(T<sub>amb</sub>) = {_em.get("K_temp","—")} ({_em.get("K_source","—")}) &times; the '
+                f'{_em.get("I_rated_A","—")} A datasheet rating. HF ESR uses the datasheet frequency '
+                f'coefficient k<sub>f</sub> = {_em.get("kf","—")}. Source: {_em.get("source","—")}.',
+                S['note']))
         story.append(Spacer(1, 2*mm))
 
         hdr9 = ['V<sub>in</sub>\n(Vac)', 'P<sub>out</sub>\n(W)',
-                'I<sub>total</sub>\n(A)', 'I/cap\n(A)', 'I<sub>rated</sub>\n(A)',
+                'I<sub>total</sub>\n(A)', 'I/cap\n(A)', 'I<sub>allow</sub>\n(A)',
+                'ESR<sub>LF</sub>@T\n(m&Omega;)',
                 'P<sub>diss</sub>\n(W)', '&Delta;T\n(&deg;C)',
                 'T<sub>cap</sub>\n(&deg;C)', 'V<sub>rip,pp</sub>\n(V)', 'Ripple\nPass']
         rows9 = [[Paragraph(h, S['tbl_hdr']) for h in hdr9]]
@@ -470,6 +490,7 @@ def generate_step15_section(result: dict) -> list:
                 Paragraph(f"{row['I_cap_total_A']:.3f}",                S['tbl_cell']),
                 Paragraph(f"{row['I_cap_per_unit_A']:.3f}",             S['tbl_cell']),
                 Paragraph(f"{row.get('I_rated_A',0):.2f}",              S['tbl_cell']),
+                Paragraph(f"{row.get('ESR_lf_mohm','—')}",              S['tbl_cell']),
                 Paragraph(f"{row['P_dissipated_W']:.3f}",               S['tbl_cell']),
                 Paragraph(f"{row['dT_rise_C']:.1f}",                    S['tbl_cell']),
                 Paragraph(f"{row['T_cap_C']:.1f}",                      S['tbl_cell']),
@@ -477,12 +498,12 @@ def generate_step15_section(result: dict) -> list:
                 Paragraph('PASS' if ok else 'FAIL',                     S['tbl_cell']),
             ])
             ts_extra += [
-                ('TEXTCOLOR', (7,ri),(7,ri), t_col),
-                ('TEXTCOLOR', (9,ri),(9,ri), p_col),
-                ('FONTNAME',  (9,ri),(9,ri), 'Helvetica-Bold'),
+                ('TEXTCOLOR', (8,ri),(8,ri), t_col),
+                ('TEXTCOLOR', (10,ri),(10,ri), p_col),
+                ('FONTNAME',  (10,ri),(10,ri), 'Helvetica-Bold'),
             ]
 
-        cw9 = [14*mm,14*mm,16*mm,14*mm,16*mm,16*mm,13*mm,15*mm,16*mm,14*mm]
+        cw9 = [13*mm,13*mm,15*mm,13*mm,14*mm,15*mm,14*mm,12*mm,14*mm,15*mm,13*mm]
         t9  = Table(rows9, colWidths=cw9)
         t9.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),NAVY),('TEXTCOLOR',(0,0),(-1,0),WHITE),
@@ -497,12 +518,75 @@ def generate_step15_section(result: dict) -> list:
         story.append(Spacer(1, 3*mm))
         worst_T = th.get("worst_case_T_C","—")
         all_ok  = th.get("all_ripple_pass", False)
+        _n_der9 = sum(1 for r in th["thermal_table"] if r.get("ripple_status") == "pass_derated")
         story.append(Paragraph(
             f'Worst-case T<sub>cap</sub> = <b>{worst_T}&deg;C</b> '
             f'(rating {temp_rating}&deg;C) &nbsp;|&nbsp; '
-            f'Ripple current: {"PASS" if all_ok else "FAIL — reduce I/cap by adding more capacitors"}',
+            f'Ripple current: {"PASS" if all_ok else "FAIL — reduce I/cap by adding more capacitors"}'
+            + (f' &nbsp;({_n_der9} point(s) PASS-derated: above the nameplate rating but within the '
+               f'temperature allowance, core within rating, Life Time Period met)' if _n_der9 else ''),
             S['note']))
         story.append(Spacer(1, 4*mm))
+
+        # ── 15.9b Temperature characterization of the selected capacitor ─────────
+        try:
+            from app.mode_b.step15_cap_db import _load as _csvload, characterize_temperature_sweep
+            _cfg9 = result.get("configuration") or []
+            _pn9  = next((str(r.get("part_number") or "") for r in _cfg9 if r.get("part_number")), "")
+            _rec9 = next((x for x in _csvload()
+                          if str(x.get("part_number", "")).lower() == _pn9.lower()), None) if _pn9 else None
+        except Exception:
+            _rec9 = None
+        if _rec9 is not None:
+            _qty9 = sum(int(r.get("qty") or 0) for r in _cfg9) or 1
+            _wc9  = result.get("worst_case", {})
+            _sw9  = characterize_temperature_sweep(
+                _rec9, _qty9, float(_wc9.get("I_LF_A", 0) or 0), float(_wc9.get("I_HF_A", 0) or 0),
+                float(result.get("inputs", {}).get("Vout_V", 393) or 393), T_op=_tamb9)
+            story.append(Paragraph('Step 15.9b) Temperature Characterization of the Selected Capacitor', S['h2']))
+            story.append(Paragraph(
+                f'Each figure at its own declared temperature basis; required ripple per capacitor '
+                f'= {_sw9["I_req_per_cap_A"]} A (a demand, ambient-independent). Validation: at the '
+                f'rated row I<sub>allow</sub> reduces exactly to the nameplate rating; at 20&deg;C the '
+                f'no-load ESR reproduces the datasheet tan-&delta; value.', S['body']))
+            hdrS = ['T<sub>amb</sub>', 'ESR@T<sub>amb</sub>', 'ESR@T<sub>core</sub>',
+                    'T<sub>core</sub>', 'I<sub>allow</sub> (K)', 'Life Time Period']
+            rowsS = [[Paragraph(h, S['tbl_hdr']) for h in hdrS]]
+            for r in _sw9["rows"]:
+                mark = ' (op)' if r['is_operating'] else (' (rated)' if r['is_rated'] else '')
+                rowsS.append([
+                    Paragraph(f"{r['T_amb_C']:.0f}&deg;C{mark}", S['tbl_cell']),
+                    Paragraph(f"{r['esr_at_amb_mohm']:.0f} m&Omega;", S['tbl_cell']),
+                    Paragraph(f"{r['esr_at_core_mohm']:.0f} m&Omega;", S['tbl_cell']),
+                    Paragraph(f"{r['T_core_C']:.1f}&deg;C", S['tbl_cell']),
+                    Paragraph((f"{r['I_allow_A']:.2f} A (K={r['K']}{'*' if r['K_clamped'] else ''})"
+                               if r['I_allow_A'] is not None else '—'), S['tbl_cell']),
+                    Paragraph(f"{'&gt;200' if r['life_years'] >= 200 else r['life_years']} yr", S['tbl_cell']),
+                ])
+            tS = Table(rowsS, colWidths=[26*mm, 26*mm, 26*mm, 24*mm, 40*mm, 28*mm])
+            tS.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,0),NAVY),('TEXTCOLOR',(0,0),(-1,0),WHITE),
+                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),8),
+                ('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,1),(-1,-1),'Helvetica'),
+                ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,STRIPE]),
+                ('GRID',(0,0),(-1,-1),0.3,RULE),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                ('TOPPADDING',(0,0),(-1,-1),2),('BOTTOMPADDING',(0,0),(-1,-1),2),
+            ]))
+            story.append(tS)
+            story.append(Spacer(1, 2*mm))
+            story.append(Paragraph(
+                '<b>Why I<sub>allow</sub> is clamped (K* &le; 2.5) at low ambient:</b> the pure thermal '
+                'capability keeps growing as the ambient falls (K<sub>raw</sub> &asymp; 4&times; at '
+                '0&ndash;25&deg;C), but the credited allowance is clamped because (1) published vendor '
+                'temperature-multiplier tables top out at &asymp;2.0&ndash;2.5 &mdash; manufacturers do '
+                'not warrant unlimited ripple in a cold enclosure (terminal/tab ampacity, internal '
+                'joints and the characterized envelope take over as limits); (2) the un-clamped figure '
+                'describes operation with the core AT its temperature limit, where the Life Time Period '
+                'would collapse to the bare endurance rating L<sub>0</sub>; (3) a series’ published '
+                'multiplier table, when entered in the vendor registry, takes precedence over both the '
+                'model and the clamp. Below 20&deg;C the ESR is held at the 20&deg;C datasheet value '
+                '(no cold-side anchor).', S['note']))
+            story.append(Spacer(1, 4*mm))
 
     # ── 15.10 Summary ─────────────────────────────────────────────────────────
     if ver:

@@ -3470,6 +3470,24 @@ def _ch5(story, state, s15):
             "ΔT = I<sub>cap</sub>² · ESR · R<sub>th</sub> must keep the case below its temperature "
             "rating, and the per-cap RMS current must stay under its rated value at every "
             "operating point.", 5)
+        # vendor-implied ESR(T) model — the resistance basis of every P/ΔT/T figure below
+        _em5 = thermal.get("esr_model") or {}
+        if _em5:
+            annotation(story, "CONCEPT",
+                "<b>Temperature-corrected ESR (vendor-implied).</b> The datasheet tan-δ ESR is a MAX "
+                "at 20 °C/120 Hz, but the electrolyte resistance is strongly NTC — at the operating "
+                "core temperature the real ESR is roughly half the cold figure. ESR is therefore "
+                "interpolated exponentially in CORE temperature between two anchors taken from the "
+                f"part's own datasheet row: <b>{_em5.get('esr20_mohm','—')} mΩ @20 °C</b> (tan-δ max) "
+                f"and <b>{_em5.get('esr_hot_mohm','—')} mΩ @{_em5.get('T_hot_C',110):.0f} °C</b> — the "
+                "hot anchor being ΔT<sub>0</sub>/(I<sub>rated</sub>²·R<sub>th</sub>), the resistance the "
+                "vendor's own rated-ripple thermal design implies (the same relation the Life Time "
+                "Period model uses, so loss, temperature and lifetime share one basis). The core "
+                "temperature is solved self-consistently (NTC → convergent), the HF ESR uses the "
+                f"datasheet frequency coefficient k<sub>f</sub> = {_em5.get('kf','—')}, and the allowed "
+                f"ripple is K(T<sub>amb</sub>) = {_em5.get('K_temp','—')} × the "
+                f"{_em5.get('I_rated_A','—')} A datasheet rating "
+                f"({_em5.get('K_source','—')}, clamped ≤ 2.5). Model source: {_em5.get('source','—')}.", 5)
 
         # Item 28 / 2e — worked calculation chain at the hottest corner, before the table.
         _hr = max(thermal["thermal_table"], key=lambda r: r["T_cap_C"])
@@ -3525,11 +3543,78 @@ def _ch5(story, state, s15):
             col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.13, CW*0.13, CW*0.13, CW*0.13],
             worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
+        _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
         verdict_row(story, "Ripple-current rating (all 9 points)",
-            f"I/cap ≤ I<sub>rated</sub> at {_n_pass}/{len(tt)} points; "
-            f"T<sub>cap,max</sub> = {thermal.get('worst_case_T_C','—')} °C "
+            f"I/cap ≤ I<sub>allow</sub> at {_n_pass}/{len(tt)} points"
+            + (f" ({_n_der} within the temperature allowance above nameplate)" if _n_der else "")
+            + f"; T<sub>cap,max</sub> = {thermal.get('worst_case_T_C','—')} °C "
             f"≤ {thermal.get('temp_rating_C','—')} °C",
             "PASS" if thermal.get("all_ripple_pass") else "VERIFY", ch=5)
+        if _n_der:
+            annotation(story, "NOTE",
+                "<b>Derated-PASS condition.</b> At the flagged operating points the per-capacitor "
+                "ripple current exceeds the NAMEPLATE 120 Hz rating (which the datasheet specifies "
+                "at the category maximum temperature) but remains within the temperature-adjusted "
+                "allowance K(T<sub>amb</sub>)·I<sub>rated</sub>, the core temperature stays within "
+                "the rating, and the Life Time Period target (§5.4) is met. This is the "
+                "vendor-sanctioned use of the ripple temperature multiplier; the acceptance is "
+                "conditional on the specified ambient — if the enclosure runs hotter than the "
+                "spec ambient, the allowance shrinks accordingly.", 5)
+
+        # ── 5.3.2 Temperature characterization of the selected capacitor ──────────
+        try:
+            from app.mode_b.step15_cap_db import _load as _csvload, characterize_temperature_sweep
+            _pn5  = str(sel.get("part_number", "") or "")
+            _rec5 = next((x for x in _csvload()
+                          if str(x.get("part_number", "")).lower() == _pn5.lower()), None)
+        except Exception:
+            _rec5 = None
+        if _rec5 is not None:
+            _tamb5 = float(state.get("intake", {}).get("thermal", {})
+                           .get("ambient_temp_c_max", 50) or 50)
+            _sw = characterize_temperature_sweep(
+                _rec5, _qty, float(wc.get("I_LF_A", 0) or 0), float(wc.get("I_HF_A", 0) or 0),
+                Vout, T_op=_tamb5)
+            _swrows = []
+            for r in _sw["rows"]:
+                _mark = " (operating)" if r["is_operating"] else (" (rated)" if r["is_rated"] else "")
+                _swrows.append([
+                    f"{r['T_amb_C']:.0f} °C{_mark}",
+                    f"{r['esr_at_amb_mohm']:.0f} mΩ",
+                    f"{r['esr_at_core_mohm']:.0f} mΩ",
+                    f"{r['T_core_C']:.1f} °C",
+                    (f"{r['I_allow_A']:.2f} A (K={r['K']}{'*' if r['K_clamped'] else ''})"
+                     if r['I_allow_A'] is not None else "—"),
+                    f"{'>200' if r['life_years'] >= 200 else r['life_years']} yr",
+                ])
+            data_table(story, "5.3.2",
+                "Temperature Characterization of the Selected Capacitor",
+                f"ESR, allowed 120 Hz ripple, core temperature and Life Time Period vs ambient — "
+                f"each figure at its own declared temperature basis. Required ripple per capacitor: "
+                f"{_sw['I_req_per_cap_A']} A (a demand, ambient-independent). "
+                "Validation anchors: at the rated row I<sub>allow</sub> reduces exactly to the "
+                "nameplate rating and the ESR to the vendor-implied hot anchor; at 20 °C the "
+                "no-load ESR reproduces the datasheet tan-δ value.",
+                ["T<sub>amb</sub>", "ESR@T<sub>amb</sub>", "ESR@T<sub>core</sub>",
+                 "T<sub>core</sub>", "I<sub>allow</sub> (K)", "Life Time Period"],
+                _swrows,
+                col_widths=[CW*0.17, CW*0.15, CW*0.15, CW*0.14, CW*0.22, CW*0.17],
+                worst_rows=[i for i, r in enumerate(_sw["rows"]) if r["is_operating"]], ch=5)
+            annotation(story, "NOTE",
+                "<b>Why I<sub>allow</sub> is clamped (K ≤ 2.5) at low ambient.</b> The pure thermal "
+                "capability (the current that would drive the core to its limit) keeps growing as the "
+                "ambient falls — K<sub>raw</sub> reaches ≈4× at 0–25 °C. The credited allowance is "
+                "nevertheless clamped at 2.5× for three reasons: (1) published vendor "
+                "temperature-multiplier tables top out at ≈2.0–2.5 — manufacturers do not warrant "
+                "unlimited ripple in a cold enclosure, because non-thermal limits (terminal and tab "
+                "ampacity, internal connection joints, the boundary of the characterized envelope) "
+                "take over; (2) the un-clamped figure describes operation with the core AT its "
+                "temperature limit, where the Life Time Period would collapse to the bare endurance "
+                "rating L<sub>0</sub> — not a design point, only a ceiling; (3) when a series' "
+                "PUBLISHED multiplier table is entered in the tool's vendor registry it takes "
+                "precedence over both the model and the clamp. Below 20 °C the ESR is additionally "
+                "held at the 20 °C datasheet value (no cold-side anchor; the datasheet's "
+                "low-temperature impedance ratio could supply one as a future data enrichment).", 5)
 
     # ── 5.5 Capacitor lifetime analysis (Arrhenius model) ─────────────────────
     life = s15.get("lifetime")

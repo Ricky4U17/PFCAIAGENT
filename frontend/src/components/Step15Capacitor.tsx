@@ -4,7 +4,7 @@ import {
   step15CapacitorDesign,
   docGenerateReport,
   step15HvcapFilterOptions, step15HvcapFilterCaps, step15HvcapCapTable,
-  step15CapLifetime,
+  step15CapLifetime, step15CapTempSweep,
 } from '../api/client'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -162,11 +162,14 @@ export const Step15Capacitor: React.FC<Props> = ({
       lifetime: fLifetime??undefined, tolerance: fTolerance??undefined,
       lead_spacing_mm: fLeadSpacing??undefined,
       height_max_mm: fHeightMax??undefined, diameter_max_mm: fDiaMax??undefined,
+      // operating ambient → vendor-implied ESR(T) + allowed-ripple multiplier K(T) in the rows;
+      // changing the temperature input refreshes the shown ESR (designer request)
+      Tamb_C: fAmbientC,
     }).then((d: any) => {
       setCapTable(d.table ?? [])
       setLoadingTable(false)
     }).catch(() => setLoadingTable(false))
-  }, [confirmedState, fVoltage, fOpTemp, fLifetime, fTolerance, fLeadSpacing, fHeightMax, fDiaMax])
+  }, [confirmedState, fVoltage, fOpTemp, fLifetime, fTolerance, fLeadSpacing, fHeightMax, fDiaMax, fAmbientC])
 
   const handlePickCap = (cap_uF: number) => {
     const minQ = computeMinQty(cap_uF)
@@ -200,6 +203,18 @@ export const Step15Capacitor: React.FC<Props> = ({
     }).then((d: any) => { setLifetime(d); setLoadingLifetime(false) })
       .catch(() => setLoadingLifetime(false))
   }, [chosenPart, selectedQty, fAmbientC])
+
+  // ── Temperature characterization sweep (ESR / I_allow / Life / T_core vs ambient) ────
+  const [tempSweep, setTempSweep] = useState<any>(null)
+  useEffect(() => {
+    if (!chosenPart || !chosenPart.part_number) { setTempSweep(null); return }
+    step15CapTempSweep({
+      state: confirmedState,
+      part_number: chosenPart.part_number,
+      qty: selectedQty,
+      Tamb_C: fAmbientC,
+    }).then((d: any) => setTempSweep(d)).catch(() => setTempSweep(null))
+  }, [chosenPart, selectedQty, fAmbientC])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed effective parameters ─────────────────────────────────────────
   const C_total     = (selectedCapUF ?? 0) * selectedQty
@@ -550,20 +565,90 @@ export const Step15Capacitor: React.FC<Props> = ({
                 <KV k="Total capacitance"      v={`${C_total} µF`} hi={!meetsC} red={!meetsC} />
                 <KV k="C per unit"             v={`${selectedCapUF} µF`} />
                 <KV k="ESR effective (par.)"   v={chosenPart ? `${esr_eff_mohm.toFixed(1)} mΩ` : '—'} />
-                <KV k="ESR each cap"           v={chosenPart ? `${esr_each_mohm.toFixed(0)} mΩ` : '—'} />
+                <KV k="ESR each cap @20°C"     v={chosenPart ? `${esr_each_mohm.toFixed(0)} mΩ` : '—'} />
+                {/* vendor-implied ESR at the converged core temp — follows the ambient input */}
+                <KV k={`ESR each @T_core${chosenPart?.T_core_C != null ? ` (${chosenPart.T_core_C}°C)` : ''}`}
+                    v={chosenPart?.esr_at_op_mohm != null ? `${chosenPart.esr_at_op_mohm.toFixed(0)} mΩ` : '—'} />
                 <KV k="I_rms per cap (worst)"  v={`${I_per_cap.toFixed(3)} A`} />
-                <KV k="I_rated per cap"        v={I_rated ? `${I_rated.toFixed(3)} A` : '—'} />
-                <div style={{marginTop:8,padding:'6px 10px',borderRadius:6,
-                  background:ripple_pass===null?C.bg4:ripple_pass?C.greenL:C.redL,
-                  border:`0.5px solid ${ripple_pass===null?C.border:ripple_pass?C.green:C.red}44`,
-                  fontSize:11,fontWeight:600,
-                  color:ripple_pass===null?C.hint:ripple_pass?C.green:C.red}}>
-                  {ripple_pass===null
-                    ? 'Select a part to check ripple current'
-                    : ripple_pass
-                    ? `✓ Ripple PASS — I/cap ${I_per_cap.toFixed(3)}A ≤ ${I_rated!.toFixed(3)}A rated`
-                    : `⚠ Ripple FAIL — I/cap ${I_per_cap.toFixed(3)}A > ${I_rated!.toFixed(3)}A — increase qty`}
-                </div>
+                <KV k={`I_allow per cap${chosenPart?.K_temp != null ? ` (K=${chosenPart.K_temp})` : ''}`}
+                    v={chosenPart?.I_allow_A != null ? `${chosenPart.I_allow_A.toFixed(2)} A`
+                       : (I_rated ? `${I_rated.toFixed(3)} A` : '—')} />
+                {/* three-tier ripple verdict: PASS / PASS-derated ⚠ / FAIL */}
+                {(() => {
+                  const st = chosenPart?.ripple_status ?? (ripple_pass === null ? null : ripple_pass ? 'pass' : 'fail')
+                  const nameplate = chosenPart?.I_rated_120hz_A
+                  const col = st === null ? C.hint : st === 'pass' ? C.green : st === 'pass_derated' ? C.amber : C.red
+                  const bg  = st === null ? C.bg4  : st === 'pass' ? C.greenL : st === 'pass_derated' ? C.amberL : C.redL
+                  return (
+                    <div style={{marginTop:8,padding:'6px 10px',borderRadius:6,background:bg,
+                      border:`0.5px solid ${col}44`,fontSize:11,fontWeight:600,color:col}}>
+                      {st === null
+                        ? 'Select a part to check ripple current'
+                        : st === 'pass'
+                        ? `✓ Ripple PASS — I/cap ${I_per_cap.toFixed(3)}A ≤ ${nameplate?.toFixed(2) ?? '—'}A nameplate`
+                        : st === 'pass_derated'
+                        ? `⚠ Ripple PASS (derated) — exceeds the nameplate ${nameplate?.toFixed(2)}A (@${tempSweep?.T_rated_C ?? 105}°C) `
+                          + `but within the temperature allowance ${chosenPart?.I_allow_A?.toFixed(2)}A @${fAmbientC}°C `
+                          + `and the Life Time Period target is met`
+                        : `✗ Ripple FAIL — I/cap ${I_per_cap.toFixed(3)}A beyond the temperature allowance — increase qty`}
+                    </div>
+                  )
+                })()}
+                {/* three-line rating statement: each figure at its own declared temperature */}
+                {chosenPart?.I_rated_120hz_A != null && (
+                  <div style={{marginTop:6,fontSize:10,fontFamily:'IBM Plex Mono,monospace',
+                    color:C.muted,lineHeight:1.7}}>
+                    Nameplate: {chosenPart.I_rated_120hz_A.toFixed(2)} A @{tempSweep?.T_rated_C ?? 105}°C (datasheet)<br/>
+                    Effective: {chosenPart.I_allow_A?.toFixed(2) ?? '—'} A @{fAmbientC}°C (K={chosenPart.K_temp ?? '—'}, clamped)<br/>
+                    Operating: {I_per_cap.toFixed(2)} A → T_core {chosenPart.T_core_C ?? '—'}°C
+                    {lifetime ? ` → Life Time Period ${lifetime.min_life_years} yr ${lifetime.pass_15yr ? '✓' : '✗'}` : ''}
+                  </div>
+                )}
+                {/* temperature characterization sweep */}
+                {tempSweep?.rows && (
+                  <div style={{marginTop:10}}>
+                    <div style={{fontSize:10,color:C.hint,textTransform:'uppercase',
+                      fontFamily:'IBM Plex Mono,monospace',letterSpacing:'.05em',marginBottom:5}}>
+                      Temperature characterization — {tempSweep.I_req_per_cap_A} A/cap required
+                    </div>
+                    <div style={{border:`0.5px solid ${C.border}`,borderRadius:7,overflow:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:10}}>
+                        <thead><tr style={{background:C.bg4}}>
+                          {['T_amb','ESR@T_amb','ESR@T_core','T_core','I_allow (K)','Life'].map(h=>(
+                            <th key={h} style={{padding:'4px 7px',textAlign:'right',color:C.hint,
+                              fontWeight:400,fontSize:9,whiteSpace:'nowrap'}}>{h}</th>))}
+                        </tr></thead>
+                        <tbody>
+                          {tempSweep.rows.map((r:any)=>(
+                            <tr key={r.T_amb_C} style={{borderTop:`0.5px solid ${C.border}`,
+                              background:r.is_operating?C.accentL:r.is_rated?C.bg4:'transparent'}}>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace',
+                                fontWeight:(r.is_operating||r.is_rated)?600:400}}>
+                                {r.T_amb_C}°C{r.is_operating?' ◀ op':r.is_rated?' ◀ rated':''}
+                              </td>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace'}}>{r.esr_at_amb_mohm.toFixed(0)} mΩ</td>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace'}}>{r.esr_at_core_mohm.toFixed(0)} mΩ</td>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace'}}>{r.T_core_C.toFixed(1)}°C</td>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace'}}
+                                title={r.K_clamped?`thermal capability ${r.K_raw}× — clamped at K=2.5 (vendor guarantee boundary)`:''}>
+                                {r.I_allow_A != null ? `${r.I_allow_A.toFixed(2)} A (${r.K}${r.K_clamped?'*':''})` : '—'}
+                              </td>
+                              <td style={{padding:'3px 7px',textAlign:'right',fontFamily:'IBM Plex Mono,monospace',
+                                color:r.life_pass?C.green:C.red}}>
+                                {r.life_years >= 200 ? '>200' : r.life_years} yr
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:4}}>
+                      K* = clamped at 2.5 (vendor guarantee boundary; published multiplier tables top out
+                      ≈2.0–2.5 — the raw thermal capability is in the tooltip). Below 20 °C the ESR is held
+                      at the 20 °C datasheet value (no cold-side anchor). Rated row: I_allow = nameplate exactly.
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{fontSize:10,color:C.hint,fontFamily:'IBM Plex Mono,monospace',
@@ -694,8 +779,8 @@ export const Step15Capacitor: React.FC<Props> = ({
                 <thead>
                   <tr style={{background:C.bg3,borderBottom:`0.5px solid ${C.border}`}}>
                     {['','Manufacturer','Part Number','V (V)',
-                      'ESR each (mΩ)','ESR par. (mΩ)',
-                      'I_rated (A)','I/cap (A)','Ripple',
+                      'ESR@20°C (mΩ)',`ESR@T_core (mΩ)`,
+                      'I_allow (A)','I/cap (A)','Ripple',
                       'Lifetime','Op Temp','⌀ (mm)','H (mm)',
                       'Lead (mm)','RoHS'].map(h=>(
                       <th key={h} style={{padding:'6px 8px',textAlign:'left',color:C.hint,
@@ -731,20 +816,25 @@ export const Step15Capacitor: React.FC<Props> = ({
                           color:row.esr_each_ohm*1000<500?C.green:row.esr_each_ohm*1000<2000?C.teal:C.amber}}>
                           {(row.esr_each_ohm*1000).toFixed(0)}
                         </td>
-                        <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace',
-                          color:C.green}}>
-                          {esr_par_mohm.toFixed(1)}
+                        {/* vendor-implied ESR at the converged core temperature for the entered ambient */}
+                        <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.green}}
+                          title={row.T_core_C != null ? `T_core ≈ ${row.T_core_C} °C (${row.esr_source})` : ''}>
+                          {row.esr_at_op_mohm != null ? row.esr_at_op_mohm.toFixed(0) : esr_par_mohm.toFixed(1)}
                         </td>
-                        <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace'}}>
-                          {row.I_rated_120hz_A?.toFixed(3) ?? '—'}
+                        <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace'}}
+                          title={row.K_temp != null ? `K(T_amb) = ${row.K_temp} × rated ${row.I_rated_120hz_A ?? '—'} A` : ''}>
+                          {row.I_allow_A != null ? row.I_allow_A.toFixed(2) : (row.I_rated_120hz_A?.toFixed(3) ?? '—')}
                         </td>
                         <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace',
                           color:rip_ok===false?C.red:rip_ok?C.green:C.muted}}>
                           {row.I_rms_per_cap_A?.toFixed(3)}
                         </td>
                         <td style={{padding:'5px 8px',fontSize:10,fontWeight:600,
-                          color:rip_ok===null?C.hint:rip_ok?C.green:C.red}}>
-                          {rip_ok===null?'—':rip_ok?'PASS':'FAIL'}
+                          color:rip_ok===null?C.hint:row.ripple_status==='pass'?C.green
+                            :row.ripple_status==='pass_derated'?C.amber:rip_ok?C.green:C.red}}
+                          title={row.ripple_status==='pass_derated'
+                            ?`Exceeds the nameplate ${row.I_rated_120hz_A?.toFixed(2)} A rating (@ rated temp) but within the temperature allowance ${row.I_allow_A?.toFixed(2)} A (K=${row.K_temp}) and the Life Time Period target is met`:''}>
+                          {rip_ok===null?'—':row.ripple_status==='pass_derated'?'PASS ⚠':rip_ok?'PASS':'FAIL'}
                         </td>
                         <td style={{padding:'5px 8px',fontSize:10,color:C.muted,whiteSpace:'nowrap'}}>
                           {row.lifetime}

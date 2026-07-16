@@ -1526,6 +1526,7 @@ class _CapVerifyReq(BaseModel):
     series:         str
     voltage_rating: int
     configuration:  List[Dict[str, Any]]   # [{"value_uF": int, "qty": int}]
+    cap_ref:        Optional[Dict[str, Any]] = None   # selected part record → ESR(T) hot anchor
 
 @app.post("/mode-b/step15/capacitor-design", tags=["mode-b"])
 def step15_capacitor_design(req: _CapDesignReq):
@@ -1546,6 +1547,8 @@ def step15_verify_configuration(req: _CapVerifyReq):
         from app.mode_b.step15_capacitor import (
             run_capacitor_design, verify_configuration, calculate_thermal_table)
         base = run_capacitor_design(req.state)
+        _tamb = float(req.state.get("intake", {}).get("thermal", {})
+                      .get("ambient_temp_c_max", 50) or 50)
         result = verify_configuration(
             config         = req.configuration,
             supplier       = req.supplier,
@@ -1557,6 +1560,8 @@ def step15_verify_configuration(req: _CapVerifyReq):
             f_line         = base["inputs"]["f_line_Hz"],
             Vdc_min        = base["inputs"]["Vdc_min_V"],
             C_required_uF  = base["C_required_uF"],
+            cap_ref        = req.cap_ref,
+            Tamb_C         = _tamb,
         )
         # Enhancement 2 — add thermal table across all 9 operating points
         thermal = calculate_thermal_table(
@@ -1636,6 +1641,7 @@ class _CapTableReq(BaseModel):
     lead_spacing_mm:  Optional[float] = None
     height_max_mm:    Optional[float] = None
     diameter_max_mm:  Optional[float] = None
+    Tamb_C:           Optional[float] = None   # designer operating ambient → ESR(T), K(T)
 
 @app.get("/mode-b/step15/hvcap-filter-options", tags=["mode-b"])
 def step15_hvcap_filter_options():
@@ -1667,6 +1673,28 @@ class _CapLifetimeReq(BaseModel):
     part_number:    str
     qty:            int   = 1
     Tamb_C:         float = 50.0    # ambient temperature (°C) — spec worst-case default
+
+@app.post("/mode-b/step15/cap-temp-sweep", tags=["mode-b"])
+def step15_cap_temp_sweep(req: _CapLifetimeReq):
+    """Step 15 — temperature characterization of the selected capacitor: ESR (at ambient and at
+    the converged core), allowed 120 Hz ripple (clamped K + raw thermal multiplier), Life Time
+    Period and T_core at 0/20/25/T_op/85/T_rated °C."""
+    try:
+        _validate_state(req.state)
+        from app.mode_b.step15_cap_db import _load, characterize_temperature_sweep
+        from app.mode_b.step15_capacitor import run_capacitor_design
+        cap = next((r for r in _load() if r['part_number'] == req.part_number), None)
+        if not cap:
+            raise HTTPException(404, f"Part {req.part_number!r} not found in database")
+        base = run_capacitor_design(req.state)
+        out  = characterize_temperature_sweep(
+            cap, req.qty,
+            float(base["worst_case"]["I_LF_A"]), float(base["worst_case"]["I_HF_A"]),
+            float(base["inputs"]["Vout_V"]), T_op=req.Tamb_C)
+        return {"status": "ok", **out}
+    except HTTPException: raise
+    except Exception as e:
+        log.exception("cap_temp_sweep"); raise HTTPException(500, str(e))
 
 @app.post("/mode-b/step15/cap-lifetime", tags=["mode-b"])
 def step15_cap_lifetime(req: _CapLifetimeReq):
@@ -1701,6 +1729,8 @@ def step15_hvcap_cap_table(req: _CapTableReq):
         Vout     = base["inputs"]["Vout_V"]
         f_line   = base["inputs"]["f_line_Hz"]
         C_req    = base["C_required_uF"]
+        _tamb    = req.Tamb_C if req.Tamb_C is not None else float(
+            req.state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
         table = get_cap_table(
             capacitance_uF=req.capacitance_uF,
             n_parallel=req.n_parallel,
@@ -1711,6 +1741,9 @@ def step15_hvcap_cap_table(req: _CapTableReq):
             lead_spacing_mm=req.lead_spacing_mm,
             height_max_mm=req.height_max_mm,
             diameter_max_mm=req.diameter_max_mm,
+            Tamb_C=_tamb,
+            I_LF_A=base["worst_case"]["I_LF_A"],
+            I_HF_A=base["worst_case"]["I_HF_A"],
         )
         return {"status": "ok", "table": table, "count": len(table),
                 "I_total_A": I_total, "I_per_cap_A": round(I_total/max(req.n_parallel,1), 3)}
@@ -1786,6 +1819,8 @@ def step15_generate_report(req: _Step15ReportReq):
                                 "part_number": part_number}]
 
                 # Step 15.5–15.8: verification + ripple/hold-up performance
+                _tamb15 = float(req.state.get("intake", {}).get("thermal", {})
+                                .get("ambient_temp_c_max", 50) or 50)
                 ver = verify_configuration(
                     config         = config_list,
                     supplier       = supplier,
@@ -1797,6 +1832,8 @@ def step15_generate_report(req: _Step15ReportReq):
                     f_line         = base["inputs"]["f_line_Hz"],
                     Vdc_min        = base["inputs"]["Vdc_min_V"],
                     C_required_uF  = base["C_required_uF"],
+                    cap_ref        = sel_cap,
+                    Tamb_C         = _tamb15,
                 )
 
                 # Enrich cap_specs[0] with rated lifetime + operating temperature

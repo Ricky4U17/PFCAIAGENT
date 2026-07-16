@@ -3952,3 +3952,73 @@ the SOLE lifetime criterion, renamed "Life Time Period".
 Verified: 450HXK470 ×4 @390 V → Life Time Period 65.8 yr PASS (was min-gate 9.7 yr FAIL);
 standalone + ch5 PDFs contain "Life Time Period" and zero mentions of Method 1/2; live endpoint
 returns the new verdict; tsc clean.
+
+## C83 — Vendor-implied temperature-corrected ESR model (all vendors) + docs (2026-07-14)
+
+Designer request: tan-δ ESR is a 20°C max spec; at operating temperature the electrolyte NTC
+roughly halves it — losses/T_core were overstated and allowable ripple understated.
+- NEW backend/app/mode_b/cap_esr_model.py: two-anchor exponential ESR(T_core) from each part's
+  OWN datasheet row — cold = tan-δ max @20°C, hot = ΔT0/(I_rated²·Rth) @ Tmax+ΔT0 (the
+  resistance the vendor's rated-ripple thermal design implies; same relation the Life Time
+  Period model uses → one resistance basis for loss, temperature and lifetime). HF branch has
+  its own anchors (0.595·ESR20 ↔ ESR_hot/kf², kf = datasheet HF/120Hz ripple ratio, HXK 1.40
+  verified against the live datasheet). Fixed-point core-temp solve (NTC → convergent).
+  Temperature multiplier K(T_amb)=√(ΔT_allow/ΔT0) convention (K(Tmax)=1 exactly), clamped 2.5,
+  with a VENDOR_TEMP_MULTIPLIERS registry hook — published tables are used LITERALLY as current
+  allowances (not decoded into ESR: vendors mix allowed-core-rise growth and ESR(T) inside K).
+  Fallback ladder: no rating → esr20_only (previous behaviour). Works for ALL vendors/parts.
+- step15_capacitor: calculate_thermal_table iterates ESR(T_core) per point (also FIXES a
+  pre-existing bug: per-cap P used the bank-PARALLEL ESR with per-cap current — undercounted by
+  the parallel count); package type from the part record (series-name heuristic fallback);
+  T_amb from intake; rows carry ESR_lf/hf_mohm; I_rated → K(Tamb)·datasheet rating; return
+  carries esr_model summary. verify_configuration: cap_ref/Tamb_C params, V_esr + cap_specs
+  I_rated on the corrected basis, perf rows carry ESR_at_op/T_core.
+- step15_cap_db: get_cap_table(Tamb_C, I_LF_A, I_HF_A) rows add esr_at_op/esr_hf_at_op/T_core/
+  K_temp/I_allow; ripple pass/headroom vs K·rated; lifetime Method-1 internal bound uses the
+  corrected solve. Endpoints: hvcap-cap-table Tamb_C param; verify endpoint passes cap_ref+Tamb.
+- Sim page: CapacitorSimAgent computes the same anchors + K (tempMult) into the package;
+  pfc_dcbus_agent_v4 engine iterates ESR at each explore point's converged core temp
+  (fallback = fixed 20°C when anchors absent); SELECTION ledger shows ESR@20°C AND ESR@op.
+  Node-run engine parity: esrLF 233.7 mΩ / Tcore 60.9 / I_allow 5.22 == backend exactly.
+- GUI (Step15Capacitor): part-table columns ESR@20°C / ESR@T_core (tooltip T_core+source) /
+  I_allow (tooltip K); chosen-part KVs; table REFETCHES when the ambient input changes —
+  the shown ESR follows the designer's operating temperature (as requested).
+- Documentation: ch5 §5.3 CONCEPT annotation documents the model (anchors, hot-anchor relation,
+  kf, K); standalone Step-15 report 15.9 gains the model paragraph + ESR_LF@T column.
+Verified (450HXK470 ×4 @390V/50C): anchors 423.3→114.5 mΩ@110°C; T_core 60.9 (was 70.4);
+P/cap 1.09 W (was 2.04); I_allow 5.22 A; K(105)=1.00 self-consistency; live table ESR follows
+ambient (234@50 ↔ 281@35 mΩ); both reports build with the model documented; tsc clean.
+
+## C84 — Temperature-sweep characterization + 3-tier ripple verdict + clamp documentation (2026-07-16)
+
+Designer requests (2026-07-15/16): show the capacitor's capability at each temperature basis
+instead of comparing the application current against the 105°C nameplate and printing FAIL.
+- step15_cap_db.characterize_temperature_sweep(cap, qty, I_LF, I_HF, Vout, T_op): rows at
+  0/20/25/T_op/85/T_rated °C with ESR@T_amb (no-load), ESR@T_core (converged), T_core,
+  I_allow = K·rated (clamped, with K_raw + K_clamped flag), Life Time Period. Self-validating:
+  rated row → I_allow == nameplate exactly + ESR == hot anchor; 20 °C row → ESR == tan-δ value.
+  Entirely per-part (proven across Chemi-Con/CDE/KEMET/Nichicon/Rubycon — incl. auto-detected
+  130 °C hot anchor for a 125 °C-rated series and kf 2.65 for KEMET's strong HF rating).
+- step15_cap_db.ripple_status(): three-tier verdict — pass (≤ nameplate) / pass_derated (≤
+  K·rated + T_core ≤ rating + Life Time Period met where known) / fail. Wired into
+  get_cap_table rows (with per-row lifetime check), calculate_thermal_table rows,
+  verify_configuration perf (+ I_nameplate_A).
+- Endpoint POST /mode-b/step15/cap-temp-sweep (+ client step15CapTempSweep).
+- Step15Capacitor GUI: tiered ripple banner ("PASS (derated) — exceeds the nameplate … but
+  within the temperature allowance … and the Life Time Period target is met"), the three-line
+  rating statement (Nameplate @rated-T / Effective @T_amb (K, clamped) / Operating → T_core →
+  Life), the temperature characterization table (op + rated rows highlighted, K* tooltip with
+  the raw thermal capability), parts-table Ripple column PASS / PASS ⚠ / FAIL with tooltip.
+- Sim (pfc_dcbus_agent_v4): Ripple-I margin check annotates "temp-derated (K=…) — above
+  nameplate, within allowance" + ⚠ when between the two bases.
+- Documentation (per designer: include the clamp argument as a NOTE in the DC-bus capacitor
+  chapter): ch5 gains Table 5.3.2 (temperature characterization) + the "Why I_allow is clamped
+  (K ≤ 2.5)" NOTE (vendor guarantee boundary ≈2.0–2.5; un-clamped K runs the core AT its limit
+  → life collapses to L0; vendor-published tables take precedence via the registry; <20 °C ESR
+  held at the 20 °C value pending a cold-side anchor from the Z-ratio spec) + Derated-PASS
+  condition NOTE on the 5.3 verdict; standalone report gains Step 15.9b with the same table +
+  note + derated summary line.
+Verified: sweep anchors assert-checked; tier logic 5 cases; HXK ×4 @390 V now pass_derated
+(2.505 > 2.09 nameplate, ≤ 5.22 allowance, life 65.8 yr) across table/thermal/verify; both
+PDFs contain the sweep + clamp + derated notes; live sweep endpoint 200; sim html syntax clean;
+tsc clean.

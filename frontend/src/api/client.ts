@@ -166,6 +166,11 @@ export const step15HvcapFilterCaps = (req: {
 export const step15CapLifetime = (req: {
   state: object; part_number: string; qty: number; Tamb_C?: number
 }) => post('/mode-b/step15/cap-lifetime', req)
+// temperature characterization of the selected cap (ESR / I_allow / Life Time Period / T_core
+// at 0/20/25/T_op/85/T_rated °C)
+export const step15CapTempSweep = (req: {
+  state: object; part_number: string; qty: number; Tamb_C?: number
+}) => post('/mode-b/step15/cap-temp-sweep', req)
 
 // ── Controller reference database agent ──────────────────────────────────────
 export interface RefPassage {
@@ -186,6 +191,7 @@ export const step15HvcapCapTable = (req: {
   state: object; capacitance_uF: number; n_parallel?: number
   voltage_V?: number; op_temp?: string; lifetime?: string; tolerance?: string
   lead_spacing_mm?: number; height_max_mm?: number; diameter_max_mm?: number
+  Tamb_C?: number   // operating ambient → vendor-implied ESR(T) + K(T) in the returned rows
 }) => post('/mode-b/step15/hvcap-cap-table', req)
 
 export const step15GenerateReport = (req: {

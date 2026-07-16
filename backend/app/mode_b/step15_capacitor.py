@@ -130,14 +130,17 @@ def verify_configuration(
     f_line: float,
     Vdc_min: float,
     C_required_uF: float,
+    cap_ref: dict | None = None,   # selected part record (ratings → vendor-implied ESR(T) model)
+    Tamb_C: float = 50.0,
 ) -> dict:
     db       = _load_db()
     ser_db   = db.get(supplier, {}).get(series, {})
     esr_db   = ser_db.get("ESR_mohm", {})
     temp_rating = int(ser_db.get("temp_rating_C") or ser_db.get("op_temp_max_C") or 105)
-    T_amb       = 50.0
+    T_amb       = float(Tamb_C or 50.0)
     is_snap  = any(kw in series.lower() for kw in ["snap","screw","380lx","lx"])
     Rth_ca   = 10.0 if is_snap else 15.0
+    dT0      = 5.0  if is_snap else 10.0
 
     C_total_uF  = sum(r["value_uF"] * r["qty"] for r in config)
     total_count = sum(r["qty"] for r in config)
@@ -151,16 +154,30 @@ def verify_configuration(
             esr_inv += row["qty"] / esr_each
     ESR_par = (1.0 / esr_inv) if esr_inv > 0 else None
 
-    # Per-cap spec table: ESR each, I_rated from thermal limit
+    # ── Vendor-implied ESR(T) model (cap_esr_model): selected part record preferred ────────
+    from app.mode_b.cap_esr_model import build_esr_model, solve_core_temp, temp_multiplier, esr_lf_at
+    _model_src = dict(cap_ref) if cap_ref else {
+        "esr_ohm": ((_interp_esr(esr_db, int(config[0]["value_uF"]), voltage_rating) or 500.0) / 1000.0)
+                   if config else 0.5,
+        "capacitance_uF": config[0]["value_uF"] if config else 470,
+        "op_temp_max_C":  temp_rating,
+    }
+    esr_m = build_esr_model(_model_src, Rth_ca, dT0)
+    _K    = temp_multiplier(esr_m, T_amb, str(_model_src.get("manufacturer", supplier)), series)
+
+    # Per-cap spec table: ESR each + allowed ripple at this ambient
     cap_specs = []
     for row in config:
         v_uF     = int(row["value_uF"])
         esr_each = _interp_esr(esr_db, v_uF, voltage_rating)
-        # I_rated from thermal limit: P_max = (T_rating - T_amb) / Rth_ca
-        # P_per_cap = I_per_cap² × ESR_each_ohm  → I_rated = sqrt(P_max / ESR_each_ohm)
-        esr_ohm  = (esr_each / 1000.0) if esr_each else None
-        P_max    = max(0.0, temp_rating - T_amb) / max(Rth_ca, 0.1)
-        I_rated  = math.sqrt(P_max / max(esr_ohm or 1e-3, 1e-6)) if esr_ohm else None
+        if esr_m.get("I_rated_A"):
+            # one basis: K(T_amb) × the datasheet 120 Hz rating (matches table + sim page)
+            I_rated = esr_m["I_rated_A"] * _K["K"]
+        else:
+            # thermal-limit fallback, with the ESR evaluated HOT (at the limit core temp)
+            esr_ohm  = (esr_each / 1000.0) if esr_each else None
+            P_max    = max(0.0, temp_rating - T_amb) / max(Rth_ca, 0.1)
+            I_rated  = math.sqrt(P_max / max(esr_lf_at(esr_m, temp_rating), 1e-6)) if esr_ohm else None
         cap_specs.append({
             "value_uF":        v_uF,
             "qty":             int(row["qty"]),
@@ -171,14 +188,8 @@ def verify_configuration(
             "part_number":     row.get("part_number", ""),
         })
 
-    # ESR and I_rated for the overall parallel bank
-    if ESR_par and total_count > 0:
-        esr_each_equiv = ESR_par * total_count        # each cap's own ESR
-        esr_ohm_equiv  = esr_each_equiv / 1000.0
-        P_max_eq       = max(0.0, temp_rating - T_amb) / max(Rth_ca, 0.1)
-        I_rated_bank   = math.sqrt(P_max_eq / max(esr_ohm_equiv, 1e-6))
-    else:
-        I_rated_bank = None
+    # Allowed ripple for the bank (per cap) — same basis as cap_specs
+    I_rated_bank = cap_specs[0]["I_rated_A"] if cap_specs else None
 
     def _perf(op: dict) -> dict:
         P      = op["Pout"]
@@ -188,16 +199,27 @@ def verify_configuration(
         I_t    = op["I_total_A"]
         # Correct: current splits equally across X parallel caps → I_per_cap = I_total / X
         I_pc   = I_t / max(total_count, 1)
-        Vesr   = I_t * (ESR_par / 1000.0) if ESR_par is not None else None
-        rip_ok = (I_pc <= I_rated_bank) if I_rated_bank is not None else True
+        # V_esr with the temperature-corrected ESR at the converged core temperature
+        n = max(total_count, 1)
+        _s = solve_core_temp(esr_m, float(op.get("I_LF_A", 0)) / n,
+                             float(op.get("I_HF_A", 0)) / n, T_amb)
+        Vesr = I_t * (_s["esr_lf"] / n)
+        from app.mode_b.step15_cap_db import ripple_status as _rip_status
+        _status = _rip_status(I_pc, esr_m.get("I_rated_A"), I_rated_bank,
+                              _s["T_core"], float(temp_rating), None)
+        rip_ok = (_status != 'fail') if I_rated_bank is not None else True
         return {
             "V_ripple_pp_V":       round(V_rp, 3),
             "t_holdup_ms":         round(t_hd, 1),
             "I_rms_per_cap_A":     round(I_pc, 3),
             "I_rms_total_A":       round(I_t,  3),
             "I_rated_per_cap_A":   round(I_rated_bank, 2) if I_rated_bank else None,
+            "I_nameplate_A":       esr_m.get("I_rated_A"),
             "ripple_current_pass": rip_ok,
+            "ripple_status":       _status,
             "V_esr_pk_V":          round(Vesr, 3) if Vesr is not None else None,
+            "ESR_at_op_mohm":      round(_s["esr_lf"] * 1000, 1),
+            "T_core_C":            round(_s["T_core"], 1),
         }
 
     margin = (C_total_uF - C_required_uF) / C_required_uF * 100 if C_required_uF > 0 else 0
@@ -413,7 +435,8 @@ def calculate_thermal_table(
     Vout       = float(ap.get("output_bus_voltage_v",      393))
     f_line     = float(ap.get("nominal_line_frequency_hz", 60))
     Vdc_ripple = float(tsi.get("dc_bus_ripple_vpp",        20.0))
-    T_amb      = 50.0   # °C ambient
+    # operating ambient from the SPEC (same value the lifetime panel and the sim page use)
+    T_amb      = float(intake.get("thermal", {}).get("ambient_temp_c_max", 50.0) or 50.0)
 
     db       = _load_db()
     ser_db   = db.get(supplier, {}).get(series, {})
@@ -423,18 +446,48 @@ def calculate_thermal_table(
     # Snap-in / screw → lower Rth; radial aluminium → higher
     is_snap = any(kw in series.lower() for kw in ["snap", "screw", "380lx", "lx"])
     Rth_ca = 10.0 if is_snap else 15.0
+    dT0    = 5.0  if is_snap else 10.0
 
     C_total_uF  = sum(r["value_uF"] * r["qty"] for r in config)
     C_total_F   = C_total_uF * 1e-6
     total_count = sum(r["qty"] for r in config)
 
-    # Parallel ESR of the configuration
+    # Parallel ESR of the configuration (datasheet 20 °C basis, for display/V_esr reference)
     esr_inv = 0.0
     for row in config:
         esr_each = _interp_esr(esr_db, int(row["value_uF"]), voltage_rating)
         if esr_each and row["qty"] > 0:
             esr_inv += row["qty"] / esr_each
     ESR_par = (1.0 / esr_inv) if esr_inv > 0 else 500.0  # mΩ fallback
+
+    # ── Vendor-implied ESR(T) model (cap_esr_model) ──────────────────────────
+    # Prefer the part's own CSV record (carries the rated ripple currents that set the hot
+    # anchor); fall back to the series-interpolated 20 °C ESR with no hot anchor (esr20_only —
+    # exactly the previous behaviour).
+    from app.mode_b.cap_esr_model import build_esr_model, solve_core_temp, temp_multiplier
+    _pn  = next((str(r.get("part_number") or "") for r in config if r.get("part_number")), "")
+    _rec = None
+    if _pn:
+        try:
+            from app.mode_b.step15_cap_db import _load as _load_csv
+            _rec = next((x for x in _load_csv()
+                         if str(x.get("part_number", "")).lower() == _pn.lower()), None)
+        except Exception:
+            _rec = None
+    if _rec is None:
+        _rec = {"esr_ohm": (ESR_par * total_count) / 1000.0,
+                "capacitance_uF": config[0]["value_uF"] if config else 470,
+                "op_temp_max_C": temp_rating}
+    else:
+        # the part record knows its true package — more reliable than the series-NAME heuristic
+        # (e.g. series "HXK" doesn't contain "snap" but the part is a snap-in can)
+        _pkg = (str(_rec.get("package") or "") + " " + str(_rec.get("mounting") or "")).lower()
+        if _pkg.strip():
+            is_snap = any(k in _pkg for k in ("snap", "screw"))
+            Rth_ca  = 10.0 if is_snap else 15.0
+            dT0     = 5.0  if is_snap else 10.0
+    esr_m = build_esr_model(_rec, Rth_ca, dT0)
+    _K    = temp_multiplier(esr_m, T_amb, _rec.get("manufacturer", supplier), series)
 
     n_phases = int(state.get("selected_channels") or 2)
     table = []
@@ -448,18 +501,29 @@ def calculate_thermal_table(
         I_HF    = math.sqrt(max(0.0, ID2 - I_o**2 - I_LF**2)) / math.sqrt(max(n_phases, 1))
         I_total = math.hypot(I_LF, I_HF)
 
-        # Correct: X caps in parallel → each carries I_total / X
-        I_per_cap   = I_total / max(total_count, 1)
-        P_diss      = I_per_cap**2 * (ESR_par / 1000.0)   # W per cap (ESR in mΩ → Ω)
-        dT          = P_diss * Rth_ca
-        T_cap       = T_amb + dT
+        # X caps in parallel → each carries I/X; per-cap dissipation uses the cap's OWN
+        # (temperature-corrected) ESR at its converged core temperature — this also fixes the
+        # old bug that multiplied the per-cap current by the bank-PARALLEL ESR (which
+        # under-counted per-cap loss by the parallel count).
+        n = max(total_count, 1)
+        I_per_cap = I_total / n
+        _s   = solve_core_temp(esr_m, I_LF / n, I_HF / n, T_amb)
+        P_diss = _s["P_W"]; dT = _s["dT"]; T_cap = _s["T_core"]
         V_ripple_pp = (Pout / (2 * math.pi * f_line * C_total_F * eta * Vout)
                        if C_total_F > 0 else 999.0)
-        # I_rated from thermal limit per cap
-        ESR_each_ohm = (ESR_par * total_count) / 1000.0  # individual cap ESR
-        P_max_cap    = max(0.0, temp_rating - T_amb) / max(Rth_ca, 0.1)
-        I_rated      = math.sqrt(P_max_cap / max(ESR_each_ohm, 1e-6))
-        ripple_pass  = I_per_cap <= I_rated
+        # Allowed ripple at this ambient: K(T_amb) × the datasheet rating (one basis with the
+        # part table and the simulation page). Thermal-limit fallback when no rating exists.
+        if esr_m.get("I_rated_A"):
+            I_rated = esr_m["I_rated_A"] * _K["K"]
+        else:
+            from app.mode_b.cap_esr_model import esr_lf_at
+            P_max_cap = max(0.0, temp_rating - T_amb) / max(Rth_ca, 0.1)
+            I_rated   = math.sqrt(P_max_cap / max(esr_lf_at(esr_m, temp_rating), 1e-6))
+        # three-tier verdict (pass / pass_derated / fail); lifetime is gated by §5.4
+        from app.mode_b.step15_cap_db import ripple_status as _rip_status
+        r_status    = _rip_status(I_per_cap, esr_m.get("I_rated_A"), I_rated,
+                                  T_cap, float(temp_rating), None)
+        ripple_pass = (r_status != 'fail')
 
         table.append({
             "Vin_rms":          Vin_rms,
@@ -474,8 +538,11 @@ def calculate_thermal_table(
             "P_dissipated_W":   round(P_diss,       3),
             "dT_rise_C":        round(dT,            1),
             "T_cap_C":          round(T_cap,         1),
+            "ESR_lf_mohm":      round(_s["esr_lf"] * 1000, 1),
+            "ESR_hf_mohm":      round(_s["esr_hf"] * 1000, 1),
             "V_ripple_pp_V":    round(V_ripple_pp,   2),
             "ripple_pass":      ripple_pass,
+            "ripple_status":    r_status,       # 'pass' | 'pass_derated' | 'fail'
         })
 
     worst_dT = max(r["dT_rise_C"] for r in table)
@@ -490,6 +557,18 @@ def calculate_thermal_table(
         "Rth_ca_CW":        Rth_ca,
         "ESR_parallel_mohm": round(ESR_par, 1),
         "n_phases":         n_phases,
+        "T_amb_C":          T_amb,
+        # vendor-implied ESR(T) model summary (documented in the report's capacitor chapter)
+        "esr_model": {
+            "source":       esr_m["source"],
+            "esr20_mohm":   round(esr_m["esr20"] * 1000, 1),
+            "esr_hot_mohm": round(esr_m["esr_hot"] * 1000, 1),
+            "T_hot_C":      round(esr_m["T_hot"], 0),
+            "kf":           round(esr_m["kf"], 2),
+            "K_temp":       round(_K["K"], 2),
+            "K_source":     _K["source"],
+            "I_rated_A":    esr_m.get("I_rated_A"),
+        },
     }
 
 

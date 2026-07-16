@@ -366,15 +366,39 @@ const DCBUS = (() => {
     const CtotEOL = Ctot * kEOL;
     const e120 = esr120(cap, warnings);
     if (e120.src === 'missing') warnings.push('Neither ESR@120Hz nor tan δ supplied — copper loss = 0.');
-    const esrHF = (cap.ESR_HF_ohm != null && isFinite(cap.ESR_HF_ohm)) ? cap.ESR_HF_ohm : e120.v;
-    if (cap.ESR_HF_ohm == null && e120.v > 0) warnings.push('ESR@HF not given — using ESR@120Hz for the HF loss term (conservative).');
-    const esrLFtot = e120.v * nS / nP;
+    let esrLF = e120.v;
+    let esrHF = (cap.ESR_HF_ohm != null && isFinite(cap.ESR_HF_ohm)) ? cap.ESR_HF_ohm : e120.v;
+    if (cap.ESR_HF_ohm == null && cap.esrAnchors == null && e120.v > 0) warnings.push('ESR@HF not given — using ESR@120Hz for the HF loss term (conservative).');
+    let esrSrcT = 'fixed @20°C';
 
     const Ilf = pt.Pout_W / (Math.SQRT2 * op.Vbus_V);
     const hf = hfCurrent(op, pt);
     const Ihf = hf.I;
     const Itot = Math.hypot(Ilf, Ihf);
     const IlfEach = Ilf / nP, IhfEach = Ihf / nP, IEach = Itot / nP;
+
+    // ── vendor-implied ESR(T): interpolate between the part's cold/hot anchors at the
+    // CONVERGED core temperature of THIS operating point (electrolyte NTC → the fixed point
+    // is self-stabilizing). Same model as the Step-15 page (cap_esr_model.py), so the two
+    // pages agree at every point, not only the verdict corner.
+    let TcoreEsr = pt.Tamb_C;
+    if (cap.esrAnchors && isFinite(cap.esrAnchors.esrHot_ohm) && cap.esrAnchors.esr20_ohm > 0) {
+      const A = cap.esrAnchors;
+      const lam  = Math.log(A.esr20_ohm / Math.max(A.esrHot_ohm, 1e-9)) / Math.max(A.Thot_C - 20, 1e-9);
+      const hf20 = 0.595 * A.esr20_ohm;
+      const hfHot = Math.min(A.esrHot_ohm / Math.max((A.kf || 1.4) * (A.kf || 1.4), 1), hf20);
+      const lamH = Math.log(hf20 / Math.max(hfHot, 1e-9)) / Math.max(A.Thot_C - 20, 1e-9);
+      let T = pt.Tamb_C;
+      for (let it = 0; it < 6; it++) {
+        const el = Math.min(Math.max(A.esr20_ohm * Math.exp(-lam  * (T - 20)), A.esrHot_ohm), A.esr20_ohm);
+        const eh = Math.min(Math.max(hf20        * Math.exp(-lamH * (T - 20)), hfHot),        hf20);
+        const P = IlfEach * IlfEach * el + IhfEach * IhfEach * eh;
+        const Tn = pt.Tamb_C + P * (cap.Rth_CperW || 15);
+        esrLF = el; esrHF = eh; T = Tn;
+      }
+      TcoreEsr = T; esrSrcT = 'vendor-implied ESR(T)';
+    }
+    const esrLFtot = esrLF * nS / nP;
 
     // LF ripple: capacitive term + ESR step (small at LF; included for honesty)
     const VppC_nom = ripplePP(pt.Pout_W, op.fLine_Hz, Ctot, op.Vbus_V);
@@ -417,8 +441,11 @@ const DCBUS = (() => {
     const Ieq = Math.hypot(IlfEach, IhfEach / Khf);
     const Iallow = cap.rippleRating_A * Ktp;
     const margin = Iallow > 0 ? (Iallow - Ieq) / Iallow * 100 : NaN;
+    // three-tier context: above the NAMEPLATE rating but within the temperature allowance
+    // (K = tempMult) — vendor-sanctioned derated operation, annotated rather than failed
+    const rippleDerated = (cap.rippleRating_A > 0 && Ieq > cap.rippleRating_A && Ieq <= Iallow);
 
-    const PeachLF = IlfEach * IlfEach * e120.v;
+    const PeachLF = IlfEach * IlfEach * esrLF;
     const PeachHF = IhfEach * IhfEach * esrHF;
     const PeachCu = PeachLF + PeachHF;
     let Pbal = 0;
@@ -454,7 +481,9 @@ const DCBUS = (() => {
     };
     add('vpp',  'Bus ripple (LF+HF)',  VppTot, acc.Vripple_max_Vpp, '<=', 'EOL + HF env', VppTot.toFixed(1) + ' Vpp', (acc.Vripple_max_Vpp ?? 0) + ' Vpp');
     add('hold', 'Hold-up time',        holdMs, acc.holdUp_min_ms,   '>=', 'EOL C',       holdMs.toFixed(1) + ' ms',  (acc.holdUp_min_ms ?? 0) + ' ms');
-    add('imarg','Ripple-I margin',     margin, acc.Imargin_min_pct, '>=', 'this point',  (isFinite(margin)?margin.toFixed(1):'—') + ' %', (acc.Imargin_min_pct ?? 0) + ' %');
+    add('imarg','Ripple-I margin',     margin, acc.Imargin_min_pct, '>=',
+        rippleDerated ? 'temp-derated (K=' + Ktp.toFixed(2) + ') — above nameplate, within allowance' : 'this point',
+        (isFinite(margin)?margin.toFixed(1):'—') + ' %' + (rippleDerated ? ' ⚠' : ''), (acc.Imargin_min_pct ?? 0) + ' %');
     add('thot', 'Hotspot temperature', Thot,   acc.Thot_max_C,      '<=', 'this point',  Thot.toFixed(1) + ' °C',    (acc.Thot_max_C ?? 0) + ' °C');
     add('life', 'Lifetime',            lifeH,  acc.life_min_h,      '>=', 'at hotspot',  (lifeH/8760).toFixed(1) + ' yr', ((acc.life_min_h ?? 0)/8760).toFixed(0) + ' yr');
     add('vder', 'Voltage derate',      vDer,   acc.Vderate_max_pct, '<=', 'EOL ripple',  vDer.toFixed(1) + ' %',     (acc.Vderate_max_pct ?? 0) + ' %');
@@ -462,7 +491,8 @@ const DCBUS = (() => {
     const judged = checks.filter(c => c.status !== 'N/A');
     const verdict = judged.length === 0 ? 'NO-LIMITS' : (judged.every(c => c.status === 'PASS') ? 'APPROVE' : 'REJECT');
 
-    return { pt, op, bank, cap, acc, nP, nS, Ctot, CtotEOL, kEOL, e120, esrHF, esrLFtot,
+    return { pt, op, bank, cap, acc, nP, nS, Ctot, CtotEOL, kEOL, e120, esrLF, esrHF, esrLFtot,
+             esrSrcT, TcoreEsr,
              Ilf, Ihf, IhfSrc: hf.src, Itot, IlfEach, IhfEach, IEach, Ieq, Iallow, margin,
              VppNom, VppEOL, VppESR, VppHF, VppTot, hfEnvAt, ImPh, esrHFbank, fEff, dCrest,
              PeachLF, PeachHF, PeachCu, Pbal, Pbank, dT, Thot, lifeH, Vwork, vDer,
@@ -602,7 +632,8 @@ function renderTables(rN) {
     ['Capacitor', `${c.manufacturer ?? '—'} ${c.series ?? ''}`.trim()],
     ['Selection', `${rN.nS}S·${rN.nP}P × ${fmt(c.C_uF,0)} µF / ${fmt(c.Vrated_V,0)} V`],
     ['Total C (nom / EOL)', `${fmt(rN.Ctot*1e6,0)} / ${fmt(rN.CtotEOL*1e6,0)} µF`],
-    ['ESR@120Hz each', `${fmt(rN.e120.v*1e3,0)} mΩ (${rN.e120.src})`],
+    ['ESR@120Hz each (20°C)', `${fmt(rN.e120.v*1e3,0)} mΩ (${rN.e120.src})`],
+    ['ESR @ operating point', `${fmt(rN.esrLF*1e3,0)} mΩ LF / ${fmt(rN.esrHF*1e3,0)} mΩ HF @ T_core ${fmt(rN.TcoreEsr,0)} °C (${rN.esrSrcT})`],
     ['Required C — ripple / hold-up', `${rN.CripNeed?fmt(rN.CripNeed*1e6,0):'—'} / ${rN.CholdNeed?fmt(rN.CholdNeed*1e6,0):'—'} µF`],
     ['Hold-up available (EOL)', fmt(rN.holdMs,1) + ' ms'],
   ].map(x => `<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('');

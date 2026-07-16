@@ -121,11 +121,28 @@ export const CapacitorSimAgent: React.FC<Props> = ({
     // 10 (snap-in/screw) / 15 (radial) model Step 15 uses. (The old 18 fallback ran ~1.8×
     // hotter than the page whenever no specific part was selected.)
     const pkgTxt = `${cap?.series ?? result.series ?? ''} ${(cap as any)?.package ?? ''}`.toLowerCase()
-    const Rth    = Number(cap?.Rth_ca_CW ?? (/(snap|screw)/.test(pkgTxt) ? 10 : 15))
+    const isSnap = /(snap|screw)/.test(pkgTxt)
+    const Rth    = Number(cap?.Rth_ca_CW ?? (isSnap ? 10 : 15))
+    const dT0    = isSnap ? 5 : 10                                 // rated core rise (°C)
     const rippleHf  = Number(cap?.ripple_hf_A ?? 0)               // rated HF ripple → frequency multiplier
     // K_hf ≥ 1 always: a handful of DB rows carry an HF rating BELOW the 120 Hz rating
     // (data quirk), which would INFLATE Ieq by 1/K_hf and falsely fail the margin.
     const freqMult  = (rippleHf > 0 && iRated) ? Math.max(1, +(rippleHf / Number(iRated)).toFixed(3)) : 1.4
+
+    // ── Vendor-implied ESR(T) anchors + temperature multiplier (cap_esr_model, mirrored) ──
+    // Hot anchor = ΔT0/(I_rated²·R_th) at core T_max+ΔT0 — the resistance the vendor's own
+    // rated-ripple thermal design implies. The sim engine interpolates ESR between the anchors
+    // at each explore point's CONVERGED core temperature, so the sliders stay honest and the
+    // verdict corner matches Step 15 exactly.
+    const Tamb50   = Number(thermal.ambient_temp_c_max ?? 50)
+    const esrHot   = (iRated && esr120 > 0)
+      ? Math.min(dT0 / (Number(iRated) ** 2 * Rth), esr120) : null
+    const ThotC    = tempMaxC + dT0
+    // model-implied ripple temperature multiplier K = √(ΔT_allow/ΔT0), clamped 2.5 (life is
+    // gated separately by the Life Time Period model) — same convention as the Step-15 page.
+    const Ktemp    = (iRated && esrHot)
+      ? Math.min(Math.sqrt(Math.max(tempMaxC + dT0 - Tamb50, 0) / (Rth * esrHot)) / Number(iRated), 2.5)
+      : 1.0
     const L0      = parseLifeHours(cap?.lifetime) ?? 5000
 
     // Step-15 "Life Time Period" (manufacturer model — the sole lifetime criterion) →
@@ -169,12 +186,15 @@ export const CapacitorSimAgent: React.FC<Props> = ({
           ESR_120_ohm:  esr120 > 0 ? esr120 : null,
           tanDelta:     null,
           // HF ESR = 0.595 × ESR@120 — the SAME HF/LF ratio Step 15's lifetime Method 1 uses.
-          // (Passing null made the tool fall back to the full 120 Hz ESR for the HF loss term,
-          //  overheating the hotspot ~1.7× on the HF component vs the selection page.)
+          // (Fallback when the ESR(T) anchors below are unavailable.)
           ESR_HF_ohm:   esr120 > 0 ? +(esr120 * 0.595).toFixed(4) : null,
+          // vendor-implied ESR(T) anchors — engine iterates ESR at the converged core temp
+          ...(esrHot ? { esrAnchors: { esr20_ohm: esr120, esrHot_ohm: +esrHot.toFixed(4),
+                                       Thot_C: ThotC, kf: freqMult } } : {}),
           rippleRating_A: iRated ?? 0,
           freqMult_HF:  freqMult,        // ripple_hf_A / ripple_120hz_A from the datasheet (DB)
-          tempMult:     1.0,
+          // allowed-ripple temperature multiplier K(T_amb) — same basis as the Step-15 page
+          tempMult:     +Ktemp.toFixed(2),
           Rth_CperW:    Rth,             // case-to-ambient from package type (DB), not a fixed guess
           // nominal capacitance basis — consistent with how Step 15 sized C_required
           tol_pct:      0,

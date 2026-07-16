@@ -56,12 +56,16 @@ def calculate_lifetime(
 
     def _yr(h): return round(h / HOURS_PER_YEAR, 1)
 
-    # ── Method 1: Arrhenius from datasheet ESR ────────────────────────────
-    esr_lf1 = esr_db if esr_db > 0 else (tan_d / (2 * math.pi * 120 * C_F))
-    esr_hf1 = esr_lf1 * 0.595            # typical HF/LF ratio (0.138/0.232)
-    P1      = I_LF**2 * esr_lf1 + I_HF**2 * esr_hf1
-    dT1     = P1 * Rth
-    Tc1     = Tamb + dT1
+    # ── Method 1 (INTERNAL bound): Arrhenius from vendor-implied ESR(T) ───
+    # Uses the temperature-corrected ESR at the converged core temperature (cap_esr_model),
+    # replacing the old cold-max ESR that double-counted the rated-ripple self-heating.
+    from app.mode_b.cap_esr_model import build_esr_model, solve_core_temp
+    _m1s    = solve_core_temp(build_esr_model(cap, Rth, delta_To), I_LF, I_HF, Tamb)
+    esr_lf1 = _m1s['esr_lf']
+    esr_hf1 = _m1s['esr_hf']
+    P1      = _m1s['P_W']
+    dT1     = _m1s['dT']
+    Tc1     = _m1s['T_core']
     fT1     = 2 ** ((Tmax - Tc1) / 10)
     fV1     = (Vo / Vout) ** 3
     L1_h    = Lo * fT1 * fV1
@@ -137,6 +141,97 @@ def calculate_lifetime(
     }
 
 _DB: list | None = None
+
+def characterize_temperature_sweep(
+    cap: dict,            # part record (DB row or selected_cap-like dict)
+    qty: int,
+    I_LF_bank: float,     # bank LF (120 Hz) RMS current [A]
+    I_HF_bank: float,     # bank HF (switching) RMS current [A]
+    Vout: float,
+    T_op: float = 50.0,   # designer operating ambient
+) -> dict:
+    """Temperature characterization of the SELECTED capacitor (designer request 2026-07-16):
+    for a set of ambient temperatures compute 1) ESR (no-load at T_amb AND at the converged
+    core), 2) the allowed 120 Hz ripple I_allow = K(T_amb)·I_rated (clamped, with the raw
+    thermal multiplier shown alongside), 3) the Life Time Period, 4) T_core — so the designer
+    sees the whole capability curve, with each number labelled at its own temperature basis.
+
+    Anchor rows: 0/20/25 °C (cold/room), the operating ambient, 85 °C, and the rated
+    temperature (validation row — I_allow reduces to the nameplate there and ESR to the hot
+    anchor). Everything derives from the part's own record via cap_esr_model — nothing is
+    part- or vendor-specific."""
+    from app.mode_b.cap_esr_model import (build_esr_model, esr_lf_at, solve_core_temp,
+                                          temp_multiplier)
+    qty  = max(int(qty), 1)
+    pkg  = (str(cap.get('package') or '') + ' ' + str(cap.get('mounting') or '')
+            + ' ' + str(cap.get('series') or '')).lower()
+    snap = any(k in pkg for k in ('snap', 'screw'))
+    Rth, dT0 = (10.0, 5.0) if snap else (15.0, 10.0)
+    m    = build_esr_model(cap, Rth, dT0)
+    t_rated = float(cap.get('op_temp_max_C') or cap.get('temp_rating_C') or 105)
+    ambients = sorted({0.0, 20.0, 25.0, float(T_op), 85.0, t_rated})
+    ilf, ihf = I_LF_bank / qty, I_HF_bank / qty
+
+    rows = []
+    for T in ambients:
+        s = solve_core_temp(m, ilf, ihf, T)
+        K = temp_multiplier(m, T, str(cap.get('manufacturer', '')), str(cap.get('series', '')))
+        # raw (un-clamped) thermal multiplier — the pure core-limit capability
+        dTa   = max(m['tmax'] + m['dT0'] - T, 0.0)
+        K_raw = (math.sqrt(dTa / (m['Rth'] * m['esr_hot'])) / m['I_rated_A']
+                 if (m.get('I_rated_A') and dTa > 0) else None)
+        lt = calculate_lifetime(cap, qty, I_LF_bank, I_HF_bank, T, Vout)
+        rows.append({
+            'T_amb_C':          T,
+            'esr_at_amb_mohm':  round(esr_lf_at(m, T) * 1000, 1),
+            'esr_at_core_mohm': round(s['esr_lf'] * 1000, 1),
+            'T_core_C':         round(s['T_core'], 1),
+            'K':                round(K['K'], 2),
+            'K_source':         K['source'],
+            'K_raw':            round(K_raw, 2) if K_raw is not None else None,
+            'K_clamped':        bool(K_raw is not None and K['source'] == 'model_implied'
+                                     and K_raw > K['K'] + 1e-9),
+            'I_allow_A':        round(K['K'] * m['I_rated_A'], 2) if m.get('I_rated_A') else None,
+            'life_years':       lt['life_years'],
+            'life_pass':        lt['pass_15yr'],
+            'is_operating':     abs(T - float(T_op)) < 1e-9,
+            'is_rated':         abs(T - t_rated) < 1e-9,
+        })
+    return {
+        'rows':            rows,
+        'model':           {'esr20_mohm': round(m['esr20'] * 1000, 1),
+                            'esr_hot_mohm': round(m['esr_hot'] * 1000, 1),
+                            'T_hot_C': round(m['T_hot'], 0), 'kf': round(m['kf'], 2),
+                            'source': m['source'], 'I_rated_A': m.get('I_rated_A'),
+                            'Rth_CW': Rth, 'dT0_C': dT0},
+        'I_req_per_cap_A': round(math.hypot(I_LF_bank, I_HF_bank) / qty, 3),
+        'T_op_C':          float(T_op),
+        'T_rated_C':       t_rated,
+    }
+
+
+def ripple_status(I_per_cap: float, I_rated: float | None, I_allow: float | None,
+                  T_core: float | None = None, temp_rating: float | None = None,
+                  life_pass: bool | None = None) -> str:
+    """Three-tier ripple verdict (designer decision 2026-07-16):
+      'pass'         — within the NAMEPLATE rating (no temperature credit needed)
+      'pass_derated' — above nameplate but within K(T_amb)·rating, core temp within the
+                       rating, and (when known) the Life Time Period target met — the
+                       vendor-sanctioned temperature allowance, shown as an amber warning
+                       rather than a failure
+      'fail'         — beyond the allowance, or core/lifetime limit violated"""
+    if I_rated is None or I_allow is None:
+        return 'pass'                      # no rating data → no basis to fail on
+    if T_core is not None and temp_rating is not None and T_core > temp_rating:
+        return 'fail'
+    if life_pass is False:
+        return 'fail'
+    if I_per_cap <= I_rated:
+        return 'pass'
+    if I_per_cap <= I_allow:
+        return 'pass_derated'
+    return 'fail'
+
 
 def _load() -> list:
     """Load HV capacitor database from CSV (flat tabular, human-editable in Excel)."""
@@ -242,6 +337,9 @@ def get_cap_table(
     height_max_mm:    Optional[float] = None,
     diameter_max_mm:  Optional[float] = None,
     C_required_uF:    float           = 0.0,
+    Tamb_C:           float           = 50.0,   # designer operating ambient → ESR(T), K(T)
+    I_LF_A:           Optional[float] = None,   # bank LF (120 Hz) RMS — for the core-temp solve
+    I_HF_A:           Optional[float] = None,   # bank HF (switching) RMS
 ) -> list[dict]:
     """
     Return a table of all caps matching capacitance + filter criteria.
@@ -277,22 +375,49 @@ def get_cap_table(
     # Current per cap (parallel split)
     n = max(int(n_parallel), 1)
     I_per_cap = I_total_A / n
+    # LF/HF split for the ESR(T) core-temp solve; fall back to a consistent decomposition of
+    # the total when the caller doesn't supply the bank components.
+    _ilf = float(I_LF_A) if I_LF_A else I_total_A * 0.65
+    _ihf = float(I_HF_A) if I_HF_A else math.sqrt(max(I_total_A**2 - _ilf**2, 0.0))
+
+    from app.mode_b.cap_esr_model import build_esr_model, solve_core_temp, temp_multiplier
 
     # Parallel ESR
     rows = []
     for r in matched:
         esr_each  = r['esr_ohm'] or 0.0
-        esr_par   = esr_each / n if n > 0 else esr_each
-        V_esr_pk  = round(I_total_A * esr_par, 3)
-
-        rated_rip = r.get('ripple_120hz_A')
-        rip_pass  = (I_per_cap <= rated_rip) if rated_rip else None
-        headroom  = round((rated_rip - I_per_cap) / rated_rip * 100, 1) if rated_rip else None
 
         # Case-to-ambient thermal resistance by package type (same model as
         # verify_configuration): snap-in / screw cans run cooler than radial leaded.
         pkg_txt = (str(r.get('package') or '') + ' ' + str(r.get('mounting') or '')).lower()
-        Rth_ca  = 10.0 if any(k in pkg_txt for k in ('snap', 'screw')) else 15.0
+        is_snap = any(k in pkg_txt for k in ('snap', 'screw'))
+        Rth_ca  = 10.0 if is_snap else 15.0
+        dT0     = 5.0  if is_snap else 10.0
+
+        # Vendor-implied ESR(T): per-cap loss and core temperature at the designer's ambient,
+        # with the electrolyte NTC captured between the part's own cold/hot anchors.
+        _m  = build_esr_model(r, Rth_ca, dT0)
+        _s  = solve_core_temp(_m, _ilf / n, _ihf / n, Tamb_C)
+        esr_op    = _s['esr_lf']                          # corrected LF ESR at T_core
+        esr_par   = (esr_op / n) if n > 0 else esr_op
+        V_esr_pk  = round(I_total_A * esr_par, 3)
+
+        # Allowed ripple at this ambient: K(T_amb) × datasheet rating (one basis everywhere)
+        rated_rip = r.get('ripple_120hz_A')
+        _K   = temp_multiplier(_m, Tamb_C, r.get('manufacturer', ''), r.get('series', ''))
+        I_allow = round(rated_rip * _K['K'], 2) if rated_rip else None
+        # three-tier verdict: pass (within nameplate) / pass_derated (within temperature
+        # allowance + lifetime met) / fail
+        _lt_ok = None
+        if rated_rip:
+            try:
+                _lt_ok = calculate_lifetime(r, n, _ilf, _ihf, Tamb_C, Vout)['pass_15yr']
+            except Exception:
+                _lt_ok = None
+        status = ripple_status(I_per_cap, rated_rip, I_allow, _s['T_core'],
+                               float(r.get('op_temp_max_C') or 105), _lt_ok)
+        rip_pass  = (status != 'fail') if I_allow else None
+        headroom  = round((I_allow - I_per_cap) / I_allow * 100, 1) if I_allow else None
 
         rows.append({
             'manufacturer':    r['manufacturer'],
@@ -304,11 +429,21 @@ def get_cap_table(
             'tolerance':       r['tolerance'],
             'esr_each_ohm':    round(esr_each, 4),
             'esr_parallel_mohm': round(esr_par * 1000, 2),
+            # vendor-implied ESR(T): datasheet 20 °C value vs the corrected value at the
+            # converged core temperature for this ambient (see cap_esr_model)
+            'esr_at_op_mohm':  round(esr_op * 1000, 1),
+            'esr_hf_at_op_mohm': round(_s['esr_hf'] * 1000, 1),
+            'T_core_C':        round(_s['T_core'], 1),
+            'esr_source':      _s['source'],
+            'K_temp':          round(_K['K'], 2),
+            'K_temp_source':   _K['source'],
+            'I_allow_A':       I_allow,
             'V_esr_pk_V':      V_esr_pk,
             'I_rms_per_cap_A': round(I_per_cap, 3),
             'I_rated_120hz_A': rated_rip,
             'ripple_hf_A':     r.get('ripple_hf_A'),       # rated ripple at HF (for freq multiplier)
             'ripple_pass':     rip_pass,
+            'ripple_status':   status,          # 'pass' | 'pass_derated' | 'fail'
             'ripple_headroom_pct': headroom,
             'lifetime':        r['lifetime_raw'],
             'lifetime_temp_C': r.get('lifetime_temp_C'),   # temp the rated endurance L0 is specified at
