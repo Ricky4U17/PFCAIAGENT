@@ -27,12 +27,17 @@ interface Props {
   approvedCapacitorDesign: CapacitorResult | null
   onBack:    () => void
   onRestart: () => void
-  onSelectSemiconductors: () => void
+  // Receives the full step16_params (incl. s2 designer selections + js_design_state)
+  // so App can persist them — later pages (Semiconductor, InputProtection) forward
+  // them to the report; without this the report falls back to engine defaults
+  // (e.g. R_CS 15 mΩ instead of the selected value).
+  onSelectSemiconductors: (step16?: Record<string, unknown>) => void
+  savedStep16Params?: Record<string, unknown> | null
 }
 
 export const ControlDesign: React.FC<Props> = ({
   confirmedState, approvedInductorDesign, approvedCapacitorDesign,
-  onBack, onRestart, onSelectSemiconductors,
+  onBack, onRestart, onSelectSemiconductors, savedStep16Params,
 }) => {
   const iframeRef              = useRef<HTMLIFrameElement>(null)
   const [rptLoading, setRptLoad] = useState(false)
@@ -44,7 +49,10 @@ export const ControlDesign: React.FC<Props> = ({
   type Sub = 'cur'|'vol'|'res'
   const [screen, setScreen] = useState<Scr>('s1')
   const [s4sub, setS4sub] = useState<Sub>('cur')   // S4 sub-screen: current → voltage → results
-  const [s2sel, setS2Sel] = useState<ComponentSelections|null>(null)
+  // Re-hydrate the screen-2 selections (R_CS, filter caps) from the persisted params so
+  // navigating away and back does not silently reset them to the engine defaults.
+  const [s2sel, setS2Sel] = useState<ComponentSelections|null>(
+    (savedStep16Params?.s2 as ComponentSelections | undefined) ?? null)
   const [reportGen, setReportGen] = useState(false)
   const injectedRef = useRef(false)
   const TOOL_TAB: Record<string, string> = { s4: 'screen2', s5: 'screen3', s6: 'screen4', s7: 'screen5' }
@@ -284,7 +292,17 @@ export const ControlDesign: React.FC<Props> = ({
                   <Btn variant="success" disabled={rptLoading} onClick={handleReport}>
                     {rptLoading ? '⏳ Generating…' : '📥 Download & Review Report'}
                   </Btn>
-                  <Btn variant="primary" onClick={onSelectSemiconductors}>
+                  <Btn variant="primary" onClick={async () => {
+                    // Persist the complete control-design config with the approval so every
+                    // later report keeps the designer's R_CS / filter caps / loop design.
+                    const jsState = await getJsDesignState().catch(() => null)
+                    onSelectSemiconductors({
+                      ...(savedStep16Params ?? {}),   // keep earlier js/s2 if this visit has none
+                      ...step16_params,
+                      ...(jsState ? { js_design_state: jsState } : {}),
+                      ...(s2sel   ? { s2: s2sel } : {}),
+                    })
+                  }}>
                     ✓ Approve &amp; go to Semiconductors →
                   </Btn>
                 </div>

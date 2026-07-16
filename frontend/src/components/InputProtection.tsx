@@ -23,6 +23,10 @@ interface Props {
   confirmedState:          Record<string, unknown>
   approvedInductorDesign:  Record<string, unknown>
   approvedCapacitorDesign?: CapacitorResult | null
+  // Persisted upstream approvals — forwarded to the full report so it keeps
+  // Ch 6 (control, designer R_CS) and Ch 7 (semiconductors) instead of dropping them.
+  approvedControlParams?:  Record<string, unknown> | null
+  approvedSemiconductor?:  Record<string, unknown> | null
   selectedMosfet?:         Record<string, unknown> | null
   onBack:    () => void
   onNext?:   () => void
@@ -69,7 +73,8 @@ const CatalogTable: React.FC<{ rows: CatalogRow[]; emptyNote: string }> = ({ row
 )
 
 export const InputProtection: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, approvedCapacitorDesign, selectedMosfet, onBack, onNext, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign,
+  approvedControlParams, approvedSemiconductor, selectedMosfet, onBack, onNext, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -143,6 +148,10 @@ export const InputProtection: React.FC<Props> = ({
         state:           confirmedState as Record<string, unknown>,
         approved_design: approvedInductorDesign as Record<string, unknown>,
         step15_result:   approvedCapacitorDesign ? ({ ...approvedCapacitorDesign } as Record<string, unknown>) : {},
+        // Forward the persisted upstream approvals so the full report keeps Ch 6
+        // (designer's control config, R_CS) and Ch 7 (semiconductor selection).
+        ...(approvedControlParams ? { step16_params: approvedControlParams } : {}),
+        ...(approvedSemiconductor ? { semiconductor: approvedSemiconductor } : {}),
         input_protection: { design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
           ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM } },
       })

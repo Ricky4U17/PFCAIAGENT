@@ -4056,3 +4056,42 @@ bore / 119+1 outer per the capacity math. §14.9.2 fallback built into a real 45
 no sim_views; empty payload degrades silently (0 flowables). Ch4 fallback branch exercised
 with _ch4's exact inputs incl. entity caption — PDF builds clean. app.main imports clean
 (--reload picks up without restart). Behavior with sim_views present: unchanged.
+
+## C86 — 2026-07-16 — Calculation↔documentation agent disconnects: Ch5 zeros, R_CS 15↔12 mΩ, payload persistence
+
+Designer report: report showed C_holdup = 0 µF, C_ripple = 0 µF, I_eq = 0 A (Chapter 5) despite
+an approved 470 µF × 4 bank, and documented R_CS = 15 mΩ although the GUI suggested and the
+designer selected 12 mΩ. Root pattern: each page rebuilt the report payload from ITS OWN local
+state, so selections made on other pages fell back to backend defaults.
+
+Fixes:
+1. Ch5 zeros — two-sided:
+   - Step15Capacitor "Approve" now carries the FULL backend sizing result (inputs, worst_case,
+     low_line, C_required_uF, governing) + the computed lifetime, not just the selected part
+     (CLAUDE.md rule 8). CapacitorResult interface extended accordingly.
+   - doc_report_builder._ch5 self-heals: a stripped payload (empty worst_case / no
+     C_required_uF — e.g. any pre-fix session) triggers run_capacitor_design(state) and only
+     non-empty payload keys override. Fixes §5.1 sizing, §5.2 verify inputs, §5.3.2 sweep
+     currents and §5.5 lifetime in one place.
+2. R_CS persistence chain: ControlDesign "Approve & go to Semiconductors" now passes the full
+   step16_params (incl. s2 designer selections + live js_design_state) → App persists
+   approvedControlParams → SemiconductorSelection and InputProtection forward it to the report.
+   s2 selections re-hydrate when navigating back to Control Design (no more silent reset).
+   Verified: rcs 12 mΩ reaches _control_inputs_from_step16 AND the ch7 §7.8 budget; the 15 mΩ
+   default now applies only when no selection was ever made.
+3. §5.5 lifetime fallback used a broken synthetic cap dict — missing ripple_120hz_A (→1 A
+   default → absurd ΔTj → 0.0 yr) and package misdetected from the series name (HXK → radial
+   instead of snap-in). Now uses the full DB record (same inputs as the GUI endpoint); the
+   synthetic dict remains only for parts not in the DB and now carries I_rated_A/ripple_hf_A.
+4. §5.2 verify_configuration now passes cap_ref (part record) + Tamb_C (intake ambient) —
+   part-anchored ESR(T) model, parity with the GUI verify call (C83).
+5. Hardcode removals in Ch5: "V_out = 393 V" eq heading → resolved Vout; ambient 50 °C in the
+   §5.4/5.5 lifetime call, body text and three displayed equations → intake ambient.
+6. Semiconductor persistence: "Input protection →" passes the page's full config → App
+   approvedSemiconductor → InputProtection report keeps Ch 7. Its full report now carries
+   step16_params + semiconductor → true Steps1_19 instead of dropping Ch 6–7.
+
+Verified: ch5 built from a deliberately stripped payload (user's exact 450HXK470MEPASN35X35 ×4)
+into a clean PDF — C_holdup 2031 µF, I_LF 6.47 A, I_eq 2.11 A, Life 63.6 yr, no zeros;
+R_CS resolution asserts both directions (12 selected / 15 never-selected); tsc clean;
+app.main imports clean; both dev servers live-reloaded.

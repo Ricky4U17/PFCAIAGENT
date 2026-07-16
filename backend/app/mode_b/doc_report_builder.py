@@ -3450,6 +3450,23 @@ def _ch5(story, state, s15):
             "Complete Step 15 and approve the capacitor selection to populate this chapter.", 5)
         return
 
+    # The App-level APPROVED payload (what every page after Step 15 forwards) may carry
+    # only the selected part + bank totals — worst_case/inputs/C_required arrive empty,
+    # which used to render every §5.1 sizing figure (and the ripple currents that feed
+    # §5.2 verify, the §5.3.2 sweep and the §5.4 lifetime) as 0. Re-derive the sizing
+    # from the same engine the Step-15 page runs on this very state, then let any
+    # non-empty keys the payload DOES carry override the engine values.
+    if not (s15.get("worst_case") or {}) or not s15.get("C_required_uF"):
+        try:
+            from app.mode_b.step15_capacitor import run_capacitor_design
+            _base15 = run_capacitor_design(state)
+            for _k, _v in s15.items():
+                if _v:
+                    _base15[_k] = _v
+            s15 = _base15
+        except Exception:
+            pass
+
     # step15_result is the run_capacitor_design() payload: hold-up / ripple
     # capacitance live under worst_case{}, the spec inputs under inputs{}, and the
     # governing requirement under "governing". Read those nested keys first, with
@@ -3514,6 +3531,18 @@ def _ch5(story, state, s15):
         except Exception: _qty = 1
         cfg = [{"value_uF": _val, "qty": _qty, "part_number": sel.get("part_number", "")}]
 
+    # Selected-part CSV record + intake ambient — shared by §5.2 verify (cap_ref anchors the
+    # vendor-implied ESR(T) model to the part, matching the GUI's verify call) and §5.3.2.
+    _tamb5 = float(state.get("intake", {}).get("thermal", {})
+                   .get("ambient_temp_c_max", 50) or 50)
+    try:
+        from app.mode_b.step15_cap_db import _load as _csvload
+        _pn5  = str(sel.get("part_number", "") or "")
+        _rec5 = next((x for x in _csvload()
+                      if str(x.get("part_number", "")).lower() == _pn5.lower()), None)
+    except Exception:
+        _rec5 = None
+
     # ── 5.2 Bank configuration and voltage rating ─────────────────────────────
     step_h(story, "5.2", "Bank Configuration and Selected Capacitor", 5)
     V_sel   = s15.get("V_rating_selected_V") or v_rating
@@ -3532,7 +3561,8 @@ def _ch5(story, state, s15):
             verified = verify_configuration(
                 config=cfg, supplier=supplier, series=series, voltage_rating=v_rating,
                 worst=wc, low=s15.get("low_line", {}) or {}, Vout=Vout,
-                f_line=f_line, Vdc_min=V_min, C_required_uF=C_req)
+                f_line=f_line, Vdc_min=V_min, C_required_uF=C_req,
+                cap_ref=_rec5, Tamb_C=_tamb5)
         except Exception:
             verified = None
 
@@ -3620,7 +3650,7 @@ def _ch5(story, state, s15):
             rf"I_{{HF}} = \dfrac{{\sqrt{{\,I_{{D,rms}}^2 - I_o^2 - I_{{LF}}^2\,}}}}{{\sqrt{{N}}}} "
             rf"= {_hr['I_HF_A']:.3f}\ \mathrm{{A}}\quad(\mathrm{{switching}},\ N = {_npha}\ \mathrm{{phases}})",
         ], heading=f"Capacitor ripple-current decomposition at {_hr['Vin_rms']:.0f} Vac "
-                   f"(V_in,pk = {_vinpk:.1f} V, V_out = 393 V)", ch=5)
+                   f"(V_in,pk = {_vinpk:.1f} V, V_out = {Vout:.0f} V)", ch=5)
         eq_box(story, [
             rf"I_{{cap,total}} = \sqrt{{I_{{LF}}^2 + I_{{HF}}^2}} = {_hr['I_cap_total_A']:.3f}\ \mathrm{{A}}"
             rf"\quad(\mathrm{{at}}\ {_hr['Vin_rms']:.0f}\ \mathrm{{V_{{ac}}}},\ {_hr['Pout_W']:.0f}\ \mathrm{{W}})",
@@ -3675,16 +3705,8 @@ def _ch5(story, state, s15):
                 "spec ambient, the allowance shrinks accordingly.", 5)
 
         # ── 5.3.2 Temperature characterization of the selected capacitor ──────────
-        try:
-            from app.mode_b.step15_cap_db import _load as _csvload, characterize_temperature_sweep
-            _pn5  = str(sel.get("part_number", "") or "")
-            _rec5 = next((x for x in _csvload()
-                          if str(x.get("part_number", "")).lower() == _pn5.lower()), None)
-        except Exception:
-            _rec5 = None
         if _rec5 is not None:
-            _tamb5 = float(state.get("intake", {}).get("thermal", {})
-                           .get("ambient_temp_c_max", 50) or 50)
+            from app.mode_b.step15_cap_db import characterize_temperature_sweep
             _sw = characterize_temperature_sweep(
                 _rec5, _qty, float(wc.get("I_LF_A", 0) or 0), float(wc.get("I_HF_A", 0) or 0),
                 Vout, T_op=_tamb5)
@@ -3734,22 +3756,32 @@ def _ch5(story, state, s15):
     if not life and sel:
         try:
             from app.mode_b.step15_cap_db import calculate_lifetime
-            import re as _re
-            _m  = _re.search(r"([\d,]+)\s*h", str(sel.get("lifetime", "")))
-            _lh = float(_m.group(1).replace(",", "")) if _m else None
-            cap_d = {
-                "capacitance_uF": float(sel.get("value_uF", 470) or 470),
-                "voltage_V":      float(sel.get("voltage_rating_V", 450) or 450),
-                "op_temp_max_C":  float(sel.get("temp_rating_C", 105) or 105),
-                "esr_ohm":        float(sel.get("ESR_each_mohm", 0) or 0) / 1000.0,
-                "package":        str(sel.get("series", "")),
-                "lifetime_hours": _lh or 2000,
-            }
+            if _rec5 is not None:
+                # Full DB record — the SAME inputs the GUI lifetime endpoint uses: correct
+                # package text (snap-in → Rth/ΔT0), nameplate 120 Hz ripple anchor and real
+                # endurance hours. The synthetic dict below (used only when the part is not
+                # in the DB) misses ripple_120hz_A (→ 1 A default) and misdetects the
+                # package from the series name, which wrecks the Life Time Period figure.
+                cap_d = _rec5
+            else:
+                import re as _re
+                _m  = _re.search(r"([\d,]+)\s*h", str(sel.get("lifetime", "")))
+                _lh = float(_m.group(1).replace(",", "")) if _m else None
+                cap_d = {
+                    "capacitance_uF": float(sel.get("value_uF", 470) or 470),
+                    "voltage_V":      float(sel.get("voltage_rating_V", 450) or 450),
+                    "op_temp_max_C":  float(sel.get("temp_rating_C", 105) or 105),
+                    "esr_ohm":        float(sel.get("ESR_each_mohm", 0) or 0) / 1000.0,
+                    "package":        str(sel.get("series", "")),
+                    "lifetime_hours": _lh or 2000,
+                    "ripple_120hz_A": sel.get("I_rated_A") or None,
+                    "ripple_hf_A":    sel.get("ripple_hf_A") or None,
+                }
             life = calculate_lifetime(
                 cap=cap_d, qty=_qty,
                 I_LF_total=float(wc.get("I_LF_A", 0) or 0),
                 I_HF_total=float(wc.get("I_HF_A", 0) or 0),
-                Tamb=50.0, Vout=Vout)
+                Tamb=_tamb5, Vout=Vout)
         except Exception:
             life = None
 
@@ -3774,7 +3806,7 @@ def _ch5(story, state, s15):
         body(story,
             f"Per-capacitor worst-case ripple currents (bank ÷ {_qty} caps): "
             f"I<sub>LF</sub> = {_ilf:.3f} A (120 Hz) and I<sub>HF</sub> = {_ihf:.3f} A (switching); "
-            f"ambient T<sub>amb</sub> = 50 °C.", 5)
+            f"ambient T<sub>amb</sub> = {_tamb5:.0f} °C.", 5)
 
         _m3 = life.get("method3", {}) or {}
         if _m3:
@@ -3793,9 +3825,9 @@ def _ch5(story, state, s15):
                 rf"I_{{eq}} = \sqrt{{(I_{{LF}}/k_{{LF}})^2 + (I_{{HF}}/k_{{HF}})^2}},\ "
                 rf"k_{{LF}}=1.00,\ k_{{HF}}=1.94\ \Rightarrow\ I_{{eq}} = {_ieq:.3f}\ \mathrm{{A}}",
                 rf"\Delta T_j = \Delta T_o\,(I_{{eq}}/I_o)^2 = {_dtj:.2f}\,^\circ\mathrm{{C}}"
-                rf"\ \Rightarrow\ T_{{core}} = 50 + {_dtj:.2f} = {_tc3:.1f}\,^\circ\mathrm{{C}}",
-                rf"f_T = 2^{{(T_{{max}}-T_{{amb}})/10}} = 2^{{({_Tmax:.0f}-50)/10}} "
-                rf"= 2^{{{(_Tmax-50)/10:.2f}}} = {_ft3:.2f}",
+                rf"\ \Rightarrow\ T_{{core}} = {_tamb5:.0f} + {_dtj:.2f} = {_tc3:.1f}\,^\circ\mathrm{{C}}",
+                rf"f_T = 2^{{(T_{{max}}-T_{{amb}})/10}} = 2^{{({_Tmax:.0f}-{_tamb5:.0f})/10}} "
+                rf"= 2^{{{(_Tmax-_tamb5)/10:.2f}}} = {_ft3:.2f}",
                 rf"d_{{To}} = 10 - 0.25\,\Delta T_o = {_dToD:.2f},\qquad "
                 rf"d_{{Tj}} = 10 - 0.25\,\Delta T_j = {_dTjD:.3f}",
                 rf"f_I = 2^{{\Delta T_o/d_{{To}} - \Delta T_j/d_{{Tj}}}} "

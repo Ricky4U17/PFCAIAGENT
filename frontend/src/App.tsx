@@ -36,6 +36,13 @@ interface AppState {
   intakeData: IntakeData|null
   approvedInductorDesign:  Record<string,unknown>|null
   approvedCapacitorDesign: CapacitorResult|null
+  // full step16_params (incl. s2 selections + js_design_state) persisted when the
+  // designer approves Control Design — later pages forward it to the report so the
+  // documented R_CS / loop components match the GUI selection.
+  approvedControlParams:   Record<string,unknown>|null
+  // full semiconductor config (design/mosfet/diode/bridge/thermal) persisted when the
+  // designer moves past the Semiconductor page — Input-Protection report keeps Ch 7.
+  approvedSemiconductor:   Record<string,unknown>|null
   // documentation agent
   docStatus: DocReportStatus|null; docStatusLoading: boolean
 }
@@ -46,7 +53,8 @@ const INIT: AppState = {
   selectedTopology:'',selectedMode:'',controllerStrategy:null,selectedControllerMode:'',
   isInterleaved:false,selectedChannels:1,miniDefaults:null,miniErrors:[],summary:null,
   reportLoading:false,reportReady:false,reportBytes:null,intakeData:null,
-  approvedInductorDesign:null, approvedCapacitorDesign:null,
+  approvedInductorDesign:null, approvedCapacitorDesign:null, approvedControlParams:null,
+  approvedSemiconductor:null,
   docStatus:null, docStatusLoading:false,
 }
 
@@ -303,18 +311,26 @@ export default function App() {
           approvedCapacitorDesign={s.approvedCapacitorDesign}
           onBack={() => setS(p=>({...p, step:'capsim'}))}
           onRestart={restart}
-          onSelectSemiconductors={() => setS(p=>({...p, step:'semiconductors'}))} />}
+          savedStep16Params={s.approvedControlParams}
+          onSelectSemiconductors={(p16?: Record<string,unknown>) =>
+            setS(p=>({...p, step:'semiconductors',
+                      approvedControlParams: p16 ?? p.approvedControlParams}))} />}
         {s.step==='semiconductors' && s.graphState && s.approvedInductorDesign && <SemiconductorSelection
           confirmedState={s.graphState as Record<string,unknown>}
           approvedInductorDesign={s.approvedInductorDesign}
           approvedCapacitorDesign={s.approvedCapacitorDesign}
+          approvedControlParams={s.approvedControlParams}
           onBack={() => setS(p=>({...p, step:'step16'}))}
-          onNext={() => setS(p=>({...p, step:'inputprotection'}))}
+          onNext={(semi?: Record<string,unknown>) =>
+            setS(p=>({...p, step:'inputprotection',
+                      approvedSemiconductor: semi ?? p.approvedSemiconductor}))}
           onRestart={restart} />}
         {s.step==='inputprotection' && s.graphState && s.approvedInductorDesign && <InputProtection
           confirmedState={s.graphState as Record<string,unknown>}
           approvedInductorDesign={s.approvedInductorDesign}
           approvedCapacitorDesign={s.approvedCapacitorDesign}
+          approvedControlParams={s.approvedControlParams}
+          approvedSemiconductor={s.approvedSemiconductor}
           onBack={() => setS(p=>({...p, step:'semiconductors'}))}
           onNext={() => setS(p=>({...p, step:'inputfilter'}))}
           onRestart={restart} />}

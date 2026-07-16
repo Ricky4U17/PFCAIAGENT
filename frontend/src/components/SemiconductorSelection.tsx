@@ -19,8 +19,13 @@ interface Props {
   confirmedState:          Record<string, unknown>
   approvedInductorDesign:  Record<string, unknown>
   approvedCapacitorDesign: CapacitorResult | null
+  // Persisted Control-Design step16_params (s2 selections + js_design_state) — forwarded
+  // to the report so Ch6/Ch7 document the designer's R_CS etc., not engine defaults.
+  approvedControlParams?:  Record<string, unknown> | null
   onBack:    () => void
-  onNext?:   () => void
+  // Receives the page's full semiconductor config so App persists it — the
+  // Input-Protection page forwards it and its report keeps Chapter 7.
+  onNext?:   (semiconductor?: Record<string, unknown>) => void
   onRestart: () => void
 }
 
@@ -149,7 +154,8 @@ const inStyle: React.CSSProperties = { background: C.bg3, border: `1px solid ${C
 const fmtW = (n: number) => `${n.toFixed(2)} W`
 
 export const SemiconductorSelection: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, approvedCapacitorDesign, onBack, onNext, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign, approvedControlParams,
+  onBack, onNext, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -289,6 +295,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
         C_uF: approvedCapacitorDesign?.C_total_uF ?? 2350, ESR_mOhm: approvedCapacitorDesign?.ESR_parallel_mohm ?? 5,
         Vout_V: design.vout, fsw_Hz: design.fsw, Pout_lo_W: design.pout_lo, Pout_hi_W: design.pout_hi,
         eta_lo: 0.945, eta_hi: 0.965, nch: design.nch,
+        // The approved Control-Design config wins where it overlaps — it carries the
+        // designer's s2 selections (R_CS…) and the live loop design (js_design_state);
+        // without it the backend documents its engine defaults (e.g. R_CS 15 mΩ).
+        ...(approvedControlParams ?? {}),
       }
       const blob = await docGenerateReport({
         state: confirmedState, approved_design: approvedInductorDesign,
@@ -638,7 +648,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
           <Btn variant="primary" disabled={busy} onClick={calc}>
             {busy ? '⏳ Calculating…' : '⚙ Calculate losses (all 9 line voltages)'}
           </Btn>
-          {onNext && <Btn variant="success" onClick={onNext}>Input protection →</Btn>}
+          {onNext && <Btn variant="success" onClick={() => {
+            const b = body()
+            onNext({ design: b.design, mosfet: b.mosfet, diode: b.diode, bridge: b.bridge,
+                     thermal: b.thermal, tj_limit: b.tj_limit })
+          }}>Input protection →</Btn>}
         </div>
       </div>
     </div>

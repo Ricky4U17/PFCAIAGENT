@@ -28,6 +28,13 @@ export interface CapacitorResult {
   C_total_uF: number; ESR_parallel_mohm: number
   thermal_table: ThermalRow[]
   worst_case: OperatingPointResult; low_line: OperatingPointResult
+  // Full sizing block from the backend design result (run_capacitor_design) — REQUIRED
+  // for Chapter 5 of any report generated from a later page (C_holdup/C_ripple/I_eq
+  // render as 0 without it). See CLAUDE.md rule 8: approved result → full config.
+  inputs?: Record<string, unknown>
+  C_required_uF?: number
+  governing?: string
+  lifetime?: Record<string, unknown>
   // Carries full part detail through to ControlDesign so the backend can
   // reconstruct verified + thermal for Step 15 sections 15.7+.
   selected_cap?: {
@@ -969,6 +976,10 @@ export const Step15Capacitor: React.FC<Props> = ({
         </div>
         <Btn variant="primary" disabled={!canApprove}
           onClick={() => onConfirm({
+            // Full backend sizing result FIRST (inputs / worst_case / low_line /
+            // C_required_uF / governing) — Chapter 5 of every downstream report reads
+            // these; the explicit selection keys below override where they overlap.
+            ...(design ?? {}),
             supplier:       chosenPart?.manufacturer ?? '',
             series:         chosenPart?.series ?? '',
             voltage_rating: chosenPart?.voltage_V ?? 0,
@@ -979,9 +990,10 @@ export const Step15Capacitor: React.FC<Props> = ({
             }],
             C_total_uF:         C_total,
             ESR_parallel_mohm:  esr_eff_mohm,
-            thermal_table:      [],
-            worst_case:         {} as OperatingPointResult,
-            low_line:           {} as OperatingPointResult,
+            thermal_table:      (design?.thermal_table ?? []) as ThermalRow[],
+            worst_case:         (design?.worst_case ?? {}) as OperatingPointResult,
+            low_line:           (design?.low_line ?? {}) as OperatingPointResult,
+            ...(lifetime ? { lifetime } : {}),
             selected_cap: chosenPart ? {
               supplier:         chosenPart.manufacturer ?? '',
               series:           chosenPart.series       ?? '',
