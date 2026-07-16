@@ -4022,3 +4022,37 @@ Verified: sweep anchors assert-checked; tier logic 5 cases; HXK ×4 @390 V now p
 (2.505 > 2.09 nameplate, ≤ 5.22 allowance, life 65.8 yr) across table/thermal/verify; both
 PDFs contain the sweep + clamp + derated notes; live sweep endpoint 200; sim html syntax clean;
 tsc clean.
+
+## C85 — 2026-07-16 — Server-side ring views: report figures no longer depend on browser captures
+
+Designer report: "newly generated report misses the inductor ring views showing winding in
+cross section and effect of temperature and flux."
+
+Root cause: the ring/thermal figures (C77/C78) were canvas captures posted from the
+Simulation-Agent page and carried in the payload as sim_views. Reports generated without
+visiting that page in the current session (captures live only in browser page state — lost on
+restart or when approving without the sim visit) had no sim_views, and doc-report §4.1 /
+steps13-14 §14.9.2 silently dropped the figures.
+
+Changes:
+- doc_report_builder._fig_ring_views(d, t_amb) [NEW]: server-side matplotlib render of the two
+  ring views from the approved design's own data (OD/ID/N/n_parallel/bundle OD/Bmax/
+  Bmax_inner/dT/T_hotspot). Left panel: flux-density field with B(r) ∝ 1/r crowding
+  (colorbar Bmax·r_mean/r_out … B_inner). Right panel: radial temperature field, interior
+  hotspot → cooled surface (T_hotspot … T_amb+ΔT). Both overlaid with the exact per-layer
+  winding turns using the same packing math as the Sim-Agent drawRing: bore layer capacities
+  floor(2πr_layer/OD) walking inward, outer-layer packing walking outward, passes = N×n_par.
+  Degrades to None (no crash) on missing geometry; estimates bundle OD if absent.
+- doc report §4.1: live captures still take precedence; when sim_views is absent the server
+  render embeds as Figure 4.1 (caption states the basis and that visiting the Sim-Agent page
+  swaps in live captures). Ambient from intake thermal. Schematic cross-section labeled 4.1b
+  whenever a ring figure (either source) is present.
+- generate_steps13_14 §14.9.2: same fallback ("Winding geometry — ring views (server render)")
+  instead of the section vanishing; 3D view remains capture-only by nature.
+
+Verified: rendered PNG eyeballed — flux colorbar 0.347–0.550 T matches the 1/r law at both
+edges exactly; temperature 97.2→88.5 °C (= 50+38.5); 120 passes (2×60 bifilar) packed 70+50
+bore / 119+1 outer per the capacity math. §14.9.2 fallback built into a real 455 kB PDF with
+no sim_views; empty payload degrades silently (0 flowables). Ch4 fallback branch exercised
+with _ch4's exact inputs incl. entity caption — PDF builds clean. app.main imports clean
+(--reload picks up without restart). Behavior with sim_views present: unchanged.

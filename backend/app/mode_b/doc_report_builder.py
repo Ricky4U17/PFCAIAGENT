@@ -420,6 +420,102 @@ def _fig_img(fig, width_mm=150):
     return Image(buf, width=width_mm*mm, height=width_mm*mm*(h_in/max(w_in, 0.1)))
 
 
+def _fig_ring_views(d, t_amb=50.0):
+    """Server-side ring views of the wound toroid — flux-density field (left) and temperature
+    field (right), each overlaid with the ACCURATE per-layer winding turns (same packing math
+    as the Simulation-Agent drawRing: bore layer capacities from each layer's shrinking
+    circumference + outer-layer packing of the full pass count).
+
+    This is the ALWAYS-AVAILABLE fallback for the report: the live Simulation-Agent captures
+    (sim_views) are preferred when the designer visited that page, but they live in browser
+    state — reports generated without that visit (or after a restart) previously lost the ring
+    views entirely. Rendered from the approved design's own field data instead."""
+    try:
+        OD = float(d.get("OD_mm", 0) or 0); ID = float(d.get("ID_mm", 0) or 0)
+        N  = int(d.get("N", 0) or 0)
+        if not (OD and ID and N):
+            return None
+        rin, rout = ID / 2.0, OD / 2.0
+        od = float(d.get("bundle_OD_computed_mm") or d.get("wire_OD_mm") or 0) or max((rout - rin) * 0.12, 0.8)
+        npar   = max(int(d.get("n_parallel", 1) or 1), 1)
+        passes = N * npar
+        r_mean = (rin + rout) / 2.0
+
+        Bmax   = float(d.get("Bmax_FL_T", 0) or d.get("Bac_pk_T", 0) or 0.3)
+        Binner = float(d.get("Bmax_inner_FL_T", 0) or (Bmax * r_mean / rin))
+        dT     = float(d.get("dT_rise_C", 0) or 10.0)
+        Thot   = float(d.get("T_hotspot_C", 0) or (t_amb + dT * 1.12))
+        Tsurf  = t_amb + dT
+
+        # winding turn positions — bore (per-layer capacities) and outer (full pass count)
+        def _bore_turns():
+            pts, placed, lay = [], 0, 0
+            while placed < passes and lay < 12:
+                rr = rin - (lay + 0.5) * od
+                if rr < od / 2:
+                    break
+                cap = max(1, int(2 * math.pi * rr / od))
+                n = min(cap, passes - placed)
+                for k in range(n):
+                    a = k / n * 2 * math.pi + lay * 0.4
+                    pts.append((rr * math.cos(a), rr * math.sin(a)))
+                placed += n; lay += 1
+            return pts
+        def _outer_turns():
+            pts, placed, lay = [], 0, 0
+            while placed < passes and lay < 8:
+                rr = rout + (lay + 0.5) * od
+                cap = max(1, int(2 * math.pi * rr / od))
+                n = min(cap, passes - placed)
+                for k in range(n):
+                    a = k / n * 2 * math.pi + lay * 0.35
+                    pts.append((rr * math.cos(a), rr * math.sin(a)))
+                placed += n; lay += 1
+            return pts
+        bore_pts, outer_pts = _bore_turns(), _outer_turns()
+
+        # annulus fields on a cartesian grid
+        R = rout + 3.5 * od
+        xs = np.linspace(-R, R, 340); X, Y = np.meshgrid(xs, xs)
+        r  = np.sqrt(X**2 + Y**2)
+        core = (r >= rin) & (r <= rout)
+        rs   = np.clip(r, rin, rout)
+        Bfld = np.where(core, Bmax * r_mean / rs, np.nan)          # 1/r flux crowding
+        # temperature: hottest at the bore (winding side), cooling toward the outer surface
+        Tfld = np.where(core, Thot + (Tsurf - Thot) * (rs - rin) / max(rout - rin, 1e-9), np.nan)
+
+        fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.8))
+        for ax, fld, cmap, title, unit, vmin, vmax in (
+            (axes[0], Bfld, "turbo",   "Flux density |B(r)| — 1/r crowding", "T",
+             Bmax * r_mean / rout, Binner),
+            (axes[1], Tfld, "inferno", "Temperature field", "°C", Tsurf, Thot),
+        ):
+            im = ax.imshow(fld, extent=[-R, R, -R, R], origin="lower", cmap=cmap,
+                           vmin=vmin, vmax=vmax, aspect="equal")
+            for rr, lw in ((rin, 0.9), (rout, 0.9)):
+                ax.add_patch(plt.Circle((0, 0), rr, fill=False, ec="#94a3b8", lw=lw))
+            for x, y in bore_pts:
+                ax.plot(x, y, marker="x", ms=3.2, mew=1.0, color="#1d4ed8")
+                ax.add_patch(plt.Circle((x, y), od * 0.42, fill=False, ec="#1d4ed8", lw=0.5))
+            for x, y in outer_pts:
+                ax.add_patch(plt.Circle((x, y), od * 0.42, fill=True, fc="#111827",
+                                        ec="#e5e7eb", lw=0.4))
+            ax.set_xlim(-R, R); ax.set_ylim(-R, R); ax.axis("off")
+            ax.set_title(title, fontsize=9)
+            cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
+            cb.ax.tick_params(labelsize=7); cb.set_label(unit, fontsize=7)
+        fig.suptitle(f"Ring view — {passes} passes ({npar}×{N}), bundle Ø{od:.2f} mm  ·  "
+                     f"⊗ bore / ● outer", fontsize=8.5, y=0.02, va="bottom")
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
+        return _fig_img(fig, width_mm=168)
+    except Exception:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+        return None
+
+
 def _img_from_datauri(uri, width_mm=82):
     """Decode a base64 PNG/JPEG data URI (a canvas capture from the Simulation-Agent viewer) into
     an aspect-preserved Image flowable. None on any problem — fully defensive."""
@@ -2897,13 +2993,30 @@ def _ch4(story, state, d):
             + ("Right: the same view with the temperature gradient and thermal details. "
                if _th_img else "")
             + "Colour scales and turn counts are identical to the designer's GUI.", 4)
+        _ring_shown = True
+    else:
+        # No browser captures in the payload (Simulation-Agent page not visited this session,
+        # or design approved before C77) — render the same ring views server-side from the
+        # approved design's field data so the figure is NEVER missing from the report.
+        _amb4 = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
+        _rv = _fig_ring_views(d, _amb4)
+        _ring_shown = bool(_rv)
+        if _rv:
+            story.append(_rv)
+            fig_caption(story,
+                f"Figure 4.1 — Wound-core ring views rendered from the approved design's field "
+                f"model: flux-density crowding B(r) &prop; 1/r across the {stacks}-core stack "
+                "(left) and the radial temperature field from the interior hotspot to the "
+                "cooled surface (right), both overlaid with the exact per-layer winding turns "
+                "(&otimes; bore / &#9679; outer). Opening the Simulation-Agent page before "
+                "generating the report replaces this render with the live GUI captures.", 4)
 
     # Item 19 — 2D winding cross-section (top view with turns + radial cut).
     _wfig = _fig_winding_cross_section(d)
     if _wfig:
         story.append(_wfig)
         fig_caption(story,
-            f"Figure 4.1{'b' if (_ring_img or _th_img) else ''} — Winding cross-section (schematic). "
+            f"Figure 4.1{'b' if _ring_shown else ''} — Winding cross-section (schematic). "
             f"Left: toroid top view with the {N} turns "
             "distributed around the core. Right: radial cross-section of one turn over the "
             f"{stacks}-core stack, showing the wire bundle over the core window.", 4)

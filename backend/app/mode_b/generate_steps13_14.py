@@ -1757,12 +1757,30 @@ def _sec_14_9_sim_verification(story, approved_design, state, S):
 def _sec_14_9_2_winding_views(story, approved_design, S):
     """Step 14.9.2 — Ring cross-section + 3D winding views captured from the Simulation-Agent
     viewer. INDEPENDENT of the 14.9 cross-check (which may early-return): the images embed whenever
-    the payload carries them. Present only when the designer opened the Simulation-Agent page, which
-    posts the canvas captures into the report payload; absent/bad captures degrade silently."""
+    the payload carries them. When the designer did NOT open the Simulation-Agent page (no canvas
+    captures in the payload), a server-side matplotlib render of the flux/temperature ring views
+    (_fig_ring_views) is embedded instead so the section is never missing."""
     views    = (approved_design or {}).get('sim_views') or {}
     ring_img = _img_from_datauri(views.get('ring'),   width_mm=82)
     td_img   = _img_from_datauri(views.get('threeD'), width_mm=82)
     if not (ring_img or td_img):
+        # No browser captures (Simulation-Agent page not visited before generating) —
+        # render the ring flux/temperature views server-side so the section never vanishes.
+        from app.mode_b.doc_report_builder import _fig_ring_views
+        _rv = _fig_ring_views(approved_design or {})
+        if _rv is None:
+            return
+        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph('Step 14.9.2) Winding geometry — ring views (server render)', S['h3']))
+        story.append(Paragraph(
+            "Ring views of the wound core rendered from the approved design's field data: "
+            "flux-density crowding B(r) &prop; 1/r (left) and the radial temperature field "
+            "from the interior hotspot to the cooled surface (right), overlaid with the exact "
+            "per-layer winding turns (&otimes; bore / &#9679; outer). Opening the Simulation-Agent "
+            "page before generating the report replaces this render with the live GUI captures "
+            "(including the 3D view).", S['body']))
+        story.append(Spacer(1, 2*mm))
+        story.append(_rv)
         return
     story.append(Spacer(1, 4*mm))
     story.append(Paragraph('Step 14.9.2) Winding geometry — Simulation-Agent views', S['h3']))
