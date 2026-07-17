@@ -34,15 +34,33 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 INTERLEAVED = {"interleaved_boost_ccm", "totem_pole_interleaved_ccm"}
 
-def _calc_l_py(pout_lo, vin_min, vout, fsw, crest, eta=0.945, PF=0.9987):
-    Vin_pk = vin_min * math.sqrt(2)
-    D      = max(0.001, 1 - Vin_pk / vout)
-    Iin_pk = math.sqrt(2) * (pout_lo / eta) / (vin_min * PF)
-    dIin   = crest * Iin_pk
-    KD     = (2*D-1)/D if D >= 0.5 else (1-2*D)/(1-D)
-    dIL    = dIin / max(0.001, KD)
-    L      = Vin_pk * D / (fsw * dIL)
-    return dict(L_uH=round(L*1e6,2), dIL=round(dIL,4), Iin_pk=round(Iin_pk,4), D=round(D,6), KD=round(KD,6), Vin_pk=round(Vin_pk,4))
+def _calc_l_py(pout_lo, vin_min, vout, fsw, crest,
+               pout_hi=None, vin_max=None, eta_target=None):
+    """Worst-case L across the nine-point operating grid (report notes #4): the
+    required L is evaluated at EVERY point via the canonical η/PF chain and the
+    maximum governs. The old single-point (90 Vac) sizing let the actual crest
+    ripple ratio reach ~25% at 200–230 Vac high line with r = 20% selected —
+    interleave cancellation K(D) is weakest at low duty."""
+    from app.mode_b.calculations import (canonical_ops_table, step2_input_params,
+                                         step4_inductance)
+    ops = canonical_ops_table(vin_min, vin_max or 264.0, pout_lo,
+                              pout_hi or pout_lo, eta_target)
+    s2  = step2_input_params(vout, ops)
+    s4  = step4_inductance(s2, crest, fsw, vout)
+    i   = s4["ref_idx"]
+    return dict(L_uH=round(s4["L_calc"]*1e6, 2), dIL=round(s4["dIL_ref"], 4),
+                Iin_pk=round(float(s2["Iin_pk"][i]), 4), D=round(float(s2["Dpk"][i]), 6),
+                KD=round(float(s2["KDpk"][i]), 6), Vin_pk=round(float(s2["Vin_pk"][i]), 4),
+                governing_vac=float(s2["Vin_rms"][i]), governing_pout=float(s2["Pout"][i]))
+
+
+def _eta_target_frac(ap: dict):
+    """Designer's intake target efficiency as a fraction, None if unset."""
+    try:
+        v = float(ap.get("efficiency_target_percent", 0) or 0)
+        return v / 100.0 if v else None
+    except Exception:
+        return None
 
 def _fsw_defaults(mode):
     if mode == "ccm":
@@ -176,7 +194,9 @@ def approve_channels(req: FbReq):
     mini = _fsw_defaults(sel_mode)
     intake = state.get("intake",{}); ap = intake.get("application",{})
     lpy = _calc_l_py(float(ap.get("output_power_w_low_line",1700)),float(ap.get("vin_rms_min",90)),
-                     float(ap.get("output_bus_voltage_v",393)),float(mini["recommended_frequency_hz"] or 70000),float(mini["default_crest_ripple_ratio"]))
+                     float(ap.get("output_bus_voltage_v",393)),float(mini["recommended_frequency_hz"] or 70000),float(mini["default_crest_ripple_ratio"]),
+                     pout_hi=float(ap.get("output_power_w_high_line",3600)),
+                     vin_max=float(ap.get("vin_rms_max",264)), eta_target=_eta_target_frac(ap))
     mini["indicative_L_uH"] = lpy["L_uH"]; mini["indicative_Iin_pk_A"] = lpy["Iin_pk"]
     state["selected_channels"] = n_ch; state["topology_specific_inputs"] = mini
     return {"status":"wait_mini_intake","selected_channels":n_ch,"mini_intake_defaults":mini,"validation_errors":[],"state":state}
@@ -200,9 +220,15 @@ def submit_mini(req: FbReq):
     intake = state.get("intake",{}); ap = intake.get("application",{})
     fsw = float(tsi.get("recommended_frequency_hz") or 70000)
     lpy = _calc_l_py(float(ap.get("output_power_w_low_line",1700)),float(ap.get("vin_rms_min",90)),
-                     float(ap.get("output_bus_voltage_v",393)),fsw,crest)
+                     float(ap.get("output_bus_voltage_v",393)),fsw,crest,
+                     pout_hi=float(ap.get("output_power_w_high_line",3600)),
+                     vin_max=float(ap.get("vin_rms_max",264)), eta_target=_eta_target_frac(ap))
     tsi["confirmed_L_uH"]     = lpy["L_uH"]
-    tsi["confirmed_L_uH_sel"] = round(lpy["L_uH"]/5)*5
+    # ceil to the 5 µH grid — rounding down would violate the selected ripple ceiling
+    # at the governing operating point (matches Chapter 3 / build_design_ops_table)
+    tsi["confirmed_L_uH_sel"] = math.ceil(lpy["L_uH"]/5)*5
+    tsi["governing_vac"]      = lpy.get("governing_vac")
+    tsi["governing_pout"]     = lpy.get("governing_pout")
     tsi["confirmed_Iin_pk_A"] = lpy["Iin_pk"]
     tsi["confirmed_dIL_A"]    = lpy["dIL"]
     state["topology_specific_inputs"] = tsi
@@ -267,6 +293,8 @@ class _PowerPlantReq(BaseModel):
     pout_lo: float = 1700.0
     pout_hi: float = 3600.0
     vout:    float = 393.7
+    # designer's intake target efficiency (%) — anchors the η ladder's 264 Vac corner
+    eta_target_pct: Optional[float] = None
 
 @app.post("/mode-b/control/power-plant", tags=["mode-b"])
 def control_power_plant(req: _PowerPlantReq):
@@ -278,7 +306,8 @@ def control_power_plant(req: _PowerPlantReq):
     try:
         import math
         from app.mode_b.calculations import canonical_ops_table
-        m = canonical_ops_table(req.vin_min, req.vin_max, req.pout_lo, req.pout_hi)
+        m = canonical_ops_table(req.vin_min, req.vin_max, req.pout_lo, req.pout_hi,
+                                (req.eta_target_pct / 100.0) if req.eta_target_pct else None)
         rows = []
         for r in m:
             vac, pout, eta, pf = float(r[0]), float(r[1]), float(r[2]), float(r[3])
@@ -858,7 +887,7 @@ class _SizingReq(BaseModel):
     custom_core: dict = {}
     n_parallel: int = 1
     mounting: str = 'horizontal'           # 'horizontal' | 'vertical'
-    optimization_goal: str = 'best_performance'  # 'best_performance' | 'max_ffu'
+    optimization_goal: str = 'best_performance'  # 'best_performance' | 'max_ffu' | 'min_height'
 
 class _Step8Req(BaseModel):
     state: dict                     # confirmed Mode A state
@@ -1132,6 +1161,9 @@ def step7_run_sizing(req: _SizingReq):
         dT_bgt = T_spot - T_amb
         app_cls= intake.get("compliance",{}).get("application_class", "Industrial")
         r_input= float(tsi.get("default_crest_ripple_ratio", 0.095)) or 0.095
+        # η ladder anchored to the designer's intake target (264 Vac corner = target)
+        _eta_t = float(intake.get("application",{}).get("efficiency_target_percent", 0) or 0)
+        _eta_t = (_eta_t / 100.0) if _eta_t else None
 
         # Build the design-derived 9-point OPS table — [Vin_rms, Pout, eta, PF,
         # Iph_rms] — via the SAME canonical_ops_table -> step2_input_params ->
@@ -1141,7 +1173,7 @@ def step7_run_sizing(req: _SizingReq):
         # / 3.6.1 always agree with Table 3.2.4 — single source of truth.
         try:
             OPS, _L_phi_doc = build_design_ops_table(
-                Vin_lo, Vin_hi, Pout_lo, Pout_hi, Vout, fsw_Hz, r_input)
+                Vin_lo, Vin_hi, Pout_lo, Pout_hi, Vout, fsw_Hz, r_input, _eta_t)
         except Exception:
             OPS = DEFAULT_OPS
 

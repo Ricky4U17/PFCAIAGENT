@@ -12,8 +12,12 @@ interface Props {
 }
 
 // Correct inductance formula — matches Python backend exactly
-// L is SAME for all N (L independent of phase count)
-function calcLPy(intake: any, crest = 0.095, fsw = 70000) {
+// L is SAME for all N (L independent of phase count).
+// crest 0.20 = the CCM design default the designer confirms at mini-intake — the SAME
+// basis shown there, so this page and the next never display two different L values.
+// Shown value is at MINIMUM input voltage; the sizing engine later governs at the
+// worst-case ripple corner across all nine operating points (noted on the Result page).
+function calcLPy(intake: any, crest = 0.20, fsw = 70000) {
   const app = intake?.application || {}
   const pout_lo = parseFloat(app.output_power_w_low_line  || 1700)
   const vin_min = parseFloat(app.vin_rms_min              || 90)
@@ -36,6 +40,10 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
   const isAnalog = controllerMode === 'analog'
 
   const { L_uH, dIL, Iin_pk } = calcLPy(intake)
+  // designer-specified corners — never hardcode 90 Vac in labels
+  const vinMin = parseFloat(String(intake?.application?.vin_rms_min ?? 90))
+  const voutV  = parseFloat(String(intake?.application?.output_bus_voltage_v ?? 393))
+  const dCrest = Math.max(0.001, 1 - vinMin * Math.SQRT2 / voutV)
   const Ipk = (N: number) => parseFloat((Iin_pk/N + dIL/2).toFixed(2))
 
   const COMPAT: Record<number,{label:string;color:string;notes:string[]}> = {
@@ -44,8 +52,8 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
       color: C.green,
       notes: [
         `Simplest layout — 2 inductors, 2 switches, 1 bridge`,
-        `L/phase: ${L_uH} µH (same for all N — sized from input ripple spec)`,
-        `Ipk/phase: ${Ipk(2)} A at 90 Vac crest`,
+        `L/phase: ${L_uH} µH at minimum input voltage (same for all N — 20% ripple spec)`,
+        `Ipk/phase: ${Ipk(2)} A at ${vinMin} Vac crest`,
         isAnalog ? 'Best analog IC support: UCC28070A hardwires 180° shift internally' : 'Standard for digital 2-phase PFC (C2000 TIDM-02013)',
       ]
     },
@@ -53,7 +61,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
       label: isAnalog ? 'Analog ✓ FAN9613 (ON Semi) — dedicated 3-phase' : 'Digital ✓ recommended',
       color: isAnalog ? C.amber : C.green,
       notes: [
-        `L/phase: ${L_uH} µH (same for all N)`,
+        `L/phase: ${L_uH} µH at minimum input voltage (same for all N)`,
         `Ipk/phase: ${Ipk(3)} A — lower than 2-phase by ${((1-Ipk(3)/Ipk(2))*100).toFixed(0)}%`,
         isAnalog ? '⚠ No single-chip 3-phase analog PFC IC available' : '★ Optimal ripple/complexity at this power level',
         isAnalog ? 'Would need 3× single-phase IC + external 120° phase-shift RC network' : 'Phase balancing via TI C2000 or STM32G4 MCSDK',
@@ -63,7 +71,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
       label: isAnalog ? 'Analog ✗ digital required' : 'Digital ✓ lowest Ipk',
       color: isAnalog ? C.red : C.accent,
       notes: [
-        `L/phase: ${L_uH} µH (same for all N)`,
+        `L/phase: ${L_uH} µH at minimum input voltage (same for all N)`,
         `Ipk/phase: ${Ipk(4)} A — lowest per-switch current`,
         isAnalog ? '✗ No analog IC supports 4-phase interleaved PFC' : '4 gate drivers + 4 current sensors — complex layout',
         isAnalog ? '→ Switch back to Digital (Gate 3) if 4-phase needed' : 'Best EMI performance at 280 kHz effective ripple',
@@ -71,7 +79,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
     },
   }
 
-  const D_duty = 0.68
+  const D_duty = dCrest
   const phaseColors = ['#4f7cff','#2dd4a0','#f5a623','#a78bfa']
 
   return (
@@ -103,7 +111,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
                   background:`${selColor}22`,color:selColor,border:`0.5px solid ${selColor}55`}}>{compat.label}</div>
               </div>
               <div style={{padding:'11px 14px'}}>
-                {[['L / phase',`${L_uH} µH`],['Ipk / phase',`${Ipk(N)} A`],[`Ripple freq`,`${N*70} kHz`],['Phase shift',`${360/N}°`]].map(([k,v]) => (
+                {[['L / phase (min Vin)',`${L_uH} µH`],['Ipk / phase',`${Ipk(N)} A`],[`Ripple freq`,`${N*70} kHz`],['Phase shift',`${360/N}°`]].map(([k,v]) => (
                   <div key={k} style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:4}}>
                     <span style={{color:C.hint}}>{k}</span>
                     <span style={{color:isSel?selColor:C.muted,fontWeight:500}}>{v}</span>
@@ -122,7 +130,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
       </div>
 
       <Card style={{marginBottom:14}}>
-        <SecHead icon="📈" label="Phase gate timing — 360° / N interleave (D ≈ 0.68 at 90 Vac crest)" />
+        <SecHead icon="📈" label={`Phase gate timing — 360° / N interleave (D ≈ ${dCrest.toFixed(2)} at ${vinMin} Vac crest)`} />
         {Array.from({length:selN},(_,ph) => {
           const off = (ph/selN)*100
           const segments: React.ReactNode[] = []
@@ -142,7 +150,7 @@ export const ChannelSelect: React.FC<Props> = ({ selectedTopology, controllerMod
       </Card>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:9,marginBottom:14}}>
-        {[['Phases',String(selN)],[`L / phase`,`${L_uH} µH`],[`Ipk / phase`,`${Ipk(selN)} A`],[`Ripple freq`,`${selN*70} kHz`],['Phase shift',`${360/selN}°`]].map(([k,v])=>(
+        {[['Phases',String(selN)],[`L / phase (min Vin)`,`${L_uH} µH`],[`Ipk / phase`,`${Ipk(selN)} A`],[`Ripple freq`,`${selN*70} kHz`],['Phase shift',`${360/selN}°`]].map(([k,v])=>(
           <div key={k} style={{background:C.bg3,border:`0.5px solid ${C.border}`,borderRadius:7,padding:'9px 11px'}}>
             <div style={{fontSize:10,color:C.hint,marginBottom:3}}>{k}</div>
             <div style={{fontSize:15,fontWeight:500,color:C.accent}}>{v}</div>

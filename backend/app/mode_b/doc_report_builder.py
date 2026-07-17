@@ -702,13 +702,27 @@ def _fig_pcore_waveform(d, state):
 # (see _canonical_ops_table / Section 1.2.4, Table 1.2.2) — NOT from a single
 # fixed value — so every Pin/Ipk/Iph figure in the sweep matches the η/PF
 # estimated for that operating point.
-def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIST[-1], r_input=0.095):
-    ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+def _eta_target(state) -> float | None:
+    """Designer's intake target efficiency as a fraction (None if unset). Anchors the
+    η ladder: canonical_ops_table keeps its loss-derived shape but is scaled so the
+    264 Vac best corner equals this target (designer decision, report notes #2)."""
+    try:
+        v = float(((state or {}).get("intake", {}) or {})
+                  .get("application", {}).get("efficiency_target_percent", 0) or 0)
+        return v / 100.0 if v else None
+    except Exception:
+        return None
+
+
+def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIST[-1], r_input=0.095,
+         eta_target=None):
+    ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target)
     # Per-phase RMS through the SAME step2 -> step4 -> step5 chain that produces
     # Table 3.2.2b / Table 3.4.1's "accurate" Iφ,rms — replaces the old sinusoidal
     # "PFC approximation" (ipk_l/nph/√2 · √(π/2) · 0.98) that diverged from the
     # rigorous figures by ~20% and was the root of the Table 3.1.1 vs 3.2.x mismatch.
-    ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input)
+    ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input,
+                                           eta_target)
     rows = []
     for i, vin in enumerate(VAC_LIST):
         pout   = pout_hi if vin >= 180 else pout_lo
@@ -760,7 +774,11 @@ def _ch1(story, state):
     t_hold   = float(raw_ap.get("hold_up_time_ms", 20))
     vdc_min  = float(raw_ap.get("vdc_min_holdup_v", 300))
     pf_tgt   = float(raw_ap.get("power_factor_target", 0.99))
-    eta_tgt  = float(raw_ap.get("efficiency_target_pct", 95))
+    # canonical intake key is efficiency_target_percent (intake/schema.py); the old
+    # *_pct spelling never matched and silently printed the 95% default over the
+    # designer's spec-page value.
+    eta_tgt  = float(raw_ap.get("efficiency_target_percent",
+                                raw_ap.get("efficiency_target_pct", 95)))
     t_amb    = float(raw_th.get("ambient_temp_c_max", 50))
     t_hot    = float(raw_th.get("hotspot_limit_c", 110))
     app_cls  = str(raw_co.get("application_class","Industrial"))
@@ -782,7 +800,7 @@ def _ch1(story, state):
         ["Field", "Value"],
         [
             ["Project ID",       pid],
-            ["Tool version",     "PFC AI Design Agent v2.4"],
+            ["Tool version",     "PFC Design Suite v2.4"],
             ["Application class",app_cls],
             ["Topology",         (ds.selected_topology or "—").replace("_"," ").title()],
             ["Controller mode",  (ds.selected_controller_mode or "—").replace("_"," ").upper()],
@@ -826,31 +844,37 @@ def _ch1(story, state):
         ), ch=1)
 
     annotation(story, "DECISION",
-        f"Electrical specification accepted as-is. No derived adjustments. "
-        f"Worst-case inductor corner: {vin_min:.0f} V<sub>rms</sub>, "
-        f"{pout_lo:.0f} W (maximum duty cycle → maximum inductance demand).", 1)
+        "Electrical specification accepted as-is. No derived adjustments. "
+        "The inductance is sized for the worst-case crest ripple ratio across ALL nine "
+        "operating points — the governing corner is identified in Section 3.2.4 (it is "
+        "often a high-line point, where the interleave ripple cancellation is weakest, "
+        "not necessarily the maximum-duty low-line corner).", 1)
 
     sub_h(story, "1.2.4", "Efficiency and power factor across operating points", 1)
     annotation(story, "CONCEPT",
-        "Per-point efficiency (η) and power factor (PF) are estimated based on "
-        "available design data — interpolated across the input-voltage range from "
-        "the specified low-line and high-line corner figures. These nine η/PF pairs "
-        "are the single source for every P<sub>in</sub>, I<sub>in</sub>, I<sub>φ</sub>, "
-        "loss, and thermal calculation that follows — Chapters 2, 3, 4, 5 and 6 all "
-        "derive their per-point figures from this same table, never from a re-typed value.", 1)
+        f"Per-point efficiency (η) and power factor (PF) follow the loss-derived reference "
+        f"SHAPE of the curve (the per-point ratios versus the 264 V<sub>rms</sub> best corner "
+        f"are real design data), ANCHORED to the designer's target: the whole ladder is scaled "
+        f"so the best corner equals the specified target efficiency η = {eta_tgt:.0f}%. "
+        "These nine η/PF pairs are the single source for every P<sub>in</sub>, I<sub>in</sub>, "
+        "I<sub>φ</sub>, loss, and thermal calculation that follows — Chapters 2, 3, 4, 5 and 6 "
+        "all derive their per-point figures from this same table, never from a re-typed value.", 1)
 
-    ops_pf = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    ops_pf = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_tgt / 100.0)
+    _e_lo, _e_hi = float(ops_pf[0, 2]) * 100, float(ops_pf[-1, 2]) * 100
+    _pf_lo, _pf_hi = float(ops_pf[0, 3]), float(ops_pf[-1, 3])
     data_table(story, "1.2.2", "Operating-Point Efficiency and Power Factor — Reference Table",
-        "Estimated based on available design data — nine-point η/PF reference "
-        "matrix interpolated from the specified corner conditions, reproduced here "
-        "and referred to in every subsequent calculation.",
+        f"Nine-point η/PF reference matrix — loss-derived shape anchored so the "
+        f"264 V<sub>rms</sub> corner equals the designer's target efficiency "
+        f"({eta_tgt:.0f}%), reproduced here and referred to in every subsequent calculation.",
         ["V<sub>in,rms</sub> (Vac)", "P<sub>out</sub> (W)", "η", "PF"],
         [[f"{int(r[0])}", f"{int(r[1])}", f"{r[2]:.3f}", f"{r[3]:.4f}"] for r in ops_pf],
         col_widths=[CW*0.25]*4,
         interpretation=(
-            "η rises from 94.5% at the 90 V<sub>rms</sub> low-line corner to 99.0% at "
-            "the 264 V<sub>rms</sub> high-line corner; PF is highest (0.9987) at low "
-            "line and falls to 0.9520 at high line as reactive content increases. "
+            f"η rises from {_e_lo:.1f}% at the {vin_min:.0f} V<sub>rms</sub> low-line corner "
+            f"to {_e_hi:.1f}% (= the specified target) at the {vin_max:.0f} V<sub>rms</sub> "
+            f"high-line corner; PF is highest ({_pf_lo:.4f}) at low line and falls to "
+            f"{_pf_hi:.4f} at high line as reactive content increases. "
             "Both columns are carried forward verbatim into every later chapter — "
             "no further fitting or adjustment is applied."
         ), ch=1)
@@ -1235,7 +1259,7 @@ def _ch2(story, state):
         ],
         col_widths=[CW*0.42, CW*0.58], ch=2)
 
-    OPS = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    OPS = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
     s2 = step2_input_params(vout, OPS)
     Vin_rms = s2["Vin_rms"]; Pout = s2["Pout"]; eta = s2["eta"]; PF = s2["PF"]
     Vin_pk  = s2["Vin_pk"];  Dpk  = s2["Dpk"];  Pin = s2["Pin"]
@@ -1398,7 +1422,7 @@ def _ch2(story, state):
         "K(D) = 1 means no cancellation (same as single-phase). "
         "For 2-phase interleaving: K(D) = |2D−1|/max(D,1−D).", 2)
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest)
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest, _eta_target(state))
     kd_rows = []
     for op in ops_all:
         kd_rows.append([
@@ -1491,7 +1515,7 @@ def _ch3(story, state, d):
     # η/PF at the worst-case 90 Vac corner — taken from the canonical estimated
     # reference table (Section 1.2.4 / Table 1.2.2), not re-typed: row 0 of that
     # table is always the vin_min low-line corner.
-    _ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    _ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
     eta      = float(_ops_ref[0, 2]); PF = float(_ops_ref[0, 3])
     # Per-phase RMS current at the 90 Vac reference corner — derived through the
     # SAME step2 -> step4 -> step5 chain as Table 3.2.4 and the sizing engine
@@ -1500,7 +1524,7 @@ def _ch3(story, state, d):
     # "accurate" per-phase RMS figures instead of reading a field
     # (IL_rms_A / Iph_rms_A) that DesignResult never actually populates.
     _ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi,
-                                             vout, fsw, r_input)
+                                             vout, fsw, r_input, _eta_target(state))
     Iph_rms_ref = float(_ops_design[0, 4])
 
     # DesignResult fields
@@ -1565,15 +1589,29 @@ def _ch3(story, state, d):
     wound_OD = float(d.get("wound_OD_actual_mm", OD_mm))
     wound_HT = float(d.get("wound_HT_actual_mm", HT_mm*stacks))
 
-    # Reference corner calculations
+    # Reference corner calculations — 90 Vac low line (maximum current: flux/Bdc basis)
     vin_pk_90   = vin_min * math.sqrt(2)
     D_90        = max(0.001, 1 - vin_pk_90 / vout)
-    KD_90       = (2*D_90-1)/D_90 if D_90 >= 0.5 else (1-2*D_90)/(1-D_90)
     ipk_line_90 = math.sqrt(2) * (pout_lo/eta) / (vin_min * PF)
-    iph_pk_90   = ipk_line_90 / n_ph
     iavg_90     = ipk_line_90 / (2*n_ph)
-    dIL_tgt     = crest * iph_pk_90 / max(KD_90, 0.001)
-    L_calc      = vin_pk_90 * D_90 / (fsw * dIL_tgt) * 1e6
+    # Governing-corner chain for the §3.1.1 L derivation — the SAME step2 → step4
+    # chain as the sizing engine, evaluated at the worst-case ripple-ratio corner.
+    # Deriving L at 90 Vac here while the criterion actually governs at high line
+    # (weak interleave cancellation at low duty) confused reviewers: the 90 Vac
+    # per-phase arithmetic produced a larger figure that then "rounded" DOWN to the
+    # engine's target. Steps 1–6 now run at the governing corner and ceil to 5 µH.
+    _ops9    = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
+    _s2g     = step2_input_params(vout, _ops9)
+    _s4g     = step4_inductance(_s2g, r_input, fsw, vout)
+    _g       = int(_s4g["ref_idx"])
+    vin_g    = float(_s2g["Vin_rms"][_g]); pout_g = float(_s2g["Pout"][_g])
+    eta_g    = float(_s2g["eta"][_g]);     PF_g   = float(_s2g["PF"][_g])
+    vin_pk_g = float(_s2g["Vin_pk"][_g]);  D_g    = float(_s2g["Dpk"][_g])
+    KD_g     = float(_s2g["KDpk"][_g]);    ipk_line_g = float(_s2g["Iin_pk"][_g])
+    iph_pk_g = ipk_line_g / n_ph
+    dIin_g   = float(_s4g["dIin_ref"]);    dIL_g  = float(_s4g["dIL_ref"])
+    L_calc   = float(_s4g["L_calc"]) * 1e6
+    L_ceil   = math.ceil(L_calc / 5) * 5
     Ae_m2       = Ae_mm2 * 1e-6
     dBpp        = vin_pk_90 * D_90 / (N * Ae_m2 * fsw) if N and Ae_m2 else Bac_pk*2
     Bac_val     = dBpp / 2
@@ -1586,7 +1624,7 @@ def _ch3(story, state, d):
     rho_100     = 1.72e-8 * (1 + ALPHA_CU*80)
     skin_mm     = math.sqrt(rho_100/(math.pi*fsw*4*math.pi*1e-7))*1e3
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input)
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input, _eta_target(state))
 
     chapter_splash(story, 3, "PFC Inductor Sizing",
         "What inductance and winding do we need?",
@@ -1605,43 +1643,54 @@ def _ch3(story, state, d):
 
     sub_h(story, "3.1.1", "Target inductance derivation", 3)
     annotation(story, "CONCEPT",
-        "The target inductance is derived at the worst-case operating corner: "
-        f"{vin_min:.0f} V<sub>rms</sub> input, full load {pout_lo:.0f} W. "
-        "At this point duty cycle D is maximum, making the volt-second product "
-        "V<sub>in,pk</sub>·D the largest — requiring the most inductance to limit "
-        "the ripple current to the specified fraction of peak current.", 3)
+        "The target inductance must hold the input ripple ratio "
+        "ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> ≤ r at EVERY operating point, so the required "
+        "L is evaluated across all nine points and the worst case governs. For THIS design "
+        f"the worst-case ripple ratio occurs at <b>{vin_g:.0f} V<sub>rms</sub> / "
+        f"{pout_g:.0f} W</b> — NOT at the {vin_min:.0f} V<sub>rms</sub> maximum-duty corner: "
+        "although the volt-second product V<sub>in,pk</sub>·D peaks at low line, the "
+        f"{n_ph}-phase interleaving cancellation K(D) is weakest at the low duty of the "
+        "high-line points, so more of the per-phase ripple reaches the input there. "
+        "Steps 1–6 below are therefore evaluated at the governing corner.", 3)
 
     eq_box(story, [
         r"V_{in,pk} = \sqrt{2}\, V_{in,rms}",
-        rf"V_{{in,pk}} = \sqrt{{2}} \times {vin_min:.0f} = {vin_pk_90:.4f}\ \mathrm{{V}}",
-    ], heading=f"Step 1 — Peak input voltage at {vin_min:.0f} V$_{{rms}}$ low line", number="3.1-1", ch=3)
+        rf"V_{{in,pk}} = \sqrt{{2}} \times {vin_g:.0f} = {vin_pk_g:.4f}\ \mathrm{{V}}",
+    ], heading=f"Step 1 — Peak input voltage at the governing corner "
+               f"({vin_g:.0f} V$_{{rms}}$ / {pout_g:.0f} W)", number="3.1-1", ch=3)
     eq_box(story, [
         r"D_{pk} = 1 - \dfrac{V_{in,pk}}{V_{out}}",
-        rf"D_{{pk}} = 1 - \dfrac{{{vin_pk_90:.4f}}}{{{vout:.0f}}} = {D_90:.4f}",
-    ], heading="Step 2 — Duty cycle at crest of low-line half cycle", number="3.1-2", ch=3)
+        rf"D_{{pk}} = 1 - \dfrac{{{vin_pk_g:.4f}}}{{{vout:.0f}}} = {D_g:.4f}",
+    ], heading="Step 2 — Duty cycle at the crest of the governing half cycle", number="3.1-2", ch=3)
     eq_box(story, [
-        r"K(D) = \dfrac{2D-1}{D} \quad (D \geq 0.5)",
-        rf"K({D_90:.4f}) = \dfrac{{2 \times {D_90:.4f} - 1}}{{{D_90:.4f}}} = {KD_90:.4f}",
+        (r"K(D) = \dfrac{2D-1}{D} \quad (D \geq 0.5)" if D_g >= 0.5
+         else r"K(D) = \dfrac{1-2D}{1-D} \quad (D < 0.5)"),
+        (rf"K({D_g:.4f}) = \dfrac{{2 \times {D_g:.4f} - 1}}{{{D_g:.4f}}} = {KD_g:.4f}" if D_g >= 0.5
+         else rf"K({D_g:.4f}) = \dfrac{{1 - 2 \times {D_g:.4f}}}{{1 - {D_g:.4f}}} = {KD_g:.4f}"),
     ], heading=f"Step 3 — Interleaving cancellation factor K(D) for {n_ph}-phase", number="3.1-3", ch=3)
     eq_box(story, [
-        rf"P_{{in}} = \dfrac{{P_{{out}}}}{{\eta}} = \dfrac{{{pout_lo:.0f}}}{{{eta:.3f}}} = {pout_lo/eta:.2f}\ \mathrm{{W}}",
-        rf"I_{{pk,line}} = \dfrac{{\sqrt{{2}}\,P_{{in}}}}{{V_{{in,rms}}\,\mathrm{{PF}}}} "
-        rf"= \dfrac{{\sqrt{{2}} \times {pout_lo/eta:.2f}}}{{{vin_min:.0f} \times {PF:.4f}}} = {ipk_line_90:.4f}\ \mathrm{{A}}",
-        rf"I_{{\phi,pk}} = \dfrac{{I_{{pk,line}}}}{{N_\phi}} = \dfrac{{{ipk_line_90:.4f}}}{{{n_ph}}} = {iph_pk_90:.4f}\ \mathrm{{A}}",
-    ], heading=f"Step 4 — Per-phase peak current (N$_\\phi$ = {n_ph})", number="3.1-4", ch=3)
+        rf"P_{{in}} = \dfrac{{P_{{out}}}}{{\eta}} = \dfrac{{{pout_g:.0f}}}{{{eta_g:.3f}}} = {pout_g/eta_g:.2f}\ \mathrm{{W}}",
+        rf"I_{{in,pk}} = \dfrac{{\sqrt{{2}}\,P_{{in}}}}{{V_{{in,rms}}\,\mathrm{{PF}}}} "
+        rf"= \dfrac{{\sqrt{{2}} \times {pout_g/eta_g:.2f}}}{{{vin_g:.0f} \times {PF_g:.4f}}} = {ipk_line_g:.4f}\ \mathrm{{A}}",
+        rf"I_{{\phi,pk}} = \dfrac{{I_{{in,pk}}}}{{N_\phi}} = \dfrac{{{ipk_line_g:.4f}}}{{{n_ph}}} = {iph_pk_g:.4f}\ \mathrm{{A}}\quad(\mathrm{{per\ phase,\ for\ reference}})",
+    ], heading=f"Step 4 — Line input peak current at the governing corner", number="3.1-4", ch=3)
     eq_box(story, [
-        r"\Delta I_{L,target} = \dfrac{r\, I_{\phi,pk}}{K(D)}",
-        rf"\Delta I_{{L,target}} = \dfrac{{{crest:.3g} \times {iph_pk_90:.4f}}}{{{KD_90:.4f}}} = {dIL_tgt:.4f}\ \mathrm{{A}}",
-    ], heading="Step 5 — Target per-phase ripple current", number="3.1-5", ch=3)
+        r"\Delta I_{in,pp} = r\, I_{in,pk},\qquad \Delta I_{L,target} = \dfrac{\Delta I_{in,pp}}{K(D)}",
+        rf"\Delta I_{{in,pp}} = {r_input:.3g} \times {ipk_line_g:.4f} = {dIin_g:.4f}\ \mathrm{{A}},\qquad "
+        rf"\Delta I_{{L,target}} = \dfrac{{{dIin_g:.4f}}}{{{KD_g:.4f}}} = {dIL_g:.4f}\ \mathrm{{A}}",
+    ], heading="Step 5 — Ripple targets: line input (the r criterion), then per phase", number="3.1-5", ch=3)
     eq_box(story, [
         r"L_{target} = \dfrac{V_{in,pk}\, D_{pk}}{f_{sw}\, \Delta I_{L,target}}",
-        rf"L_{{target}} = \dfrac{{{vin_pk_90:.4f} \times {D_90:.4f}}}{{{fsw:.0f} \times {dIL_tgt:.4f}}} "
-        rf"= {L_calc:.2f}\ \mu\mathrm{{H}} \;\Rightarrow\; {L_tgt:.0f}\ \mu\mathrm{{H}}",
-    ], heading="Step 6 — Target inductance (rounded up)", number="3.1-6", ch=3)
+        rf"L_{{target}} = \dfrac{{{vin_pk_g:.4f} \times {D_g:.4f}}}{{{fsw:.0f} \times {dIL_g:.4f}}} "
+        rf"= {L_calc:.2f}\ \mu\mathrm{{H}} \;\Rightarrow\; {L_ceil:.0f}\ \mu\mathrm{{H}}\ (\mathrm{{next}}\ 5\ \mu\mathrm{{H}}\ \mathrm{{step}})",
+    ], heading="Step 6 — Target inductance (rounded UP to the next 5 µH step)", number="3.1-6", ch=3)
     annotation(story, "DECISION",
         f"Target inductance: <b>L<sub>φ,target</sub> = {L_tgt:.0f} µH</b> per phase. "
-        f"Calculated {L_calc:.2f} µH rounded up to "
-        f"{L_tgt:.0f} µH ({(L_tgt/L_calc-1)*100:.1f}% margin over minimum).", 3)
+        f"Calculated {L_calc:.2f} µH at the governing corner "
+        f"({vin_g:.0f} V<sub>ac</sub> / {pout_g:.0f} W), rounded UP to the next 5 µH step "
+        f"({L_ceil:.0f} µH; {(L_tgt/L_calc-1)*100:.1f}% margin over minimum). "
+        "Rounding up guarantees the ripple-ratio ceiling holds at the governing corner; "
+        "Section 3.2.4 verifies the ratio at all nine points with this value.", 3)
 
     sub_h(story, "3.1.2", "Per-phase operating currents — I_pk and I_rms at all 9 points", 3)
     annotation(story, "CONCEPT",
@@ -1711,7 +1760,7 @@ def _ch3(story, state, d):
         "waveforms — per phase and at the input — across the half line cycle for "
         "the low-line and high-line operating families.", 3)
 
-    OPS3 = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    OPS3 = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
     s2x = step2_input_params(vout, OPS3)
     Vin_rms = s2x["Vin_rms"]; Pout = s2x["Pout"]; eta_a = s2x["eta"]; PF_a = s2x["PF"]
     Vin_pk  = s2x["Vin_pk"];  Dpk  = s2x["Dpk"];  Pin = s2x["Pin"]
@@ -1720,7 +1769,9 @@ def _ch3(story, state, d):
 
     s4x = step4_inductance(s2x, r_input, fsw, vout)
     L_phi_calc = s4x["L_calc"]
-    L_phi  = round(L_phi_calc * 1e6 / 5) * 5 * 1e-6
+    # ceil to the 5 µH grid: rounding DOWN would put r_act above the designer's
+    # ceiling at the governing point, failing the very criterion L was sized for.
+    L_phi  = math.ceil(L_phi_calc * 1e6 / 5) * 5 * 1e-6
     ref9   = s4x["ref_idx"]
 
     IL_rms = np.zeros(n9); IL_LF = np.zeros(n9); IL_HF = np.zeros(n9); dIL_crest = np.zeros(n9)
@@ -1743,10 +1794,18 @@ def _ch3(story, state, d):
     def _vc(i): return VAC_COLORS.get(int(Vin_rms[i]), "#1f77b4")
     fig_n = 0
 
-    # ── 3.2.1 — Lphi sizing at low-line full load (Step 4) ──────────────────
-    sub_h(story, "3.2.1", "Lφ sizing at low-line full load", 3)
+    # ── 3.2.1 — Lphi sizing at the worst-case ripple corner (Step 4) ─────────
+    sub_h(story, "3.2.1", "Lφ sizing at the worst-case ripple-ratio corner", 3)
+    annotation(story, "DECISION",
+        f"Input current ripple ratio at the crest (r) selected by designer = "
+        f"<b>{r_input*100:.1f}%</b>. The inductance is sized so that "
+        "ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> ≤ r at EVERY one of the nine operating "
+        "points — the required L is evaluated at each point and the maximum governs. "
+        f"Governing point: <b>{int(Vin_rms[ref9])} V<sub>ac</sub> / "
+        f"{int(Pout[ref9])} W</b> (interleave cancellation K(D) is weakest there, "
+        "so it demands the most inductance — not necessarily the 90 V maximum-duty corner).", 3)
     body(story,
-        f"Sized at {int(Vin_rms[ref9])} V<sub>ac</sub>, "
+        f"Governing corner: {int(Vin_rms[ref9])} V<sub>ac</sub>, "
         f"V<sub>out</sub> = {vout:.1f} V<sub>dc</sub>, "
         f"f<sub>sw</sub> = {fsw/1e3:.0f} kHz, r = {r_input*100:.1f} %.", 3)
     eq_box(story, [
@@ -1917,18 +1976,29 @@ def _ch3(story, state, d):
 
     # ── 3.2.4 — Summary tables (Step 7) ─────────────────────────────────────
     sub_h(story, "3.2.4", "Summary tables — crest-of-line ripple and worst-case angle", 3)
+    # Pass column is COMPUTED against the designer-selected r (was a hardcoded "YES"
+    # against a fixed 15% ceiling — a 20% selection wrongly "passed" rows above 15%).
+    _rlim = r_input * 100
     rows71 = [[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{int(Pout[i])}", f"{Pin[i]:.2f}",
                f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}", f"{Vin_pk[i]:.3f}", f"{Dpk[i]:.4f}",
                f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.2f}",
-               f"{Iph_pk[i]:.4f}", "YES"] for i in range(n9)]
+               f"{Iph_pk[i]:.4f}",
+               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"] for i in range(n9)]
     data_table(story, "3.2.4a", "Crest-of-Line Ripple and Currents — All Nine Points",
-        "Last column verifies ΔI<sub>in,pp</sub> stays below the 15% design ceiling at every point.",
+        f"Last column verifies ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> stays at or below the "
+        f"designer-selected ripple ratio r = {_rlim:.1f}% at every point (with the selected "
+        f"L<sub>φ</sub> = {L_phi*1e6:.0f} µH).",
         ["V<sub>in</sub> (V)","η","P<sub>out</sub> (W)","P<sub>in</sub> (W)",
          "I<sub>in,rms</sub> (A)","I<sub>in,pk</sub> (A)","V<sub>pk</sub> (V)","D@crest",
          "ΔI<sub>L,pp</sub> (A)","ΔI<sub>in,pp</sub> (A)","ΔI<sub>in</sub>/I<sub>pk</sub> %",
-         "I<sub>φ,pk</sub> (A)","<15% Pass?"],
+         "I<sub>φ,pk</sub> (A)",f"≤{_rlim:.0f}% Pass?"],
         rows71,
-        col_widths=[CW*0.072]*13, ch=3)
+        col_widths=[CW*0.072]*13,
+        worst_rows=[ref9], ch=3)
+    body(story,
+        f"The governing (worst ripple-ratio) point is <b>{int(Vin_rms[ref9])} V<sub>ac</sub> / "
+        f"{int(Pout[ref9])} W</b> — highlighted row. L<sub>φ</sub> was sized there, so its "
+        f"ratio sits at the r = {_rlim:.1f}% ceiling and every other point falls below it.", 3)
 
     rows72 = [[f"{int(Vin_rms[i])}", f"{Vin_pk[i]:.3f}", f"{Vin_w[i]:.4f}",
                f"{np.degrees(th1[i]):.4f}", f"{t1_ms[i]:.4f}", f"{D_w[i]:.4f}",
@@ -2033,11 +2103,12 @@ def _ch3(story, state, d):
 
     body(story, "Compact crest-of-line ripple summary:", 3)
     rows10 = [[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{Dpk[i]:.4f}", f"{KDpk[i]:.4f}",
-               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.3f}%", "YES"]
+               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.3f}%",
+               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"]
               for i in range(n9)]
     data_table(story, "3.2.7", "Compact Crest-of-Line Ripple Table", "",
         ["V<sub>ac,rms</sub> (V)","η","D@crest","K(D)@crest","ΔI<sub>L,pp</sub>@crest (A)",
-         "ΔI<sub>in,pp</sub>@crest (A)","ΔI<sub>in</sub>/I<sub>pk</sub>@crest","15% pass?"],
+         "ΔI<sub>in,pp</sub>@crest (A)","ΔI<sub>in</sub>/I<sub>pk</sub>@crest",f"≤{_rlim:.0f}% pass?"],
         rows10,
         col_widths=[CW*0.13,CW*0.10,CW*0.12,CW*0.13,CW*0.16,CW*0.16,CW*0.13,CW*0.07], ch=3)
 
@@ -2847,7 +2918,7 @@ def _sim_verification(story, state, d):
     except Exception:
         return  # sim-agent module not in this tree — silently skip
 
-    step_h(story, "4.8", "Simulation-Agent Verification (independent cross-check)", 4)
+    step_h(story, "4.8", "Simulation Verification (independent cross-check)", 4)
     try:
         pkg, vr = adapter.build_and_validate(d or {}, state or {})
     except Exception as e:
@@ -2885,7 +2956,7 @@ def _sim_verification(story, state, d):
     n_ok  = sum(1 for r in ccr if r["within"])
     n_tot = sum(1 for r in ccr if r["within"] is not None)
     notes = "; ".join(f"{r['quantity']} — {r['note']}" for r in ccr if r["within"] is False and r["note"])
-    data_table(story, "4.8.1", "Step-7 vs Simulation-Agent cross-check",
+    data_table(story, "4.8.1", "Step-7 vs simulation cross-check",
         "Our Step-7 engine is authoritative for the design; the field engine independently "
         "re-derives each quantity from the same database physics, compared on a common basis. "
         "Δ is the field-engine value relative to Step-7; Band is the agreed engineering tolerance.",
@@ -2987,7 +3058,7 @@ def _ch4(story, state, d):
         else:
             story.append(_pair[0][0])
         fig_caption(story,
-            f"Figure 4.1 — Wound-core ring view captured from the Simulation-Agent field viewer: "
+            f"Figure 4.1 — Wound-core ring view captured from the simulation field viewer: "
             f"exact per-layer winding turns (⊗ bore / ⊙ outer) around the {stacks}-core stack. "
             "Left: flux-density field at the operating point. "
             + ("Right: the same view with the temperature gradient and thermal details. "
@@ -3008,7 +3079,7 @@ def _ch4(story, state, d):
                 f"model: flux-density crowding B(r) &prop; 1/r across the {stacks}-core stack "
                 "(left) and the radial temperature field from the interior hotspot to the "
                 "cooled surface (right), both overlaid with the exact per-layer winding turns "
-                "(&otimes; bore / &#9679; outer). Opening the Simulation-Agent page before "
+                "(&otimes; bore / &#9679; outer). Opening the Simulation page before "
                 "generating the report replaces this render with the live GUI captures.", 4)
 
     # Item 19 — 2D winding cross-section (top view with turns + radial cut).
@@ -4469,8 +4540,8 @@ def _ch6_references(story, controller_id="fan9672"):
         sub_h(story, "6.9.2", "Grounded Reference Summary by Design Aspect", 6)
         annotation(story, "INSIGHT",
             "Each summary below is written strictly from the retrieved reference excerpts and "
-            "cites them inline — no claim extends beyond the cited sources. Generated by the "
-            "controller reference agent at report time.", 6)
+            "cites them inline — no claim extends beyond the cited sources. Compiled from the "
+            "controller reference library at report time.", 6)
         for label, answer, cites in blocks:
             body(story, "<b>" + _esc(label) + ".</b> " + _esc(answer) +
                  ("  <i>[Sources: " + _esc(cites) + "]</i>" if cites else ""), 6)
@@ -4498,7 +4569,7 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     topo = (ds.selected_topology or "—").replace("_"," ").title()
     S = _S(1)
     story.append(Spacer(1, 40*mm))
-    story.append(Paragraph("PFC AI Design Agent", S["cover_t"]))
+    story.append(Paragraph("Power Factor Correction Converter", S["cover_t"]))
     story.append(Spacer(1, 5*mm))
     story.append(Paragraph("Engineering Design Report", S["cover_s"]))
     story.append(Spacer(1, 8*mm))

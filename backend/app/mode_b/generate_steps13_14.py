@@ -1683,7 +1683,7 @@ def _sec_14_9_sim_verification(story, approved_design, state, S):
         return  # sim-agent module not in this tree — silently skip
 
     story.append(PageBreak())
-    story.append(Paragraph('Step 14.9) Simulation-Agent Verification — Independent Cross-Check',
+    story.append(Paragraph('Step 14.9) Simulation Verification — Independent Cross-Check',
                            S['h2']))
     try:
         pkg, vr = adapter.build_and_validate(approved_design or {}, state or {})
@@ -1776,17 +1776,17 @@ def _sec_14_9_2_winding_views(story, approved_design, S):
             "Ring views of the wound core rendered from the approved design's field data: "
             "flux-density crowding B(r) &prop; 1/r (left) and the radial temperature field "
             "from the interior hotspot to the cooled surface (right), overlaid with the exact "
-            "per-layer winding turns (&otimes; bore / &#9679; outer). Opening the Simulation-Agent "
+            "per-layer winding turns (&otimes; bore / &#9679; outer). Opening the Simulation "
             "page before generating the report replaces this render with the live GUI captures "
             "(including the 3D view).", S['body']))
         story.append(Spacer(1, 2*mm))
         story.append(_rv)
         return
     story.append(Spacer(1, 4*mm))
-    story.append(Paragraph('Step 14.9.2) Winding geometry — Simulation-Agent views', S['h3']))
+    story.append(Paragraph('Step 14.9.2) Winding geometry — simulation views', S['h3']))
     story.append(Paragraph(
         "Ring cross-section and 3D view of the wound core, captured from the interactive "
-        "Simulation-Agent field viewer at the design operating point. The ring view shows the "
+        "simulation field viewer at the design operating point. The ring view shows the "
         "layer-by-layer bundle packing around the bore; the 3D view shows the winding wrapping "
         "the assembled core stack.", S['body']))
     story.append(Spacer(1, 2*mm))
@@ -1816,7 +1816,7 @@ def generate_steps13_14_pdf(approved_design: dict, state: dict) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4,
         leftMargin=25.4*mm, rightMargin=25.4*mm, topMargin=22*mm, bottomMargin=18*mm,
         title='PFC Inductor Magnetic Design — Steps 13 & 14',
-        author='PFC AI Design Agent')
+        author='PFC Design Suite')
 
     S = _S()
     story = []

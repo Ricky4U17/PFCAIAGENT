@@ -969,9 +969,10 @@ def design_one_core(
         res.fail_reasons.append(f"ΔT={res.dT_rise_C:.1f}°C > budget {dT_budget_C:.0f}°C.")
     if res.L_vs_Vin_table:
         Lfull_min = min(r["L_full_min_uH"] for r in res.L_vs_Vin_table)
-        if Lfull_min < L_target_H * 1e6 * 0.85:
+        # 95% retention floor (designer decision, report notes #6 — was 85%)
+        if Lfull_min < L_target_H * 1e6 * 0.95:
             res.fail_reasons.append(
-                f"L_full,min={Lfull_min:.1f}µH < 85% of L_target at some op-point.")
+                f"L_full,min={Lfull_min:.1f}µH < 95% of L_target at some op-point.")
 
     res.passed = len(res.fail_reasons) == 0
 
@@ -1009,7 +1010,9 @@ def _turns_powder(core: dict, mat_key: str, L_H: float,
         H_Oe  = H_Am / 79.577
         k_b   = _db().get_k_bias(mat_key, H_Oe)
         L_full_min = N**2 * AL_min * k_b
-        if L_full_min >= L_H * 0.85:
+        # converge N until ≥95% of target held at full bias (designer decision,
+        # report notes #6 — was 85%)
+        if L_full_min >= L_H * 0.95:
             break
         N += 1
 
@@ -1137,6 +1140,8 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
     optimization_goal:
       'best_performance' — sort by composite score (loss/volume/ΔT/cost/fill).
       'max_ffu'          — sort by FFcu descending (densest/most-compact first).
+      'min_height'       — sort by installed_height_mm ascending (lowest wound
+                           profile first, mounting-orientation aware).
     """
     passed = [r for r in results if r.passed]
     if not passed:
@@ -1145,6 +1150,10 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
     def _key(r: DesignResult) -> str:
         return r.part_number + str(r.stacks)
 
+    # mounting-aware overall height incl. winding; falls back to the wound height
+    def _hgt(r: DesignResult) -> float:
+        return float(r.installed_height_mm or r.wound_HT_actual_mm or 1e9)
+
     groups: dict[int, list[DesignResult]] = {}
     for r in passed:
         groups.setdefault(r.stacks, []).append(r)
@@ -1152,6 +1161,9 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
     if optimization_goal == 'max_ffu':
         global_best_key = _key(max(passed, key=lambda r: r.FFcu))
         global_label    = "★ Most compact"
+    elif optimization_goal == 'min_height':
+        global_best_key = _key(min(passed, key=_hgt))
+        global_label    = "★ Lowest profile"
     else:
         global_best_key = _key(min(passed, key=lambda r: r.score))
         global_label    = "★ Best overall"
@@ -1164,9 +1176,14 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
         by_temp = sorted(grp, key=lambda r: r.dT_rise_C)
         by_econ = sorted(grp, key=lambda r: r.score * (1.2 if r.core_type == "powder" else 1.0))
         by_ffu  = sorted(grp, key=lambda r: -r.FFcu)
+        by_hgt  = sorted(grp, key=_hgt)
 
-        top_in_group = by_ffu[0] if optimization_goal == 'max_ffu' else by_sc[0]
-        top_lbl      = f"★ Densest fill {s}-stack" if optimization_goal == 'max_ffu' else f"★ Best {s}-stack"
+        if optimization_goal == 'max_ffu':
+            top_in_group, top_lbl = by_ffu[0], f"★ Densest fill {s}-stack"
+        elif optimization_goal == 'min_height':
+            top_in_group, top_lbl = by_hgt[0], f"★ Lowest profile {s}-stack"
+        else:
+            top_in_group, top_lbl = by_sc[0], f"★ Best {s}-stack"
 
         for r, lbl in [
             (top_in_group, top_lbl),
@@ -1187,6 +1204,8 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
         seen_in_group: set[str] = set()
         if optimization_goal == 'max_ffu':
             group_sorted = sorted(groups[s], key=lambda r: (-r.FFcu, r.score))
+        elif optimization_goal == 'min_height':
+            group_sorted = sorted(groups[s], key=lambda r: (_hgt(r), r.score))
         else:
             group_sorted = sorted(groups[s], key=lambda r: r.score)
         count = 0

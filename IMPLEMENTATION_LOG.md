@@ -4095,3 +4095,55 @@ Verified: ch5 built from a deliberately stripped payload (user's exact 450HXK470
 into a clean PDF — C_holdup 2031 µF, I_LF 6.47 A, I_eq 2.11 A, Life 63.6 yr, no zeros;
 R_CS resolution asserts both directions (12 selected / 15 never-selected); tsc clean;
 app.main imports clean; both dev servers live-reloaded.
+
+## C87 — 2026-07-17 — Report notes #1–6 + follow-up irregularities (worst-case L, η anchoring, GUI consistency)
+
+Batch 1 of specs/PFC Report Improvment Notes.docx (points 1–6), plus the three irregularities
+the designer found while testing.
+
+1. AI/Agent wording removed from all report output: cover → "Power Factor Correction
+   Converter / Engineering Design Report", tool version "PFC Design Suite v2.4", PDF authors,
+   §4.8 → "Simulation Verification (independent cross-check)" (= notes #11), all
+   "Simulation-Agent" captions → "simulation". Code identifiers/docstrings untouched.
+2. Efficiency target connected: ch1 read efficiency_target_pct but the canonical intake key is
+   efficiency_target_percent → designer's 98% silently fell to the 95% default. Fixed (with old
+   key fallback). η ladder ANCHORED to the target per designer decision: canonical_ops_table
+   gains eta_target — keeps the loss-derived SHAPE (ratios vs the 264 Vac corner are real data),
+   scales so the best corner == target. Threaded through build_design_ops_table, the sizing
+   endpoint, _ops/all 6 ladder builds in doc_report_builder, _calc_l_py, and the power-plant
+   endpoint (+eta_target_pct field). Table 1.2.2 text now derives from actual values and states
+   the anchoring (stale "rises to 99.0%" removed).
+3. §3.2.1 DECISION states the designer-selected crest ripple ratio r verbatim.
+4. WORST-CASE L (designer decision): step4_inductance evaluates required L at ALL nine points,
+   max governs (ref_idx + L_per_point_uH). With r=20%: old 90 Vac sizing gave 122.3 µH and let
+   r_act hit 22.9–24.8% at 200–230 Vac (weak K(D) at low duty); governing 220 V/3600 W → 151.8
+   → ceil 155 µH (5 µH grid rounding changed round→ceil everywhere: violating the ceiling by
+   rounding down defeats the criterion). Tables 3.2.4a/3.2.7 pass columns now COMPUTED against
+   the designer's r (were hardcoded "YES" vs a fixed 15% text), header dynamic, governing row
+   highlighted + note. _calc_l_py (mini-intake confirmed L) uses the same 9-point chain; tsi
+   gains governing_vac/governing_pout. Ch1 DECISION no longer claims 90 V is the worst corner.
+5. Step-7 Shortlist priority gains third option "Minimum Height": rank by installed_height_mm
+   (mounting-aware wound height), labels "★ Lowest profile (N-stack)". GUI card + client type +
+   endpoint doc updated.
+6. Bias-retention floor 85% → 95% in BOTH sites (turns-convergence loop + candidate pass gate).
+
+Follow-up irregularities (same session):
+a. §3.1.1 rebuilt: CONCEPT states the design's ACTUAL governing corner (not 90 Vac) with the
+   K(D) explanation; steps 1–6 evaluated there via the engine chain — the old per-phase Step-5
+   convention (r·Iφ,pk) disagreed with the criterion (r·I_in,pk) and produced a larger figure
+   that then "rounded DOWN"; step 6 states the ceil to the next 5 µH step. K(D) eq shows the
+   correct D<0.5 branch when applicable.
+b. ONE L story in the GUI: ChannelSelect used crest 0.095 → 0.20 (the mini-intake default);
+   both pages labeled "at minimum input voltage"; mini header un-hardcoded from "worst-case
+   90 Vac"; Step-7 Result page gains a "Sizing basis" banner (governing corner + required L
+   from tsi). ChannelSelect 90 Vac/D≈0.68 label hardcodes → computed from intake.
+c. Max stacks: full chain verified honoring max_stacks (live endpoint repro: 5×2-stack +
+   5×1-stack with max_stacks=2, could NOT reproduce the designer's 3-stack sighting);
+   defensive client-side filter added (candidates above the selection can never display) and
+   the candidates header shows the applied constraint.
+
+Verified: anchor asserts (264 corner == target exactly, shape ratios preserved); worst-case L
+end-to-end (governing 220 V/3600 W, max r_act 19.58% with 155 µH, all 9 pass); ch1 + ch3 PDFs
+text-verified (98%, 0.980, "NOT at the 90", governing corner in 3.1.1); min_height ranking
+smoke (order + labels, existing goals unchanged); tsc clean; app.main imports clean; live
+power-plant endpoint honors eta_target_pct.

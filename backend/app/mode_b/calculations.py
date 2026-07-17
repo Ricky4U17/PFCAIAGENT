@@ -4,6 +4,7 @@ Core PFC calculations for Mode B report generation.
 All functions accept primitive floats/arrays — no DesignParams dependency.
 """
 from __future__ import annotations
+import math
 import numpy as np
 from typing import Dict, Any
 
@@ -30,12 +31,23 @@ def step2_input_params(Vout: float, OPS: np.ndarray) -> Dict[str, np.ndarray]:
 
 
 def step4_inductance(s2: Dict, r_input: float, fsw: float, Vout: float) -> Dict:
-    """Step 4: Size Lphi at 90 Vac low-line."""
-    i = 0
+    """Step 4: Size Lphi for the WORST-CASE crest ripple ratio across all nine
+    operating points — not only 90 Vac low-line. At each point the L required
+    to hold ΔI_in,pp/I_in,pk ≤ r is L_i = Vpk·Dpk·K(Dpk)/(r·I_in,pk·f_sw); the
+    target is the maximum (governing point recorded in ref_idx). Sizing only at
+    index 0 let r_act reach ~25% at 200–230 Vac high line with r = 20% selected
+    (interleave cancellation K(D) is weak at low duty)."""
+    n = len(s2['Vin_pk'])
+    L_all = np.zeros(n)
+    for i in range(n):
+        dIin_i   = r_input * s2['Iin_pk'][i]
+        dIL_i    = dIin_i / s2['KDpk'][i]
+        L_all[i] = s2['Vin_pk'][i] * s2['Dpk'][i] / (dIL_i * fsw)
+    i = int(np.argmax(L_all))
     dIin = r_input * s2['Iin_pk'][i]
     dIL  = dIin / s2['KDpk'][i]
-    L    = s2['Vin_pk'][i] * s2['Dpk'][i] / (dIL * fsw)
-    return dict(ref_idx=i, dIin_ref=dIin, dIL_ref=dIL, L_calc=L)
+    return dict(ref_idx=i, dIin_ref=dIin, dIL_ref=dIL, L_calc=float(L_all[i]),
+                L_per_point_uH=[round(float(x) * 1e6, 2) for x in L_all])
 
 
 def step5_phase_rms(Vin_pk_v: float, Iin_pk_v: float,
@@ -100,15 +112,22 @@ def gen_waveforms(Vin_pk_v: float, Iin_pk_v: float,
 
 
 def canonical_ops_table(vin_min: float, vin_max: float,
-                        pout_lo: float, pout_hi: float) -> np.ndarray:
+                        pout_lo: float, pout_hi: float,
+                        eta_target: float | None = None) -> np.ndarray:
     """Nine-point eta/PF reference matrix scaled to this design's Vin/Pout
     corners. Single source of truth for the operating-point grid — both the
     sizing engine and every report chapter must build their OPS arrays from
     this same table (directly or via build_design_ops_table) so that derived
-    figures such as Iph_rms never diverge between Table 3.2.4 and Table 3.4.1."""
+    figures such as Iph_rms never diverge between Table 3.2.4 and Table 3.4.1.
+
+    eta_target (fraction, e.g. 0.98): the designer's target efficiency from the
+    intake spec. The base ladder keeps its loss-derived SHAPE (the per-point
+    ratios vs the 264 Vac best corner are real data), and the whole ladder is
+    scaled so the best corner (vin_max, last row) equals the target. None keeps
+    the unscaled reference ladder."""
     # High-line efficiencies lowered to realistic values (the loss-derived re-estimate in Ch 7.9
     # showed the original 0.985–0.990 were optimistic vs the computed losses).
-    return np.array([
+    m = np.array([
         [vin_min,  pout_lo,  0.945, 0.9987],
         [110,      pout_lo,  0.955, 0.9986],
         [120,      pout_lo,  0.965, 0.9985],
@@ -119,10 +138,14 @@ def canonical_ops_table(vin_min: float, vin_max: float,
         [230,      pout_hi,  0.975, 0.9789],
         [vin_max,  pout_hi,  0.980, 0.9520],
     ], dtype=float)
+    if eta_target:
+        m[:, 2] = np.clip(m[:, 2] * (float(eta_target) / m[-1, 2]), 0.0, 0.999)
+    return m
 
 
 def build_design_ops_table(vin_min: float, vin_max: float, pout_lo: float, pout_hi: float,
-                           vout: float, fsw: float, r_input: float):
+                           vout: float, fsw: float, r_input: float,
+                           eta_target: float | None = None):
     """Nine-point [Vin_rms, Pout, eta, PF, Iph_rms] operating matrix derived
     from THIS design's actual corner conditions, via the same rigorous
     step2_input_params -> step4_inductance -> step5_phase_rms chain that
@@ -134,10 +157,12 @@ def build_design_ops_table(vin_min: float, vin_max: float, pout_lo: float, pout_
     Returns (OPS, L_phi) where OPS columns are [Vin_rms, Pout, eta, PF, Iph_rms]
     and L_phi is the low-line target inductance (H) used to derive Iph_rms.
     """
-    ops_ref = canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi)
+    ops_ref = canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target)
     s2 = step2_input_params(vout, ops_ref)
     s4 = step4_inductance(s2, r_input, fsw, vout)
-    L_phi = round(s4["L_calc"] * 1e6 / 5) * 5 * 1e-6
+    # ceil to the 5 µH grid (matches Chapter 3): rounding down would violate the
+    # designer's ripple-ratio ceiling at the governing operating point.
+    L_phi = math.ceil(s4["L_calc"] * 1e6 / 5) * 5 * 1e-6
     n9 = len(s2["Vin_rms"])
     iph_rms = np.zeros(n9)
     for i in range(n9):

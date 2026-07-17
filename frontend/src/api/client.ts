@@ -119,7 +119,7 @@ export const step7RunSizing = (req: {
   max_height_mm: number; max_stacks: number; J_target: number; n_top: number
   FFcu_limit?: number; coated_only?: boolean; custom_core?: object | null
   mounting?: string; wire_type?: string; n_parallel?: number
-  optimization_goal?: 'best_performance' | 'max_ffu'
+  optimization_goal?: 'best_performance' | 'max_ffu' | 'min_height'
 }) => post('/mode-b/step7/run-sizing', req)
 
 // ── Step 8: Time-domain core-loss modeling ───────────────────────────────────

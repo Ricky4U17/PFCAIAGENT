@@ -57,7 +57,7 @@ def generate_combined_report(
                       leftMargin=20*mm, rightMargin=20*mm,
                       topMargin=26*mm, bottomMargin=26*mm,
                       title='Step 15 — Vout Capacitor Design',
-                      author='PFC AI Design Agent')
+                      author='PFC Design Suite')
         story15 = generate_step15_section(step15_result)
         doc15.build(story15)
         r15 = PdfReader(io.BytesIO(buf15.getvalue()))
@@ -80,7 +80,7 @@ def generate_combined_report(
                          leftMargin=20*mm, rightMargin=20*mm,
                          topMargin=22*mm, bottomMargin=18*mm,
                          title='Step 16 — PFC Control Loop Design',
-                         author='PFC AI Design Agent')
+                         author='PFC Design Suite')
             story16 = generate_step16_section(ctrl)
             doc16.build(story16)
             r16 = PdfReader(io.BytesIO(buf16.getvalue()))
@@ -100,7 +100,7 @@ def generate_combined_report(
 
     writer.add_metadata({
         "/Title":   f"PFC Design Report — Steps {steps_label} — {project_id}",
-        "/Author":  "PFC AI Design Agent",
+        "/Author":  "PFC Design Suite",
         "/Subject": "Full PFC Power-Stage Design Calculation Record",
     })
 

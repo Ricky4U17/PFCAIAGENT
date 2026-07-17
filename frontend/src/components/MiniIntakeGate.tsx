@@ -171,10 +171,10 @@ export const MiniIntakeGate: React.FC<Props> = ({
       )}
 
       <Card style={{marginBottom:14}}>
-        <SecHead icon="⚡" label="Live electrical estimates — per phase · worst-case 90 Vac · Python formula" />
+        <SecHead icon="⚡" label={`Live electrical estimates — per phase · at minimum input voltage (${vin_min} Vac)`} />
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9}}>
           {[
-            ['L / phase', `${elec.L_uH} µH`,  crest<=0.15?C.green:crest<=0.30?C.accent:C.amber,  'corrected Python formula'],
+            ['L / phase', `${elec.L_uH} µH`,  crest<=0.15?C.green:crest<=0.30?C.accent:C.amber,  'at min Vin — worst case governs at core selection'],
             ['ΔIL (pp)',  `${elec.dIL} A`,     C.accent,                                           '= dIin / K(D)'],
             ['Peak I/ph.',`${elec.Ipk_ph} A`,  elec.Ipk_ph>35?C.amber:C.accent,                   `= Iin_pk/${nPhases} + ΔIL/2`],
             ['Tsw',       `${elec.Tsw_us} µs`, C.green,                                            '= 1 / fsw'],

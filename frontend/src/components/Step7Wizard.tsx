@@ -113,7 +113,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   const [mountDir,    setMountDir]    = useState<'horizontal'|'vertical'>('horizontal')
   const [jTarget,     setJTarget]     = useState(5.0)
   const [FFcuLimit,   setFFcuLimit]   = useState(0.35)    // designer-selectable fill factor
-  const [optGoal,     setOptGoal]     = useState<'best_performance'|'max_ffu'>('best_performance')
+  const [optGoal,     setOptGoal]     = useState<'best_performance'|'max_ffu'|'min_height'>('best_performance')
   const [coatedOnly,  setCoatedOnly]  = useState(true)    // Medical default
   const [showCustom,  setShowCustom]  = useState(false)   // custom core entry panel
   const [customCore,  setCustomCore]  = useState({        // custom core fields
@@ -287,7 +287,9 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
         FFcu_limit: FFcuLimit, coated_only: coatedOnly,
         custom_core: cc ?? {}, mounting: mountDir, optimization_goal: optGoal,
       }) as any
-      const candidates = d.top_5 ?? []
+      // HARD GUARANTEE on the designer's Max-stacks selection: never display a candidate
+      // above it, regardless of what any backend/staleness edge case returns.
+      const candidates = (d.top_5 ?? []).filter((c:any) => (c.result?.stacks ?? 1) <= maxStacks)
       const passing = candidates.filter((c:any) => c.result?.passed)
       const best = passing.length ? passing[0] : candidates[0]
       const top = best?.result ?? null
@@ -762,13 +764,15 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
             padding:'14px 16px',marginBottom:12}}>
             <div style={{fontSize:10,color:C.hint,fontFamily:'IBM Plex Mono,monospace',
               textTransform:'uppercase',letterSpacing:'.06em',marginBottom:10}}>Shortlist priority</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
               {([
                 {k:'best_performance', l:'Best Performance',
                   d:'Lowest total loss + best DC bias headroom. Highest efficiency design.'},
                 {k:'max_ffu',          l:'Max FFcu — Smallest Core',
                   d:'Highest window utilisation first. Shows most compact option for the chosen wire.'},
-              ] as {k:'best_performance'|'max_ffu', l:string, d:string}[]).map(o=>(
+                {k:'min_height',       l:'Minimum Height',
+                  d:'Smallest overall height including winding, per the selected mounting orientation.'},
+              ] as {k:'best_performance'|'max_ffu'|'min_height', l:string, d:string}[]).map(o=>(
                 <div key={o.k} onClick={()=>setOptGoal(o.k)}
                   style={{border:`1.5px solid ${optGoal===o.k?C.accent:C.border}`,borderRadius:8,
                     padding:'10px 12px',cursor:'pointer',
@@ -883,6 +887,19 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
 
       {/* ══ GATE 4: RESULT — two-panel layout (left: selection + actions, right: detail cards) ══ */}
       {sub === 'result' && result && (
+        <div>
+        {/* Worst-case sizing basis — earlier pages show L at minimum input voltage; the
+            engine's target is governed by the worst ripple-ratio corner (often high line). */}
+        {tsi.governing_vac ? (
+          <div style={{background:C.tealL,border:`1px solid ${C.teal}55`,borderRadius:8,
+            padding:'8px 12px',marginBottom:12,fontSize:11.5,color:C.text}}>
+            <b style={{color:C.teal}}>Sizing basis.</b> The worst-case input ripple ratio for this
+            design occurs at <b>{Number(tsi.governing_vac).toFixed(0)} Vac /
+            {' '}{Number(tsi.governing_pout ?? 0).toFixed(0)} W</b> — not at the minimum input
+            voltage shown on the earlier pages — and requires <b>L<sub>φ</sub> = {L_uH} µH</b> to
+            meet the selected ripple ratio there. All candidates below are sized to that target.
+          </div>
+        ) : null}
         <div style={{display:'grid',gridTemplateColumns:'360px 1fr',gap:16,alignItems:'start'}}>
 
           {/* ── LEFT PANEL: candidates list + result badge + action bar ── */}
@@ -893,7 +910,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
               <div>
                 <div style={{fontSize:10,color:C.hint,fontFamily:'IBM Plex Mono,monospace',
                   textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>
-                  Top {allCandidates.length} candidates — click to select
+                  Top {allCandidates.length} candidates — click to select · max {maxStacks} stack{maxStacks>1?'s':''}
                 </div>
                 {allCandidates.map((c:any, i:number) => {
                   const r = c.result ?? {}
@@ -1242,6 +1259,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
               </Card>
             )}
           </div>
+        </div>
         </div>
       )}
 
