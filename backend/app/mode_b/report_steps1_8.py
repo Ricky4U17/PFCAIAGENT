@@ -645,6 +645,60 @@ def _build_step8(story, data):
 _TITLE = "Control Scheme — Steps 1–14 + Appendices A–E (full detail)"
 
 
+def _build_asbuilt_L_section(story, inp: dict, prior: dict):
+    """Per-point as-built inductance verification (designer decision 2026-07-17).
+
+    The approved inductor's per-point inductance curve (l_curve = [[Vac, L_uH], …])
+    is passed in by the report endpoint. The control design is anchored at the
+    MINIMUM as-built full-load inductance (worst point: lowest L → highest plant
+    gain → highest current-loop crossover); this section verifies all nine points:
+    with L_i ≥ L_design everywhere, the effective crossover only moves DOWN from
+    the design point, so every point stays inside the designed bandwidth."""
+    curve = inp.get("l_curve") or []
+    if len(curve) < 2:
+        return
+    _p    = prior.get("inputs", {}) if isinstance(prior, dict) else {}
+    L_des = float(inp.get("lphi_uH") or _p.get("lphi_uH", 0) or 0)
+    fci   = float(_p.get("fci", inp.get("fci", 8000)) or 8000)
+    if not L_des:
+        L_des = min(float(l) for _, l in curve)
+    sub_h(story, "1.b", "As-built inductance basis — verification at all nine operating points", C6)
+    annotation(story, "CONCEPT",
+        f"The control design uses L<sub>φ</sub> = <b>{L_des:.1f} µH</b> — the MINIMUM "
+        "as-built full-load inductance of the approved inductor across the nine operating "
+        "points (its inductance varies with DC bias). This is the worst case for the "
+        "current loop: the lowest inductance gives the highest plant gain and therefore "
+        "the highest loop crossover. At every other point the as-built L is larger, the "
+        "plant gain lower, and the effective crossover proportionally lower — so the "
+        "compensator designed here is verified at all nine points by construction.", C6)
+    rows = []
+    ok_all = True
+    for vac, l_uh in curve:
+        l_uh = float(l_uh)
+        fci_i = fci * (L_des / l_uh) if l_uh else fci
+        ok = fci_i <= fci * 1.0001
+        ok_all = ok_all and ok
+        rows.append([f"{float(vac):.0f}", f"{l_uh:.1f}",
+                     f"{(L_des / l_uh):.3f}" if l_uh else "—",
+                     f"{fci_i/1e3:.2f}", "✓" if ok else "✗"])
+    data_table(story, "6.1b",
+        "As-Built Inductance and Effective Current-Loop Crossover — All 9 Points",
+        f"Per-point as-built L (nominal A<sub>L</sub>) from the approved inductor design; "
+        f"plant-gain ratio and effective crossover relative to the design basis "
+        f"(L = {L_des:.1f} µH, f<sub>ci</sub> = {fci/1e3:.1f} kHz).",
+        ["V<sub>in</sub> (Vac)", "L<sub>as-built</sub> (µH)",
+         "Gain ratio L<sub>des</sub>/L<sub>i</sub>",
+         "Effective f<sub>ci</sub> (kHz)", "Within design ✓"],
+        rows,
+        col_widths=[CW*0.18, CW*0.22, CW*0.22, CW*0.22, CW*0.16], ch=C6)
+    body(story,
+        ("All nine points remain at or below the designed crossover — the loop is "
+         "verified across the part's real inductance swing."
+         if ok_all else
+         "One or more points exceed the design-basis crossover — review the inductance "
+         "basis passed to the control design."), C6)
+
+
 def build_story(inp: dict | None = None):
     """Assemble the full Steps 1–14 + Appendices control-design story.
 
@@ -681,6 +735,7 @@ def build_story(inp: dict | None = None):
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
+    _build_asbuilt_L_section(story, inp or {}, prior)
     build_step9(story, compute_step9_bibo(inp))
     build_step10(story, compute_step10_iloop(inp, prior))
     build_step11(story, compute_step11_vloop(inp, prior))

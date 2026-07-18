@@ -80,9 +80,22 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   const isMedical = ((intake.compliance as any)?.application_class ?? '') === 'Medical'
   const fsw_Hz   = Number(tsi.recommended_frequency_hz ?? 70000)
   const L_uH     = Number(tsi.confirmed_L_uH_sel ?? tsi.recommended_L_uH ?? 240)
-  const Irms     = Number(tsi.Iph_rms_A ?? 10.07)
-  const Ipk      = Number(tsi.Ipk_ph_A ?? 16.73)
-  const dIL      = Number(tsi.dIL_pp_A ?? 5.161)
+  // All currents derive from the design's own confirmed mini-intake chain — the
+  // canonical keys (Iph_rms_A/Ipk_ph_A/dIL_pp_A) are written by the backend at
+  // mini-intake submit; the secondary fallbacks derive from the confirmed values
+  // and the intake spec, never from reference-design constants.
+  const nPhGui   = Number((confirmedState as any)?.selected_channels ?? 2)
+  const vinMinW  = Number((intake.application as any)?.vin_rms_min ?? 90)
+  const voutW    = Number((intake.application as any)?.output_bus_voltage_v ?? 393)
+  const _vpkW    = vinMinW * Math.SQRT2
+  const _dilCalc = _vpkW * Math.max(0.001, 1 - _vpkW / voutW) / (L_uH * 1e-6 * fsw_Hz)
+  const dIL      = Number(tsi.dIL_pp_A ?? tsi.confirmed_dIL_A ?? _dilCalc)
+  // line input peak at min Vin, derived from the intake spec if the confirmed key is absent
+  const _poutLo  = Number((intake.application as any)?.output_power_w_low_line ?? 1700)
+  const _iinPkW  = Number(tsi.confirmed_Iin_pk_A ??
+                     (Math.SQRT2 * (_poutLo / 0.945) / (vinMinW * 0.9987)))
+  const Ipk      = Number(tsi.Ipk_ph_A ?? (_iinPkW / nPhGui + dIL / 2))
+  const Irms     = Number(tsi.Iph_rms_A ?? (_iinPkW / nPhGui / Math.SQRT2))
 
   const [sub,   setSub]   = useState<SubStep>('material')
   const [loading,setLoad] = useState(false)
@@ -144,6 +157,10 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   useEffect(() => {
     if (sub !== 'powder_rank') return
     setLoad(true); setErr([])
+    // Ipk/dIL/L come from the design's own mini-intake chain. Bac_pk_T and
+    // Le_single_m are REPRESENTATIVE comparison-point constants for the relative
+    // grade ranking only (no core exists yet — actual Bac/Le are core-specific
+    // and computed per candidate by the sizing engine at the next gate).
     step7PowderRanking({
       fsw_Hz, Bac_pk_T: 0.054, T_operating_C: 100.0,
       Ipk_A: Ipk, dIL_pp_A: dIL, Le_single_m: 0.0655, L_target_uH: L_uH, mu: 60
@@ -193,10 +210,9 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
     if (sub !== 'wire') return
     setLoad(true)
     const nPar = winding==='bifilar'?2:winding==='trifilar'?3:1
-    // Crest ripple: r = dIL_pp / Ipk at line crest. IL_HF_rms = dIL_pp/(2√3)
-    const dIL_pp  = parseFloat((sub as any)?.topology_specific_inputs?.dIL_pp_A
-                    ?? (sub as any)?.dIL_pp_A ?? 5.161)
-    const IL_HF_rms = dIL_pp / (2 * Math.sqrt(3))
+    // Crest ripple from the design's own chain (the old code read tsi off the wizard
+    // step STRING — always undefined — and silently used a 5.161 A reference constant).
+    const IL_HF_rms = dIL / (2 * Math.sqrt(3))
     step7WireOptions({ wire_type: wireType, IL_rms_A: Irms/nPar,
       IL_HF_rms_A: IL_HF_rms,
       fsw_Hz, T_C:100.0, J_target: jTarget, n_options:50 })
@@ -859,10 +875,12 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                 )}
                 <div style={{marginTop:10,padding:'8px 12px',background:C.bg3,borderRadius:8,
                   fontSize:10,color:C.muted,lineHeight:1.7}}>
-                  <strong style={{color:C.text}}>How agent selects AL:</strong> N = ceil(√(L_target / AL_nom)).
-                  Then iterates: H_Oe = N × I_dc / Le / 79.577 → k_bias = DC bias rolloff at H_Oe →
-                  check N² × AL_min × k_bias ≥ 0.85 × L_target. If not, N++ and repeat.
-                  AL_min (worst tolerance) ensures the design holds under production spread.
+                  <strong style={{color:C.text}}>How the engine selects N:</strong> per-point convergence —
+                  at each of the 9 operating points the bias field H and retention k(H) are evaluated,
+                  and N is the smallest turns count whose as-built NOMINAL inductance
+                  N² × AL_nom × k(H_i) meets that point&apos;s own requirement L_req(V_i)
+                  (zero added margin — the design runs at the selected ripple ratio).
+                  The ±AL tolerance band is reported alongside for production spread.
                 </div>
               </div>
             )}
@@ -1040,13 +1058,18 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   ['AL nom (total ×'+String(result.stacks??1)+')',`${Math.round((result.AL_nom_nH??0)*(result.stacks??1))} nH/T²`],
                   ['AL tolerance',       `±${result.AL_tol_pct?.toFixed(0) ?? '8'}%`],
                   ['L no-load (H=0)',    `${result.L_no_load_uH ?? L_uH} µH`],
-                  // Per-operating-point L_full_nom and L_margin from L_vs_Vin_table
+                  // Per-operating-point delivered L_full vs the REQUIRED L at that same
+                  // point (backend L_req_uH — the L that holds the selected ripple ratio
+                  // there; largest at the governing corner, wherever the spec puts it).
+                  // Comparing every row against the single worst-case target made the
+                  // delivered value at light-bias points look disconnected from §3.1.1.
                   ...((result.L_vs_Vin_table ?? []) as any[]).map((r:any) => {
                     const Lnom = Math.round(r.L_full_nom_uH ?? 0)
-                    const diff = Lnom - L_uH
-                    const pct  = Lnom > 0 ? ((Lnom / L_uH - 1) * 100).toFixed(0) : '—'
+                    const req  = r.L_req_uH != null ? Math.round(r.L_req_uH) : L_uH
+                    const diff = Lnom - req
+                    const pct  = req > 0 ? ((Lnom / req - 1) * 100).toFixed(0) : '—'
                     const col  = diff >= 0 ? 'L_full@'+r.Vin_rms+'Vac ✓' : 'L_full@'+r.Vin_rms+'Vac'
-                    const val  = `${Lnom} µH  (${diff >= 0 ? '+' : ''}${diff}µH / ${diff >= 0 ? '+' : ''}${pct}%)`
+                    const val  = `${Lnom} µH ≥ req ${req} µH  (${diff >= 0 ? '+' : ''}${pct}%)`
                     return [col, val] as [string, string]
                   }),
                   ['L variation (no-load→full-load)', `−${result.L_variation_pct ?? '—'}%`],
@@ -1070,6 +1093,21 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                     </div>
                   )
                 })}
+                {(() => {
+                  // governing corner derived from the table itself — never hardcoded
+                  const lvt = (result.L_vs_Vin_table ?? []) as any[]
+                  const withReq = lvt.filter((r:any) => r.L_req_uH != null)
+                  if (!withReq.length) return null
+                  const gov = withReq.reduce((a:any,b:any) => (b.L_req_uH > a.L_req_uH ? b : a))
+                  return (
+                    <div style={{marginTop:8,fontSize:10,color:C.hint,lineHeight:1.5}}>
+                      The required L varies with input voltage — largest at{' '}
+                      <b style={{color:C.text}}>{gov.Vin_rms} Vac ({Math.round(gov.L_req_uH)} µH)</b>,
+                      the governing corner. Delivered L_full is higher at light DC bias, so margins
+                      above the per-point requirement are expected and not an inconsistency.
+                    </div>
+                  )
+                })()}
                 {(()=>{
                   const kActual = result.kbias ?? result.kreq_nom ?? 0.8
                   return (

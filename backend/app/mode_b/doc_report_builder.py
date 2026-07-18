@@ -735,7 +735,6 @@ def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIS
         ipk_l  = math.sqrt(2) * pin / (vin * PF)
         iph_rms = float(ops_design[i, 4])
         iph_pk  = ipk_l / n_ph
-        dIL     = vin_pk * D / (fsw * pout / eta / (vin * PF) / n_ph * math.sqrt(2) * 0.001)
         rows.append({"Vin": vin, "Vout": vout, "Pout": pout, "Vin_pk": vin_pk,
                      "D": D, "KD": KD, "Ipk_line": ipk_l,
                      "Iph_rms": iph_rms, "Iph_pk": iph_pk})
@@ -846,7 +845,7 @@ def _ch1(story, state):
     annotation(story, "DECISION",
         "Electrical specification accepted as-is. No derived adjustments. "
         "The inductance is sized for the worst-case crest ripple ratio across ALL nine "
-        "operating points — the governing corner is identified in Section 3.2.4 (it is "
+        "operating points — the governing corner is identified in Section 3.5.4 (it is "
         "often a high-line point, where the interleave ripple cancellation is weakest, "
         "not necessarily the maximum-duty low-line corner).", 1)
 
@@ -1309,7 +1308,9 @@ def _ch2(story, state):
                 f"{int(Pout[i])}", f"{eta[i]:.3f}", f"{PF[i]:.4f}",
                 f"{Pin[i]:.3f}", f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}"] for i in range(n2)]
     data_table(story, "2.7.2", "Input Parameters and Duty Cycle — All Nine Operating Points",
-        "D<sub>pk</sub> is maximum at 90 V<sub>rms</sub> (amber row) — this corner governs inductor sizing.",
+        "D<sub>pk</sub> and the input currents are maximum at 90 V<sub>rms</sub> (amber row) — "
+        "the maximum-current corner. (The inductance requirement is governed by the worst "
+        "ripple-ratio corner, identified in Section 3.1.)",
         ["V<sub>in,rms</sub> (V)", "V<sub>in,pk</sub> (V)", "D<sub>pk</sub>",
          "P<sub>out</sub> (W)", "η", "PF", "P<sub>in</sub> (W)",
          "I<sub>in,rms</sub> (A)", "I<sub>in,pk</sub> (A)"],
@@ -1390,28 +1391,30 @@ def _ch2(story, state):
     step_h(story, "2.8", "Architecture Summary", 2)
 
     sub_h(story, "2.8.1", "Key design constants", 2)
-    vin_pk_90 = vin_min * math.sqrt(2)
-    D_90      = max(0.001, 1 - vin_pk_90 / vout)
-    eta_90    = float(OPS[0, 2]); PF_90 = float(OPS[0, 3])
-    pin_90    = pout_lo / eta_90
-    ipk_line  = math.sqrt(2) * pin_90 / (vin_min * PF_90)
-    iph_rms   = ipk_line / n_ph / math.sqrt(2) * math.sqrt(math.pi/2) * 0.98
-    dIL_pp    = vin_pk_90 * D_90 / (fsw * L_tgt * 1e-6)
-
+    # SAME canonical chain as every other table (report notes 2026-07-18 #1/#2):
+    # the old block computed I_φ,rms from a deprecated sinusoidal approximation
+    # (ipk/nph/√2·√(π/2)·0.98, ~+21% off) and listed inductance/ripple rows that
+    # do not exist yet in Chapter 2 (L is derived in Chapter 3) — both removed.
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest, _eta_target(state))
+    iph_lf_90  = float(Iin_rms[0]) / n_ph              # line-frequency component
     data_table(story, "2.8.1", "Architecture Constants — All Downstream Chapters Reference",
-        "These values are derived from Sections 2.1–2.7 and locked at this point.",
+        "These values are derived from Sections 2.1–2.7 and locked at this point. "
+        "All current figures come from the same canonical calculation chain as "
+        "Tables 2.7.2 and 2.8.2. (The target inductance does not exist yet — it is "
+        "derived in Chapter 3 from the crest ripple ratio r; HF-ripple-dependent "
+        "currents are therefore computed in Section 3.5, after the inductance is known.)",
         ["Parameter", "Symbol", "Value", "Unit"],
         [
             ["DC bus voltage",               "V<sub>out</sub>",       f"{vout:.0f}",       "V<sub>dc</sub>"],
             ["Switching frequency",          "f<sub>sw</sub>",        f"{fsw/1e3:.0f}",    "kHz"],
             ["Phase count",                  "N<sub>ph</sub>",        str(n_ph),           "—"],
-            ["Target inductance per phase",  "L<sub>φ,target</sub>",  f"{L_tgt:.0f}",      "µH"],
-            ["Crest ripple ratio",           "r",                     f"{crest:.2f}",      "—"],
-            ["Peak input voltage (90 Vac)",  "V<sub>in,pk</sub>",     f"{vin_pk_90:.4f}",  "V"],
-            ["Duty cycle at 90 Vac crest",   "D<sub>pk,90</sub>",     f"{D_90:.4f}",       "—"],
-            ["Per-phase peak current",       "I<sub>φ,pk</sub>",      f"{ipk_line/n_ph:.4f}", "A"],
-            ["Per-phase RMS current",        "I<sub>φ,rms</sub>",     f"{iph_rms:.4f}",    "A"],
-            ["Inductor ripple pk-pk (90 Vac)","ΔI<sub>L,pp</sub>",   f"{dIL_pp:.4f}",     "A"],
+            ["Crest ripple ratio (designer)","r",                     f"{crest:.2f}",      "—"],
+            ["Peak input voltage (90 Vac)",  "V<sub>in,pk</sub>",     f"{Vin_pk[0]:.4f}",  "V"],
+            ["Duty cycle at 90 Vac crest",   "D<sub>pk,90</sub>",     f"{Dpk[0]:.4f}",     "—"],
+            ["Per-phase crest current (excl. HF ripple)",
+                                             "I<sub>φ,crest</sub>",   f"{Iin_pk[0]/n_ph:.4f}", "A"],
+            ["Per-phase RMS current (LF component)",
+                                             "I<sub>φ,LF</sub>",      f"{iph_lf_90:.4f}",  "A"],
         ],
         col_widths=[CW*0.38, CW*0.15, CW*0.17, CW*0.30], ch=2)
 
@@ -1422,24 +1425,26 @@ def _ch2(story, state):
         "K(D) = 1 means no cancellation (same as single-phase). "
         "For 2-phase interleaving: K(D) = |2D−1|/max(D,1−D).", 2)
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest, _eta_target(state))
     kd_rows = []
-    for op in ops_all:
+    for i, op in enumerate(ops_all):
+        _lf = float(Iin_rms[i]) / n_ph
         kd_rows.append([
             f"{op['Vin']:.0f}",
             f"{op['Pout']:.0f}",
             f"{op['Vin_pk']:.3f}",
             f"{op['D']:.4f}",
             f"{op['KD']:.4f}",
-            f"{op['Iph_rms']:.4f}",
+            f"{_lf:.4f}",
         ])
-    data_table(story, "2.8.2", "K(D) and Per-Phase Currents — All Nine Operating Points",
-        "This table is used directly in Section 3.2 ripple analysis. "
-        "Amber row = worst-case inductor sizing corner (90 V<sub>rms</sub>).",
+    data_table(story, "2.8.2", "K(D) and Per-Phase LF Currents — All Nine Operating Points",
+        "This table is used directly in Section 3.5 ripple analysis. "
+        "Amber row = 90 V<sub>rms</sub> maximum-current corner. Only the "
+        "line-frequency component I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub> is "
+        "stated here — the HF ripple depends on the inductance, which does not exist yet.",
         ["V<sub>in,rms</sub> (V)", "P<sub>out</sub> (W)", "V<sub>in,pk</sub> (V)",
-         "D@crest", "K(D)", "I<sub>φ,rms</sub> (A)"],
+         "D@crest", "K(D)", "I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub> (A)"],
         kd_rows,
-        col_widths=[CW*0.12, CW*0.10, CW*0.14, CW*0.14, CW*0.14, CW*0.36],
+        col_widths=[CW*0.13, CW*0.11, CW*0.14, CW*0.13, CW*0.13, CW*0.36],
         worst_rows=[0], ch=2,
         interpretation=(
             f"K(D) minimum occurs near V<sub>in,rms</sub> = {vout/2/math.sqrt(2):.0f} V "
@@ -1449,6 +1454,23 @@ def _ch2(story, state):
             f"{ops_all[0]['KD']:.4f} — only "
             f"{ops_all[0]['KD']*100:.1f}% of per-phase ripple reaches the input filter."
         ))
+
+    # Designer note (report notes 2026-07-18 #1): the HF component depends on the
+    # inductance, which is derived in Chapter 3 — only the LF share is stated here.
+    _lf0 = float(Iin_rms[0]) / n_ph
+    eq_box(story, [
+        rf"I_{{\phi,LF}} = \dfrac{{I_{{in,rms}}}}{{N_{{ph}}}} = \dfrac{{{Iin_rms[0]:.4f}}}{{{n_ph}}} = {_lf0:.4f}\ \mathrm{{A}}\quad({int(Vin_rms[0])}\ \mathrm{{V_{{ac}}}})",
+    ], heading=f"Worked example — line-frequency per-phase share at {int(Vin_rms[0])} Vac", ch=2)
+    annotation(story, "NOTE",
+        "The total per-phase RMS current is I<sub>φ,rms</sub> = "
+        "√(I<sub>φ,LF</sub>² + I<sub>φ,HF</sub>²): each phase carries the LINE-FREQUENCY "
+        "share I<sub>in,rms</sub>/N<sub>ph</sub> PLUS its full switching ripple — "
+        "interleave cancellation reduces only the summed input current, never the "
+        "individual phase current, which is why I<sub>φ,rms</sub> will sit slightly above "
+        "I<sub>in,rms</sub>/2. The amount of HF ripple is set by the inductance at each "
+        "operating voltage, f<sub>sw</sub> and the duty cycle — the inductance is not yet "
+        "determined at this point, so the actual value is calculated in Section 3.5 with "
+        "the as-built inductance of the selected core.", 2)
 
     # K(D) plot
     vins_plot = np.linspace(vin_min*0.95, vin_max*1.05, 400)
@@ -1611,7 +1633,6 @@ def _ch3(story, state, d):
     iph_pk_g = ipk_line_g / n_ph
     dIin_g   = float(_s4g["dIin_ref"]);    dIL_g  = float(_s4g["dIL_ref"])
     L_calc   = float(_s4g["L_calc"]) * 1e6
-    L_ceil   = math.ceil(L_calc / 5) * 5
     Ae_m2       = Ae_mm2 * 1e-6
     dBpp        = vin_pk_90 * D_90 / (N * Ae_m2 * fsw) if N and Ae_m2 else Bac_pk*2
     Bac_val     = dBpp / 2
@@ -1628,11 +1649,11 @@ def _ch3(story, state, d):
 
     chapter_splash(story, 3, "PFC Inductor Sizing",
         "What inductance and winding do we need?",
-        ["3.1 Design requirements — inductance derivation and per-phase operating currents",
-         "3.2 Ripple, current, and duty-cycle analysis — Steps 4-12.5 in full detail",
-         "3.3 Core material selection — powder vs ferrite, soft saturation, Steinmetz model",
-         "3.4 Core geometry selection — sizing engine, candidate table, selected core",
-         "3.5 Winding design — wire type, skin depth, turns, fill factor",
+        ["3.1 Design requirements — per-point inductance requirement and operating currents",
+         "3.2 Core material selection — powder vs ferrite, soft saturation, Steinmetz model",
+         "3.3 Core geometry selection — sizing engine, candidate table, selected core",
+         "3.4 Winding design — wire, per-point turns convergence, as-built L vs Vin",
+         "3.5 Ripple, current, and duty-cycle analysis — AS BUILT, matches lab measurement",
          "3.6 First-pass loss and thermal — all 9 operating points",
          "3.7 Sizing summary — approved design, margins, correction log"])
 
@@ -1651,7 +1672,33 @@ def _ch3(story, state, d):
         "although the volt-second product V<sub>in,pk</sub>·D peaks at low line, the "
         f"{n_ph}-phase interleaving cancellation K(D) is weakest at the low duty of the "
         "high-line points, so more of the per-phase ripple reaches the input there. "
-        "Steps 1–6 below are therefore evaluated at the governing corner.", 3)
+        "Table 3.1.1a evaluates the requirement at every point; Steps 1–6 below then "
+        "walk the governing row in full.", 3)
+
+    # Table 3.1.1a — the requirement at ALL nine points (report notes #5): shows
+    # WHY the governing corner is what it is before the step-by-step derivation.
+    _Lpp9 = _s4g.get("L_per_point_uH") or []
+    if len(_Lpp9) == len(_s2g["Vin_rms"]):
+        _rq_rows = []
+        for i in range(len(_Lpp9)):
+            _rq_rows.append([
+                f"{float(_s2g['Vin_rms'][i]):.0f}", f"{float(_s2g['Pout'][i]):.0f}",
+                f"{float(_s2g['Vin_pk'][i]):.2f}", f"{float(_s2g['Dpk'][i]):.4f}",
+                f"{float(_s2g['KDpk'][i]):.4f}", f"{float(_s2g['Iin_pk'][i]):.3f}",
+                f"{r_input * float(_s2g['Iin_pk'][i]):.3f}", f"{float(_Lpp9[i]):.1f}",
+            ])
+        data_table(story, "3.1.1a",
+            "Per-Point Inductance Requirement — All Nine Operating Points",
+            f"For each point: duty and cancellation K(D) at the crest, allowed input ripple "
+            f"ΔI<sub>in,allow</sub> = r·I<sub>in,pk</sub> (r = {r_input*100:.1f}%), and the "
+            "inductance L<sub>req</sub> needed to hold it. The maximum L<sub>req</sub> "
+            "(amber row) governs the design.",
+            ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)", "V<sub>pk</sub> (V)", "D@crest",
+             "K(D)", "I<sub>in,pk</sub> (A)", "ΔI<sub>in,allow</sub> (A)",
+             "L<sub>req</sub> (µH)"],
+            _rq_rows,
+            col_widths=[CW*0.10, CW*0.11, CW*0.12, CW*0.12, CW*0.12, CW*0.14, CW*0.15, CW*0.14],
+            worst_rows=[_g], ch=3)
 
     eq_box(story, [
         r"V_{in,pk} = \sqrt{2}\, V_{in,rms}",
@@ -1682,53 +1729,58 @@ def _ch3(story, state, d):
     eq_box(story, [
         r"L_{target} = \dfrac{V_{in,pk}\, D_{pk}}{f_{sw}\, \Delta I_{L,target}}",
         rf"L_{{target}} = \dfrac{{{vin_pk_g:.4f} \times {D_g:.4f}}}{{{fsw:.0f} \times {dIL_g:.4f}}} "
-        rf"= {L_calc:.2f}\ \mu\mathrm{{H}} \;\Rightarrow\; {L_ceil:.0f}\ \mu\mathrm{{H}}\ (\mathrm{{next}}\ 5\ \mu\mathrm{{H}}\ \mathrm{{step}})",
-    ], heading="Step 6 — Target inductance (rounded UP to the next 5 µH step)", number="3.1-6", ch=3)
+        rf"= {L_calc:.2f}\ \mu\mathrm{{H}}\quad(\mathrm{{exact\ —\ no\ rounding}})",
+    ], heading="Step 6 — Target inductance (exact calculated value)", number="3.1-6", ch=3)
     annotation(story, "DECISION",
-        f"Target inductance: <b>L<sub>φ,target</sub> = {L_tgt:.0f} µH</b> per phase. "
-        f"Calculated {L_calc:.2f} µH at the governing corner "
-        f"({vin_g:.0f} V<sub>ac</sub> / {pout_g:.0f} W), rounded UP to the next 5 µH step "
-        f"({L_ceil:.0f} µH; {(L_tgt/L_calc-1)*100:.1f}% margin over minimum). "
-        "Rounding up guarantees the ripple-ratio ceiling holds at the governing corner; "
-        "Section 3.2.4 verifies the ratio at all nine points with this value.", 3)
+        f"Input current ripple ratio at the crest (r) selected by designer = "
+        f"<b>{r_input*100:.1f}%</b>. "
+        f"Target inductance requirement: <b>L<sub>φ,target</sub> = {L_calc:.2f} µH</b> per "
+        f"phase, at the governing corner ({vin_g:.0f} V<sub>ac</sub> / {pout_g:.0f} W) — the "
+        "exact calculated value, with no rounding step: the integer turns count of the "
+        "selected core is the only physical quantization (Section 3.4.3), and "
+        "Section 3.5.4 verifies the ripple ratio at all nine points with the as-built "
+        "inductance the converged turns actually deliver.", 3)
 
-    sub_h(story, "3.1.2", "Per-phase operating currents — I_pk and I_rms at all 9 points", 3)
+    sub_h(story, "3.1.2", "Per-phase operating currents — all 9 points (inductance-independent)", 3)
     annotation(story, "CONCEPT",
         "The per-phase currents at all nine operating points determine winding loss, "
-        "current density, and the window fill factor. "
-        "I<sub>φ,rms</sub> drives copper loss; I<sub>φ,pk</sub> drives saturation risk.", 3)
+        "current density, and the window fill factor. Only INDUCTANCE-INDEPENDENT "
+        "quantities are stated here — the ripple-dependent values (ΔI<sub>L,pp</sub>, "
+        "I<sub>φ,pk</sub> incl. ripple, HF RMS) are determined by the AS-BUILT per-point "
+        "inductance of the selected core, which does not exist yet; they are computed in "
+        "Section 3.5 after core, turns and winding are finalized.", 3)
 
-    body(story,
-        "Table 3.1.1 is the operating-point table used throughout Sections 3.6 and 3.7 "
-        "for loss calculations. It also feeds Chapter 4 performance analysis.", 3)
-
+    # per-point-correct chain (each row uses its OWN η/PF — report notes #3: the old
+    # table applied the 90 Vac corner's η/PF to every row)
     op_rows = []
-    worst_op = 0
-    for i, op in enumerate(ops_all):
-        pin_i   = op["Pout"] / eta
-        ipk_i   = math.sqrt(2) * pin_i / (op["Vin"] * PF)
-        iavg_i  = ipk_i / (2*n_ph)
-        iph_rms_i = op["Iph_rms"]
-        dIL_i   = op["Vin_pk"]*op["D"]/(fsw*L_tgt*1e-6) if L_tgt else 0
+    for i in range(len(_s2g["Vin_rms"])):
+        _vin_i = float(_s2g["Vin_rms"][i]); _pout_i = float(_s2g["Pout"][i])
+        _iinr_i = float(_s2g["Iin_rms"][i]); _iinp_i = float(_s2g["Iin_pk"][i])
         op_rows.append([
-            f"{op['Vin']:.0f}",
-            f"{op['Pout']:.0f}",
-            f"{op['Vin_pk']:.3f}",
-            f"{op['D']:.4f}",
-            f"{iavg_i:.4f}",
-            f"{iph_rms_i:.4f}",
-            f"{ipk_i/n_ph:.4f}",
-            f"{dIL_i:.4f}",
+            f"{_vin_i:.0f}", f"{_pout_i:.0f}",
+            f"{float(_s2g['eta'][i]):.3f}", f"{float(_s2g['PF'][i]):.4f}",
+            f"{float(_s2g['Vin_pk'][i]):.3f}", f"{float(_s2g['Dpk'][i]):.4f}",
+            f"{_iinr_i:.4f}", f"{_iinr_i/n_ph:.4f}", f"{_iinp_i/(2*n_ph):.4f}",
         ])
     data_table(story, "3.1.1", "Per-Phase Operating Currents — All 9 Input Voltages",
-        "Amber row = worst-case for inductor sizing (90 V<sub>rms</sub>). "
-        "I<sub>φ,avg@crest</sub> = I<sub>pk,line</sub> / (2 × N<sub>ph</sub>).",
-        ["V<sub>in,rms</sub> (V)", "P<sub>out</sub> (W)", "V<sub>in,pk</sub> (V)",
-         "D@crest", "I<sub>φ,avg@crest</sub> (A)", "I<sub>φ,rms</sub> (A)",
-         "I<sub>φ,pk</sub> (A)", "ΔI<sub>L,pp</sub> (A)"],
+        "Amber row = 90 V<sub>rms</sub> maximum-current corner. Every row uses its own "
+        "point's η/PF from Table 1.2.2 — same canonical chain as Tables 2.7.2/2.8.2. "
+        "I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub>; "
+        "I<sub>φ,avg@crest</sub> = I<sub>in,pk</sub>/(2·N<sub>ph</sub>).",
+        ["V<sub>in,rms</sub> (V)", "P<sub>out</sub> (W)", "η", "PF",
+         "V<sub>in,pk</sub> (V)", "D@crest", "I<sub>in,rms</sub> (A)",
+         "I<sub>φ,LF</sub> (A)", "I<sub>φ,avg@crest</sub> (A)"],
         op_rows,
-        col_widths=[CW*0.09,CW*0.09,CW*0.10,CW*0.09,CW*0.14,CW*0.12,CW*0.12,CW*0.25],
+        col_widths=[CW*0.10,CW*0.09,CW*0.08,CW*0.09,CW*0.11,CW*0.10,CW*0.14,CW*0.14,CW*0.15],
         worst_rows=[0], ch=3)
+    # Worked example at the maximum-current corner (report notes: show the steps)
+    eq_box(story, [
+        rf"P_{{in}} = \dfrac{{P_{{out}}}}{{\eta}} = \dfrac{{{float(_s2g['Pout'][0]):.0f}}}{{{float(_s2g['eta'][0]):.3f}}} = {float(_s2g['Pin'][0]):.2f}\ \mathrm{{W}}",
+        rf"I_{{in,rms}} = \dfrac{{P_{{in}}}}{{V_{{in}}\,\mathrm{{PF}}}} = \dfrac{{{float(_s2g['Pin'][0]):.2f}}}{{{float(_s2g['Vin_rms'][0]):.0f} \times {float(_s2g['PF'][0]):.4f}}} = {float(_s2g['Iin_rms'][0]):.4f}\ \mathrm{{A}}",
+        rf"I_{{\phi,LF}} = \dfrac{{{float(_s2g['Iin_rms'][0]):.4f}}}{{{n_ph}}} = {float(_s2g['Iin_rms'][0])/n_ph:.4f}\ \mathrm{{A}},\qquad "
+        rf"I_{{\phi,avg@crest}} = \dfrac{{\sqrt{{2}} \times {float(_s2g['Iin_rms'][0]):.4f}}}{{2 \times {n_ph}}} = {float(_s2g['Iin_pk'][0])/(2*n_ph):.4f}\ \mathrm{{A}}",
+    ], heading=f"Worked example — row 1 ({float(_s2g['Vin_rms'][0]):.0f} Vac / "
+               f"{float(_s2g['Pout'][0]):.0f} W), reproducible by hand", ch=3)
 
     sub_h(story, "3.1.3", "DC bias current at crest", 3)
     body(story,
@@ -1739,26 +1791,16 @@ def _ch3(story, state, d):
         "used in the inductance retention model (Section 3.4).", 3)
 
     sub_h(story, "3.1.4", "Current density target", 3)
+    _Jtgt14 = float(d.get("J_target_A_mm2", 0) or 0)
     annotation(story, "DECISION",
-        "Current density target: <b>J<sub>target</sub> = 3–7 A/mm²</b>. "
-        "Lower J → larger wire → higher fill factor → fewer turns fit in the window. "
+        ("Current density target selected by designer: "
+         f"<b>J<sub>target</sub> ≤ {_Jtgt14:.1f} A/mm²</b>. " if _Jtgt14 else
+         "Current density target: <b>J<sub>target</sub> = 3–7 A/mm²</b>. ")
+        + "Lower J → larger wire → higher fill factor → fewer turns fit in the window. "
         "Higher J → smaller wire → lower fill factor → more loss. "
         "The selected wire achieves J = "
         + (f"{J_Amm2:.2f} A/mm²" if J_Amm2 else "— (from winding design).")
-        + " (Section 3.5).", 3)
-
-    # ════════════════════════════════════════════════════════
-    # 3.2 RIPPLE AND INTERLEAVING ANALYSIS
-    # ════════════════════════════════════════════════════════
-    step_h(story, "3.2", "Ripple, Current, and Duty-Cycle Analysis", 3)
-    annotation(story, "CONCEPT",
-        "Section 3.2 carries the full ripple-and-current analysis chain that fixes "
-        "the inductor's electrical operating envelope: sizing L<sub>φ</sub> at the "
-        "worst-case low-line corner, computing per-phase RMS currents and crest "
-        "ripple, mapping ripple against line angle, locating the worst-case line "
-        "angle, and constructing the complete time-domain current and ripple "
-        "waveforms — per phase and at the input — across the half line cycle for "
-        "the low-line and high-line operating families.", 3)
+        + " (Section 3.4.7).", 3)
 
     OPS3 = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
     s2x = step2_input_params(vout, OPS3)
@@ -1769,9 +1811,10 @@ def _ch3(story, state, d):
 
     s4x = step4_inductance(s2x, r_input, fsw, vout)
     L_phi_calc = s4x["L_calc"]
-    # ceil to the 5 µH grid: rounding DOWN would put r_act above the designer's
-    # ceiling at the governing point, failing the very criterion L was sized for.
-    L_phi  = math.ceil(L_phi_calc * 1e6 / 5) * 5 * 1e-6
+    # exact requirement — the 5 µH grid is retired from sizing (integer N is the
+    # only quantization); L_phi is the requirement-curve maximum, used only as the
+    # fallback basis when the approved design carries no as-built table.
+    L_phi  = L_phi_calc
     ref9   = s4x["ref_idx"]
 
     IL_rms = np.zeros(n9); IL_LF = np.zeros(n9); IL_HF = np.zeros(n9); dIL_crest = np.zeros(n9)
@@ -1787,540 +1830,46 @@ def _ch3(story, state, d):
     Vin_w = s78x["Vin_w"]; D_w = s78x["D_w"]
     t1_ms = s78x["t1_ms"]; t2_ms = s78x["t2_ms"]
     dIL_max = s78x["dIL_max"]
+
+    # ── AS-BUILT override (designer decision 2026-07-17) ─────────────────────
+    # The approved design carries the converged per-point inductance of the BUILT
+    # part (L_vs_Vin_table, nominal A_L). Every L-dependent figure below — ripple
+    # tables, worst-case-angle magnitudes, per-phase/input waveforms, HF RMS — is
+    # recomputed with the point's own as-built L, so the analysis matches what a
+    # lab measurement shows. Without the table (legacy payload) the constant
+    # requirement-maximum L_phi remains as a conservative envelope.
+    _lvt_ab = [r for r in (d.get("L_vs_Vin_table") or []) if r.get("dIL_pp_A") is not None]
+    L_ab_uH = None
+    if len(_lvt_ab) == n9:
+        L_ab_uH    = np.array([float(r["L_full_nom_uH"]) for r in _lvt_ab])
+        dIL_crest  = np.array([float(r["dIL_pp_A"])      for r in _lvt_ab])
+        dIin_crest = np.array([float(r["dIin_pp_A"])     for r in _lvt_ab])
+        r_act      = np.array([float(r["r_act_pct"]) / 100.0 for r in _lvt_ab])
+        Iph_pk     = Iin_pk / 2 + dIL_crest / 2
+        for i in range(n9):
+            IL_rms[i], IL_LF[i], IL_HF[i], _ = step5_phase_rms(
+                Vin_pk[i], Iin_pk[i], L_ab_uH[i] * 1e-6, fsw, vout)
+        # worst-case-angle ripple magnitudes with the as-built per-point L
+        dIL_max = Vin_w * D_w / (L_ab_uH * 1e-6 * fsw)
+
+    def L_pt(i):
+        """Per-point inductance basis: as-built nominal when available, else target."""
+        return (L_ab_uH[i] * 1e-6) if L_ab_uH is not None else L_phi
+
     dIL_max_global = float(np.max(dIL_max))
+    _bind9 = int(np.argmax(r_act))     # as-built binding point (worst actual ripple ratio)
 
     LLOW  = [i for i,v in enumerate(Vin_rms) if v <= 132]
     LHIGH = [i for i,v in enumerate(Vin_rms) if v >= 180]
     def _vc(i): return VAC_COLORS.get(int(Vin_rms[i]), "#1f77b4")
     fig_n = 0
 
-    # ── 3.2.1 — Lphi sizing at the worst-case ripple corner (Step 4) ─────────
-    sub_h(story, "3.2.1", "Lφ sizing at the worst-case ripple-ratio corner", 3)
-    annotation(story, "DECISION",
-        f"Input current ripple ratio at the crest (r) selected by designer = "
-        f"<b>{r_input*100:.1f}%</b>. The inductance is sized so that "
-        "ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> ≤ r at EVERY one of the nine operating "
-        "points — the required L is evaluated at each point and the maximum governs. "
-        f"Governing point: <b>{int(Vin_rms[ref9])} V<sub>ac</sub> / "
-        f"{int(Pout[ref9])} W</b> (interleave cancellation K(D) is weakest there, "
-        "so it demands the most inductance — not necessarily the 90 V maximum-duty corner).", 3)
-    body(story,
-        f"Governing corner: {int(Vin_rms[ref9])} V<sub>ac</sub>, "
-        f"V<sub>out</sub> = {vout:.1f} V<sub>dc</sub>, "
-        f"f<sub>sw</sub> = {fsw/1e3:.0f} kHz, r = {r_input*100:.1f} %.", 3)
-    eq_box(story, [
-        r"\Delta I_{in,pp} = r\, I_{in,pk}",
-        rf"\Delta I_{{in,pp}} = {r_input} \times {Iin_pk[ref9]:.4f} = {s4x['dIin_ref']:.4f}\ \mathrm{{A}}",
-    ], heading="Input ripple current at the crest", number="4.1", ch=3)
-    eq_box(story, [
-        r"\Delta I_{L,pp} = \dfrac{\Delta I_{in,pp}}{K(D_{pk})}",
-        rf"\Delta I_{{L,pp}} = \dfrac{{{s4x['dIin_ref']:.4f}}}{{{KDpk[ref9]:.6f}}} = {s4x['dIL_ref']:.4f}\ \mathrm{{A}}",
-    ], heading="Per-phase inductor ripple current", number="4.2", ch=3)
-    eq_box(story, [
-        r"L_\phi = \dfrac{V_{in,pk}\, D_{pk}}{\Delta I_{L,pp}\, f_{sw}}",
-        rf"L_\phi = {L_phi_calc*1e6:.2f}\ \mathrm{{\mu H}}",
-    ], heading="Target per-phase inductance", number="4.3", ch=3)
-    data_table(story, "3.2.1", "Lφ Sizing Result — Low-Line Full Load", "",
-        ["Quantity", "Value"],
-        [
-            ["V<sub>in,pk</sub>",      f"{Vin_pk[ref9]:.4f} V"],
-            ["D<sub>pk</sub>",         f"{Dpk[ref9]:.6f}"],
-            ["ΔI<sub>in,pp</sub>",     f"{s4x['dIin_ref']:.4f} A"],
-            ["K(D<sub>pk</sub>)",      f"{KDpk[ref9]:.6f}"],
-            ["ΔI<sub>L,pp</sub>",      f"{s4x['dIL_ref']:.4f} A"],
-            ["Computed L<sub>φ</sub>", f"{L_phi_calc*1e6:.2f} µH"],
-            ["Selected L<sub>φ</sub>", f"{L_phi*1e6:.0f} µH"],
-        ],
-        col_widths=[CW*0.42, CW*0.58], ch=3)
-
-    # ── 3.2.2 — Per-phase RMS current and crest ripple (Step 5) ─────────────
-    sub_h(story, "3.2.2", "Per-phase RMS current and crest ripple", 3)
-    body(story, f"Numerical integration over the half line cycle, "
-                f"L<sub>φ</sub> = {L_phi*1e6:.0f} µH.", 3)
-    eq_box(story, [r"i_{L,avg,\phi}(\theta) = \dfrac{I_{in,pk}}{2}\sin\theta"],
-           heading="Average per-phase current", number="5.1", ch=3)
-    eq_box(story, [r"I_{L,\phi,rms} = \sqrt{\dfrac{1}{\pi}\int_0^{\pi}"
-                   r"\left[i_{L,avg}^{\,2} + i_{L,hf}^{\,2}\right] d\theta}"],
-           heading="Total per-phase RMS current", number="5.2", ch=3)
-
-    rows52a = [[f"{int(Vin_rms[i])}", f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}",
-                f"{dIin_crest[i]:.3f}", f"{Iph_pk[i]:.3f}"] for i in range(n9)]
-    data_table(story, "3.2.2a", "Input Current and Ripple at Crest", "",
-        ["V<sub>in,rms</sub> (V)","I<sub>in,rms</sub> (A)","I<sub>in,pk</sub> (A)",
-         "ΔI<sub>in,pp</sub>@crest (A)","I<sub>φ,pk</sub>@crest w/ ripple (A)"],
-        rows52a, col_widths=[CW*0.20]*5, ch=3)
-
-    rows52b = [[f"{int(Vin_rms[i])}", f"{Iin_rms[i]:.3f}", f"{IL_rms[i]:.4f}",
-                f"{IL_LF[i]:.4f}", f"{IL_HF[i]:.4f}", f"{dIL_crest[i]:.4f}",
-                f"{Iph_pk[i]:.4f}"] for i in range(n9)]
-    data_table(story, "3.2.2b", "Inductor Current RMS per Phase", "",
-        ["V<sub>in,rms</sub> (V)","I<sub>in,rms</sub> (A)","I<sub>L,φ,rms</sub> (A)",
-         "I<sub>L,φ,rms,LF</sub> (A)","I<sub>L,φ,rms,HF</sub> (A)",
-         "ΔI<sub>L,pp</sub>@crest (A)","I<sub>L,φ,pk</sub>@crest (A)"],
-        rows52b, col_widths=[CW*0.15]+[CW*0.142]*6, ch=3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, IL_rms, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{L,\\phi,rms}$ (A)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $I_{{L,\\phi,rms}}$ vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Per-phase inductor RMS current rises with V<sub>in,rms</sub> as duty cycle and ripple content shift.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, Iin_rms, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{in,rms}$ (A)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $I_{{in,rms}}$ vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Input RMS current falls as V<sub>in,rms</sub> rises for constant power, settling near the high-line corner.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, Iin_pk, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{in,pk}$ (A)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $I_{{in,pk}}$ vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Peak input current is highest at the {int(Vin_rms[0])} V<sub>ac</sub> low-line corner — the corner that drives component stress ratings.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, dIin_crest, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$\\Delta I_{in,pp}$@crest (A)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $\\Delta I_{{in,pp}}$@crest vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Net input ripple at the crest after K(D) cancellation — the quantity the input EMI filter must absorb.", 3)
-
-    # ── 3.2.3 — Ripple vs line angle (Step 6) ───────────────────────────────
-    sub_h(story, "3.2.3", "Ripple versus line angle", 3)
-    annotation(story, "CONCEPT",
-        "Per-phase inductor ripple ΔI<sub>L,pp</sub>(θ) is plotted against line "
-        "angle θ for all nine operating points. The high-line family shows "
-        "characteristic twin peaks either side of the D = 0.5 crossing "
-        f"(V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V), where ripple is at "
-        "its absolute maximum but K(D) nulls the net input ripple.", 3)
-
-    th90  = np.linspace(0, np.pi/2, 400)
-    th180 = np.linspace(0, np.pi, 400)
-    def _dIL_curve(Vp, th):
-        Vt = Vp*np.sin(th); Dt = np.clip(1-Vt/vout, 0, 1)
-        return Vt*Dt/(L_phi*fsw)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3.7))
-    for i in range(n9):
-        ax.plot(np.degrees(th90), _dIL_curve(Vin_pk[i], th90),
-                color=_vc(i), lw=1.3, label=f"{int(Vin_rms[i])} Vac")
-    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
-    ax.set_xlabel("Line angle $\\theta$ (deg)", fontsize=9)
-    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $\\Delta I_{{L,pp}}$ vs line angle (0°-90°)", fontsize=9)
-    ax.legend(fontsize=6.5, ncol=3, framealpha=0.9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Per-phase ripple from the zero crossing to the crest, all nine operating points; dashed line marks the global maximum.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3.7))
-    for i in range(n9):
-        ax.plot(np.degrees(th180), _dIL_curve(Vin_pk[i], th180),
-                color=_vc(i), lw=1.3, label=f"{int(Vin_rms[i])} Vac")
-    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
-    ax.set_xlabel("Line angle $\\theta$ (deg, 0-180)", fontsize=9)
-    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $\\Delta I_{{L,pp}}$ vs line angle (0°-180°)", fontsize=9)
-    ax.legend(fontsize=6.5, ncol=3, framealpha=0.9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Full half cycle. High-line curves trace the characteristic twin-peak shape either side of D = 0.5.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3.7))
-    for i in LHIGH:
-        ax.plot(np.degrees(th90), _dIL_curve(Vin_pk[i], th90),
-                color=_vc(i), lw=1.6, label=f"{int(Vin_rms[i])} Vac")
-    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
-    if LHIGH:
-        th_wc = np.arcsin(vout/2/Vin_pk[LHIGH[0]])
-        ax.axvline(np.degrees(th_wc), color="gray", ls=":", lw=1.0)
-    ax.set_xlabel("$\\theta$ (deg)", fontsize=9)
-    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — High-line zoom: worst case ($V_{{in}} \\approx V_{{out}}/2$)", fontsize=9)
-    ax.legend(fontsize=8, framealpha=0.9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Every high-line curve touches the maximum-ripple ceiling at V<sub>in</sub> ≈ V<sub>out</sub>/2 (dotted marker).", 3)
-
-    fig_n += 1
-    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
-    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
-        for i in idxs:
-            Vt = Vin_pk[i]*np.sin(th90); Dt = np.clip(1-Vt/vout, 0, 1)
-            ax2.plot(np.degrees(th90), K_of_D(Dt)*Vt*Dt/(L_phi*fsw),
-                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Line angle $\\theta$ (deg)", fontsize=9)
-        ax2.set_ylabel("$\\Delta I_{in,pp}(\\theta)$ (A pk-pk)", fontsize=9)
-        ax2.set_title(f"Input Ripple Envelope after K(D) Cancellation — {ttl}", fontsize=9)
-        ax2.set_xlim(0, 90); ax2.legend(fontsize=7, ncol=2)
-        ax2.grid(True, alpha=0.3)
-    fig.tight_layout(pad=2.0)
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story,
-        f"Figure 3.2.{fig_n} — ΔI<sub>in,pp</sub>(θ) = K(D(θ)) × ΔI<sub>L,pp</sub>(θ) for "
-        "the low-line (top) and high-line (bottom) families. Cancellation drives "
-        f"the envelope toward zero near D = 0.5 (≈{vout/2/math.sqrt(2):.0f} V<sub>ac</sub>).", 3)
-
-    # ── 3.2.4 — Summary tables (Step 7) ─────────────────────────────────────
-    sub_h(story, "3.2.4", "Summary tables — crest-of-line ripple and worst-case angle", 3)
-    # Pass column is COMPUTED against the designer-selected r (was a hardcoded "YES"
-    # against a fixed 15% ceiling — a 20% selection wrongly "passed" rows above 15%).
-    _rlim = r_input * 100
-    rows71 = [[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{int(Pout[i])}", f"{Pin[i]:.2f}",
-               f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}", f"{Vin_pk[i]:.3f}", f"{Dpk[i]:.4f}",
-               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.2f}",
-               f"{Iph_pk[i]:.4f}",
-               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"] for i in range(n9)]
-    data_table(story, "3.2.4a", "Crest-of-Line Ripple and Currents — All Nine Points",
-        f"Last column verifies ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> stays at or below the "
-        f"designer-selected ripple ratio r = {_rlim:.1f}% at every point (with the selected "
-        f"L<sub>φ</sub> = {L_phi*1e6:.0f} µH).",
-        ["V<sub>in</sub> (V)","η","P<sub>out</sub> (W)","P<sub>in</sub> (W)",
-         "I<sub>in,rms</sub> (A)","I<sub>in,pk</sub> (A)","V<sub>pk</sub> (V)","D@crest",
-         "ΔI<sub>L,pp</sub> (A)","ΔI<sub>in,pp</sub> (A)","ΔI<sub>in</sub>/I<sub>pk</sub> %",
-         "I<sub>φ,pk</sub> (A)",f"≤{_rlim:.0f}% Pass?"],
-        rows71,
-        col_widths=[CW*0.072]*13,
-        worst_rows=[ref9], ch=3)
-    body(story,
-        f"The governing (worst ripple-ratio) point is <b>{int(Vin_rms[ref9])} V<sub>ac</sub> / "
-        f"{int(Pout[ref9])} W</b> — highlighted row. L<sub>φ</sub> was sized there, so its "
-        f"ratio sits at the r = {_rlim:.1f}% ceiling and every other point falls below it.", 3)
-
-    rows72 = [[f"{int(Vin_rms[i])}", f"{Vin_pk[i]:.3f}", f"{Vin_w[i]:.4f}",
-               f"{np.degrees(th1[i]):.4f}", f"{t1_ms[i]:.4f}", f"{D_w[i]:.4f}",
-               f"{dIL_max[i]:.4f}",
-               "Vpk<Vout/2 -> crest" if Vin_pk[i] < vout/2 else "Vin = Vout/2"]
-              for i in range(n9)]
-    data_table(story, "3.2.4b", "Worst-Case Line Angle — All Nine Points",
-        "θ<sub>1</sub> is the line angle at which V<sub>in</sub>(θ) = V<sub>out</sub>/2 "
-        "(maximum-ripple condition); reachable only when V<sub>in,pk</sub> ≥ V<sub>out</sub>/2.",
-        ["V<sub>in</sub> (V)","V<sub>pk</sub> (V)","V<sub>in</sub>@max (V)","θ<sub>1</sub> (deg)",
-         "t<sub>1</sub> (ms)","D<sub>worst</sub>","ΔI<sub>L,max</sub> (A)","Condition"],
-        rows72,
-        col_widths=[CW*0.10,CW*0.11,CW*0.13,CW*0.11,CW*0.10,CW*0.11,CW*0.12,CW*0.22], ch=3)
-
-    # ── 3.2.5 — Worst-case line angle (Step 8) ──────────────────────────────
-    sub_h(story, "3.2.5", "Worst-case line angle for maximum per-phase ripple", 3)
-    eq_box(story, [r"\Delta I_{L,pp}(\theta) = \dfrac{V_{in}(\theta)\, D(\theta)}{L_\phi\, f_{sw}}"],
-           heading="Per-phase ripple as a function of line angle", number="8.1", ch=3)
-    eq_box(story, [rf"\dfrac{{dg}}{{dV_{{in}}}} = 0 \quad\Rightarrow\quad "
-                   rf"V_{{in}} = \dfrac{{V_{{out}}}}{{2}} = {vout/2:.1f}\ \mathrm{{V}}"],
-           heading="Stationary point of the ripple envelope", number="8.2", ch=3)
-    eq_box(story, [r"\theta_1 = \arcsin\!\left(\dfrac{V_{out}}{2\, V_{pk}}\right),"
-                   r"\quad \theta_2 = 180^\circ - \theta_1"],
-           heading="Worst-case line angles", number="8.3", ch=3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, np.degrees(th1), color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9)
-    ax.set_ylabel("Worst-case angle $\\theta_1$ (deg)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — Worst-case angle $\\theta_1$ vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — θ<sub>1</sub> stays at 90° while V<sub>in,pk</sub> &lt; V<sub>out</sub>/2 (the crest is the worst case); it departs from 90° once the high-line crest can reach V<sub>out</sub>/2.", 3)
-
-    fig_n += 1
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(Vin_rms, dIL_max, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
-    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9)
-    ax.set_ylabel("$\\Delta I_{L,pp,max}$ (A)", fontsize=9)
-    ax.set_title(f"Figure 3.2.{fig_n} — $\\Delta I_{{L,pp,max}}$ vs $V_{{in,rms}}$", fontsize=9)
-    ax.grid(True, alpha=0.3); fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Maximum per-phase ripple ΔI<sub>L,pp,max</sub> = {dIL_max_global:.4f} A occurs at D = 0.5 (V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V) wherever the input range reaches it.", 3)
-
-    # ── 3.2.6 — Combined results table (Step 9) ─────────────────────────────
-    sub_h(story, "3.2.6", "Combined worst-case results table", 3)
-    rows9 = [[f"{int(Vin_rms[i])}", f"{Vin_pk[i]:.4f}", f"{Vin_w[i]:.4f}",
-              f"{np.degrees(th1[i]):.4f}", f"{t1_ms[i]:.4f}",
-              f"{np.degrees(th2[i]):.4f}", f"{t2_ms[i]:.4f}", f"{dIL_max[i]:.4f}",
-              "Vpk<Vout/2 -> crest" if Vin_pk[i] < vout/2 else "Vin = Vout/2 reachable"]
-             for i in range(n9)]
-    data_table(story, "3.2.6", "Worst-Case Line Angle and Ripple — Full Results", "",
-        ["V<sub>in,rms</sub> (V)","V<sub>in,pk</sub> (V)","V<sub>in</sub>@max (V)",
-         "θ<sub>1</sub> (deg)","t<sub>1</sub> (ms)","θ<sub>2</sub> (deg)","t<sub>2</sub> (ms)",
-         "ΔI<sub>L,max</sub> (A)","Condition"],
-        rows9,
-        col_widths=[CW*0.10,CW*0.10,CW*0.11,CW*0.10,CW*0.09,CW*0.10,CW*0.09,CW*0.11,CW*0.20], ch=3)
-    body(story,
-        f"ΔI<sub>L,pp,max</sub> = {dIL_max_global:.4f} A at D = 0.5 "
-        f"(V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V).", 3)
-
-    # ── 3.2.7 — Duty-cycle waveforms (Step 10) ──────────────────────────────
-    sub_h(story, "3.2.7", "Duty-cycle waveforms over the line cycle", 3)
-    body(story,
-        "D(t) = 1 − V<sub>in,pk</sub>·|sin(2π·f<sub>line</sub>·t)| / V<sub>out</sub>. "
-        "Red dashed line marks D<sub>pk</sub> for each operating point.", 3)
-
-    T_cyc = 1/f_line; t_cyc = np.linspace(0, T_cyc, 2000)*1000
-    groups = [LLOW[:4], LHIGH[:3], LHIGH[3:]]
-    for gi, grp in enumerate([g for g in groups if g]):
-        nc = min(len(grp), 3); nr = (len(grp)+nc-1)//nc
-        fig, axes = plt.subplots(nr, nc, figsize=(nc*2.5, nr*2.4))
-        if nr*nc == 1: axes = np.array([[axes]])
-        elif nr == 1:  axes = axes.reshape(1, -1)
-        elif nc == 1:  axes = axes.reshape(-1, 1)
-        k2 = 0
-        for row in axes:
-            for ax2 in row:
-                if k2 < len(grp):
-                    i = grp[k2]
-                    Vt = Vin_pk[i]*np.abs(np.sin(2*np.pi*f_line*t_cyc/1000))
-                    Dt = np.clip(1-Vt/vout, 0, 1)
-                    ax2.plot(t_cyc, Dt, color=_mpl_c(STEP_BLUE), lw=1.4)
-                    ax2.axhline(Dpk[i], color="#C00000", ls="--", lw=0.9)
-                    ax2.set_title(f"{int(Vin_rms[i])} Vrms", fontsize=9)
-                    ax2.set_xlabel("Time (ms)", fontsize=8); ax2.set_ylabel("D(t)", fontsize=8)
-                    ax2.set_xlim(0, T_cyc*1000); ax2.set_ylim(-0.02, 1.05)
-                    ax2.tick_params(labelsize=7); ax2.grid(True, alpha=0.3)
-                else:
-                    ax2.set_visible(False)
-                k2 += 1
-        fig_n += 1
-        fig.suptitle(f"Figure 3.2.{fig_n} — Duty cycle over one line cycle — group {gi+1}",
-                     fontsize=9, fontweight="bold")
-        fig.tight_layout(rect=(0, 0, 1, 0.94))
-        story.append(_mpl_img(fig, 165))
-        fig_caption(story,
-            f"Figure 3.2.{fig_n} — D(t) traces for group {gi+1} "
-            f"({', '.join(str(int(Vin_rms[x]))+' Vac' for x in grp)}); "
-            "red dashed line marks D<sub>pk</sub> at the crest of each operating point.", 3)
-
-    body(story, "Compact crest-of-line ripple summary:", 3)
-    rows10 = [[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{Dpk[i]:.4f}", f"{KDpk[i]:.4f}",
-               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.3f}%",
-               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"]
-              for i in range(n9)]
-    data_table(story, "3.2.7", "Compact Crest-of-Line Ripple Table", "",
-        ["V<sub>ac,rms</sub> (V)","η","D@crest","K(D)@crest","ΔI<sub>L,pp</sub>@crest (A)",
-         "ΔI<sub>in,pp</sub>@crest (A)","ΔI<sub>in</sub>/I<sub>pk</sub>@crest",f"≤{_rlim:.0f}% pass?"],
-        rows10,
-        col_widths=[CW*0.13,CW*0.10,CW*0.12,CW*0.13,CW*0.16,CW*0.16,CW*0.13,CW*0.07], ch=3)
-
-    # ── 3.2.8 — Per-phase current waveforms (Step 11) ───────────────────────
-    sub_h(story, "3.2.8", "Per-phase current waveforms", 3)
-    body(story,
-        f"Phase A shown; Phase B carries identical average current, T<sub>s</sub>/2 "
-        f"phase-shifted. L<sub>φ</sub> = {L_phi*1e6:.0f} µH, f<sub>sw</sub> = {fsw/1e3:.0f} kHz.", 3)
-    eq_box(story, [r"V_{pk} = \sqrt{2}\, V_{in,rms}, \quad D(\theta) = 1 - \dfrac{V_{in}(\theta)}{V_{out}}"],
-           heading="Peak input voltage and instantaneous duty cycle", number="11.1", ch=3)
-    eq_box(story, [r"\Delta I_{L,pp}(\theta) = \dfrac{V_{in}\, D}{L_\phi\, f_{sw}}"],
-           heading="Per-phase ripple at line angle θ", number="11.2", ch=3)
-    eq_box(story, [r"i_{L,avg,\phi}(t) = \dfrac{1}{2}\, I_{in,pk} \sin(2\pi f_{line}\, t)"],
-           heading="Average per-phase current versus time", number="11.3", ch=3)
-    eq_box(story, [
-        r"i_{L\phi,A}(t) = i_{L,avg,\phi}(t) + \tilde{\imath}_{L\phi,A}(t)",
-        r"\tilde{\imath}_{L\phi,B}(t) = \tilde{\imath}_{L\phi,A}(t + T_s/2)",
-    ], heading="Phase-A / Phase-B switching-ripple superposition", number="11.4", ch=3)
-
-    th_h = np.linspace(1e-6, np.pi, 1200)
-    T_crest = 1/(4*f_line); zh = 90e-6
-
-    def _ripple_at(ph, D, dI):
-        Ds = np.where(D > 1e-7, D, 1e-7); Rs = np.where(1-D > 1e-7, 1-D, 1e-7)
-        return np.where(ph <= D, dI*(ph/Ds-0.5), dI*(0.5-(ph-D)/Rs))
-
-    sub_h(story, "3.2.8.1", "Per-phase ripple envelope over the half cycle", 3)
-    fig_n += 1
-    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
-    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
-        for i in idxs:
-            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
-            ax2.plot(th_h/(2*np.pi*f_line)*1000, Vt*Dt/(L_phi*fsw),
-                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
-        ax2.axhline(dIL_max_global, color="k", ls="--", lw=0.8)
-        ax2.set_xlabel("Time (ms)", fontsize=9); ax2.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
-        ax2.set_title(f"Per-phase Ripple Envelope — {ttl}", fontsize=9)
-        ax2.set_xlim(0, 8.333); ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
-    fig.tight_layout(pad=2.0)
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Per-phase ripple envelope ΔI<sub>L,pp</sub>(t) over the half line cycle, low-line (top) and high-line (bottom) families.", 3)
-
-    sub_h(story, "3.2.8.2", "Signed ripple — Phase A", 3)
-    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
-        fig_n += 1
-        fig, ax2 = plt.subplots(figsize=(7, 3.5))
-        for i in idxs:
-            t_ms,_,_,rA,_,_,_,_ = gen_waveforms(Vin_pk[i], Iin_pk[i], L_phi, fsw, f_line, vout)
-            ax2.plot(t_ms, rA, color=_vc(i), lw=0.4, alpha=0.85, label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Time (ms)", fontsize=9)
-        ax2.set_ylabel("$\\tilde{i}_{L\\phi,A}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Figure 3.2.{fig_n} — Per-Phase Signed Ripple (Phase A) — {tag}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
-        fig.tight_layout()
-        story.append(_mpl_img(fig, 165))
-        fig_caption(story, f"Figure 3.2.{fig_n} — Switching-frequency ripple riding on the average per-phase current, {tag.lower()} family.", 3)
-
-    sub_h(story, "3.2.8.3", "Per-phase current over the half cycle", 3)
-    fig_n += 1
-    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
-    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
-        for i in idxs:
-            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
-            dIL_e = Vt*Dt/(L_phi*fsw); iavg_e = (Iin_pk[i]/2)*np.sin(th_h)
-            t_ms_h = th_h/(2*np.pi*f_line)*1000; c = _vc(i)
-            ax2.fill_between(t_ms_h, np.maximum(iavg_e-dIL_e/2, 0), iavg_e+dIL_e/2, alpha=0.18, color=c)
-            ax2.plot(t_ms_h, iavg_e+dIL_e/2, color=c, lw=1.2, label=f"{int(Vin_rms[i])} Vac")
-            ax2.plot(t_ms_h, np.maximum(iavg_e-dIL_e/2, 0), color=c, lw=1.2)
-        ax2.set_xlabel("Time (ms)", fontsize=9); ax2.set_ylabel("$i_{L\\phi,A}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Per-phase Current — {ttl}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
-    fig.tight_layout(pad=2.0)
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Per-phase current envelope i<sub>Lφ,A</sub>(t) = i<sub>avg</sub>(t) ± ΔI<sub>L,pp</sub>(t)/2, low-line (top) and high-line (bottom) families.", 3)
-
-    sub_h(story, "3.2.8.4", "Switching ripple around the crest", 3)
-    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
-        fig_n += 1
-        fig, ax2 = plt.subplots(figsize=(7, 3.5))
-        for i in idxs:
-            t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
-            th_z = 2*np.pi*f_line*t_z
-            Vt = Vin_pk[i]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
-            iavg_z = (Iin_pk[i]/2)*np.sin(th_z); dIL_z = Vt*Dt/(L_phi*fsw)
-            phA = (t_z*fsw) % 1.0
-            ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phA, Dt, dIL_z),
-                     color=_vc(i), lw=1.0, label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Time around crest (µs)", fontsize=9)
-        ax2.set_ylabel("$i_{L\\phi,A}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Figure 3.2.{fig_n} — Switching Ripple Around Crest — {tag}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
-        fig.tight_layout()
-        story.append(_mpl_img(fig, 165))
-        fig_caption(story, f"Figure 3.2.{fig_n} — Switching-frequency current ripple resolved at the crest of the line cycle, {tag.lower()} family.", 3)
-
-    sub_h(story, "3.2.8.5", "Phase A versus Phase B", 3)
-    fig_n += 1
-    fig, ax2 = plt.subplots(figsize=(7, 3.5))
-    i0 = 0
-    t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
-    th_z = 2*np.pi*f_line*t_z
-    Vt = Vin_pk[i0]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
-    iavg_z = (Iin_pk[i0]/2)*np.sin(th_z); dIL_z = Vt*Dt/(L_phi*fsw)
-    phA = (t_z*fsw) % 1.0; phB = (t_z*fsw + 0.5) % 1.0
-    ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phA, Dt, dIL_z),
-             color=_mpl_c(STEP_BLUE), lw=1.2, label="Phase A")
-    ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phB, Dt, dIL_z),
-             color="#C00000", lw=1.2, ls="--", label="Phase B ($T_s/2$ shift)")
-    ax2.set_xlabel("Time around crest (µs)", fontsize=9)
-    ax2.set_ylabel("$i_{L\\phi}(t)$ (A)", fontsize=9)
-    ax2.set_title(f"Figure 3.2.{fig_n} — Phase A vs Phase B at {int(Vin_rms[i0])} Vac", fontsize=9)
-    ax2.legend(fontsize=8); ax2.grid(True, alpha=0.3)
-    fig.tight_layout()
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Phase A and Phase B carry identical average current with switching ripple offset by exactly T<sub>s</sub>/2 — the basis of interleaved cancellation.", 3)
-
-    # ── 3.2.9 — Input ripple and total input current (Step 12) ──────────────
-    sub_h(story, "3.2.9", "Input ripple and total input current", 3)
-    body(story, "i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) + δi<sub>in</sub>(t).", 3)
-    eq_box(story, [r"\Delta I_{in,pp}(\theta) = K(D(\theta))\, \Delta I_{L,pp}(\theta)"],
-           heading="Input ripple after interleaved cancellation", number="12.1", ch=3)
-    eq_box(story, [r"\delta i_{in}(t) = \tilde{\imath}_{L\phi,A}(t) + \tilde{\imath}_{L\phi,B}(t)"],
-           heading="Net switching ripple seen at the input", number="12.2", ch=3)
-    eq_box(story, [r"i_{in,total}(t) = I_{in,pk} \sin(2\pi f_{line}\, t) + \delta i_{in}(t)"],
-           heading="Total instantaneous input current", number="12.3", ch=3)
-
-    sub_h(story, "3.2.9.1", "Input ripple envelope over the half cycle", 3)
-    fig_n += 1
-    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
-    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
-        for i in idxs:
-            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
-            ax2.plot(th_h/(2*np.pi*f_line)*1000, K_of_D(Dt)*Vt*Dt/(L_phi*fsw),
-                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Time (ms)", fontsize=9)
-        ax2.set_ylabel("$\\Delta I_{in,pp}(\\theta)$ (A pk-pk)", fontsize=9)
-        ax2.set_title(f"Input Ripple Envelope — {ttl}", fontsize=9)
-        ax2.set_xlim(0, 8.333); ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
-    fig.tight_layout(pad=2.0)
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Net input ripple envelope after K(D) cancellation across the half line cycle, low-line (top) and high-line (bottom) families.", 3)
-
-    sub_h(story, "3.2.9.2", "Signed input ripple", 3)
-    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
-        fig_n += 1
-        fig, ax2 = plt.subplots(figsize=(7, 3.5))
-        for i in idxs:
-            t_ms,_,_,_,_,diin,_,_ = gen_waveforms(Vin_pk[i], Iin_pk[i], L_phi, fsw, f_line, vout)
-            ax2.plot(t_ms, diin, color=_vc(i), lw=0.4, alpha=0.85, label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Time (ms)", fontsize=9)
-        ax2.set_ylabel("$\\delta i_{in}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Figure 3.2.{fig_n} — Signed Input Ripple — {tag}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
-        fig.tight_layout()
-        story.append(_mpl_img(fig, 165))
-        fig_caption(story, f"Figure 3.2.{fig_n} — Signed net input ripple δi<sub>in</sub>(t) = ĩ<sub>Lφ,A</sub>(t) + ĩ<sub>Lφ,B</sub>(t), {tag.lower()} family.", 3)
-
-    sub_h(story, "3.2.9.3", "Total input current over the half cycle", 3)
-    fig_n += 1
-    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
-    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
-        for i in idxs:
-            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
-            dIin_e = K_of_D(Dt)*Vt*Dt/(L_phi*fsw)
-            iavg_e = Iin_pk[i]*np.sin(th_h); t_ms_h = th_h/(2*np.pi*f_line)*1000; c = _vc(i)
-            ax2.fill_between(t_ms_h, iavg_e-dIin_e/2, iavg_e+dIin_e/2, alpha=0.18, color=c)
-            ax2.plot(t_ms_h, iavg_e+dIin_e/2, color=c, lw=1.2, label=f"{int(Vin_rms[i])} Vac")
-            ax2.plot(t_ms_h, np.maximum(iavg_e-dIin_e/2, 0), color=c, lw=1.2)
-        ax2.set_xlabel("Time (ms)", fontsize=9)
-        ax2.set_ylabel("$i_{in,total}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Total Input Current — {ttl}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
-    fig.tight_layout(pad=2.0)
-    story.append(_mpl_img(fig, 165))
-    fig_caption(story, f"Figure 3.2.{fig_n} — Total input current envelope i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) ± ΔI<sub>in,pp</sub>(t)/2, low-line (top) and high-line (bottom) families.", 3)
-
-    sub_h(story, "3.2.9.4", "Total current — switching ripple around the crest", 3)
-    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
-        fig_n += 1
-        fig, ax2 = plt.subplots(figsize=(7, 3.5))
-        for i in idxs:
-            t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
-            th_z = 2*np.pi*f_line*t_z
-            Vt = Vin_pk[i]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
-            iavg_z = Iin_pk[i]*np.sin(th_z); dIL_z = Vt*Dt/(L_phi*fsw)
-            phA = (t_z*fsw) % 1.0; phB = (t_z*fsw + 0.5) % 1.0
-            rA = _ripple_at(phA, Dt, dIL_z); rB = _ripple_at(phB, Dt, dIL_z)
-            ax2.plot((t_z-T_crest)*1e6, iavg_z+rA+rB, color=_vc(i), lw=1.0,
-                     label=f"{int(Vin_rms[i])} Vac")
-        ax2.set_xlabel("Time around crest (µs)", fontsize=9)
-        ax2.set_ylabel("$i_{in,total}(t)$ (A)", fontsize=9)
-        ax2.set_title(f"Figure 3.2.{fig_n} — Total-Current Switching Ripple Around Crest — {tag}", fontsize=9)
-        ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
-        fig.tight_layout()
-        story.append(_mpl_img(fig, 165))
-        fig_caption(story, f"Figure 3.2.{fig_n} — Total input current i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) + δi<sub>in</sub>(t) resolved at the crest, both phases' switching ripple summed, {tag.lower()} family.", 3)
-
-    annotation(story, "DECISION",
-        f"The full Steps 4-12.5 ripple-and-current chain confirms L<sub>φ</sub> = "
-        f"{L_phi*1e6:.0f} µH meets the {r_input*100:.1f}% crest-ripple target across "
-        f"all nine operating points (max ΔI<sub>in</sub>/I<sub>pk</sub> = "
-        f"{float(np.max(r_act))*100:.2f}%, well inside the 15% design ceiling), and "
-        f"that the worst-case per-phase ripple ΔI<sub>L,pp,max</sub> = "
-        f"{dIL_max_global:.4f} A occurs at D = 0.5. Section 3.3 carries this "
-        "inductance requirement into core material selection.", 3)
-
     # ════════════════════════════════════════════════════════
-    # 3.3 CORE MATERIAL SELECTION
+    # 3.2 CORE MATERIAL SELECTION
     # ════════════════════════════════════════════════════════
-    step_h(story, "3.3", "Core Material Selection", 3)
+    step_h(story, "3.2", "Core Material Selection", 3)
 
-    sub_h(story, "3.3.1", "Material type: powder vs ferrite — DC bias characteristic", 3)
+    sub_h(story, "3.2.1", "Material type: powder vs ferrite — DC bias characteristic", 3)
     annotation(story, "CONCEPT",
         "The core material determines the most important trade-off in PFC inductor design: "
         "how does inductance behave under DC bias? "
@@ -2329,7 +1878,7 @@ def _ch3(story, state, d):
         "smoothly and there is no fringing loss. At high current, powder cores maintain "
         "inductance better than gapped ferrite.", 3)
 
-    data_table(story, "3.3.1", "Powder Core vs Gapped Ferrite — Comparison",
+    data_table(story, "3.2.1", "Powder Core vs Gapped Ferrite — Comparison",
         "Material selection criteria at the design operating point.",
         ["Property", "Powder Core (distributed gap)", "Gapped Ferrite", "Advantage"],
         [
@@ -2343,7 +1892,7 @@ def _ch3(story, state, d):
         ],
         col_widths=[CW*0.22,CW*0.28,CW*0.26,CW*0.24], ch=3)
 
-    sub_h(story, "3.3.2", "Soft saturation vs hard saturation — physical explanation", 3)
+    sub_h(story, "3.2.2", "Soft saturation vs hard saturation — physical explanation", 3)
     annotation(story, "THEORY",
         "In a gapped ferrite, the air gap stores most of the magnetic energy. "
         "When the core material approaches B<sub>sat</sub>, the permeability collapses "
@@ -2353,18 +1902,18 @@ def _ch3(story, state, d):
         "at 2× rated current is still 50–70% of no-load value. "
         "This soft rolloff provides inherent over-current tolerance.", 3)
 
-    sub_h(story, "3.3.3", "Selected material family and grade", 3)
+    sub_h(story, "3.2.3", "Selected material family and grade", 3)
     annotation(story, "DECISION",
         f"Material selected: <b>{mat_key}</b>  |  "
         f"Core type: <b>{core_t.title()}</b>  |  "
         f"Supplier: <b>{supplier}</b>. "
         + ("The distributed-gap powder core is selected for its soft saturation "
            "characteristic — inductance retention at rated DC bias is verified "
-           "in Section 3.4.3 and Table 3.4.2."
+           "in Section 3.4.3 and Table 3.3.2."
            if core_t == "powder" else
-           "Ferrite selected. Air gap design verified in Section 3.4."), 3)
+           "Ferrite selected. Air gap design verified in Section 3.3."), 3)
 
-    sub_h(story, "3.3.4", "Material model — Steinmetz constants", 3)
+    sub_h(story, "3.2.4", "Material model — Steinmetz constants", 3)
     body(story,
         "Core loss is modelled using the iGSE (improved Generalised Steinmetz Equation): "
         "P<sub>core</sub> = k · B<sub>ac,pk</sub><sup>β</sup> · f<sub>sw</sub><sup>α</sup> · F(D). "
@@ -2373,7 +1922,7 @@ def _ch3(story, state, d):
         "The F(D) correction factor accounts for non-sinusoidal excitation. "
         f"For {mat_key}: loss model validated at the reference operating point in Section 3.6.2.", 3)
 
-    sub_h(story, "3.3.5", "Permeability vs DC bias model", 3)
+    sub_h(story, "3.2.5", "Permeability vs DC bias model", 3)
     body(story,
         "The inductance retention model k<sub>bias</sub>(H) is extracted from the "
         "material database. H (oersteds) = N × I<sub>φ,avg@crest</sub> / "
@@ -2383,12 +1932,12 @@ def _ch3(story, state, d):
         "L<sub>full</sub> at each operating voltage.", 3)
 
     # ════════════════════════════════════════════════════════
-    # 3.4 CORE GEOMETRY SELECTION
+    # 3.3 CORE GEOMETRY SELECTION
     # ════════════════════════════════════════════════════════
-    step_h(story, "3.4", "Core Geometry Selection", 3)
+    step_h(story, "3.3", "Core Geometry Selection", 3)
 
-    sub_h(story, "3.4.1", "Sizing engine inputs", 3)
-    data_table(story, "3.4.1", "Sizing Engine Inputs — Reference Operating Point",
+    sub_h(story, "3.3.1", "Sizing engine inputs", 3)
+    data_table(story, "3.3.1", "Sizing Engine Inputs — Reference Operating Point",
         "Values passed to the sizing engine.",
         ["Parameter", "Symbol", "Value", "Unit"],
         [
@@ -2408,7 +1957,7 @@ def _ch3(story, state, d):
         ],
         col_widths=[CW*0.36,CW*0.24,CW*0.18,CW*0.22], ch=3)
 
-    sub_h(story, "3.4.2", "Top candidates table — all metrics side by side", 3)
+    sub_h(story, "3.3.2", "Top candidates table — all metrics side by side", 3)
     cands = d.get("all_candidates",[])
     if cands:
         cand_rows = []
@@ -2437,7 +1986,7 @@ def _ch3(story, state, d):
         "checks window fill, computes losses at all 9 operating points, "
         "and runs the thermal model. Candidates are ranked by composite score.", 3)
 
-    data_table(story, "3.4.2", "Top Core Candidates — Sizing Engine Output",
+    data_table(story, "3.3.2", "Top Core Candidates — Sizing Engine Output",
         "Amber row = selected design (#1). All remaining rows are alternatives. "
         "",
         ["#", "Part number", "Stacks", "N", "FF<sub>cu</sub>%", "ΔT °C", "P<sub>total</sub> W", "Result"],
@@ -2445,7 +1994,7 @@ def _ch3(story, state, d):
         col_widths=[CW*0.05,CW*0.20,CW*0.08,CW*0.06,CW*0.10,CW*0.10,CW*0.15,CW*0.26],
         worst_rows=[sel_row], ch=3)
 
-    sub_h(story, "3.4.3", "Candidate comparison and selection rationale", 3)
+    sub_h(story, "3.3.3", "Candidate comparison and selection rationale", 3)
     annotation(story, "THEORY",
         f"For a stacked toroid the winding shares ONE bore, so the window area "
         f"W<sub>a</sub> = {Wa_s_mm2:.1f} mm² is the single-core bore and is the correct basis for "
@@ -2454,7 +2003,7 @@ def _ch3(story, state, d):
         f"with the stack); the winding window does not. This is standard, correct practice for "
         "stacked toroids — not a limitation.", 3)
 
-    sub_h(story, "3.4.4", "Stacking note", 3)
+    sub_h(story, "3.3.4", "Stacking note", 3)
     body(story,
         f"Stacking {stacks} identical cores multiplies: "
         f"A<sub>e,total</sub> = {stacks}×{Ae_s_mm2:.1f} = {Ae_mm2:.1f} mm²; "
@@ -2462,8 +2011,8 @@ def _ch3(story, state, d):
         f"A<sub>L,total</sub> = {stacks}×A<sub>L,single</sub> (inductances in series). "
         f"Window area W<sub>a</sub> = {Wa_s_mm2:.1f} mm² is unchanged.", 3)
 
-    sub_h(story, "3.4.5", "Selected core — dimensions, A_L, A_e, L_e, V_e, W_a", 3)
-    data_table(story, "3.4.3", f"Selected Core — {part_no} × {stacks} Stacks",
+    sub_h(story, "3.3.5", "Selected core — dimensions, A_L, A_e, L_e, V_e, W_a", 3)
+    data_table(story, "3.3.3", f"Selected Core — {part_no} × {stacks} Stacks",
         "Physical and electrical parameters for the approved core configuration.",
         ["Parameter", "Symbol", "Value", "Unit"],
         [
@@ -2485,7 +2034,7 @@ def _ch3(story, state, d):
         ],
         col_widths=[CW*0.40, CW*0.18, CW*0.22, CW*0.20], ch=3)
 
-    sub_h(story, "3.4.6", "Selection rationale and design margins", 3)
+    sub_h(story, "3.3.6", "Selection rationale and design margins", 3)
     annotation(story, "DECISION",
         f"Core selected: <b>{part_no} × {stacks}</b>. "
         f"This candidate achieves the lowest composite score (loss + ΔT + fill). "
@@ -2511,11 +2060,11 @@ def _ch3(story, state, d):
                 + f". The selected core wins with the minimum score, {_score:.3f}.", 3)
 
     # ════════════════════════════════════════════════════════
-    # 3.5 WINDING DESIGN
+    # 3.4 WINDING DESIGN
     # ════════════════════════════════════════════════════════
-    step_h(story, "3.5", "Winding Design", 3)
+    step_h(story, "3.4", "Winding Design", 3)
 
-    sub_h(story, "3.5.1", "Wire type selection — Litz vs solid vs TIW", 3)
+    sub_h(story, "3.4.1", "Wire type selection — Litz vs solid vs TIW", 3)
     annotation(story, "CONCEPT",
         "The wire type determines how AC/DC copper loss splits, whether skin-effect "
         "limitations apply, and whether insulation satisfies creepage. "
@@ -2549,7 +2098,7 @@ def _ch3(story, state, d):
         f"loss runs only {(_rr-1)*100:.0f}% above the DC value here — a strength of the physics "
         "model over a flat 1.15 heuristic; it feeds the I<sub>hf,rms</sub>² term in Chapter 4.", 3)
 
-    sub_h(story, "3.5.2", "Strand count and bundle OD", 3)
+    sub_h(story, "3.4.2", "Strand count and bundle OD", 3)
     _skin_ok = d_str <= 2 * skin_mm
     _cmp = "≤" if _skin_ok else ">"
     body(story,
@@ -2566,7 +2115,7 @@ def _ch3(story, state, d):
             "R<sub>AC</sub>/R<sub>DC</sub> ratio (Section 3.6), not by sub-skin stranding. "
             "Litz/TIW stranding is only warranted when the HF ripple fraction is large.", 3)
 
-    sub_h(story, "3.5.3", "Number of turns N — bias-aware A_L sizing", 3)
+    sub_h(story, "3.4.3", "Number of turns N — bias-aware A_L sizing", 3)
     I_dc_worst   = float(d.get("I_dc_worst_A", 0)) or iavg_90
     Le_s         = Le_mm / 1000.0
     H_Oe_worst   = float(d.get("H_Oe_worst", 0)) or (
@@ -2575,15 +2124,15 @@ def _ch3(story, state, d):
     L_full_min_uH = N**2 * AL_min * k_bias_worst * 1e-3 if k_bias_worst else 0
     N_naive = math.ceil(math.sqrt(L_tgt*1e-6/(AL_nom*1e-9))) if AL_nom else 0
     eq_box(story, [
-        r"H_{Oe} = \dfrac{N \, I_{dc,worst}}{L_e \times 79.577}\ ,\quad"
-        r"k_{bias} = k(H_{Oe})\ ,\quad"
-        r"L_{full,min} = N^2 A_{L,min}\, k_{bias}",
-        rf"H_{{Oe}} = \dfrac{{{N} \times {I_dc_worst:.3f}}}{{{Le_s:.4f} \times 79.577}} = {H_Oe_worst:.2f}\ \mathrm{{Oe}}"
+        r"H_{Oe,i} = \dfrac{N \, I_{\phi,crest,i}}{L_e \times 79.577}\ ,\quad"
+        r"k_{bias,i} = k(H_{Oe,i})\ ,\quad"
+        r"L_{full,nom}(V_i) = N^2 A_{L,nom}\, k_{bias,i}",
+        rf"\mathrm{{worst\ bias:}}\ H_{{Oe}} = \dfrac{{{N} \times {I_dc_worst:.3f}}}{{{Le_s:.4f} \times 79.577}} = {H_Oe_worst:.2f}\ \mathrm{{Oe}}"
         rf"\ \Rightarrow\ k_{{bias}} = {k_bias_worst:.4f}",
-        rf"L_{{full,min}} = {N}^2 \times {AL_min:.1f}\times10^{{-9}} \times {k_bias_worst:.4f} = {L_full_min_uH:.1f}\ \mu\mathrm{{H}}"
-        rf"\ \geq\ 0.85\, L_{{target}} = {0.85*L_tgt:.1f}\ \mu\mathrm{{H}}\ \Rightarrow\ N = {N}\ \mathrm{{turns}}",
-    ], heading="Bias-aware turns convergence — N increments until the AL,min-derated "
-               "inductance clears 85% of target under worst-case DC bias", ch=3)
+        rf"L_{{full,nom}}(V_i)\ \geq\ L_{{req}}(V_i)\quad \forall\, i \in 9\ \mathrm{{points}}"
+        rf"\ \Rightarrow\ N = {N}\ \mathrm{{turns}}",
+    ], heading="Per-point bias-aware turns convergence — smallest N whose as-built "
+               "nominal inductance meets the requirement at every operating point", ch=3)
 
     annotation(story, "THEORY",
         "Reading the equation term by term: the magnetising field is H = N·I / l<sub>e</sub> in "
@@ -2596,21 +2145,54 @@ def _ch3(story, state, d):
         f"(here k = {k_bias_worst:.4f}, i.e. {k_bias_worst*100:.1f}% retained). The retained "
         f"inductance is then L<sub>full,min</sub> = N²·A<sub>L,min</sub>·k = {L_full_min_uH:.1f} µH.", 3)
 
+    _lvt43 = [r for r in d.get("L_vs_Vin_table", []) if r.get("L_req_uH") is not None]
+    _b43 = (min(_lvt43, key=lambda r: float(r["L_full_nom_uH"]) - float(r["L_req_uH"]))
+            if _lvt43 else None)
     annotation(story, "PITFALL",
-        f"N is selected by the iterative <b>bias-aware</b> convergence loop, not "
-        f"by the naive estimate N = ⌈√(L<sub>target</sub>/A<sub>L,nom</sub>)⌉ = {N_naive} "
-        f"(which ignores DC-bias permeability rolloff). The worst-case per-phase DC "
-        f"bias I<sub>dc,worst</sub> = {I_dc_worst:.3f} A is the <b>maximum across all "
-        f"9 operating points</b> — the highest line/load corner sets the largest "
-        f"ampere-turn product, not necessarily the 90 V<sub>ac</sub> low line. This "
-        f"drives H<sub>Oe</sub> = {H_Oe_worst:.2f} Oe and permeability retention "
-        f"k<sub>bias</sub> = {k_bias_worst:.4f}; N is incremented until the "
-        f"A<sub>L,min</sub>-derated retained inductance "
-        f"L<sub>full,min</sub> = {L_full_min_uH:.1f} µH clears "
-        f"0.85 × L<sub>target</sub> = {0.85*L_tgt:.1f} µH. "
-        + ("✓ PASS" if (L_full_min_uH >= 0.85*L_tgt and k_bias_worst) else "— see Section 3.4 (bias retention)"), 3)
+        f"N is selected by the iterative <b>per-point bias-aware</b> convergence loop, not "
+        f"by the naive estimate N = ⌈√(L<sub>req,max</sub>/A<sub>L,nom</sub>)⌉ = {N_naive} "
+        "(which ignores DC-bias permeability rolloff). At each operating point the bias field "
+        "H<sub>i</sub> and retention k(H<sub>i</sub>) are evaluated, and N increments until the "
+        "as-built NOMINAL inductance N²·A<sub>L,nom</sub>·k(H<sub>i</sub>) meets that point's "
+        "own requirement L<sub>req</sub>(V<sub>i</sub>) — zero added margin, so the design runs "
+        "at the selected ripple ratio, not below it. The requirement is largest at the governing "
+        "ripple corner while the bias rolloff is heaviest at low line; the binding point emerges "
+        "from the data"
+        + (f": <b>{float(_b43['Vin_rms']):.0f} V<sub>ac</sub></b> "
+           f"(L<sub>full,nom</sub> = {float(_b43['L_full_nom_uH']):.1f} µH vs "
+           f"L<sub>req</sub> = {float(_b43['L_req_uH']):.1f} µH — the residual margin is the "
+           f"integer-turns quantization). ✓ PASS at all nine points."
+           if _b43 is not None and all(r.get("meets_req") for r in _lvt43)
+           else ". See the L-vs-V<sub>in</sub> table below."), 3)
 
-    sub_h(story, "3.5.4", "No-load inductance L0 — A_L tolerance band", 3)
+    # Convergence trace — the engine's ACTUAL iterations (report notes #6: show the
+    # steps). Each row is one candidate N with the as-built nominal inductance at the
+    # tightest (binding) operating point versus that point's requirement.
+    _trace43 = d.get("turns_trace") or []
+    if _trace43:
+        _tr_show = _trace43[-8:]           # last iterations (full trace can be long)
+        _tr_rows = [[str(t.get("N")),
+                     f"{float(t.get('Vin_binding', 0)):.0f}",
+                     f"{float(t.get('L_nom_uH', 0)):.1f}",
+                     f"{float(t.get('L_req_uH', 0)):.1f}",
+                     f"{float(t.get('L_nom_uH', 0)) - float(t.get('L_req_uH', 0)):+.1f}",
+                     "PASS — all 9 points" if t.get("ok") else "below requirement → N+1"]
+                    for t in _tr_show]
+        data_table(story, "3.4.3",
+            "Turns Convergence Trace — Engine Iterations at the Binding Point",
+            ("The engine's actual iteration record"
+             + (f" (last {len(_tr_show)} of {len(_trace43)} steps shown)"
+                if len(_trace43) > len(_tr_show) else "")
+             + ": for each candidate N, the as-built nominal inductance at the tightest "
+             "operating point is checked against that point's requirement; N increments "
+             "until every point passes."),
+            ["N (turns)", "Binding V<sub>in</sub> (Vac)", "L<sub>full,nom</sub> (µH)",
+             "L<sub>req</sub> (µH)", "Margin (µH)", "Verdict"],
+            _tr_rows,
+            col_widths=[CW*0.11, CW*0.16, CW*0.16, CW*0.14, CW*0.13, CW*0.30],
+            worst_rows=[len(_tr_rows) - 1], ch=3)
+
+    sub_h(story, "3.4.4", "No-load inductance L0 — A_L tolerance band", 3)
     eq_box(story, [
         r"L_0 = A_{L,total}\, N^2",
         rf"L_{{0,min}} = {AL_min:.1f}\ \mathrm{{nH/T^2}} \times {N}^2 = {L0_min:.3f}\ \mu\mathrm{{H}}",
@@ -2622,6 +2204,7 @@ def _ch3(story, state, d):
     lvt = d.get("L_vs_Vin_table", []) or []
     if lvt:
         wrow = min(lvt, key=lambda r: float(r.get("L_full_nom_uH", 1e9)))
+        _has_req3 = any(r.get("L_req_uH") is not None for r in lvt)
         body(story,
             "Under DC bias the powder permeability rolls off, so the full-load inductance is "
             "lower than the no-load L<sub>0</sub> above. The worst case (lowest retained "
@@ -2630,7 +2213,10 @@ def _ch3(story, state, d):
             f"{float(wrow.get('k_bias',1)):.4f}, giving nominal full-load "
             f"L<sub>full</sub> = {float(wrow.get('L_full_nom_uH',0)):.1f} µH "
             f"(A<sub>L,min</sub> band {float(wrow.get('L_full_min_uH',0)):.1f} µH). "
-            f"Every point stays above 85% of the {L_tgt:.0f} µH target.", 3)
+            + ("Every point meets its own per-point required inductance (L<sub>req</sub> "
+               "column, judged at nominal A<sub>L</sub> per the designer's decision — the "
+               "± band shows the production spread)." if _has_req3 else
+               f"Every point stays above 95% of the {L_tgt:.0f} µH target."), 3)
         _lr, _wi = [], lvt.index(wrow)
         for r in lvt:
             _lr.append([
@@ -2641,17 +2227,25 @@ def _ch3(story, state, d):
                 f"{float(r.get('L_full_min_uH',0)):.1f}",
                 f"{float(r.get('L_full_nom_uH',0)):.1f}",
                 f"{float(r.get('L_full_max_uH',0)):.1f}",
-            ])
-        data_table(story, "3.5.4", "Full-Load Inductance vs Input Voltage — All 9 Operating Points",
+            ] + ([f"{float(r.get('L_req_uH',0)):.1f}",
+                  "PASS" if r.get("meets_req") else "FAIL"] if _has_req3 else []))
+        data_table(story, "3.4.4", "Full-Load Inductance vs Input Voltage — All 9 Operating Points",
             "DC-bias-derated inductance at each operating point, across the A<sub>L</sub> "
-            "min/nom/max band. Amber row = worst case (lowest retained inductance).",
+            "min/nom/max band"
+            + ("; L<sub>req</sub> = inductance required at that point to hold the selected "
+               "crest ripple ratio (largest at the governing corner); verdict = "
+               "L<sub>full,nom</sub> ≥ L<sub>req</sub>." if _has_req3 else ".")
+            + " Amber row = worst case (lowest retained inductance).",
             ["V<sub>in</sub> (V)", "I<sub>φ,crest</sub> (A)", "H (Oe)", "k(H)",
-             "L<sub>full,min</sub> (µH)", "L<sub>full,nom</sub> (µH)", "L<sub>full,max</sub> (µH)"],
+             "L<sub>full,min</sub> (µH)", "L<sub>full,nom</sub> (µH)", "L<sub>full,max</sub> (µH)"]
+            + (["L<sub>req</sub> (µH)", "L<sub>nom</sub>≥L<sub>req</sub>"] if _has_req3 else []),
             _lr,
-            col_widths=[CW*0.12, CW*0.16, CW*0.12, CW*0.12, CW*0.16, CW*0.16, CW*0.16],
+            col_widths=([CW*0.09, CW*0.12, CW*0.09, CW*0.10, CW*0.13, CW*0.13, CW*0.13,
+                         CW*0.11, CW*0.10] if _has_req3
+                        else [CW*0.12, CW*0.16, CW*0.12, CW*0.12, CW*0.16, CW*0.16, CW*0.16]),
             worst_rows=[_wi], ch=3)
 
-    sub_h(story, "3.5.5", "Window fill factor FF_cu", 3)
+    sub_h(story, "3.4.5", "Window fill factor FF_cu", 3)
     Cu_area_one = math.pi*(d_str/2)**2*n_str if d_str else Cu_area1
     eq_box(story, [
         r"A_{cu,1} = \pi \left(\dfrac{d_{strand}}{2}\right)^{\!2} n_{strands}",
@@ -2664,7 +2258,7 @@ def _ch3(story, state, d):
                 f"FF<sub>cu</sub> = {FFcu:.4f}  ({FFcu*100:.1f}%)",
                 "PASS — below 45% limit" if FFcu<=0.45 else "FAIL — exceeds 45%", 3)
 
-    sub_h(story, "3.5.6", "Insulated bundle fill — practical winding limit check", 3)
+    sub_h(story, "3.4.6", "Insulated bundle fill — practical winding limit check", 3)
     Ku = float(d.get("Ku", FFcu*1.25))
     body(story,
         f"Insulated fill factor K<sub>u</sub> = F<sub>F</sub> × (1 + insulation overhead) "
@@ -2685,27 +2279,616 @@ def _ch3(story, state, d):
                "⚠ Negative clearance — the bore is overfilled; reduce turns or choose a larger core."), 3)
 
     # Item 16 — current density: step-by-step before the winding decision.
-    sub_h(story, "3.5.7", "Current density check", 3)
+    sub_h(story, "3.4.7", "Current density check", 3)
+    _Jtgt = float(d.get("J_target_A_mm2", 0) or 0)
     annotation(story, "CONCEPT",
-        "Current density J is the rated RMS current divided by the copper cross-section carrying "
-        "it. It sets the ohmic loss per unit volume and the local temperature rise; fan-cooled "
-        "magnet wire is typically held to ≈ 4–7 A/mm².", 3)
+        "Current density J is the per-CONDUCTOR RMS current divided by that conductor's copper "
+        "cross-section — equivalently, the full per-phase RMS current divided by the TOTAL "
+        "parallel copper n<sub>par</sub>·A<sub>cu,1</sub>. It sets the ohmic loss per unit "
+        "volume and the local temperature rise. "
+        + (f"The designer's GUI target for wire selection is J ≤ {_Jtgt:.1f} A/mm²."
+           if _Jtgt else "Fan-cooled magnet wire is typically held to ≈ 4–7 A/mm²."), 3)
     _Acu_cond = n_par * Cu_area_one
     _Jcalc = (Iph_rms / _Acu_cond) if _Acu_cond else 0.0
     eq_box(story, [
-        r"A_{cu,bundle} = n_{par}\, A_{cu,1}\ ,\qquad J = \dfrac{I_{\varphi,rms}}{A_{cu,bundle}}",
-        rf"A_{{cu,bundle}} = {n_par} \times {Cu_area_one:.4f} = {_Acu_cond:.4f}\ \mathrm{{mm^2}}",
+        r"A_{cu,total} = n_{par}\, A_{cu,1}\ ,\qquad J = \dfrac{I_{\varphi,rms}}{A_{cu,total}}"
+        r" = \dfrac{I_{\varphi,rms}/n_{par}}{A_{cu,1}}",
+        rf"A_{{cu,total}} = {n_par} \times {Cu_area_one:.4f} = {_Acu_cond:.4f}\ \mathrm{{mm^2}}",
         rf"J = \dfrac{{{Iph_rms:.4f}}}{{{_Acu_cond:.4f}}} = {_Jcalc:.2f}\ \mathrm{{A/mm^2}}",
     ], heading="Copper current density at rated per-phase RMS current", ch=3)
+    # Engine value (same convention as the equation above and the GUI wire table);
+    # the equation-box figure is the fallback for legacy payloads.
     _Jrep = J_Amm2 or _Jcalc
+    _Jlim = _Jtgt if _Jtgt else 7.0
     verdict_row(story, "Current density",
-        f"J = {_Jrep:.2f} A/mm²  (target ≤ 7 A/mm² for fan-cooled magnet wire)",
-        "PASS" if _Jrep <= 7.0 else "REVIEW", ch=3)
+        f"J = {_Jrep:.2f} A/mm²  ≤  "
+        + (f"designer target {_Jtgt:.1f} A/mm²" if _Jtgt
+           else "7 A/mm² (fan-cooled magnet wire)"),
+        "PASS" if _Jrep <= _Jlim + 1e-9 else "REVIEW", ch=3)
 
     annotation(story, "DECISION",
         f"Wire confirmed: <b>{wire}</b>, N = <b>{N} turns</b>, "
         f"n<sub>par</sub> = {n_par}, FF<sub>cu</sub> = {FFcu*100:.1f}%. "
-        f"Current density J = {J_Amm2:.2f} A/mm² at rated I<sub>rms</sub> = {Iph_rms:.4f} A.", 3)
+        f"Current density J = {_Jrep:.2f} A/mm² at rated I<sub>rms</sub> = {Iph_rms:.4f} A"
+        + (f" — within the designer's J ≤ {_Jtgt:.1f} A/mm² wire-selection target."
+           if _Jtgt and _Jrep <= _Jtgt + 1e-9 else "."), 3)
+
+    # ════════════════════════════════════════════════════════
+    # 3.5 RIPPLE AND INTERLEAVING ANALYSIS
+    # ════════════════════════════════════════════════════════
+    step_h(story, "3.5", "Ripple, Current, and Duty-Cycle Analysis", 3)
+    annotation(story, "CONCEPT",
+        "Section 3.5 carries the full ripple-and-current analysis chain that fixes "
+        "the inductor's electrical operating envelope: sizing L<sub>φ</sub> at the "
+        "worst-case low-line corner, computing per-phase RMS currents and crest "
+        "ripple, mapping ripple against line angle, locating the worst-case line "
+        "angle, and constructing the complete time-domain current and ripple "
+        "waveforms — per phase and at the input — across the half line cycle for "
+        "the low-line and high-line operating families.", 3)
+
+    # ── 3.5.1 — Lphi sizing at the worst-case ripple corner (Step 4) ─────────
+    # §3.5.1 no longer repeats the §3.1.1 sizing derivation (report notes 2026-07-18
+    # #3): with core, turns and per-point inductance now final, it states the
+    # AS-BUILT per-phase currents — the values Chapter 2 deferred until L existed.
+    sub_h(story, "3.5.1", "Per-phase currents with the as-built inductance — all 9 points", 3)
+    annotation(story, "CONCEPT",
+        "The sizing derivation lives in Section 3.1.1; core, turns and the per-point "
+        "as-built inductance are fixed in Sections 3.3–3.4. Everything below therefore "
+        "uses each operating point's OWN as-built nominal inductance — these are the "
+        "actual per-phase current values (the HF-ripple-dependent quantities that "
+        "Chapter 2 explicitly deferred), directly comparable to a lab measurement.", 3)
+    if L_ab_uH is not None:
+        _ab_rows = [[f"{int(Vin_rms[i])}", f"{int(Pout[i])}", f"{L_ab_uH[i]:.1f}",
+                     f"{Iin_pk[i]/(2*n_ph):.4f}", f"{dIL_crest[i]:.4f}",
+                     f"{Iph_pk[i]:.4f}"] for i in range(n9)]
+        data_table(story, "3.5.1",
+            "As-Built Per-Phase Currents — Crest Quantities at All 9 Points",
+            "Each row uses its own point's as-built nominal inductance from "
+            "Table 3.4.4. RMS quantities (LF/HF decomposition) follow in Table 3.5.2b.",
+            ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)", "L<sub>as-built</sub> (µH)",
+             "I<sub>φ,avg@crest</sub> (A)", "ΔI<sub>L,pp</sub>@crest (A)",
+             "I<sub>φ,pk</sub> w/ ripple (A)"],
+            _ab_rows,
+            col_widths=[CW*0.12, CW*0.13, CW*0.18, CW*0.19, CW*0.19, CW*0.19],
+            worst_rows=[_bind9], ch=3)
+    else:
+        body(story, "As-built inductance table not present in this design payload — "
+                    "the envelope values at the requirement inductance apply.", 3)
+
+    # ── 3.5.2 — Per-phase RMS current and crest ripple (Step 5) ─────────────
+    sub_h(story, "3.5.2", "Per-phase RMS current and crest ripple", 3)
+    body(story, "Numerical integration over the half line cycle, using the "
+                "AS-BUILT per-point inductance of the selected core (nominal A<sub>L</sub>; "
+                "see the L-vs-V<sub>in</sub> table in the winding section)."
+                if L_ab_uH is not None else
+                f"Numerical integration over the half line cycle, L<sub>φ</sub> = "
+                f"{L_phi*1e6:.1f} µH (requirement envelope — engine result pending).", 3)
+    eq_box(story, [r"i_{L,avg,\phi}(\theta) = \dfrac{I_{in,pk}}{2}\sin\theta"],
+           heading="Average per-phase current", number="5.1", ch=3)
+    eq_box(story, [r"I_{L,\phi,rms} = \sqrt{\dfrac{1}{\pi}\int_0^{\pi}"
+                   r"\left[i_{L,avg}^{\,2} + i_{L,hf}^{\,2}\right] d\theta}"],
+           heading="Total per-phase RMS current", number="5.2", ch=3)
+
+    rows52a = [[f"{int(Vin_rms[i])}", f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}",
+                f"{dIin_crest[i]:.3f}", f"{Iph_pk[i]:.3f}"] for i in range(n9)]
+    data_table(story, "3.5.2a", "Input Current and Ripple at Crest", "",
+        ["V<sub>in,rms</sub> (V)","I<sub>in,rms</sub> (A)","I<sub>in,pk</sub> (A)",
+         "ΔI<sub>in,pp</sub>@crest (A)","I<sub>φ,pk</sub>@crest w/ ripple (A)"],
+        rows52a, col_widths=[CW*0.20]*5, ch=3)
+    # Worked example — EVERY column of Table 3.5.2a derived step by step at one
+    # operating point (the binding row), fully substituted (report notes #4).
+    _wi5 = _bind9
+    eq_box(story, [
+        rf"P_{{in}} = \dfrac{{P_{{out}}}}{{\eta}} = \dfrac{{{Pout[_wi5]:.0f}}}{{{eta_a[_wi5]:.3f}}} = {Pin[_wi5]:.2f}\ \mathrm{{W}}",
+        rf"I_{{in,rms}} = \dfrac{{P_{{in}}}}{{V_{{in}}\,\mathrm{{PF}}}} = \dfrac{{{Pin[_wi5]:.2f}}}{{{int(Vin_rms[_wi5])} \times {PF_a[_wi5]:.4f}}} = {Iin_rms[_wi5]:.3f}\ \mathrm{{A}}",
+        rf"I_{{in,pk}} = \sqrt{{2}}\,I_{{in,rms}} = \sqrt{{2}} \times {Iin_rms[_wi5]:.3f} = {Iin_pk[_wi5]:.3f}\ \mathrm{{A}}",
+        rf"\Delta I_{{L,pp}} = \dfrac{{V_{{pk}}\,D}}{{L_{{as\text{{-}}built}}\,f_{{sw}}}} = "
+        rf"\dfrac{{{Vin_pk[_wi5]:.3f} \times {Dpk[_wi5]:.4f}}}{{{(L_pt(_wi5)*1e6):.1f}\,\mu\mathrm{{H}} \times {fsw/1e3:.0f}\,\mathrm{{kHz}}}} = {dIL_crest[_wi5]:.4f}\ \mathrm{{A}}",
+        rf"\Delta I_{{in,pp}} = K(D)\,\Delta I_{{L,pp}} = {KDpk[_wi5]:.4f} \times {dIL_crest[_wi5]:.4f} = {dIin_crest[_wi5]:.3f}\ \mathrm{{A}}",
+        rf"I_{{\phi,pk}} = \dfrac{{I_{{in,pk}}}}{{N_{{ph}}}} + \dfrac{{\Delta I_{{L,pp}}}}{{2}} = "
+        rf"\dfrac{{{Iin_pk[_wi5]:.3f}}}{{{n_ph}}} + \dfrac{{{dIL_crest[_wi5]:.4f}}}{{2}} = {Iph_pk[_wi5]:.3f}\ \mathrm{{A}}",
+    ], heading=f"Worked example — every Table 3.5.2a column at {int(Vin_rms[_wi5])} Vac / "
+               f"{int(Pout[_wi5])} W (binding row), reproducible by hand", ch=3)
+
+    rows52b = [[f"{int(Vin_rms[i])}", f"{Iin_rms[i]:.3f}", f"{IL_rms[i]:.4f}",
+                f"{IL_LF[i]:.4f}", f"{IL_HF[i]:.4f}", f"{dIL_crest[i]:.4f}",
+                f"{Iph_pk[i]:.4f}"] for i in range(n9)]
+    data_table(story, "3.5.2b", "Inductor Current RMS per Phase", "",
+        ["V<sub>in,rms</sub> (V)","I<sub>in,rms</sub> (A)","I<sub>L,φ,rms</sub> (A)",
+         "I<sub>L,φ,rms,LF</sub> (A)","I<sub>L,φ,rms,HF</sub> (A)",
+         "ΔI<sub>L,pp</sub>@crest (A)","I<sub>L,φ,pk</sub>@crest (A)"],
+        rows52b, col_widths=[CW*0.15]+[CW*0.142]*6, ch=3)
+    # Worked example — EVERY column of Table 3.5.2b at the same binding row: the
+    # LF share by hand, the HF share from the half-cycle integral of the triangular
+    # ripple, and the √-sum reproducing the table's total (report notes #4). This is
+    # the same decomposition Chapter 2's note promised once the inductance existed.
+    eq_box(story, [
+        rf"I_{{L,\phi,LF}} = \dfrac{{I_{{in,rms}}}}{{N_{{ph}}}} = \dfrac{{{Iin_rms[_wi5]:.3f}}}{{{n_ph}}} = {IL_LF[_wi5]:.4f}\ \mathrm{{A}}"
+        rf"\quad(=\ \mathrm{{RMS\ of}}\ (I_{{in,pk}}/2)\sin\theta)",
+        rf"i_{{hf}}(\theta) = \dfrac{{\Delta I_{{L,pp}}(\theta)}}{{2\sqrt{{3}}}},\qquad "
+        rf"\Delta I_{{L,pp}}(\theta) = \dfrac{{V_{{in}}(\theta)\,D(\theta)}}{{L_{{as\text{{-}}built}}\,f_{{sw}}}}"
+        rf"\quad(L = {(L_pt(_wi5)*1e6):.1f}\ \mu\mathrm{{H}})",
+        rf"I_{{L,\phi,HF}} = \sqrt{{\dfrac{{1}}{{\pi}}\int_0^{{\pi}} i_{{hf}}^2(\theta)\,d\theta}} = {IL_HF[_wi5]:.4f}\ \mathrm{{A}}"
+        rf"\quad(\mathrm{{numerical\ integration,\ 3000\ points}})",
+        rf"I_{{L,\phi,rms}} = \sqrt{{I_{{LF}}^2 + I_{{HF}}^2}} = \sqrt{{{IL_LF[_wi5]:.4f}^2 + {IL_HF[_wi5]:.4f}^2}} = {IL_rms[_wi5]:.4f}\ \mathrm{{A}}",
+        rf"\Delta I_{{L,pp}}@\mathrm{{crest}} = \dfrac{{{Vin_pk[_wi5]:.3f} \times {Dpk[_wi5]:.4f}}}{{{(L_pt(_wi5)*1e6):.1f}\,\mu\mathrm{{H}} \times {fsw/1e3:.0f}\,\mathrm{{kHz}}}} = {dIL_crest[_wi5]:.4f}\ \mathrm{{A}},\qquad "
+        rf"I_{{L,\phi,pk}} = \dfrac{{{Iin_pk[_wi5]:.3f}}}{{{n_ph}}} + \dfrac{{{dIL_crest[_wi5]:.4f}}}{{2}} = {Iph_pk[_wi5]:.4f}\ \mathrm{{A}}",
+    ], heading=f"Worked example — every Table 3.5.2b column at {int(Vin_rms[_wi5])} Vac / "
+               f"{int(Pout[_wi5])} W: LF share, HF integral, √-sum total", ch=3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, IL_rms, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{L,\\phi,rms}$ (A)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $I_{{L,\\phi,rms}}$ vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Per-phase inductor RMS current rises with V<sub>in,rms</sub> as duty cycle and ripple content shift.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, Iin_rms, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{in,rms}$ (A)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $I_{{in,rms}}$ vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Input RMS current falls as V<sub>in,rms</sub> rises for constant power, settling near the high-line corner.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, Iin_pk, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$I_{in,pk}$ (A)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $I_{{in,pk}}$ vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Peak input current is highest at the {int(Vin_rms[0])} V<sub>ac</sub> low-line corner — the corner that drives component stress ratings.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, dIin_crest, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9); ax.set_ylabel("$\\Delta I_{in,pp}$@crest (A)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $\\Delta I_{{in,pp}}$@crest vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Net input ripple at the crest after K(D) cancellation — the quantity the input EMI filter must absorb.", 3)
+
+    # ── 3.5.3 — Ripple vs line angle (Step 6) ───────────────────────────────
+    sub_h(story, "3.5.3", "Ripple versus line angle", 3)
+    annotation(story, "CONCEPT",
+        "Per-phase inductor ripple ΔI<sub>L,pp</sub>(θ) is plotted against line "
+        "angle θ for all nine operating points. The high-line family shows "
+        "characteristic twin peaks either side of the D = 0.5 crossing "
+        f"(V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V), where ripple is at "
+        "its absolute maximum but K(D) nulls the net input ripple.", 3)
+
+    th90  = np.linspace(0, np.pi/2, 400)
+    th180 = np.linspace(0, np.pi, 400)
+    def _dIL_curve(Vp, th, L_i=None):
+        Vt = Vp*np.sin(th); Dt = np.clip(1-Vt/vout, 0, 1)
+        return Vt*Dt/((L_i if L_i is not None else L_phi)*fsw)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3.7))
+    for i in range(n9):
+        ax.plot(np.degrees(th90), _dIL_curve(Vin_pk[i], th90, L_pt(i)),
+                color=_vc(i), lw=1.3, label=f"{int(Vin_rms[i])} Vac")
+    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
+    ax.set_xlabel("Line angle $\\theta$ (deg)", fontsize=9)
+    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $\\Delta I_{{L,pp}}$ vs line angle (0°-90°)", fontsize=9)
+    ax.legend(fontsize=6.5, ncol=3, framealpha=0.9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Per-phase ripple from the zero crossing to the crest, all nine operating points; dashed line marks the global maximum.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3.7))
+    for i in range(n9):
+        ax.plot(np.degrees(th180), _dIL_curve(Vin_pk[i], th180),
+                color=_vc(i), lw=1.3, label=f"{int(Vin_rms[i])} Vac")
+    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
+    ax.set_xlabel("Line angle $\\theta$ (deg, 0-180)", fontsize=9)
+    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $\\Delta I_{{L,pp}}$ vs line angle (0°-180°)", fontsize=9)
+    ax.legend(fontsize=6.5, ncol=3, framealpha=0.9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Full half cycle. High-line curves trace the characteristic twin-peak shape either side of D = 0.5.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3.7))
+    for i in LHIGH:
+        ax.plot(np.degrees(th90), _dIL_curve(Vin_pk[i], th90),
+                color=_vc(i), lw=1.6, label=f"{int(Vin_rms[i])} Vac")
+    ax.axhline(dIL_max_global, color="k", ls="--", lw=0.9)
+    if LHIGH:
+        th_wc = np.arcsin(vout/2/Vin_pk[LHIGH[0]])
+        ax.axvline(np.degrees(th_wc), color="gray", ls=":", lw=1.0)
+    ax.set_xlabel("$\\theta$ (deg)", fontsize=9)
+    ax.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — High-line zoom: worst case ($V_{{in}} \\approx V_{{out}}/2$)", fontsize=9)
+    ax.legend(fontsize=8, framealpha=0.9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Every high-line curve touches the maximum-ripple ceiling at V<sub>in</sub> ≈ V<sub>out</sub>/2 (dotted marker).", 3)
+
+    fig_n += 1
+    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
+    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
+        for i in idxs:
+            Vt = Vin_pk[i]*np.sin(th90); Dt = np.clip(1-Vt/vout, 0, 1)
+            ax2.plot(np.degrees(th90), K_of_D(Dt)*Vt*Dt/(L_pt(i)*fsw),
+                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Line angle $\\theta$ (deg)", fontsize=9)
+        ax2.set_ylabel("$\\Delta I_{in,pp}(\\theta)$ (A pk-pk)", fontsize=9)
+        ax2.set_title(f"Input Ripple Envelope after K(D) Cancellation — {ttl}", fontsize=9)
+        ax2.set_xlim(0, 90); ax2.legend(fontsize=7, ncol=2)
+        ax2.grid(True, alpha=0.3)
+    fig.tight_layout(pad=2.0)
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story,
+        f"Figure 3.5.{fig_n} — ΔI<sub>in,pp</sub>(θ) = K(D(θ)) × ΔI<sub>L,pp</sub>(θ) for "
+        "the low-line (top) and high-line (bottom) families. Cancellation drives "
+        f"the envelope toward zero near D = 0.5 (≈{vout/2/math.sqrt(2):.0f} V<sub>ac</sub>).", 3)
+
+    # ── 3.5.4 — Summary tables (Step 7) ─────────────────────────────────────
+    sub_h(story, "3.5.4", "Summary tables — crest-of-line ripple and worst-case angle", 3)
+    # Pass column is COMPUTED against the designer-selected r (was a hardcoded "YES"
+    # against a fixed 15% ceiling — a 20% selection wrongly "passed" rows above 15%).
+    _rlim = r_input * 100
+    rows71 =[[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{int(Pout[i])}", f"{Pin[i]:.2f}",
+               f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}", f"{Vin_pk[i]:.3f}", f"{Dpk[i]:.4f}",
+               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.2f}",
+               f"{Iph_pk[i]:.4f}",
+               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"] for i in range(n9)]
+    data_table(story, "3.5.4a", "Crest-of-Line Ripple and Currents — All Nine Points",
+        f"Last column verifies ΔI<sub>in,pp</sub>/I<sub>in,pk</sub> stays at or below the "
+        f"designer-selected ripple ratio r = {_rlim:.1f}% at every point — computed with "
+        + ("the AS-BUILT per-point inductance of the selected core (nominal A<sub>L</sub>), "
+           "so these are the values a lab measurement shows."
+           if L_ab_uH is not None else
+           f"the requirement envelope L<sub>φ</sub> = {L_phi*1e6:.1f} µH."),
+        ["V<sub>in</sub> (V)","η","P<sub>out</sub> (W)","P<sub>in</sub> (W)",
+         "I<sub>in,rms</sub> (A)","I<sub>in,pk</sub> (A)","V<sub>pk</sub> (V)","D@crest",
+         "ΔI<sub>L,pp</sub> (A)","ΔI<sub>in,pp</sub> (A)","ΔI<sub>in</sub>/I<sub>pk</sub> %",
+         "I<sub>φ,pk</sub> (A)",f"≤{_rlim:.0f}% Pass?"],
+        rows71,
+        col_widths=[CW*0.072]*13,
+        worst_rows=[_bind9], ch=3)
+    body(story,
+        f"The binding (worst ripple-ratio) point is <b>{int(Vin_rms[_bind9])} V<sub>ac</sub> / "
+        f"{int(Pout[_bind9])} W</b> — highlighted row — at "
+        f"{r_act[_bind9]*100:.2f}%, just under the r = {_rlim:.1f}% ceiling. "
+        "The residual gap is the integer-turns quantization: N is the smallest turns count "
+        "whose as-built inductance meets the requirement at every point.", 3)
+    # Worked example — the binding row's ripple chain with the AS-BUILT inductance,
+    # reproducible by hand (report notes: show the steps, not just eq + table).
+    if L_ab_uH is not None:
+        _bi = _bind9
+        eq_box(story, [
+            rf"\Delta I_{{L,pp}} = \dfrac{{V_{{pk}}\,D}}{{L_{{as\text{{-}}built}}\,f_{{sw}}}} = "
+            rf"\dfrac{{{Vin_pk[_bi]:.3f} \times {Dpk[_bi]:.4f}}}{{{L_ab_uH[_bi]:.1f}\,\mu\mathrm{{H}} \times {fsw/1e3:.0f}\,\mathrm{{kHz}}}} = "
+            rf"{dIL_crest[_bi]:.4f}\ \mathrm{{A}}",
+            rf"\Delta I_{{in,pp}} = K(D)\,\Delta I_{{L,pp}} = {KDpk[_bi]:.4f} \times {dIL_crest[_bi]:.4f} = {dIin_crest[_bi]:.4f}\ \mathrm{{A}}",
+            rf"r_{{act}} = \dfrac{{\Delta I_{{in,pp}}}}{{I_{{in,pk}}}} = \dfrac{{{dIin_crest[_bi]:.4f}}}{{{Iin_pk[_bi]:.4f}}} = {r_act[_bi]*100:.2f}\%\ \leq\ {_rlim:.1f}\%\ \checkmark",
+        ], heading=f"Worked example — binding row ({int(Vin_rms[_bi])} Vac / "
+                   f"{int(Pout[_bi])} W) with the as-built inductance", ch=3)
+
+    rows72 = [[f"{int(Vin_rms[i])}", f"{Vin_pk[i]:.3f}", f"{Vin_w[i]:.4f}",
+               f"{np.degrees(th1[i]):.4f}", f"{t1_ms[i]:.4f}", f"{D_w[i]:.4f}",
+               f"{dIL_max[i]:.4f}",
+               "Vpk<Vout/2 -> crest" if Vin_pk[i] < vout/2 else "Vin = Vout/2"]
+              for i in range(n9)]
+    data_table(story, "3.5.4b", "Worst-Case Line Angle — All Nine Points",
+        "θ<sub>1</sub> is the line angle at which V<sub>in</sub>(θ) = V<sub>out</sub>/2 "
+        "(maximum-ripple condition); reachable only when V<sub>in,pk</sub> ≥ V<sub>out</sub>/2.",
+        ["V<sub>in</sub> (V)","V<sub>pk</sub> (V)","V<sub>in</sub>@max (V)","θ<sub>1</sub> (deg)",
+         "t<sub>1</sub> (ms)","D<sub>worst</sub>","ΔI<sub>L,max</sub> (A)","Condition"],
+        rows72,
+        col_widths=[CW*0.10,CW*0.11,CW*0.13,CW*0.11,CW*0.10,CW*0.11,CW*0.12,CW*0.22], ch=3)
+
+    # ── 3.5.5 — Worst-case line angle (Step 8) ──────────────────────────────
+    sub_h(story, "3.5.5", "Worst-case line angle for maximum per-phase ripple", 3)
+    eq_box(story, [r"\Delta I_{L,pp}(\theta) = \dfrac{V_{in}(\theta)\, D(\theta)}{L_\phi\, f_{sw}}"],
+           heading="Per-phase ripple as a function of line angle", number="8.1", ch=3)
+    eq_box(story, [rf"\dfrac{{dg}}{{dV_{{in}}}} = 0 \quad\Rightarrow\quad "
+                   rf"V_{{in}} = \dfrac{{V_{{out}}}}{{2}} = {vout/2:.1f}\ \mathrm{{V}}"],
+           heading="Stationary point of the ripple envelope", number="8.2", ch=3)
+    eq_box(story, [r"\theta_1 = \arcsin\!\left(\dfrac{V_{out}}{2\, V_{pk}}\right),"
+                   r"\quad \theta_2 = 180^\circ - \theta_1"],
+           heading="Worst-case line angles", number="8.3", ch=3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, np.degrees(th1), color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9)
+    ax.set_ylabel("Worst-case angle $\\theta_1$ (deg)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — Worst-case angle $\\theta_1$ vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — θ<sub>1</sub> stays at 90° while V<sub>in,pk</sub> &lt; V<sub>out</sub>/2 (the crest is the worst case); it departs from 90° once the high-line crest can reach V<sub>out</sub>/2.", 3)
+
+    fig_n += 1
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(Vin_rms, dIL_max, color=_mpl_c(STEP_BLUE), marker="o", ms=5, lw=2)
+    ax.set_xlabel("$V_{in,rms}$ (Vac)", fontsize=9)
+    ax.set_ylabel("$\\Delta I_{L,pp,max}$ (A)", fontsize=9)
+    ax.set_title(f"Figure 3.5.{fig_n} — $\\Delta I_{{L,pp,max}}$ vs $V_{{in,rms}}$", fontsize=9)
+    ax.grid(True, alpha=0.3); fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Maximum per-phase ripple ΔI<sub>L,pp,max</sub> = {dIL_max_global:.4f} A occurs at D = 0.5 (V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V) wherever the input range reaches it.", 3)
+
+    # ── 3.5.6 — Combined results table (Step 9) ─────────────────────────────
+    sub_h(story, "3.5.6", "Combined worst-case results table", 3)
+    rows9 = [[f"{int(Vin_rms[i])}", f"{Vin_pk[i]:.4f}", f"{Vin_w[i]:.4f}",
+              f"{np.degrees(th1[i]):.4f}", f"{t1_ms[i]:.4f}",
+              f"{np.degrees(th2[i]):.4f}", f"{t2_ms[i]:.4f}", f"{dIL_max[i]:.4f}",
+              "Vpk<Vout/2 -> crest" if Vin_pk[i] < vout/2 else "Vin = Vout/2 reachable"]
+             for i in range(n9)]
+    data_table(story, "3.5.6", "Worst-Case Line Angle and Ripple — Full Results", "",
+        ["V<sub>in,rms</sub> (V)","V<sub>in,pk</sub> (V)","V<sub>in</sub>@max (V)",
+         "θ<sub>1</sub> (deg)","t<sub>1</sub> (ms)","θ<sub>2</sub> (deg)","t<sub>2</sub> (ms)",
+         "ΔI<sub>L,max</sub> (A)","Condition"],
+        rows9,
+        col_widths=[CW*0.10,CW*0.10,CW*0.11,CW*0.10,CW*0.09,CW*0.10,CW*0.09,CW*0.11,CW*0.20], ch=3)
+    body(story,
+        f"ΔI<sub>L,pp,max</sub> = {dIL_max_global:.4f} A at D = 0.5 "
+        f"(V<sub>in</sub> = V<sub>out</sub>/2 = {vout/2:.1f} V).", 3)
+
+    # ── 3.5.7 — Duty-cycle waveforms (Step 10) ──────────────────────────────
+    sub_h(story, "3.5.7", "Duty-cycle waveforms over the line cycle", 3)
+    body(story,
+        "D(t) = 1 − V<sub>in,pk</sub>·|sin(2π·f<sub>line</sub>·t)| / V<sub>out</sub>. "
+        "Red dashed line marks D<sub>pk</sub> for each operating point.", 3)
+
+    T_cyc = 1/f_line; t_cyc = np.linspace(0, T_cyc, 2000)*1000
+    groups = [LLOW[:4], LHIGH[:3], LHIGH[3:]]
+    for gi, grp in enumerate([g for g in groups if g]):
+        nc = min(len(grp), 3); nr = (len(grp)+nc-1)//nc
+        fig, axes = plt.subplots(nr, nc, figsize=(nc*2.5, nr*2.4))
+        if nr*nc == 1: axes = np.array([[axes]])
+        elif nr == 1:  axes = axes.reshape(1, -1)
+        elif nc == 1:  axes = axes.reshape(-1, 1)
+        k2 = 0
+        for row in axes:
+            for ax2 in row:
+                if k2 < len(grp):
+                    i = grp[k2]
+                    Vt = Vin_pk[i]*np.abs(np.sin(2*np.pi*f_line*t_cyc/1000))
+                    Dt = np.clip(1-Vt/vout, 0, 1)
+                    ax2.plot(t_cyc, Dt, color=_mpl_c(STEP_BLUE), lw=1.4)
+                    ax2.axhline(Dpk[i], color="#C00000", ls="--", lw=0.9)
+                    ax2.set_title(f"{int(Vin_rms[i])} Vrms", fontsize=9)
+                    ax2.set_xlabel("Time (ms)", fontsize=8); ax2.set_ylabel("D(t)", fontsize=8)
+                    ax2.set_xlim(0, T_cyc*1000); ax2.set_ylim(-0.02, 1.05)
+                    ax2.tick_params(labelsize=7); ax2.grid(True, alpha=0.3)
+                else:
+                    ax2.set_visible(False)
+                k2 += 1
+        fig_n += 1
+        fig.suptitle(f"Figure 3.5.{fig_n} — Duty cycle over one line cycle — group {gi+1}",
+                     fontsize=9, fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        story.append(_mpl_img(fig, 165))
+        fig_caption(story,
+            f"Figure 3.5.{fig_n} — D(t) traces for group {gi+1} "
+            f"({', '.join(str(int(Vin_rms[x]))+' Vac' for x in grp)}); "
+            "red dashed line marks D<sub>pk</sub> at the crest of each operating point.", 3)
+
+    body(story, "Compact crest-of-line ripple summary:", 3)
+    rows10 = [[f"{int(Vin_rms[i])}", f"{eta_a[i]:.3f}", f"{Dpk[i]:.4f}", f"{KDpk[i]:.4f}",
+               f"{dIL_crest[i]:.4f}", f"{dIin_crest[i]:.4f}", f"{r_act[i]*100:.3f}%",
+               "YES" if r_act[i]*100 <= _rlim + 0.05 else "NO"]
+              for i in range(n9)]
+    data_table(story, "3.5.7", "Compact Crest-of-Line Ripple Table", "",
+        ["V<sub>ac,rms</sub> (V)","η","D@crest","K(D)@crest","ΔI<sub>L,pp</sub>@crest (A)",
+         "ΔI<sub>in,pp</sub>@crest (A)","ΔI<sub>in</sub>/I<sub>pk</sub>@crest",f"≤{_rlim:.0f}% pass?"],
+        rows10,
+        col_widths=[CW*0.13,CW*0.10,CW*0.12,CW*0.13,CW*0.16,CW*0.16,CW*0.13,CW*0.07], ch=3)
+
+    # ── 3.5.8 — Per-phase current waveforms (Step 11) ───────────────────────
+    sub_h(story, "3.5.8", "Per-phase current waveforms", 3)
+    body(story,
+        f"Phase A shown; Phase B carries identical average current, T<sub>s</sub>/2 "
+        f"phase-shifted. Each family is drawn with its point's as-built inductance; "
+        f"f<sub>sw</sub> = {fsw/1e3:.0f} kHz.", 3)
+    eq_box(story, [r"V_{pk} = \sqrt{2}\, V_{in,rms}, \quad D(\theta) = 1 - \dfrac{V_{in}(\theta)}{V_{out}}"],
+           heading="Peak input voltage and instantaneous duty cycle", number="11.1", ch=3)
+    eq_box(story, [r"\Delta I_{L,pp}(\theta) = \dfrac{V_{in}\, D}{L_\phi\, f_{sw}}"],
+           heading="Per-phase ripple at line angle θ", number="11.2", ch=3)
+    eq_box(story, [r"i_{L,avg,\phi}(t) = \dfrac{1}{2}\, I_{in,pk} \sin(2\pi f_{line}\, t)"],
+           heading="Average per-phase current versus time", number="11.3", ch=3)
+    eq_box(story, [
+        r"i_{L\phi,A}(t) = i_{L,avg,\phi}(t) + \tilde{\imath}_{L\phi,A}(t)",
+        r"\tilde{\imath}_{L\phi,B}(t) = \tilde{\imath}_{L\phi,A}(t + T_s/2)",
+    ], heading="Phase-A / Phase-B switching-ripple superposition", number="11.4", ch=3)
+
+    th_h = np.linspace(1e-6, np.pi, 1200)
+    T_crest = 1/(4*f_line); zh = 90e-6
+
+    def _ripple_at(ph, D, dI):
+        Ds = np.where(D > 1e-7, D, 1e-7); Rs = np.where(1-D > 1e-7, 1-D, 1e-7)
+        return np.where(ph <= D, dI*(ph/Ds-0.5), dI*(0.5-(ph-D)/Rs))
+
+    sub_h(story, "3.5.8.1", "Per-phase ripple envelope over the half cycle", 3)
+    fig_n += 1
+    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
+    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
+        for i in idxs:
+            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
+            ax2.plot(th_h/(2*np.pi*f_line)*1000, Vt*Dt/(L_pt(i)*fsw),
+                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
+        ax2.axhline(dIL_max_global, color="k", ls="--", lw=0.8)
+        ax2.set_xlabel("Time (ms)", fontsize=9); ax2.set_ylabel("$\\Delta I_{L,pp}$ (A pk-pk)", fontsize=9)
+        ax2.set_title(f"Per-phase Ripple Envelope — {ttl}", fontsize=9)
+        ax2.set_xlim(0, 8.333); ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
+    fig.tight_layout(pad=2.0)
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Per-phase ripple envelope ΔI<sub>L,pp</sub>(t) over the half line cycle, low-line (top) and high-line (bottom) families.", 3)
+
+    sub_h(story, "3.5.8.2", "Signed ripple — Phase A", 3)
+    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
+        fig_n += 1
+        fig, ax2 = plt.subplots(figsize=(7, 3.5))
+        for i in idxs:
+            t_ms,_,_,rA,_,_,_,_ = gen_waveforms(Vin_pk[i], Iin_pk[i], L_pt(i), fsw, f_line, vout)
+            ax2.plot(t_ms, rA, color=_vc(i), lw=0.4, alpha=0.85, label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Time (ms)", fontsize=9)
+        ax2.set_ylabel("$\\tilde{i}_{L\\phi,A}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Figure 3.5.{fig_n} — Per-Phase Signed Ripple (Phase A) — {tag}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
+        fig.tight_layout()
+        story.append(_mpl_img(fig, 165))
+        fig_caption(story, f"Figure 3.5.{fig_n} — Switching-frequency ripple riding on the average per-phase current, {tag.lower()} family.", 3)
+
+    sub_h(story, "3.5.8.3", "Per-phase current over the half cycle", 3)
+    fig_n += 1
+    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
+    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
+        for i in idxs:
+            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
+            dIL_e = Vt*Dt/(L_pt(i)*fsw); iavg_e = (Iin_pk[i]/2)*np.sin(th_h)
+            t_ms_h = th_h/(2*np.pi*f_line)*1000; c = _vc(i)
+            ax2.fill_between(t_ms_h, np.maximum(iavg_e-dIL_e/2, 0), iavg_e+dIL_e/2, alpha=0.18, color=c)
+            ax2.plot(t_ms_h, iavg_e+dIL_e/2, color=c, lw=1.2, label=f"{int(Vin_rms[i])} Vac")
+            ax2.plot(t_ms_h, np.maximum(iavg_e-dIL_e/2, 0), color=c, lw=1.2)
+        ax2.set_xlabel("Time (ms)", fontsize=9); ax2.set_ylabel("$i_{L\\phi,A}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Per-phase Current — {ttl}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
+    fig.tight_layout(pad=2.0)
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Per-phase current envelope i<sub>Lφ,A</sub>(t) = i<sub>avg</sub>(t) ± ΔI<sub>L,pp</sub>(t)/2, low-line (top) and high-line (bottom) families.", 3)
+
+    sub_h(story, "3.5.8.4", "Switching ripple around the crest", 3)
+    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
+        fig_n += 1
+        fig, ax2 = plt.subplots(figsize=(7, 3.5))
+        for i in idxs:
+            t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
+            th_z = 2*np.pi*f_line*t_z
+            Vt = Vin_pk[i]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
+            iavg_z = (Iin_pk[i]/2)*np.sin(th_z); dIL_z = Vt*Dt/(L_pt(i)*fsw)
+            phA = (t_z*fsw) % 1.0
+            ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phA, Dt, dIL_z),
+                     color=_vc(i), lw=1.0, label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Time around crest (µs)", fontsize=9)
+        ax2.set_ylabel("$i_{L\\phi,A}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Figure 3.5.{fig_n} — Switching Ripple Around Crest — {tag}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
+        fig.tight_layout()
+        story.append(_mpl_img(fig, 165))
+        fig_caption(story, f"Figure 3.5.{fig_n} — Switching-frequency current ripple resolved at the crest of the line cycle, {tag.lower()} family.", 3)
+
+    sub_h(story, "3.5.8.5", "Phase A versus Phase B", 3)
+    fig_n += 1
+    fig, ax2 = plt.subplots(figsize=(7, 3.5))
+    i0 = 0
+    t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
+    th_z = 2*np.pi*f_line*t_z
+    Vt = Vin_pk[i0]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
+    iavg_z = (Iin_pk[i0]/2)*np.sin(th_z); dIL_z = Vt*Dt/(L_pt(i0)*fsw)
+    phA = (t_z*fsw) % 1.0; phB = (t_z*fsw + 0.5) % 1.0
+    ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phA, Dt, dIL_z),
+             color=_mpl_c(STEP_BLUE), lw=1.2, label="Phase A")
+    ax2.plot((t_z-T_crest)*1e6, iavg_z+_ripple_at(phB, Dt, dIL_z),
+             color="#C00000", lw=1.2, ls="--", label="Phase B ($T_s/2$ shift)")
+    ax2.set_xlabel("Time around crest (µs)", fontsize=9)
+    ax2.set_ylabel("$i_{L\\phi}(t)$ (A)", fontsize=9)
+    ax2.set_title(f"Figure 3.5.{fig_n} — Phase A vs Phase B at {int(Vin_rms[i0])} Vac", fontsize=9)
+    ax2.legend(fontsize=8); ax2.grid(True, alpha=0.3)
+    fig.tight_layout()
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Phase A and Phase B carry identical average current with switching ripple offset by exactly T<sub>s</sub>/2 — the basis of interleaved cancellation.", 3)
+
+    # ── 3.5.9 — Input ripple and total input current (Step 12) ──────────────
+    sub_h(story, "3.5.9", "Input ripple and total input current", 3)
+    body(story, "i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) + δi<sub>in</sub>(t).", 3)
+    eq_box(story, [r"\Delta I_{in,pp}(\theta) = K(D(\theta))\, \Delta I_{L,pp}(\theta)"],
+           heading="Input ripple after interleaved cancellation", number="12.1", ch=3)
+    eq_box(story, [r"\delta i_{in}(t) = \tilde{\imath}_{L\phi,A}(t) + \tilde{\imath}_{L\phi,B}(t)"],
+           heading="Net switching ripple seen at the input", number="12.2", ch=3)
+    eq_box(story, [r"i_{in,total}(t) = I_{in,pk} \sin(2\pi f_{line}\, t) + \delta i_{in}(t)"],
+           heading="Total instantaneous input current", number="12.3", ch=3)
+
+    sub_h(story, "3.5.9.1", "Input ripple envelope over the half cycle", 3)
+    fig_n += 1
+    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
+    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
+        for i in idxs:
+            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
+            ax2.plot(th_h/(2*np.pi*f_line)*1000, K_of_D(Dt)*Vt*Dt/(L_pt(i)*fsw),
+                     color=_vc(i), lw=1.4, label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Time (ms)", fontsize=9)
+        ax2.set_ylabel("$\\Delta I_{in,pp}(\\theta)$ (A pk-pk)", fontsize=9)
+        ax2.set_title(f"Input Ripple Envelope — {ttl}", fontsize=9)
+        ax2.set_xlim(0, 8.333); ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
+    fig.tight_layout(pad=2.0)
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Net input ripple envelope after K(D) cancellation across the half line cycle, low-line (top) and high-line (bottom) families.", 3)
+
+    sub_h(story, "3.5.9.2", "Signed input ripple", 3)
+    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
+        fig_n += 1
+        fig, ax2 = plt.subplots(figsize=(7, 3.5))
+        for i in idxs:
+            t_ms,_,_,_,_,diin,_,_ = gen_waveforms(Vin_pk[i], Iin_pk[i], L_pt(i), fsw, f_line, vout)
+            ax2.plot(t_ms, diin, color=_vc(i), lw=0.4, alpha=0.85, label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Time (ms)", fontsize=9)
+        ax2.set_ylabel("$\\delta i_{in}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Figure 3.5.{fig_n} — Signed Input Ripple — {tag}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
+        fig.tight_layout()
+        story.append(_mpl_img(fig, 165))
+        fig_caption(story, f"Figure 3.5.{fig_n} — Signed net input ripple δi<sub>in</sub>(t) = ĩ<sub>Lφ,A</sub>(t) + ĩ<sub>Lφ,B</sub>(t), {tag.lower()} family.", 3)
+
+    sub_h(story, "3.5.9.3", "Total input current over the half cycle", 3)
+    fig_n += 1
+    fig, axes = plt.subplots(2, 1, figsize=(7, 7.4))
+    for ax2, idxs, ttl in [(axes[0], LLOW, "Low Line"), (axes[1], LHIGH, "High Line")]:
+        for i in idxs:
+            Vt = Vin_pk[i]*np.sin(th_h); Dt = np.clip(1-Vt/vout, 0, 1)
+            dIin_e = K_of_D(Dt)*Vt*Dt/(L_pt(i)*fsw)
+            iavg_e = Iin_pk[i]*np.sin(th_h); t_ms_h = th_h/(2*np.pi*f_line)*1000; c = _vc(i)
+            ax2.fill_between(t_ms_h, iavg_e-dIin_e/2, iavg_e+dIin_e/2, alpha=0.18, color=c)
+            ax2.plot(t_ms_h, iavg_e+dIin_e/2, color=c, lw=1.2, label=f"{int(Vin_rms[i])} Vac")
+            ax2.plot(t_ms_h, np.maximum(iavg_e-dIin_e/2, 0), color=c, lw=1.2)
+        ax2.set_xlabel("Time (ms)", fontsize=9)
+        ax2.set_ylabel("$i_{in,total}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Total Input Current — {ttl}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
+    fig.tight_layout(pad=2.0)
+    story.append(_mpl_img(fig, 165))
+    fig_caption(story, f"Figure 3.5.{fig_n} — Total input current envelope i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) ± ΔI<sub>in,pp</sub>(t)/2, low-line (top) and high-line (bottom) families.", 3)
+
+    sub_h(story, "3.5.9.4", "Total current — switching ripple around the crest", 3)
+    for tag, idxs in [("Low Line", LLOW), ("High Line", LHIGH)]:
+        fig_n += 1
+        fig, ax2 = plt.subplots(figsize=(7, 3.5))
+        for i in idxs:
+            t_z = np.linspace(T_crest-zh, T_crest+zh, 300)
+            th_z = 2*np.pi*f_line*t_z
+            Vt = Vin_pk[i]*np.sin(th_z); Dt = np.clip(1-Vt/vout, 0, 1)
+            iavg_z = Iin_pk[i]*np.sin(th_z); dIL_z = Vt*Dt/(L_pt(i)*fsw)
+            phA = (t_z*fsw) % 1.0; phB = (t_z*fsw + 0.5) % 1.0
+            rA = _ripple_at(phA, Dt, dIL_z); rB = _ripple_at(phB, Dt, dIL_z)
+            ax2.plot((t_z-T_crest)*1e6, iavg_z+rA+rB, color=_vc(i), lw=1.0,
+                     label=f"{int(Vin_rms[i])} Vac")
+        ax2.set_xlabel("Time around crest (µs)", fontsize=9)
+        ax2.set_ylabel("$i_{in,total}(t)$ (A)", fontsize=9)
+        ax2.set_title(f"Figure 3.5.{fig_n} — Total-Current Switching Ripple Around Crest — {tag}", fontsize=9)
+        ax2.legend(fontsize=7, ncol=2); ax2.grid(True, alpha=0.3)
+        fig.tight_layout()
+        story.append(_mpl_img(fig, 165))
+        fig_caption(story, f"Figure 3.5.{fig_n} — Total input current i<sub>in,total</sub>(t) = i<sub>in,avg</sub>(t) + δi<sub>in</sub>(t) resolved at the crest, both phases' switching ripple summed, {tag.lower()} family.", 3)
+
+    annotation(story, "DECISION",
+        f"The full ripple-and-current chain confirms the selected core meets the "
+        f"{r_input*100:.1f}% crest-ripple target across all nine operating points with its "
+        f"as-built inductance (max ΔI<sub>in</sub>/I<sub>pk</sub> = "
+        f"{float(np.max(r_act))*100:.2f}% ≤ {r_input*100:.1f}%), and the worst-case "
+        f"per-phase ripple ΔI<sub>L,pp,max</sub> = {dIL_max_global:.4f} A occurs where the "
+        "envelope peaks. These values correspond to the physical part — a lab measurement "
+        "lands on this table, not on the sizing envelope.", 3)
 
     # ════════════════════════════════════════════════════════
     # 3.6 FIRST-PASS LOSS AND THERMAL
@@ -3109,6 +3292,23 @@ def _ch4(story, state, d):
         rf"L_{{full}}(H) = L_0\cdot k(H),\qquad L_0 = {_f(L0_nom,1)}\ \mu\mathrm{{H}}",
     ], heading="Per-operating-point inductance (DB bias retention)", number="4.1", ch=4)
     if lvt:
+        # Worked example — one full row computed by hand (report notes: show the steps)
+        _r0 = lvt[0]
+        _al_tot4 = float(d.get("AL_nom_nH", 0)) * int(d.get("stacks", 1) or 1)
+        if _al_tot4 and _r0.get("k_bias") is not None:
+            eq_box(story, [
+                rf"H = \dfrac{{N\,I_{{\phi,crest}}}}{{l_e \times 79.577}} = "
+                rf"\dfrac{{{N} \times {float(_r0.get('Iavg_crest', 0)):.4f}}}{{\dots}} = "
+                rf"{float(_r0.get('H_Oe', 0)):.1f}\ \mathrm{{Oe}}"
+                rf"\ \Rightarrow\ k(H) = {float(_r0.get('k_bias', 1)):.4f}",
+                rf"L_{{full,nom}} = N^2 A_{{L,nom}}\, k(H) = {N}^2 \times "
+                rf"{_al_tot4:.1f}\times10^{{-9}} \times {float(_r0.get('k_bias', 1)):.4f} = "
+                rf"{float(_r0.get('L_full_nom_uH', 0)):.1f}\ \mu\mathrm{{H}}",
+            ], heading=f"Worked example — row 1 ({float(_r0.get('Vin_rms', 0)):.0f} Vac): "
+                       "bias field → retention → full-load inductance", ch=4)
+        _has_req = any(r.get("L_req_uH") is not None for r in lvt)
+        _govr = (max((r for r in lvt if r.get("L_req_uH") is not None),
+                     key=lambda r: float(r["L_req_uH"])) if _has_req else None)
         Lrows = []
         for r in lvt:
             Lrows.append([
@@ -3116,20 +3316,33 @@ def _ch4(story, state, d):
                 _f(r.get("AT"),1), _f(r.get("H_Oe"),1), _f(r.get("k_bias"),4),
                 _f(r.get("L_full_min_uH"),1), _f(r.get("L_full_nom_uH"),1),
                 _f(r.get("L_full_max_uH"),1),
-            ])
+            ] + ([_f(r.get("L_req_uH"),1),
+                  "YES" if r.get("meets_req") else "NO"] if _has_req else []))
         data_table(story, "4.1",
             "Inductance vs Input Voltage — DB Bias Retention (all 9 points)",
             "L<sub>full</sub> at the min/nom/max A<sub>L</sub> band, computed from the "
-            "measured k(H) retention curve at each corner's DC bias H.",
+            "measured k(H) retention curve at each corner's DC bias H"
+            + (", against the REQUIRED inductance at each point — the L that holds the "
+               "selected crest ripple ratio there." if _has_req else "."),
             ["V<sub>in</sub> (V)","I<sub>φ,crest</sub> (A)","N·I (A·t)","H (Oe)","k(H)",
-             "L<sub>min</sub> (µH)","L<sub>nom</sub> (µH)","L<sub>max</sub> (µH)"],
+             "L<sub>min</sub> (µH)","L<sub>nom</sub> (µH)","L<sub>max</sub> (µH)"]
+            + (["L<sub>req</sub> (µH)","L<sub>nom</sub>≥req"] if _has_req else []),
             Lrows,
-            col_widths=[CW*0.11,CW*0.14,CW*0.13,CW*0.11,CW*0.11,CW*0.13,CW*0.13,CW*0.13],
+            col_widths=([CW*0.09,CW*0.11,CW*0.10,CW*0.09,CW*0.09,CW*0.11,CW*0.11,CW*0.11,
+                         CW*0.10,CW*0.09] if _has_req
+                        else [CW*0.11,CW*0.14,CW*0.13,CW*0.11,CW*0.11,CW*0.13,CW*0.13,CW*0.13]),
             ch=4,
             interpretation=(
-                "Worst-case bias (lowest k, lowest L) is the 90 V<sub>ac</sub> low-line "
-                "corner where I<sub>φ,crest</sub> peaks. The minimum-A<sub>L</sub> column "
-                "is the value the design margin is held against."))
+                "The DC bias (and therefore the inductance roll-off) is heaviest at the "
+                "low-line corner where I<sub>φ,crest</sub> peaks, while the REQUIRED "
+                "inductance is largest at the design's governing ripple corner"
+                + (f" ({_f(_govr.get('Vin_rms'),0)} V<sub>ac</sub>, "
+                   f"L<sub>req</sub> = {_f(_govr.get('L_req_uH'),1)} µH" if _govr else "")
+                + "). Delivered L<sub>full</sub> above the per-point requirement is design "
+                "margin, not an inconsistency — the two quantities vary oppositely with "
+                "input voltage. Pass/fail is judged on the NOMINAL A<sub>L</sub> column "
+                "(designer decision — a lab sample sits near nominal); the ± tolerance "
+                "columns show the production spread."))
     else:
         body(story, "Per-point inductance table not available in this design payload.", 4)
 

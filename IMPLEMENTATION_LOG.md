@@ -4147,3 +4147,52 @@ end-to-end (governing 220 V/3600 W, max r_act 19.58% with 155 µH, all 9 pass); 
 text-verified (98%, 0.980, "NOT at the 90", governing corner in 3.1.1); min_height ranking
 smoke (order + labels, existing goals unchanged); tsc clean; app.main imports clean; live
 power-plant endpoint honors eta_target_pct.
+
+## C88 — 2026-07-18 — Per-point as-built co-design + Chapter 1-4 accuracy overhaul (matches lab)
+
+Large designer-driven arc (all decisions discussed and approved incrementally): the report
+must present calculations that match lab measurement, with ONE calculation engine giving the
+same value wherever a quantity is stated, and NO hardcoded design values.
+
+Per-point as-built co-design (step7_magnetic_calc, main.py, doc_report_builder):
+- Turns loop rewritten: build per-point requirement curve L_req(V_i) from r/fsw/vout; converge
+  smallest N whose as-built NOMINAL inductance meets L_req at EVERY point (K=1.00, zero margin;
+  nominal-A_L gate). Supersedes the 95%-of-single-target rule; 5 µH rounding retired (integer N
+  is the only quantization). req_curve carries Vin; engine records a per-N convergence trace.
+- As-built propagation everywhere: L_vs_Vin_table rows gain dIL_pp_A/dIin_pp_A/r_act_pct +
+  meets_req; Bdc from N·AL_eff·I; saturation peak, first-pass Pcu HF, loss tables all use the
+  per-point as-built L. Ch4 §4.1 gate = nominal; Ch6 designs at MIN as-built L + new §1.b
+  9-point crossover verification; Ch7 L_phi_curve sourced from the as-built table.
+- Chapter 3 restructured: 3.1 requirements → 3.2 material → 3.3 geometry → 3.4 winding (turns
+  loop + as-built L table + convergence trace) → 3.5 ripple analysis AS BUILT → 3.6 loss → 3.7.
+
+Chapter 1-4 accuracy overhaul (report notes 2026-07-17/18):
+- η ladder anchored to intake efficiency_target_percent (was silently 95% via wrong key).
+- Worst-case-ripple sizing corner (not 90 V); Table 3.2.4a/3.2.7 pass columns COMPUTED vs r
+  (were hardcoded "YES"); §3.1.1 derived at the governing corner with correct step-5 convention.
+- 2.8.1/2.8.2 rewired to the canonical chain (deprecated sinusoidal approx, +21%, removed);
+  HF component removed from Ch2 as premature (only I_φ,LF stated) with a deferral note; 3.1.1
+  L-free per-point columns (each row its own η/PF); Table 3.1.1a per-point requirement table.
+- 3.4.4 gains L_nom≥L_req PASS/FAIL column; 3.5.1 replaced its §3.1.1 duplication with as-built
+  per-phase currents; worked step-by-step examples added (2.8.2 LF, 3.1.2 currents, 3.5.2a/b
+  EVERY column at the binding row, 3.4.3 bias→retention→L, turns trace).
+- Consistency sweep: 13 programmatic cross-checks (ch1-4 built from one engine result) — same
+  I_φ/I_in/L_req/N everywhere; removed a dead dimensionally-wrong dIL formula in _ops.
+
+Hardcode elimination (designer audit):
+- Step-7 GUI currents were reference constants (16.73/5.161/10.07) because tsi keys were never
+  written — mini-intake now computes Iph_rms_A/Ipk_ph_A/dIL_pp_A from the canonical chain.
+- Wire-options ripple read a wizard step-STRING (always undefined → 5.161) — now design's ΔI.
+- Powder-ranking endpoint ignored its request and used 16.73/5.161/240 — now honors GUI values.
+- Sizing endpoint HF/ΔI fallbacks now physics (Vpk·D/(L·fsw), ΔI/(2√3)) not literals.
+
+Current-density (J) fix:
+- Engine J overstated by ×n_parallel: divided area per conductor but not the current. Fixed to
+  J = Irms/A_cu,total (bifilar verified 4.81→2.40). Designer J_target plumbed GUI→endpoint→
+  result; §3.4.7 verdict + §3.1.4 now check against the designer target, all J mentions show
+  one consistent value (was calc-vs-conclusion mismatch). J_A_mm2 confirmed display-only — no
+  DCR/loss/thermal/FFcu impact.
+
+Verified: N=44 (was 50), binding 220 V r_act 19.42%≤20%; bifilar J 2.40≤target 4.0 PASS;
+13/13 consistency checks; live endpoints honor GUI (mini keys, powder ranking, J target); tsc
+clean; app.main imports clean; both dev servers hot-reloaded.

@@ -224,13 +224,38 @@ def submit_mini(req: FbReq):
                      pout_hi=float(ap.get("output_power_w_high_line",3600)),
                      vin_max=float(ap.get("vin_rms_max",264)), eta_target=_eta_target_frac(ap))
     tsi["confirmed_L_uH"]     = lpy["L_uH"]
-    # ceil to the 5 µH grid — rounding down would violate the selected ripple ceiling
-    # at the governing operating point (matches Chapter 3 / build_design_ops_table)
-    tsi["confirmed_L_uH_sel"] = math.ceil(lpy["L_uH"]/5)*5
+    # EXACT requirement — the 5 µH rounding grid is retired from sizing (designer
+    # decision 2026-07-17): the turns count is the only physical quantization, and
+    # the engine converges N against the per-point requirement curve directly.
+    tsi["confirmed_L_uH_sel"] = lpy["L_uH"]
     tsi["governing_vac"]      = lpy.get("governing_vac")
     tsi["governing_pout"]     = lpy.get("governing_pout")
     tsi["confirmed_Iin_pk_A"] = lpy["Iin_pk"]
     tsi["confirmed_dIL_A"]    = lpy["dIL"]
+    # Per-phase reference currents at the MAXIMUM-CURRENT corner (min Vin) — computed
+    # from the SAME canonical chain, stored under the exact keys the Step-7 GUI and
+    # the sizing endpoint read (Iph_rms_A / Ipk_ph_A / dIL_pp_A). These keys were
+    # previously never written, so every consumer silently fell back to hardcoded
+    # reference-design constants (16.73 / 5.161 / 10.07 A) regardless of the spec.
+    try:
+        from app.mode_b.calculations import build_design_ops_table
+        n_ch_mini = max(int(state.get("selected_channels") or 2), 1)
+        _OPSm, _Lm = build_design_ops_table(
+            float(ap.get("vin_rms_min", 90)), float(ap.get("vin_rms_max", 264)),
+            float(ap.get("output_power_w_low_line", 1700)),
+            float(ap.get("output_power_w_high_line", 3600)),
+            float(ap.get("output_bus_voltage_v", 393)), fsw, crest,
+            _eta_target_frac(ap))
+        _vpk90  = float(ap.get("vin_rms_min", 90)) * math.sqrt(2)
+        _d90    = max(0.001, 1 - _vpk90 / float(ap.get("output_bus_voltage_v", 393)))
+        _iinpk90 = math.sqrt(2) * float(_OPSm[0, 1]) / float(_OPSm[0, 2]) / (
+            float(_OPSm[0, 0]) * float(_OPSm[0, 3]))
+        _dil90  = _vpk90 * _d90 / (float(lpy["L_uH"]) * 1e-6 * fsw)
+        tsi["Iph_rms_A"] = round(float(_OPSm[0, 4]), 4)          # canonical per-phase RMS
+        tsi["dIL_pp_A"]  = round(_dil90, 4)                      # ripple @ min Vin, req L
+        tsi["Ipk_ph_A"]  = round(_iinpk90 / n_ch_mini + _dil90 / 2, 4)
+    except Exception:
+        pass
     state["topology_specific_inputs"] = tsi
     return {"status":"done","selected_topology":state.get("selected_topology"),"selected_mode":state.get("selected_mode"),
             "selected_channels":state.get("selected_channels",1),"selected_controller_mode":ctrl,
@@ -1049,11 +1074,14 @@ def step7_grade_options(req: _GradeOptReq):
     Best grade shown first. HITL Gate 3.
     """
     try:
+        # Use the DESIGN's own operating point from the request (the GUI passes the
+        # mini-intake chain values) — this call previously ignored the request fields
+        # and ranked every design against hardcoded reference constants.
         all_ranked = _mag_db().rank_grades(
             fsw_Hz=req.fsw_Hz, Bac_pk_T=req.Bac_pk_T,
             T_C=req.T_operating_C, topology=req.topology,
-            Ipk_A=16.73, dIL_pp_A=5.161,
-            Le_single_m=0.0655, L_target_uH=240.0
+            Ipk_A=req.Ipk_A, dIL_pp_A=req.dIL_pp_A,
+            Le_single_m=req.Le_single_m, L_target_uH=req.L_target_uH
         )
         # Filter to selected supplier
         filtered = [r for r in all_ranked
@@ -1177,16 +1205,20 @@ def step7_run_sizing(req: _SizingReq):
         except Exception:
             OPS = DEFAULT_OPS
 
-        # Compute per-phase electrical params at worst-case (90 Vac low line)
+        # Compute per-phase electrical params at the maximum-current corner (min Vin).
+        # NO reference-design constants: when tsi lacks the mini-intake keys, the
+        # ripple falls back to the design's own Vpk·D/(L·fsw) — never a literal.
         eta  = float(OPS[0, 2])
         PF   = float(OPS[0, 3])
         Pin  = Pout_lo / eta
         Vin_pk = Vin_lo * _math.sqrt(2)
         Ipk_line = _math.sqrt(2) * Pin / (Vin_lo * PF)
-        Ipk_A    = Ipk_line / N_ph + float(tsi.get("dIL_pp_A", 5.161)) / 2
-        Irms_A   = float(tsi.get("Iph_rms_A", float(OPS[0, 4])))
-        IL_HF    = Irms_A * 0.114      # approximate HF ripple fraction
-        dIL_pp   = float(tsi.get("dIL_pp_A", 5.161))
+        _D_lo    = max(0.001, 1 - Vin_pk / Vout)
+        _dil_calc = Vin_pk * _D_lo / max(L_uH * 1e-6 * fsw_Hz, 1e-12)
+        dIL_pp   = float(tsi.get("dIL_pp_A") or _dil_calc)
+        Ipk_A    = Ipk_line / N_ph + dIL_pp / 2
+        Irms_A   = float(tsi.get("Iph_rms_A") or float(OPS[0, 4]))
+        IL_HF    = dIL_pp / (2 * _math.sqrt(3))   # HF ripple RMS from the actual ΔI
 
         # Get the selected material info
         mat_key = req.material_key
@@ -1264,6 +1296,8 @@ def step7_run_sizing(req: _SizingReq):
                     dT_budget_C=dT_bgt, app_class=app_cls,
                     FFcu_limit=FFcu_lim,
                     mounting=getattr(req, 'mounting', 'horizontal'),
+                    vout_V=Vout, r_input=r_input,
+                    J_target=float(getattr(req, 'J_target', 5.0) or 5.0),
                 )
                 all_results.append(r)
             except Exception:
@@ -2254,13 +2288,32 @@ def doc_generate_report(req: _DocReportReq):
             _ci.setdefault("vin_max", _num(_app.get("vin_rms_max")) or 264.0)
             _ci.setdefault("r_input", _num((req.state.get("topology_specific_inputs", {}) or {})
                                            .get("default_crest_ripple_ratio")) or 0.20)
+            # As-built 9-point inductance curve (designer decision 2026-07-17): Ch6 designs
+            # at the MINIMUM as-built full-load L (worst case for the current loop) and its
+            # new §1.b table verifies all nine points; Ch7's scalar anchors there too while
+            # its per-point L_phi_curve carries the full curve.
+            _asb_curve = None
+            _asb_min_uH = None
+            try:
+                _lvt_full = (req.approved_design or {}).get("L_vs_Vin_table") or []
+                _asb_curve = [[float(r["Vin_rms"]), float(r["L_full_nom_uH"])]
+                              for r in _lvt_full if r.get("L_full_nom_uH")]
+                if _asb_curve:
+                    _asb_min_uH = min(l for _, l in _asb_curve)
+            except Exception:
+                _asb_curve, _asb_min_uH = None, None
+            if _asb_curve and _asb_min_uH:
+                _ci["lphi_uH"] = _asb_min_uH
+                _ci["l_curve"] = _asb_curve
             ch6 = build_control_report(_ci)
             parts = [ch1_5, ch6]
-            # ONE inductance everywhere: Chapter 7 must use Chapter 3's finalized Lφ, never its own.
-            # Resolve it exactly as the inductor chapter does (confirmed_L_uH_sel → confirmed_L_uH →
-            # approved L_target_uH) and force it onto the semiconductor design before rendering.
+            # ONE inductance everywhere: Chapter 7 anchors on the same as-built minimum
+            # full-load Lφ as Chapter 6 (falling back to the confirmed requirement for
+            # legacy designs without the as-built table); its per-point L_phi_curve below
+            # carries the full curve for point-accurate ripple/loss.
             _tsi = (req.state or {}).get("topology_specific_inputs", {}) or {}
-            _L_final = (_tsi.get("confirmed_L_uH_sel") or _tsi.get("confirmed_L_uH")
+            _L_final = (_asb_min_uH
+                        or _tsi.get("confirmed_L_uH_sel") or _tsi.get("confirmed_L_uH")
                         or (req.approved_design or {}).get("L_target_uH"))
             if req.semiconductor and _L_final:
                 req.semiconductor.setdefault("design", {})["L_phi_uH"] = float(_L_final)

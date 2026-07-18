@@ -202,6 +202,7 @@ class DesignResult:
     Ihf_rms_A:      float = 0.0
     Pac_W:          float = 0.0
     J_A_mm2:        float = 0.0
+    J_target_A_mm2: float = 0.0   # designer-selected current-density target (GUI)
     P_unc_lo_W:     float = 0.0
     P_unc_hi_W:     float = 0.0
     Lfull_min_at_peak_uH: float = 0.0   # min-L guarantee at worst INSTANTANEOUS peak bias
@@ -213,6 +214,7 @@ class DesignResult:
 
     # Inductance vs Vin (powder only)
     L_vs_Vin_table:  list = field(default_factory=list)
+    turns_trace:     list = field(default_factory=list)   # per-N convergence trace (binding point)
 
     # Thermal — SA single-node (preserved for backward compat + pass/fail)
     T_amb_C:        float = 50.0
@@ -559,6 +561,8 @@ def design_one_core(
     h_conv: float = 17.5,
     FFcu_limit: float = 0.40,
     mounting:   str   = 'horizontal',
+    vout_V:     float = 393.0,   # bus voltage for the L-vs-bias table (never hardcode)
+    r_input:    float = 0.0,     # designer crest ripple ratio → per-point L_req column
     lead_length_mm: float = _LEAD_MM_DEFAULT,
 ) -> DesignResult:
     """
@@ -604,9 +608,32 @@ def design_one_core(
     Ve   = res.Ve_total_cm3  * 1e-6
     Le_s = res.Le_single_mm  * 1e-3
 
-    Vout_V = 393.0
+    Vout_V = float(vout_V or 393.0)
     I_phi_avg_crest = max(Ipk_A - dIL_pp_A / 2.0, Irms_A * 0.9)
     res.I_phi_avg_crest_A = round(I_phi_avg_crest, 4)
+
+    # ── Per-point requirement curve (designer decision 2026-07-17) ────────────
+    # L_req(V_i): the inductance that holds ΔI_in,pp/I_in,pk ≤ r at each of the
+    # nine operating points. Turns are converged against THIS curve (zero extra
+    # margin, nominal-A_L basis) instead of holding the single worst-case target
+    # at the worst-bias point — that old rule demanded the governing corner's L
+    # at 90 Vac where far less is required, hiding ~10-20% extra turns. The
+    # effective target for L0/kreq reporting is the curve maximum (exact — the
+    # 5 µH rounding grid is retired from sizing; integer N is the quantization).
+    req_curve: list = []           # [(I_bias_per_phase_A, L_req_H), ...]
+    if r_input and fsw_Hz:
+        for op_row in OPS:
+            vin_op, pout_op, eta_op, pf_op = (float(op_row[0]), float(op_row[1]),
+                                              float(op_row[2]), float(op_row[3]))
+            vpk_op = vin_op * math.sqrt(2)
+            dpk_op = 1.0 - vpk_op / Vout_V
+            if dpk_op <= 0:
+                continue
+            ipk_line_op = math.sqrt(2) * (pout_op / eta_op) / (vin_op * pf_op)
+            kd_op = (2*dpk_op - 1)/dpk_op if dpk_op >= 0.5 else (1 - 2*dpk_op)/(1 - dpk_op)
+            L_req_op = vpk_op * dpk_op * max(kd_op, 1e-9) / (r_input * ipk_line_op * fsw_Hz)
+            req_curve.append((ipk_line_op / max(N_phases, 1), L_req_op, vin_op))
+    L_eff_target_H = max((e[1] for e in req_curve), default=L_target_H)
 
     # ── Step 13.3: Turns ────────────────────────────────────────────────────
     if res.core_type == "powder":
@@ -615,15 +642,17 @@ def design_one_core(
             vin_op,pout_op,eta_op,pf_op = float(op_row[0]),float(op_row[1]),float(op_row[2]),float(op_row[3])
             iavg_op = (math.sqrt(2)*pout_op/eta_op)/(vin_op*pf_op) / max(N_phases,1)
             if iavg_op > I_dc_worst: I_dc_worst = iavg_op
-        N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe_worst, k_bias_worst = \
-            _turns_powder(core, material_key, L_target_H, I_dc_worst, Le_s)
+        N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe_worst, k_bias_worst, _tr = \
+            _turns_powder(core, material_key, L_eff_target_H, I_dc_worst, Le_s,
+                          req_curve=req_curve or None)
+        res.turns_trace  = _tr
         res.I_dc_worst_A = round(I_dc_worst, 4)
         res.H_Oe_worst   = round(H_Oe_worst, 3)
         res.k_bias_worst = round(k_bias_worst, 4)
         res.lg_mm = 0.0
     else:
-        N, lg_mm, Bpk_converged = _turns_ferrite(core, material_key, L_target_H, Ipk_A)
-        L0_min = L0_nom = L0_max = L_target_H * 1e6
+        N, lg_mm, Bpk_converged = _turns_ferrite(core, material_key, L_eff_target_H, Ipk_A)
+        L0_min = L0_nom = L0_max = L_eff_target_H * 1e6
         kreq_min = kreq_nom = kreq_max = 1.0
         res.lg_mm = lg_mm
 
@@ -641,10 +670,10 @@ def design_one_core(
     res.AT_design   = round(N * I_phi_avg_crest, 2)
     res.H_Oe_design = round((N * I_phi_avg_crest / Le_s) / 79.577, 2)
 
-    # ── Step 13.4: Inductance vs Vin ─────────────────────────────────────────
+    # ── Step 13.4: Inductance vs Vin (as-built, per point) ───────────────────
     res.L_vs_Vin_table = _build_L_vs_Vin_table(
         material_key, res.core_type, N, L0_nom * 1e6, L0_min * 1e6, L0_max * 1e6,
-        Le_s, OPS, L_target_H * 1e6)
+        Le_s, OPS, L_eff_target_H * 1e6, vout=Vout_V, r_input=r_input, fsw_Hz=fsw_Hz)
 
     # ── Step 13.5: Flux density ──────────────────────────────────────────────
     Vin_pk90 = OPS[0, 0] * math.sqrt(2)
@@ -657,7 +686,9 @@ def design_one_core(
         H_Oe  = H_dc / 79.577
         k_b   = _db().get_k_bias(material_key, H_Oe)
         AL_eff = float(core.get("AL_nom_total", core.get("AL_nom_nH", 75))) * k_b * 1e-9
-        Bdc   = L_target_H * I_phi_avg_crest / (N * Ae)
+        # DC flux from the AS-BUILT inductance at this bias (N²·AL_nom·k), not the
+        # target — the built part's L differs from the target at every point.
+        Bdc   = N * AL_eff * I_phi_avg_crest / Ae
     else:
         mu_r = _db().get_mu_r(material_key, 100.0)
         lg   = res.lg_mm * 1e-3
@@ -779,11 +810,15 @@ def design_one_core(
     res.Rac_Rdc      = round(Rac_Rdc, 4)
     res.Rac_Rdc_litz = round(Rac_Rdc, 4)   # v10 alias; same value
 
-    # First-pass Pcu at reference Irms (90 Vac) — stored for report
+    # First-pass Pcu at reference Irms (90 Vac) — stored for report.
+    # HF ripple from the AS-BUILT inductance at the 90 Vac point (row 0), so the
+    # first-pass figures match the per-point tables and the lab part.
     IL_rms_ref    = float(OPS[0, 4])
     Vin_pk90_loss = OPS[0, 0] * math.sqrt(2)
-    Dpk90_loss    = max(0.0, 1.0 - Vin_pk90_loss / 393.0)
-    dIpp_90       = Vin_pk90_loss * Dpk90_loss / max(L_target_H * fsw_Hz, 1e-12)
+    Dpk90_loss    = max(0.0, 1.0 - Vin_pk90_loss / Vout_V)
+    _L90_uH       = float((res.L_vs_Vin_table or [{}])[0].get("L_full_nom_uH", 0) or 0)
+    _L90_H        = (_L90_uH * 1e-6) if _L90_uH else L_eff_target_H
+    dIpp_90       = Vin_pk90_loss * Dpk90_loss / max(_L90_H * fsw_Hz, 1e-12)
     Ihf_ref       = dIpp_90 / (2.0 * math.sqrt(3.0))
 
     res.Pcu_25C_W  = round(IL_rms_ref**2 * DCR_25  + Ihf_ref**2 * DCR_25  * Rac_Rdc, 4)
@@ -862,8 +897,12 @@ def design_one_core(
     res.Bdc_max_T     = round(wf["BdcMax_T"], 6)
     res.Bmax_FL_T     = round(wf["Bmax_T"], 6)
 
-    Cu_per_cond = float(wire.get("Cu_area_mm2", 1.0)) / max(n_parallel, 1)
-    res.J_A_mm2 = round(wf["Irms_A"] / max(Cu_per_cond, 0.001), 3)
+    # Current density: the phase current SPLITS across the n_parallel conductors,
+    # so J = (Irms/n_par)/A_single = Irms/A_total. The old code divided the area
+    # per conductor but not the current — overstating J by exactly n_parallel
+    # (x2 bifilar, x3 trifilar; single wire was coincidentally correct).
+    res.J_A_mm2 = round(wf["Irms_A"] / max(float(wire.get("Cu_area_mm2", 1.0)), 0.001), 3)
+    res.J_target_A_mm2 = round(float(J_target), 2)   # designer's GUI target, for the report verdict
 
     # HF copper loss: AC excess (Rac/Rdc − 1) amplified by the harmonic factor K_HARM
     _hf = (1.0 + (Rac_Rdc - 1.0) * K_HARM)
@@ -881,7 +920,13 @@ def design_one_core(
     # turns selection / pass-fail are unchanged (adopted from the simulation-agent engine).
     if res.core_type == "powder":
         try:
+            # As-built worst instantaneous peak: at each point, phase crest current
+            # + half the AS-BUILT ripple there (per-point L, not the constant target).
             _ipk = I_phi_avg_crest + dIL_pp_A / 2.0
+            _rows_ab = [r for r in (res.L_vs_Vin_table or []) if r.get("dIL_pp_A")]
+            if _rows_ab:
+                _ipk = max(float(r["Ipk_line"]) / max(N_phases, 1) + float(r["dIL_pp_A"]) / 2.0
+                           for r in _rows_ab)
             _Hpk = (N * _ipk / Le_s) / 79.577
             res.Lfull_min_at_peak_uH = round(L0_min * _db().get_k_bias(material_key, _Hpk) * 1e6, 3)
         except Exception:
@@ -922,15 +967,18 @@ def design_one_core(
         res.dT_hotspot_C = round(res.dT_rise_C * _THERM_hotspot, 2)
         res.T_hotspot_C  = round(T_amb_C + res.dT_hotspot_C, 2)
 
-    # Loss vs Vin sweeps
+    # Loss vs Vin sweeps — HF ripple per point from the AS-BUILT inductance
+    _L_pp_uH = [float(r.get("L_full_nom_uH", 0) or 0) for r in (res.L_vs_Vin_table or [])]
     res.loss_table_25C  = _build_loss_table(material_key, N, Ae, Ve, Le_s,
                                             R_pm_20, Rac_Rdc, Cu_len, fsw_Hz,
                                             Vout_V, OPS, T_C=25.0,
-                                            L_target_H=L_target_H)
+                                            L_target_H=L_eff_target_H,
+                                            L_per_point_uH=_L_pp_uH)
     res.loss_table_100C = _build_loss_table(material_key, N, Ae, Ve, Le_s,
                                             R_pm_20, Rac_Rdc, Cu_len, fsw_Hz,
                                             Vout_V, OPS, T_C=100.0,
-                                            L_target_H=L_target_H)
+                                            L_target_H=L_eff_target_H,
+                                            L_per_point_uH=_L_pp_uH)
 
     # ── Medical creepage check ────────────────────────────────────────────────
     if app_class == "Medical":
@@ -968,11 +1016,24 @@ def design_one_core(
     if res.dT_rise_C > dT_budget_C:
         res.fail_reasons.append(f"ΔT={res.dT_rise_C:.1f}°C > budget {dT_budget_C:.0f}°C.")
     if res.L_vs_Vin_table:
-        Lfull_min = min(r["L_full_min_uH"] for r in res.L_vs_Vin_table)
-        # 95% retention floor (designer decision, report notes #6 — was 85%)
-        if Lfull_min < L_target_H * 1e6 * 0.95:
-            res.fail_reasons.append(
-                f"L_full,min={Lfull_min:.1f}µH < 95% of L_target at some op-point.")
+        _req_rows = [r for r in res.L_vs_Vin_table if r.get("L_req_uH") is not None]
+        if _req_rows:
+            # Per-point NOMINAL gate (designer decision 2026-07-17): the as-built
+            # nominal inductance must meet the ripple requirement at EVERY point.
+            # Supersedes the 95%-of-single-target retention rule.
+            _viol = [r for r in _req_rows if not r.get("meets_req")]
+            if _viol:
+                _v0 = min(_viol, key=lambda r: r["L_full_nom_uH"] - r["L_req_uH"])
+                res.fail_reasons.append(
+                    f"L_full,nom={_v0['L_full_nom_uH']:.1f}µH < required "
+                    f"{_v0['L_req_uH']:.1f}µH at {_v0['Vin_rms']:.0f}Vac "
+                    f"({len(_viol)}/{len(_req_rows)} points below requirement).")
+        else:
+            # legacy payloads without a requirement curve: 95% retention floor
+            Lfull_min = min(r["L_full_min_uH"] for r in res.L_vs_Vin_table)
+            if Lfull_min < L_target_H * 1e6 * 0.95:
+                res.fail_reasons.append(
+                    f"L_full,min={Lfull_min:.1f}µH < 95% of L_target at some op-point.")
 
     res.passed = len(res.fail_reasons) == 0
 
@@ -998,23 +1059,59 @@ def _load_material_type(key: str) -> str:
 
 
 def _turns_powder(core: dict, mat_key: str, L_H: float,
-                  I_dc: float, Le_s: float) -> tuple:
-    """Powder core: iterative N convergence using DC bias rolloff."""
+                  I_dc: float, Le_s: float,
+                  req_curve: list | None = None) -> tuple:
+    """Powder core: iterative N convergence using DC bias rolloff.
+
+    req_curve: optional [(I_bias_per_phase_A, L_req_H), …] — one entry per
+    operating point. When given, N converges on the per-point NOMINAL gate
+    (see inline comment below); L_H then only anchors the kreq/L0 reporting."""
     AL_nom = float(core.get("AL_nom_total", core.get("AL_nom_nH", 75))) * 1e-9
     AL_min = float(core.get("AL_min_total", core.get("AL_min_nH", 69))) * 1e-9
     AL_max = float(core.get("AL_max_total", core.get("AL_max_nH", 81))) * 1e-9
 
     N = max(1, math.ceil(math.sqrt(L_H / AL_nom)))
-    for _ in range(40):
-        H_Am  = N * I_dc / Le_s
-        H_Oe  = H_Am / 79.577
-        k_b   = _db().get_k_bias(mat_key, H_Oe)
-        L_full_min = N**2 * AL_min * k_b
-        # converge N until ≥95% of target held at full bias (designer decision,
-        # report notes #6 — was 85%)
-        if L_full_min >= L_H * 0.95:
-            break
-        N += 1
+    trace: list = []
+    if req_curve:
+        # Per-point convergence (designer decision 2026-07-17, K = 1.00): smallest N
+        # such that the AS-BUILT NOMINAL inductance meets the per-point requirement
+        # at EVERY operating point — L_full,nom(V_i) = N²·AL_nom·k(H_i) ≥ L_req(V_i).
+        # Bias rolloff and the requirement vary oppositely with input voltage, so the
+        # binding point emerges from the data (often the governing ripple corner, but
+        # it can be the max-bias corner for other specs). Replaces the former rule
+        # "hold ≥95% of the single max target at the worst-bias point", which demanded
+        # the governing corner's L at a point that needs far less — hidden extra turns.
+        N = max(1, math.ceil(math.sqrt(min(e[1] for e in req_curve) / AL_nom)))
+        for _ in range(80):
+            ok = True
+            worst = None       # (margin_H, L_nom_H, L_req_H, Vin) at the tightest point
+            for I_i, L_req_i, Vin_i in req_curve:
+                H_Oe_i = (N * I_i / Le_s) / 79.577
+                L_nom_i = N**2 * AL_nom * _db().get_k_bias(mat_key, H_Oe_i)
+                m_i = L_nom_i - L_req_i
+                if worst is None or m_i < worst[0]:
+                    worst = (m_i, L_nom_i, L_req_i, Vin_i)
+                if L_nom_i < L_req_i:
+                    ok = False
+            if worst is not None:
+                trace.append({"N": N,
+                              "L_nom_uH": round(worst[1] * 1e6, 1),
+                              "L_req_uH": round(worst[2] * 1e6, 1),
+                              "Vin_binding": round(worst[3], 0),
+                              "ok": bool(ok)})
+            if ok:
+                break
+            N += 1
+    else:
+        for _ in range(40):
+            H_Am  = N * I_dc / Le_s
+            H_Oe  = H_Am / 79.577
+            k_b   = _db().get_k_bias(mat_key, H_Oe)
+            L_full_min = N**2 * AL_min * k_b
+            # legacy single-target convergence (payloads without a requirement curve)
+            if L_full_min >= L_H * 0.95:
+                break
+            N += 1
 
     L0_min = N**2 * AL_min
     L0_nom = N**2 * AL_nom
@@ -1028,7 +1125,7 @@ def _turns_powder(core: dict, mat_key: str, L_H: float,
     kreq_min = L_H / L0_min if L0_min > 0 else 0
     kreq_max = L_H / L0_max if L0_max > 0 else 0
 
-    return N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe, k_b
+    return N, L0_min, L0_nom, L0_max, kreq_min, kreq_nom, kreq_max, H_Oe, k_b, trace
 
 
 def _turns_ferrite(core: dict, mat_key: str, L_H: float, Ipk: float) -> tuple:
@@ -1058,14 +1155,23 @@ def _turns_ferrite(core: dict, mat_key: str, L_H: float, Ipk: float) -> tuple:
 
 def _build_L_vs_Vin_table(mat_key: str, core_type: str, N: int,
                             L0_nom: float, L0_min: float, L0_max: float,
-                            Le_s: float, OPS: np.ndarray, L_target_uH: float) -> list:
-    """Step 13.4: L_full min/nom/max vs Vin for all 9 op-points."""
+                            Le_s: float, OPS: np.ndarray, L_target_uH: float,
+                            vout: float = 393.0, r_input: float = 0.0,
+                            fsw_Hz: float = 0.0) -> list:
+    """Step 13.4: L_full min/nom/max vs Vin for all 9 op-points.
+
+    When vout/r_input/fsw_Hz are supplied, each row also carries the per-point
+    REQUIRED inductance L_req_uH — the L that holds ΔI_in,pp/I_in,pk ≤ r at THAT
+    operating point (same formula as step4_inductance). The requirement varies
+    with input voltage (largest at the design's governing corner, wherever that
+    is — nothing is pinned to a particular Vac), while the DELIVERED inductance
+    varies oppositely with bias, so showing only the delivered value looked like
+    a disconnect against the sizing story."""
     result = []
-    Vout = 393.0
     for row in OPS:
         Vin, Pout, eta, PF, Irms = row
         Vin_pk  = Vin * math.sqrt(2)
-        Dpk     = 1 - Vin_pk / Vout
+        Dpk     = 1 - Vin_pk / vout
         Pin     = Pout / eta
         Ipk_line = math.sqrt(2) * Pin / (Vin * PF)
         Iavg    = Ipk_line / 2
@@ -1081,6 +1187,26 @@ def _build_L_vs_Vin_table(mat_key: str, core_type: str, N: int,
             Lmin = Lnom = Lmax = round(L_target_uH, 1)
             k_b  = 1.0
 
+        # per-point required L for the designer's crest ripple ratio r, plus the
+        # AS-BUILT ripple with this N's nominal inductance at this point — these
+        # are the values a lab measurement lands on (pass/fail on NOMINAL basis
+        # per designer decision; the ±A_L band is presented alongside).
+        L_req = None
+        extra = {}
+        if r_input and fsw_Hz and Dpk > 0:
+            KD    = (2*Dpk - 1)/Dpk if Dpk >= 0.5 else (1 - 2*Dpk)/(1 - Dpk)
+            dIL_r = (r_input * Ipk_line) / max(KD, 1e-9)
+            L_req = round(Vin_pk * Dpk / (dIL_r * fsw_Hz) * 1e6, 1)
+            dIL_ab  = Vin_pk * Dpk / max(Lnom * 1e-6 * fsw_Hz, 1e-12)
+            dIin_ab = dIL_ab * KD
+            extra = {
+                "L_req_uH":   L_req,
+                "meets_req":  bool(Lnom >= L_req),
+                "dIL_pp_A":   round(dIL_ab, 4),
+                "dIin_pp_A":  round(dIin_ab, 4),
+                "r_act_pct":  round(dIin_ab / Ipk_line * 100, 2),
+            }
+
         result.append({
             "Vin_rms": Vin, "Ipk_line": round(Ipk_line, 4),
             "Iavg_crest": round(Iavg, 4),
@@ -1088,6 +1214,7 @@ def _build_L_vs_Vin_table(mat_key: str, core_type: str, N: int,
             "H_Oe": round((N * Iavg / Le_s) / 79.577, 1) if core_type == "powder" else 0,
             "k_bias": round(k_b, 4),
             "L_full_min_uH": Lmin, "L_full_nom_uH": Lnom, "L_full_max_uH": Lmax,
+            **extra,
         })
     return result
 
@@ -1096,10 +1223,16 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
                        Le_s: float, R_pm_20: float, Rac_Rdc: float,
                        Cu_len: float, fsw_Hz: float, Vout: float,
                        OPS: np.ndarray, T_C: float,
-                       L_target_H: float = 235e-6) -> list:
-    """Steps 13.8/13.9: loss vs Vin at constant temperature T_C."""
+                       L_target_H: float = 235e-6,
+                       L_per_point_uH: list | None = None) -> list:
+    """Steps 13.8/13.9: loss vs Vin at constant temperature T_C.
+
+    L_per_point_uH: as-built nominal inductance at each OPS row — the HF ripple
+    (and hence Pcu_ac) then uses the inductance the part really has at that
+    point instead of the constant target. Core flux Bac is volt-second based
+    and independent of L."""
     result = []
-    for row in OPS:
+    for _i, row in enumerate(OPS):
         Vin, Pout, eta, PF, Irms = row
         Vin_pk  = Vin * math.sqrt(2)
         Dpk     = max(0.0, min(0.98, 1.0 - Vin_pk / Vout))
@@ -1109,7 +1242,10 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
         Fd      = _Fd(Dpk)
         Pv      = _db().get_core_loss(mat_key, fsw_Hz, Bac_pk, T_C) * 1e3
         Pcore   = Pv * Fd * Ve
-        dIpp    = Vin_pk * Dpk / max(L_target_H * fsw_Hz, 1e-12)
+        _L_i_H  = L_target_H
+        if L_per_point_uH and _i < len(L_per_point_uH) and L_per_point_uH[_i]:
+            _L_i_H = L_per_point_uH[_i] * 1e-6
+        dIpp    = Vin_pk * Dpk / max(_L_i_H * fsw_Hz, 1e-12)
         Ihf     = dIpp / (2.0 * math.sqrt(3.0))
         Pcu_dc  = Irms**2 * DCR_T
         Pcu_ac  = Ihf**2 * R_ac
