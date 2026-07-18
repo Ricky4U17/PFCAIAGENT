@@ -4196,3 +4196,30 @@ Current-density (J) fix:
 Verified: N=44 (was 50), binding 220 V r_act 19.42%≤20%; bifilar J 2.40≤target 4.0 PASS;
 13/13 consistency checks; live endpoints honor GUI (mini keys, powder ranking, J target); tsc
 clean; app.main imports clean; both dev servers hot-reloaded.
+
+## C89 — 2026-07-18 — Report text/markup fixes: hold-up hardcode, LaTeX/§ leaks, black-square glyphs, 2.8.1 relabel
+
+Designer review round (report notes, 4 points):
+1. §1.3.3 hard-coded "20 ms hold-up target" → now {t_hold} ms from intake (hold_up_time_ms);
+   was the ONLY Ch1 spot ignoring the designer's value (10 ms). Reference → §1.2.3.
+2. Markup leaking as literal text:
+   a. "Chapter 3 §3.1" (only rendered § in report text) → "Chapter 3, Section 3.1.1".
+   b. §3.1.1 Step-1 heading used LaTeX math V$_{{rms}}$ inside a ReportLab heading (renders
+      $/braces literally) → V<sub>rms</sub>. (matplotlib $..$ figure titles are correct, left.)
+   c. Black squares: ReportLab Helvetica renders non-cp1252 as .notdef ■. Empirical render→
+      extract test found FIVE box glyphs (not just the reported ⌈⌉): ⌈⌉ ceiling brackets
+      (§3.4.3 naive-estimate) → ceil(√(..)); ĩ tilde-i (§3.5.9 caption) → δ-notation;
+      ⊙/○ (§4.1 ring caption) → ●; v̂/î/d̂ combining-circumflex hats (§6 small-signal
+      derivation) → prose. Verified √·²→ηφ↑↓′∝Φ⊗● all render; 0 boxes across ch1-4, 0 in source.
+3. Table 2.8.1 "Per-phase crest current (excl. HF ripple)" relabeled "Per-phase LF-envelope
+   peak" (I_φ,pk,LF) + worked derivation (I_in,pk=√2·I_in,rms → I_φ,pk,LF=I_in,pk/N_ph →
+   I_φ,LF=I_in,rms/N_ph) + NOTE: LF-envelope quantities depend on line current & phase count
+   only, NOT inductance (ripple-inclusive peak computed in §3.5). Value was correct; label
+   invited the reviewer's "where from without L?" question.
+4. §3.5.8/3.5.9 graphs verified: all waveform plots already use L_pt(i) (as-built per-point L);
+   no disconnect between as-built tables and graph data. Only issue was the caption glyph (2c).
+
+Verified: ch1-4 rebuild 0 black squares; 10 ms hold-up (not 20); Section 3.1.1/V<sub>rms</sub>/
+ceil()/LF-envelope-peak/worked-derivation all present; whole-file box-glyph sweep clean;
+app.main imports clean. Text/markup only — no calculation or value change (except the §1.3.3
+hardcode→designer-value).

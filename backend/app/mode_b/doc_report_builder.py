@@ -929,7 +929,7 @@ def _ch1(story, state):
             "The IEC 61000-4-11 voltage-dip requirement (row 7, amber) is the "
             "primary driver for hold-up capacitor sizing. A 100% dip of 0.5 line cycles "
             f"({1000/(2*f_line):.1f} ms) must not drop V<sub>bus</sub> below {vdc_min:.0f} V. "
-            f"The 20 ms hold-up target (Section 1.2) provides additional margin."
+            f"The {t_hold:.0f} ms hold-up target (Section 1.2.3) provides additional margin."
         ), ch=1)
 
     if app_cls == "Medical":
@@ -1226,7 +1226,7 @@ def _ch2(story, state):
         "core's soft-saturation margin while limiting the RMS-loss penalty, and — "
         "after K(D) interleaving cancellation — leaves a net input ripple small "
         "enough for a compact EMI filter. It is locked here and feeds directly into "
-        "the ΔI<sub>L,pp</sub> → L<sub>φ</sub> derivation in Chapter 3 §3.1.", 2)
+        "the ΔI<sub>L,pp</sub> → L<sub>φ</sub> derivation in Chapter 3, Section 3.1.1.", 2)
 
     # ── 2.7 Design Operating Point — Specifications, Duty Cycle, K(D) ────────
     step_h(story, "2.7", "Design Operating Point — Specifications, Duty Cycle, and Ripple Cancellation", 2)
@@ -1411,12 +1411,32 @@ def _ch2(story, state):
             ["Crest ripple ratio (designer)","r",                     f"{crest:.2f}",      "—"],
             ["Peak input voltage (90 Vac)",  "V<sub>in,pk</sub>",     f"{Vin_pk[0]:.4f}",  "V"],
             ["Duty cycle at 90 Vac crest",   "D<sub>pk,90</sub>",     f"{Dpk[0]:.4f}",     "—"],
-            ["Per-phase crest current (excl. HF ripple)",
-                                             "I<sub>φ,crest</sub>",   f"{Iin_pk[0]/n_ph:.4f}", "A"],
+            ["Per-phase LF-envelope peak (excl. HF ripple)",
+                                             "I<sub>φ,pk,LF</sub>",   f"{Iin_pk[0]/n_ph:.4f}", "A"],
             ["Per-phase RMS current (LF component)",
                                              "I<sub>φ,LF</sub>",      f"{iph_lf_90:.4f}",  "A"],
         ],
         col_widths=[CW*0.38, CW*0.15, CW*0.17, CW*0.30], ch=2)
+    # Worked derivation for the two per-phase LF quantities (report notes 2026-07-18):
+    # both are peaks/RMS of the LINE-FREQUENCY current envelope only — they need the
+    # line current and phase count, NOT the inductance (which sets only the HF ripple,
+    # explicitly excluded here). Shown step by step so the reviewer can reproduce them.
+    eq_box(story, [
+        rf"I_{{in,pk}} = \sqrt{{2}}\,I_{{in,rms}} = \sqrt{{2}} \times {Iin_rms[0]:.4f} = {Iin_pk[0]:.4f}\ \mathrm{{A}}\quad({int(Vin_rms[0])}\ \mathrm{{V_{{ac}}}})",
+        rf"I_{{\phi,pk,LF}} = \dfrac{{I_{{in,pk}}}}{{N_{{ph}}}} = \dfrac{{{Iin_pk[0]:.4f}}}{{{n_ph}}} = {Iin_pk[0]/n_ph:.4f}\ \mathrm{{A}}"
+        rf"\quad(\mathrm{{peak\ of\ the\ line\text{{-}}frequency\ envelope\ per\ phase}})",
+        rf"I_{{\phi,LF}} = \dfrac{{I_{{in,rms}}}}{{N_{{ph}}}} = \dfrac{{{Iin_rms[0]:.4f}}}{{{n_ph}}} = {iph_lf_90:.4f}\ \mathrm{{A}}"
+        rf"\quad(\mathrm{{RMS\ of\ the\ same\ envelope}})",
+    ], heading=f"Worked derivation — per-phase LF currents at {int(Vin_rms[0])} Vac "
+               "(inductance-independent: HF ripple is excluded)", ch=2)
+    annotation(story, "NOTE",
+        "Both I<sub>φ,pk,LF</sub> and I<sub>φ,LF</sub> describe only the LINE-FREQUENCY "
+        "current envelope (the rectified-sine average that each phase carries), so they "
+        "depend on the line current and the phase count alone — <b>not</b> on the "
+        "inductance. The inductance sets the high-frequency switching ripple that rides on "
+        "this envelope; the ripple-inclusive per-phase peak (I<sub>φ,pk</sub> = "
+        "I<sub>in,pk</sub>/N<sub>ph</sub> + ΔI<sub>L,pp</sub>/2) is therefore computed in "
+        "Section 3.5 once the as-built inductance is known.", 2)
 
     sub_h(story, "2.8.2", "K(D) sweep — ripple cancellation across all nine operating points", 2)
     annotation(story, "CONCEPT",
@@ -1704,7 +1724,7 @@ def _ch3(story, state, d):
         r"V_{in,pk} = \sqrt{2}\, V_{in,rms}",
         rf"V_{{in,pk}} = \sqrt{{2}} \times {vin_g:.0f} = {vin_pk_g:.4f}\ \mathrm{{V}}",
     ], heading=f"Step 1 — Peak input voltage at the governing corner "
-               f"({vin_g:.0f} V$_{{rms}}$ / {pout_g:.0f} W)", number="3.1-1", ch=3)
+               f"({vin_g:.0f} V<sub>rms</sub> / {pout_g:.0f} W)", number="3.1-1", ch=3)
     eq_box(story, [
         r"D_{pk} = 1 - \dfrac{V_{in,pk}}{V_{out}}",
         rf"D_{{pk}} = 1 - \dfrac{{{vin_pk_g:.4f}}}{{{vout:.0f}}} = {D_g:.4f}",
@@ -2150,7 +2170,7 @@ def _ch3(story, state, d):
             if _lvt43 else None)
     annotation(story, "PITFALL",
         f"N is selected by the iterative <b>per-point bias-aware</b> convergence loop, not "
-        f"by the naive estimate N = ⌈√(L<sub>req,max</sub>/A<sub>L,nom</sub>)⌉ = {N_naive} "
+        f"by the naive estimate N = ceil(√(L<sub>req,max</sub>/A<sub>L,nom</sub>)) = {N_naive} "
         "(which ignores DC-bias permeability rolloff). At each operating point the bias field "
         "H<sub>i</sub> and retention k(H<sub>i</sub>) are evaluated, and N increments until the "
         "as-built NOMINAL inductance N²·A<sub>L,nom</sub>·k(H<sub>i</sub>) meets that point's "
@@ -2839,7 +2859,7 @@ def _ch3(story, state, d):
         ax2.legend(fontsize=7, ncol=2); ax2.set_xlim(0, 8.333); ax2.grid(True, alpha=0.3)
         fig.tight_layout()
         story.append(_mpl_img(fig, 165))
-        fig_caption(story, f"Figure 3.5.{fig_n} — Signed net input ripple δi<sub>in</sub>(t) = ĩ<sub>Lφ,A</sub>(t) + ĩ<sub>Lφ,B</sub>(t), {tag.lower()} family.", 3)
+        fig_caption(story, f"Figure 3.5.{fig_n} — Signed net input ripple δi<sub>in</sub>(t) = δi<sub>Lφ,A</sub>(t) + δi<sub>Lφ,B</sub>(t) (δi = per-phase switching ripple about the average), {tag.lower()} family.", 3)
 
     sub_h(story, "3.5.9.3", "Total input current over the half cycle", 3)
     fig_n += 1
@@ -3242,7 +3262,7 @@ def _ch4(story, state, d):
             story.append(_pair[0][0])
         fig_caption(story,
             f"Figure 4.1 — Wound-core ring view captured from the simulation field viewer: "
-            f"exact per-layer winding turns (⊗ bore / ⊙ outer) around the {stacks}-core stack. "
+            f"exact per-layer winding turns (⊗ bore / ● outer) around the {stacks}-core stack. "
             "Left: flux-density field at the operating point. "
             + ("Right: the same view with the temperature gradient and thermal details. "
                if _th_img else "")
@@ -4578,9 +4598,10 @@ def _ch6_loop_derivation(story, res):
         "capacitor and output equations (Laplace) and combining yields the ESR-zero factor:", 6)
     eq_box(story, r"\hat{v}_o(s)=R\,\dfrac{1+sC r_C}{1+sC(R+r_C)}\,(D'\,\hat{i}_L-I_L\,\hat{d})", ch=6)
     body(story,
-        "<b>Step 5 — inductor equation (set v̂<sub>in</sub>=0 for the control-to-current "
-        "transfer) and substitute.</b> Collecting î<sub>L</sub> and d̂ gives the general "
-        "duty-to-current plant before steady-state substitution:", 6)
+        "<b>Step 5 — inductor equation (set the input perturbation v<sub>in</sub> = 0 for the "
+        "control-to-current transfer) and substitute.</b> Collecting the small-signal "
+        "i<sub>L</sub> and d terms (the hatted quantities in the equations above) gives the "
+        "general duty-to-current plant before steady-state substitution:", 6)
     eq_box(story,
         r"G_{id}(s)=\dfrac{\hat{i}_L}{\hat{d}}=\dfrac{V_o\,[1+sC(R+r_C)]+D'^2 R\,I_L\,(1+sC r_C)}"
         r"{(Ls+r_L)[1+sC(R+r_C)]+D'^2 R\,(1+sC r_C)}", ch=6)
