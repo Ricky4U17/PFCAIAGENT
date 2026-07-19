@@ -5,7 +5,7 @@ import {
   step7GradeOptions, step7WireOptions, step7RunSizing, step8TimeDomain,
 } from '../api/client'
 import { ReviewMagnetics } from './ReviewMagnetics'
-import { SimulationAgent } from './SimulationAgent'
+import { SimulationAgent, type SimViews } from './SimulationAgent'
 
 interface Props {
   confirmedState: Record<string, unknown>
@@ -146,7 +146,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
   // remount with the currently-selected candidate's data (never stale).
   const [reviewKey, setReviewKey] = useState(0)
   // Ring / thermal-ring / 3D winding captures from the Simulation-Agent viewer, carried into the report payload.
-  const [simViews, setSimViews] = useState<{ ring?: string; ring_thermal?: string; threeD?: string } | null>(null)
+  const [simViews, setSimViews] = useState<SimViews | null>(null)
 
   // Load material comparison once
   useEffect(() => {

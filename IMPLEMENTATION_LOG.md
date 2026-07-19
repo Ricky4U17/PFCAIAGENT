@@ -4223,3 +4223,34 @@ Verified: ch1-4 rebuild 0 black squares; 10 ms hold-up (not 20); Section 3.1.1/V
 ceil()/LF-envelope-peak/worked-derivation all present; whole-file box-glyph sweep clean;
 app.main imports clean. Text/markup only — no calculation or value change (except the §1.3.3
 hardcode→designer-value).
+
+## C90 — 2026-07-18 — Ch4 figures: two labeled corner sets (§4.1.1/§4.1.2) + 3D view + 9-voltage overlays
+
+Designer review (report notes, 2 points):
+1. Figure 4.1 restructure — keep the GUI-capture look, but capture at TWO labeled corners and
+   use the 3D view (was captured but unused) instead of the schematic 4.1b. Corners chosen by
+   designer: low-line minimum full load + high-line minimum full load.
+   - Frontend (pfc_sim_agent_v14.html): captureReportViews() now builds two corner sets via
+     ev.opPoint(vin,lf) — no slider manipulation. Corners: (cfg.vinMin, specMaxPct(vinMin)/100)
+     and (min(180,vinMax), specMaxPct/100) → low-line 1700W and high-line 3600W. Each set =
+     {ring, ring_thermal, threeD, op:{vin,pout,load_pct,Bmax,Thot,Tcore,Lfull_uH,Ic}}. Returns
+     {lowline, highline, +backward-compat single keys}. All derived from design config (no
+     hardcodes; 180 = system-wide band boundary).
+   - Forwarding chain: SimulationAgent was dropping the new keys (only forwarded ring/thermal/
+     threeD) → now forwards full object; new exported SimViews/SimCorner type; Step7Wizard +
+     ReviewMagnetics typed through.
+   - Backend (_ch4 §4.1): renders §4.1.1 (low-line) + §4.1.2 (high-line), each a 3-panel row
+     (flux / thermal / 3-D) with caption stating exact operating conditions from op metadata.
+     3-D replaces schematic 4.1b. Backward-compat single-corner path + server-render fallback
+     (keeps schematic there since 3-D can't be server-generated).
+2. 9-voltage graphs into Ch4 — server-rendered overlays. NEW _fig_vin_overlay() draws per-Vin
+   curves straight from the engine tables (loss_table_100C, L_vs_Vin_table) — no second physics
+   path, so graph values == tabulated engine values (one-engine principle). Three figures:
+   4.2a inductance vs Vin (L_nom/min/L_req), 4.3a flux vs Vin (Bmax/Bdc/Bac/Binner), 4.5a loss
+   vs Vin (Ptot/Pcore/Pcu), low/high-line bands shaded. NOTE: chose per-Vin summary overlays
+   over time-domain-over-cycle families to avoid re-deriving DB physics in the report builder
+   (would risk engine divergence); a future engine-exported time series could add those.
+
+Verified: sim HTML JS parses; tsc clean; §4.1.1/4.1.2 render with 3 panels + labeled conditions
+from a mock two-corner payload; three overlays present (Fig 4.2a/4.3a/4.5a, 8 images in ch4);
+no black squares; app.main imports clean; both dev servers hot-reload.

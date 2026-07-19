@@ -25,6 +25,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import rawHtml from '../assets/review_magnetics.html?raw'
 import { C, Btn } from './ui'
+import { type SimViews } from './SimulationAgent'
 import { docGenerateReport, simulateCrossCheck, getViewContract,
          type SimCrossCheck, type ViewContract } from '../api/client'
 
@@ -51,7 +52,7 @@ interface Props {
   allCandidates:  any[]
   winding:        string
   step8:          any
-  simViews?:      { ring?: string; ring_thermal?: string; threeD?: string } | null
+  simViews?:      SimViews | null
   onBack:         () => void
   onRestart:      () => void
   onSimAgent?:    () => void

@@ -627,15 +627,39 @@ function Viewer(ev,doc){
     Both are drawn on the 2D #fieldC canvas (the 3D uses the canvas-2D wireframe fallback — the
     WebGL canvas has no preserveDrawingBuffer, so toDataURL there would be blank). Drawing is
     synchronous so the temporary geo switch never paints on screen; render() restores the live view. */
+ /* Capture the ring flux + ring thermal + 3D views at ONE specified corner (vin, load
+    fraction lf of Prated), computed via ev.opPoint so the images and the operating-
+    condition metadata are self-consistent. Draw functions take (op,f) directly, so no
+    slider manipulation is needed. Returns the three data-URIs + an op{} label block. */
+ function _captureCornerSet(vin,lf,fc){
+  var wm=(+$('warmMin').value)||20;
+  var op=ev.opPoint(vin,lf,wm), f=ev.inst(op,0.5);   // frac=0.5 → line crest (sinθ=1)
+  var out={}, sm=mode;
+  try{drawRing(op,f);out.ring=fc.toDataURL('image/png');}catch(e){}
+  try{mode='thermal';drawRing(op,f);out.ring_thermal=fc.toDataURL('image/png');}catch(e){}
+  mode=sm;
+  try{hideGL3();drawWire3D(op,f);out.threeD=fc.toDataURL('image/png');}catch(e){}
+  out.op={vin:Math.round(vin), pout:Math.round(lf*cfg.Prated), load_pct:Math.round(lf*100),
+          Bmax:+(f.Bmean*ev.crowdPeak).toFixed(3), Thot:Math.round(op.ThotSS),
+          Tcore:Math.round(op.TcoreSS), Lfull_uH:Math.round(op.Lfull_uH), Ic:+op.Ic.toFixed(2)};
+  return out;
+ }
  function captureReportViews(){
   if(!_last)return null; var fc=$('fieldC'); if(!fc||!fc.toDataURL)return null;
-  var out={},savedGeo=geo,savedMode=mode;
-  try{drawRing(_last.op,_last.f);out.ring=fc.toDataURL('image/png');}catch(e){}
-  try{mode='thermal';drawRing(_last.op,_last.f);out.ring_thermal=fc.toDataURL('image/png');}catch(e){}
-  mode=savedMode;
-  try{hideGL3();drawWire3D(_last.op,_last.f);out.threeD=fc.toDataURL('image/png');}catch(e){}
-  geo=savedGeo; try{render();}catch(e){}
-  return (out.ring||out.threeD)?out:null;
+  var savedGeo=geo,savedMode=mode;
+  // Two report corners (designer decision 2026-07-18): low-line minimum full load and
+  // high-line minimum full load. lf = specMaxPct(vin)/100 gives that band's full power
+  // (low line ≈ 47% of Prated = the low-line spec power; high line = 100% = Prated).
+  var loV=cfg.vinMin, loLf=((ev.specMaxPct(loV)||47.2)/100);
+  var hiV=Math.min(180,cfg.vinMax), hiLf=((ev.specMaxPct(hiV)||100)/100);
+  var lowline=_captureCornerSet(loV,loLf,fc);
+  var highline=_captureCornerSet(hiV,hiLf,fc);
+  mode=savedMode; geo=savedGeo; try{render();}catch(e){}   // restore the live view
+  // Backward compat: keep top-level single keys (= low-line set) for older consumers.
+  return (lowline.ring||highline.ring)
+    ? {lowline:lowline, highline:highline,
+       ring:lowline.ring, ring_thermal:lowline.ring_thermal, threeD:lowline.threeD}
+    : null;
  }
  function postReportViews(){try{var v=captureReportViews();if(v&&global.parent&&global.parent!==global)global.parent.postMessage({__sim_report_views:v},'*');return v;}catch(e){return null;}}
  function mount(){

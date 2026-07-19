@@ -11,6 +11,16 @@ import rawHtml from '../assets/pfc_sim_agent_v14.html?raw'
 import { C, Btn } from './ui'
 import { simulateCrossCheck, getViewContract, type SimCrossCheck, type ViewContract } from '../api/client'
 
+/** A single captured corner: three canvas images + the operating-condition metadata the
+ *  report caption states (§4.1.1 low-line / §4.1.2 high-line). */
+export type SimCorner = {
+  ring?: string; ring_thermal?: string; threeD?: string
+  op?: { vin: number; pout: number; load_pct: number; Bmax: number
+         Thot: number; Tcore: number; Lfull_uH: number; Ic: number }
+}
+/** Report captures: two labeled corners + backward-compat single keys (= low-line set). */
+export type SimViews = SimCorner & { lowline?: SimCorner; highline?: SimCorner }
+
 interface Props {
   result:         any
   confirmedState: any
@@ -19,7 +29,7 @@ interface Props {
   selGrade:       string
   onBack:         () => void
   /** Ring / thermal-ring / 3D canvas captures posted up from the viewer, for the design report. */
-  onViews?:       (v: { ring?: string; ring_thermal?: string; threeD?: string }) => void
+  onViews?:       (v: SimViews) => void
 }
 
 export const SimulationAgent: React.FC<Props> = ({
@@ -66,7 +76,9 @@ export const SimulationAgent: React.FC<Props> = ({
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
       const v = (ev?.data as any)?.__sim_report_views
-      if (v && (v.ring || v.threeD)) onViews?.({ ring: v.ring, ring_thermal: v.ring_thermal, threeD: v.threeD })
+      // Forward the FULL object — includes the per-corner sets (lowline/highline with op
+      // metadata) the report uses for §4.1.1/§4.1.2, plus the backward-compat single keys.
+      if (v && (v.ring || v.threeD || v.lowline || v.highline)) onViews?.(v)
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
