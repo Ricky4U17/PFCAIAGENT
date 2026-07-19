@@ -4274,3 +4274,24 @@ cleanup: revert captureReportViews to single-corner + drop SimViews plumbing.
 
 Verified: single Fig 4.1 server render present (flux+temp wording), no 4.1.1/4.1.2, no 3-D, no
 schematic figure, overlays intact, no black squares, app.main imports clean.
+
+## C92 — 2026-07-18 — §4.6.2 per-cycle waveform families (the 6 Review panes × 9 voltages)
+
+Designer request: add the 6 Review "Waveform Panes" graphs (H, i_avg, B_max, P_core, P_cu,
+P_total over the half line cycle) for all 9 operating voltages (54 curves) to the report.
+Agreed (discussion): Option B — 12 figures grouped low-line/high-line (6 quantities × 2 bands);
+location §4.6.2 (under the existing §4.6 Per-Operating-Point Engine Results, no renumbering).
+
+Implementation (doc_report_builder):
+- NEW _fig_wave_family(wbv, vins, ykey, ylabel, title): overlays one quantity over the half
+  cycle for a band's voltages (viridis colormap, one trace/voltage).
+- §4.6.2 "Per-Cycle Waveform Families — All 9 Operating Points": CONCEPT (what they are +
+  provenance: identical to GUI Review panes) + THEORY (how to read: crest peaks, rectified-sine
+  shape, high-line core-loss double-hump, low/high band differences) + 12 figures (Fig 4.6.1–
+  4.6.12). Low-line band = Vin<180 (90/110/120/132), high-line = Vin≥180 (180/200/220/230/264).
+- ONE-ENGINE: data from build_view_contract(d,state) → waveforms_by_vin (the same
+  _half_cycle_averages series the GUI plots). NOT recomputed in the report builder. Verified
+  waveform crest B_max == §4.3 table B_max within 0.0–1.0% at 90/180/220 V.
+
+Verified: 12 family figures render; CONCEPT/THEORY text present; provenance note; no black
+squares; app.main imports clean. Pure backend, no frontend.

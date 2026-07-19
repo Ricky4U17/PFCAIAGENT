@@ -441,6 +441,37 @@ def _fig_vin_overlay(xs, series, ylabel, title, vbreak=180.0):
         return None
 
 
+def _fig_wave_family(wbv, vins, ykey, ylabel, title):
+    """Overlay one magnetic quantity (ykey) over the half line cycle for a band of operating
+    voltages (vins), one trace per voltage. Data is the engine's own per-V_in waveform
+    (build_view_contract → waveforms_by_vin, the SAME series the GUI Review page plots), so the
+    report graphs equal the interactive tool and the Chapter-4 tables by construction."""
+    try:
+        traces = [(vk, wbv.get(vk)) for vk in vins]
+        traces = [(vk, w) for vk, w in traces if w and w.get("t_ms") and w.get(ykey)]
+        if not traces:
+            return None
+        fig, ax = plt.subplots(figsize=(7, 2.9))
+        cmap = plt.get_cmap("viridis")
+        n = len(traces)
+        for i, (vk, w) in enumerate(traces):
+            ax.plot(w["t_ms"], w[ykey], lw=1.5,
+                    color=cmap(i / max(n - 1, 1)), label=f"{vk} Vac")
+        ax.set_xlabel("t (ms — half line cycle)", fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.set_title(title, fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=7, ncol=min(n, 5))
+        fig.tight_layout()
+        return _mpl_img(fig, 165)
+    except Exception:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+        return None
+
+
 def _fig_img(fig, width_mm=150):
     """Render a matplotlib figure to an Image flowable, preserving its aspect ratio."""
     buf = io.BytesIO()
@@ -3648,6 +3679,64 @@ def _ch4(story, state, d):
                 f"for the {stacks}-core stack.)", 4)
     else:
         body(story, "Authoritative per-point loss table not available in this design payload.", 4)
+
+    # ── 4.6.2 Per-cycle waveform families (designer decision 2026-07-18) ──
+    # The six magnetic quantities the GUI Review "Waveform Panes" show, over the half
+    # line cycle, for all nine operating points — grouped low-line / high-line. Sourced
+    # from build_view_contract (waveforms_by_vin), the SAME engine series the GUI plots.
+    sub_h(story, "4.6.2", "Per-Cycle Waveform Families — All 9 Operating Points", 4)
+    annotation(story, "CONCEPT",
+        "Each graph below traces one magnetic quantity over a single <b>half line cycle</b> — "
+        f"the rectified-sine half period ({1000/(2*float(state.get('intake',{}).get('application',{}).get('nominal_line_frequency_hz',60) or 60)):.2f} ms), "
+        "the fundamental waveform that repeats every AC half-wave. Six quantities are shown — the "
+        "magnetizing field H(t), per-phase average current i<sub>avg</sub>(t), peak flux density "
+        "B<sub>max</sub>(t), and the instantaneous core, copper and total losses — each as a family "
+        "of curves, one per operating voltage, split into the low-line and high-line bands. These "
+        "are the engine's authoritative per-V<sub>in</sub> waveforms: they are the identical series "
+        "the interactive Review &ldquo;Waveform Panes&rdquo; plot, so the report and the tool agree "
+        "by construction.", 4)
+    annotation(story, "THEORY",
+        "<b>How to read them.</b> Time runs left→right across one half cycle; the <b>crest</b> "
+        "(sine peak, mid-plot) is where current, flux and loss are largest, and the ends are the "
+        "line zero-crossings. H(t) and i<sub>avg</sub>(t) follow the rectified sine. "
+        "B<sub>max</sub> = B<sub>dc</sub> + B<sub>ac</sub> tracks the current and is the quantity "
+        "checked against B<sub>sat</sub>. Core loss shows the characteristic <b>double-hump</b> at "
+        "high line, because the duty-cycle-dependent flux swing is largest away from the crest, "
+        "whereas at low line it peaks once at the crest. The low-line and high-line families differ "
+        "in amplitude and shape because the duty cycle sits far from / near 0.5 respectively.", 4)
+    try:
+        from app.mode_b.step7_magnetic_calc import build_view_contract
+        _wbv = (build_view_contract(d, state) or {}).get("waveforms_by_vin") or {}
+    except Exception:
+        _wbv = {}
+    if _wbv:
+        _vk   = sorted(_wbv.keys(), key=lambda x: int(x))
+        _lo_v = [v for v in _vk if int(v) < 180]
+        _hi_v = [v for v in _vk if int(v) >= 180]
+        _quant = [
+            ("H_Oe",  "H (Oe)",       "Magnetizing field H(t)"),
+            ("Iavg",  "i_avg (A)",    "Per-phase average current i_avg(t)"),
+            ("Bmax",  "B_max (T)",    "Peak flux density B_max(t)"),
+            ("Pcore", "P_core (W)",   "Instantaneous core loss P_core(t)"),
+            ("Pcu",   "P_cu (W)",     "Instantaneous copper loss P_cu(t)"),
+            ("Ptot",  "P_total (W)",  "Instantaneous total loss P_total(t)"),
+        ]
+        _fn = 0
+        for _yk, _yl, _qt in _quant:
+            for _bl, _bv in (("low-line", _lo_v), ("high-line", _hi_v)):
+                if not _bv:
+                    continue
+                _wf = _fig_wave_family(_wbv, _bv, _yk, _yl, f"{_qt} — {_bl} family")
+                if _wf:
+                    _fn += 1
+                    story.append(_wf)
+                    fig_caption(story,
+                        f"Figure 4.6.{_fn} — {_qt} over the half line cycle, {_bl} operating "
+                        f"points ({', '.join(_bv)} V<sub>ac</sub>). Engine waveform "
+                        "(build_view_contract) — identical to the GUI Review waveform panes.", 4)
+    else:
+        body(story, "Per-cycle waveform families not available in this design payload "
+                    "(engine waveform contract could not be built).", 4)
 
     # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
