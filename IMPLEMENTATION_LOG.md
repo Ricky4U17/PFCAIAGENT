@@ -4254,3 +4254,23 @@ Designer review (report notes, 2 points):
 Verified: sim HTML JS parses; tsc clean; §4.1.1/4.1.2 render with 3 panels + labeled conditions
 from a mock two-corner payload; three overlays present (Fig 4.2a/4.3a/4.5a, 8 images in ch4);
 no black squares; app.main imports clean; both dev servers hot-reload.
+
+## C91 — 2026-07-18 — §4.1 revert to single server-rendered ring view (drop 3D + corner split + schematic)
+
+Designer review: the C90 two-corner GUI captures (§4.1.1/§4.1.2) looked worse than the C85
+server render and identical for low/high line. Designer chose (AskUserQuestion): single Figure
+4.1 like the previous report — flux-density + temperature field only.
+
+Change (doc_report_builder _ch4 §4.1): removed the two-corner GUI-capture rendering (4.1.1/4.1.2),
+the 3-D panel, and the schematic 4.1b figure. §4.1 now renders ONE server-side _fig_ring_views
+(flux crowding B(r)∝1/r + radial temperature field, winding turns overlaid) — always present,
+independent of whether the Sim-Agent page was opened; ignores sim_views entirely. The C90
+9-voltage overlays (Fig 4.2a/4.3a/4.5a) are untouched. The eq label "4.1b" (min inductance at
+peak bias) is unrelated and stays.
+
+Frontend two-corner capture (C90) LEFT as-is — harmless (main report now uses server render;
+legacy steps13_14 §14.9.2 still gets ring/threeD via backward-compat keys). Possible future
+cleanup: revert captureReportViews to single-corner + drop SimViews plumbing.
+
+Verified: single Fig 4.1 server render present (flux+temp wording), no 4.1.1/4.1.2, no 3-D, no
+schematic figure, overlays intact, no black squares, app.main imports clean.

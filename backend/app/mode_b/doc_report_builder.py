@@ -3274,100 +3274,20 @@ def _ch4(story, state, d):
         f"Approved core: <b>{part} × {stacks}</b>  |  N = <b>{N}</b> turns  |  "
         f"Assembled: OD = {wo:.1f} mm, height = {wh:.1f} mm.", 4)
 
-    # Simulation-Agent captures — flux-density field, temperature gradient and the 3-D winding
-    # view, captured at TWO labeled corners (designer decision 2026-07-18): §4.1.1 low-line
-    # minimum full load and §4.1.2 high-line minimum full load. Present when the designer opened
-    # the Simulation-Agent page. The 3-D view replaces the old schematic cross-section; a
-    # server render is the fallback when no captures exist.
-    _sv       = d.get("sim_views") or {}
-    _lo_set   = _sv.get("lowline") or {}
-    _hi_set   = _sv.get("highline") or {}
-    _ring_shown = False
-
-    def _cond_txt(op):
-        if not op:
-            return "the captured operating point"
-        return (f"<b>{op.get('vin','—')} V<sub>ac</sub> / {op.get('pout','—')} W</b> (full load) — "
-                f"B<sub>max</sub> = {op.get('Bmax','—')} T, "
-                f"T<sub>hotspot</sub> = {op.get('Thot','—')} °C, "
-                f"L<sub>full</sub> = {op.get('Lfull_uH','—')} µH, "
-                f"I<sub>φ,crest</sub> = {op.get('Ic','—')} A")
-
-    def _render_corner(num, title, cs):
-        ring = _img_from_datauri(cs.get("ring"), width_mm=74)
-        th   = _img_from_datauri(cs.get("ring_thermal"), width_mm=74)
-        td   = _img_from_datauri(cs.get("threeD"), width_mm=74)
-        panels = [(im, cap) for im, cap in
-                  [(ring, "Flux-density field"), (th, "Temperature gradient"),
-                   (td, "3-D winding view")] if im]
-        if not panels:
-            return False
-        sub_h(story, num, title, 4)
-        _cwN = CW / len(panels)
-        _t = Table([[im for im, _ in panels]], colWidths=[_cwN] * len(panels))
-        _t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        story.append(_t)
-        _plabels = ", ".join(cap for _, cap in panels)
+    # Figure 4.1 — single server-rendered ring view (designer decision 2026-07-18): flux-density
+    # field + temperature field only (no 3-D, no schematic). Rendered from the approved design's
+    # own field model so it is always present and looks identical regardless of whether the
+    # Simulation-Agent page was opened.
+    _amb4 = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
+    _rv = _fig_ring_views(d, _amb4)
+    if _rv:
+        story.append(_rv)
         fig_caption(story,
-            f"Figure {num} — {title} — captured from the simulation field viewer at "
-            f"{_cond_txt(cs.get('op'))}. Panels ({_plabels}) share the colour scales and exact "
-            f"per-layer winding turns (&otimes; bore / &#9679; outer) of the designer's GUI.", 4)
-        return True
-
-    if _lo_set or _hi_set:
-        if _lo_set:
-            _ring_shown |= _render_corner("4.1.1", "Low-line minimum, full load", _lo_set)
-        if _hi_set:
-            _ring_shown |= _render_corner("4.1.2", "High-line minimum, full load", _hi_set)
-
-    if not _ring_shown:
-        # Legacy single-corner capture (older payloads without the two labeled sets).
-        _ring_img = _img_from_datauri(_sv.get("ring"), width_mm=82)
-        _th_img   = _img_from_datauri(_sv.get("ring_thermal"), width_mm=82)
-        _td_img   = _img_from_datauri(_sv.get("threeD"), width_mm=82)
-        if _ring_img or _th_img:
-            _pair = [im for im in (_ring_img, _th_img) if im]
-            if len(_pair) == 2:
-                _t = Table([_pair], colWidths=[CW / 2, CW / 2])
-                _t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                        ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-                story.append(_t)
-            else:
-                story.append(_pair[0])
-            fig_caption(story,
-                "Figure 4.1 — Wound-core ring view captured from the simulation field viewer: "
-                f"exact per-layer winding turns (&otimes; bore / &#9679; outer) around the "
-                f"{stacks}-core stack. Colour scales and turn counts match the designer's GUI.", 4)
-            if _td_img:
-                story.append(_td_img)
-                fig_caption(story, "Figure 4.1b — 3-D view of the wound core from the "
-                                   "Simulation-Agent viewer.", 4)
-            _ring_shown = True
-        else:
-            # No captures at all — render the ring views server-side so §4.1 is never empty.
-            _amb4 = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
-            _rv = _fig_ring_views(d, _amb4)
-            if _rv:
-                story.append(_rv)
-                fig_caption(story,
-                    f"Figure 4.1 — Wound-core ring views rendered from the approved design's field "
-                    f"model: flux-density crowding B(r) &prop; 1/r across the {stacks}-core stack "
-                    "(left) and the radial temperature field from the interior hotspot to the "
-                    "cooled surface (right), both overlaid with the exact per-layer winding turns "
-                    "(&otimes; bore / &#9679; outer). Opening the Simulation page before "
-                    "generating the report replaces this render with the live GUI captures at the "
-                    "low-line and high-line corners (Figures 4.1.1 / 4.1.2).", 4)
-                _ring_shown = True
-                # Only the server-render path lacks a 3-D view — keep the schematic
-                # cross-section here as the geometry supplement.
-                _wfig = _fig_winding_cross_section(d)
-                if _wfig:
-                    story.append(_wfig)
-                    fig_caption(story,
-                        f"Figure 4.1b — Winding cross-section (schematic). Left: toroid top view "
-                        f"with the {N} turns distributed around the core. Right: radial cross-section "
-                        f"of one turn over the {stacks}-core stack.", 4)
+            f"Figure 4.1 — Wound-core ring views rendered from the approved design's field "
+            f"model: flux-density crowding B(r) &prop; 1/r across the {stacks}-core stack "
+            "(left) and the radial temperature field from the interior hotspot to the "
+            "cooled surface (right), both overlaid with the exact per-layer winding turns "
+            "(&otimes; bore / &#9679; outer).", 4)
 
     # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
     step_h(story, "4.2", "Inductance Performance — Bias Retention at All 9 Points", 4)
