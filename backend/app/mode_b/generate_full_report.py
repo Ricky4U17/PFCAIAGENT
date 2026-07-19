@@ -368,18 +368,34 @@ def _steps7_8(story, state, s):
     Vout = float(ap.get("output_bus_voltage_v", 393))
     fsw  = float(tsi.get("recommended_frequency_hz", 70000))
     crest= float(tsi.get("default_crest_ripple_ratio", 0.20))
-    eta  = 0.945
-    PF   = 0.9987
     n_ph = int(state.get("selected_channels", 2))
+    # η/PF at the low-line corner from the designer-anchored canonical ladder — NOT the old
+    # 0.945/0.9987 literals; guarded so any failure keeps the previous constants.
+    _vin_hi  = float(ap.get("vin_rms_max", 264))
+    _pout_hi = float(ap.get("output_power_w_high_line", 3600))
+    _eta_t   = float(ap.get("efficiency_target_percent", 0) or 0)
+    _eta_t   = (_eta_t / 100.0) if _eta_t else None
+    eta, PF, _irms_fb = 0.945, 0.9987, 10.07
+    try:
+        from app.mode_b.calculations import canonical_ops_table, build_design_ops_table
+        _o = canonical_ops_table(Vin, _vin_hi, Pout, _pout_hi, _eta_t)
+        eta, PF = float(_o[0, 2]), float(_o[0, 3])
+        _od, _ = build_design_ops_table(Vin, _vin_hi, Pout, _pout_hi, Vout, fsw, crest, _eta_t)
+        _irms_fb = float(_od[0, 4])
+    except Exception:
+        pass
 
     Vin_pk  = Vin * math.sqrt(2)
     D_crest = 1 - Vin_pk / Vout
     Pin     = Pout / eta
     Ipk_line= math.sqrt(2) * Pin / (Vin * PF)
-    dIL_pp  = float(tsi.get("confirmed_dIL_A", tsi.get("dIL_pp_A", 5.161)))
     L_sel   = float(tsi.get("confirmed_L_uH_sel", tsi.get("confirmed_L_uH", 240)))
+    # ΔI ripple: designer value first, else derive from the actual V·D/(L·fsw) — not 5.161.
+    dIL_pp  = float(tsi.get("confirmed_dIL_A", tsi.get("dIL_pp_A", 0)) or 0) \
+              or (Vin_pk * D_crest / (L_sel * 1e-6 * fsw))
     Ipk_ph  = Ipk_line / n_ph + dIL_pp / 2
-    Irms_ph = float(tsi.get("Iph_rms_A", float(DEFAULT_OPS_ROW0_RMS if False else 10.07)))
+    # per-phase RMS: designer value first, else the canonical-chain value (not 10.07)
+    Irms_ph = float(tsi.get("Iph_rms_A", 0) or 0) or _irms_fb
 
     story.append(Paragraph("Step 7 — Inductance", s["h2"]))
     story.append(Paragraph(

@@ -490,8 +490,24 @@ def calculate_thermal_table(
     _K    = temp_multiplier(esr_m, T_amb, _rec.get("manufacturer", supplier), series)
 
     n_phases = int(state.get("selected_channels") or 2)
+    # Operating grid from the DESIGNER'S intake — NOT the old hardcoded _DEFAULT_OPS_9
+    # (fixed 90-264 V / 1700-3600 W / eta / PF). Same canonical_ops_table the inductor
+    # chapters use, so the capacitor section shares one operating-point definition
+    # (one-engine) and reflects the designer's actual specs.
+    _vin_lo = float(ap.get("vin_rms_min", 90) or 90)
+    _vin_hi = float(ap.get("vin_rms_max", 264) or 264)
+    _pout_lo = float(ap.get("output_power_w_low_line", 1700) or 1700)
+    _pout_hi = float(ap.get("output_power_w_high_line", 3600) or 3600)
+    _eta_t = float(ap.get("efficiency_target_percent", 0) or 0)
+    _eta_t = (_eta_t / 100.0) if _eta_t else None
+    try:
+        from app.mode_b.calculations import canonical_ops_table
+        _ops9 = [(float(r[0]), float(r[1]), float(r[2]), float(r[3]))
+                 for r in canonical_ops_table(_vin_lo, _vin_hi, _pout_lo, _pout_hi, _eta_t)]
+    except Exception:
+        _ops9 = _DEFAULT_OPS_9
     table = []
-    for (Vin_rms, Pout, eta, PF) in _DEFAULT_OPS_9:
+    for (Vin_rms, Pout, eta, PF) in _ops9:
         # SAME HF ripple-current model as calc_operating_point / the simulation page
         Pin     = Pout / max(eta, 1e-9)
         I_o     = Pout / Vout
@@ -593,10 +609,28 @@ def run_capacitor_design(state: dict) -> dict:
     Vout_max   = float(tsi.get("Vout_max_V",               Vout * 1.10))
 
     nch = int(state.get("selected_channels") or 2)
-    worst = calc_operating_point(180, Pout_high, 0.965, Vout, f_line,
-                                  Vdc_ripple, Vdc_min, t_hold_s, pf=0.9889, n_phases=nch)
-    low   = calc_operating_point(90,  Pout_low,  0.945, Vout, f_line,
-                                  Vdc_ripple, Vdc_min, t_hold_s, pf=0.9987, n_phases=nch)
+    # η/PF for the two sizing corners from the designer-anchored canonical ladder — NOT
+    # the old 0.965/0.9889 and 0.945/0.9987 literals. Low corner = designer's vin_min; worst
+    # corner = 180 V (high-line band minimum, the worst for DC-bus ripple per the C81 model).
+    _vin_lo = float(ap.get("vin_rms_min", 90) or 90)
+    _vin_hi = float(ap.get("vin_rms_max", 264) or 264)
+    _eta_t  = float(ap.get("efficiency_target_percent", 0) or 0)
+    _eta_t  = (_eta_t / 100.0) if _eta_t else None
+    _v_worst, _eta_w, _pf_w = 180.0, 0.965, 0.9889
+    _eta_l, _pf_l = 0.945, 0.9987
+    try:
+        from app.mode_b.calculations import canonical_ops_table
+        _ops = canonical_ops_table(_vin_lo, _vin_hi, Pout_low, Pout_high, _eta_t)
+        _lo_r = _ops[0]                                                   # vin_min / low-line
+        _hi_r = next((r for r in _ops if float(r[0]) >= 180.0), _ops[4])  # 180 V / high-line
+        _v_worst, _eta_w, _pf_w = float(_hi_r[0]), float(_hi_r[2]), float(_hi_r[3])
+        _eta_l, _pf_l = float(_lo_r[2]), float(_lo_r[3])
+    except Exception:
+        pass
+    worst = calc_operating_point(_v_worst, Pout_high, _eta_w, Vout, f_line,
+                                  Vdc_ripple, Vdc_min, t_hold_s, pf=_pf_w, n_phases=nch)
+    low   = calc_operating_point(_vin_lo,  Pout_low,  _eta_l, Vout, f_line,
+                                  Vdc_ripple, Vdc_min, t_hold_s, pf=_pf_l, n_phases=nch)
 
     # Step 15.4 — C required
     candidates = {

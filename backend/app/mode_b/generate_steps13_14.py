@@ -1033,9 +1033,19 @@ def _build_ops_table(D):
     L0_nom = D['AL_nom_total_nH'] * N**2 / 1e3  # µH
     L_target = D['L_target_uH']
 
-    # Operating points: use DEFAULT_OPS from step7_magnetic_calc
-    # DEFAULT_OPS columns: [Vin_rms, Pout_W, eta, PF, Irms_ph, ...]
-    OPS = DEFAULT_OPS
+    # Operating points from the DESIGNER'S intake (build_design_ops_table — same 5-column
+    # [Vin, Pout, eta, PF, Iph_rms] shape and the same canonical chain the chapter report uses),
+    # NOT the hardcoded DEFAULT_OPS. Guarded: any failure falls back to DEFAULT_OPS so the
+    # legacy report can never fail to generate — worst case is exactly the previous behaviour.
+    try:
+        from app.mode_b.calculations import build_design_ops_table
+        OPS, _ = build_design_ops_table(
+            float(D.get('Vin_lo_rms', 90)), float(D.get('Vin_hi_rms', 264)),
+            float(D.get('Pout_lo_W', 1700)), float(D.get('Pout_hi_W', 3600)),
+            float(D['Vout_V']), float(D['fsw_Hz']),
+            float(D.get('r_input', 0.20) or 0.20), D.get('eta_target'))
+    except Exception:
+        OPS = DEFAULT_OPS
 
     rows = []
     for row in OPS:
@@ -1134,13 +1144,37 @@ def _resolve_params(approved_design: dict, state: dict) -> dict:
     Vout  = float(ap.get('output_bus_voltage_v', d.get('Vbus_V', 393)))
     fsw   = float(tsi.get('recommended_frequency_hz', 70000))
     Vin_lo= float(ap.get('vin_rms_min', 90))
-    fline = float(tsi.get('f_line_Hz', 60))
+    fline = float(tsi.get('f_line_Hz', ap.get('nominal_line_frequency_hz', 60)))
     N     = int(d.get('N', 49))
     # L_target: prefer what the designer actually confirmed
     L_target = float(tsi.get('confirmed_L_uH_sel',
                      tsi.get('confirmed_L_uH', d.get('L_target_uH', 235))))
-    Irms  = float(tsi.get('Iph_rms_A', d.get('Irms_A', 10.07)))
-    Ipk_line = float(tsi.get('confirmed_Iin_pk_A', 28.3))
+    # Intake-derived operating grid endpoints (for the intake-anchored OPS table + scalar
+    # currents) — replaces the hardcoded 10.07 A / 28.3 A reference constants below.
+    Vin_hi  = float(ap.get('vin_rms_max', 264))
+    Pout_lo = float(ap.get('output_power_w_low_line', 1700))
+    Pout_hi = float(ap.get('output_power_w_high_line', 3600))
+    r_input = float(tsi.get('default_crest_ripple_ratio', 0.20) or 0.20)
+    _eta_t  = float(ap.get('efficiency_target_percent', 0) or 0)
+    _eta_t  = (_eta_t / 100.0) if _eta_t else None
+    # Per-phase reference currents from the SAME canonical chain the chapter report uses —
+    # the tsi values (written at mini-intake, C88) take priority; else derive from intake.
+    Irms  = float(tsi.get('Iph_rms_A', 0) or 0)
+    Ipk_line = float(tsi.get('confirmed_Iin_pk_A', 0) or 0)
+    try:
+        from app.mode_b.calculations import build_design_ops_table, step2_input_params, canonical_ops_table
+        _ops0 = canonical_ops_table(Vin_lo, Vin_hi, Pout_lo, Pout_hi, _eta_t)
+        _s20  = step2_input_params(Vout, _ops0)
+        if Irms <= 0:
+            _od, _ = build_design_ops_table(Vin_lo, Vin_hi, Pout_lo, Pout_hi, Vout, fsw, r_input, _eta_t)
+            Irms = float(_od[0, 4])
+        if Ipk_line <= 0:
+            Ipk_line = float(_s20['Iin_pk'][0])
+    except Exception:
+        if Irms <= 0:
+            Irms = float(d.get('Irms_A', 10.07))
+        if Ipk_line <= 0:
+            Ipk_line = 28.3
 
     Vin_pk = math.sqrt(2) * Vin_lo
     D_pk   = max(0, 1 - Vin_pk / Vout)
@@ -1191,7 +1225,8 @@ def _resolve_params(approved_design: dict, state: dict) -> dict:
         AL_max_total_nH=round(AL_max_total),
         # electrical
         Vout_V=Vout, fsw_Hz=fsw, f_line_Hz=fline,
-        Vin_lo_rms=Vin_lo, Vin_pk=Vin_pk, D_pk=D_pk,
+        Vin_lo_rms=Vin_lo, Vin_hi_rms=Vin_hi, Vin_pk=Vin_pk, D_pk=D_pk,
+        Pout_lo_W=Pout_lo, Pout_hi_W=Pout_hi, r_input=r_input, eta_target=_eta_t,
         N=N, L_target_uH=L_target,
         Irms_A=Irms, Ipk_line=Ipk_line,
         Iavg_crest=Iavg_crest, dIL_pp=dIL_pp,

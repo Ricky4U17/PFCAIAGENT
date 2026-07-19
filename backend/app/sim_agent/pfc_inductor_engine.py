@@ -584,18 +584,22 @@ def analyze(spec, core, mat, wind, lim, cooling, airflow, rho, alpha, measured, 
     wc_Bi = max(rows, key=lambda r: r["B_inner"])
     wc_dT = max(rows, key=lambda r: r["dT"])
     Lmin_guarantee = min(r["Lfull_min_pk_uH"] for r in rows)   # instantaneous peak (informational)
-    # Authoritative L-guarantee basis (matches step7): crest-average biased inductance at AL_min,
-    # held to >= 85% of target (the standard DC-bias rolloff allowance). The instantaneous-peak
-    # value above is a more conservative informational metric and must NOT gate the verdict.
-    Lavg_min_guarantee = (min(r["L_nom_uH"] for r in rows)
-                          * (L0_min / L0_nom if L0_nom else 1.0))
+    # L-guarantee basis — aligned to the authoritative Step-7 gate (designer decision C88,
+    # 2026-07-17): turns are converged so the AS-BUILT NOMINAL inductance meets the requirement
+    # at every operating point (nominal-A_L basis, not A_L,min). The field engine therefore
+    # checks the min NOMINAL full-load inductance across the points against the target — the
+    # old A_L,min-derated basis (× L0_min/L0_nom) was the pre-C88 rule and falsely REJECTED
+    # designs the authoritative engine accepts. The A_L,min band remains reported informationally.
+    Lavg_min_guarantee = min(r["L_nom_uH"] for r in rows)
+    Lmin_ALmin_guarantee = Lavg_min_guarantee * (L0_min / L0_nom if L0_nom else 1.0)
     J = max(r["Iphi_rms"] for r in rows) / wind.A_cu_mm2
 
     asserts = {
         "material_anchors": (len(mat_fails) == 0, mat_fails),
         "L_guarantee": (Lavg_min_guarantee >= 0.85 * lim.L_target_uH,
-                        f"L_full,min(AL_min) {Lavg_min_guarantee:.1f} >= 85% x {lim.L_target_uH:.0f} "
-                        f"= {0.85*lim.L_target_uH:.1f} uH  (peak-bias {Lmin_guarantee:.1f} uH, informational)"),
+                        f"L_full,min(nom) {Lavg_min_guarantee:.1f} >= 85% x {lim.L_target_uH:.0f} "
+                        f"= {0.85*lim.L_target_uH:.1f} uH  (AL_min basis {Lmin_ALmin_guarantee:.1f} uH, "
+                        f"peak-bias {Lmin_guarantee:.1f} uH — both informational)"),
         "saturation": (wc_B["Bmax"] <= (1 - lim.sat_margin_min) * mat.Bsat,
                        f"Bmax {wc_B['Bmax']:.3f} T vs Bsat {mat.Bsat} T"),
         "window_fill": (FFcu <= lim.FFcu_limit, f"FFcu {FFcu*100:.1f}% <= {lim.FFcu_limit*100:.0f}%"),

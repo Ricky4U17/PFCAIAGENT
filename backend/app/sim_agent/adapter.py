@@ -322,19 +322,19 @@ def crosscheck_rows(result: dict, sim: dict) -> list:
     pts   = sim.get("points", []) or []
     p90   = min(pts, key=lambda p: abs(float(p.get("Vin", 1e9)) - 90)) if pts else {}
 
-    # parallel-bundle count, to put J on the same per-conductor basis as step7
-    n_str = max(1, int(_num(R.get("n_strands"), 1)))
-    d_str = _num(R.get("d_strand_mm"), 0.1) or 0.1
-    cu    = _num(R.get("Cu_area_mm2"), 0.0)
-    n_par = max(1, round(cu / max(n_str * math.pi / 4 * d_str ** 2, 1e-9))) if cu > 0 else 1
-    eng_J = _num(stat.get("J_AperMM2"), 0.0) * n_par     # total-Cu → per-conductor
+    # Current density — compared on the SAME total-copper basis. Step-7's J_A_mm2 was fixed in
+    # C88 to Irms / A_cu_total (the correct per-conductor density = total-Cu basis); the field
+    # engine's J_AperMM2 is the same Irms / A_cu_total. The old ×n_par compensation dated from
+    # before that fix (when step7 J was ×n_par overstated) and now DOUBLE-COUNTS for parallel
+    # windings — removed so bifilar/trifilar designs no longer show a false out-of-band J.
+    eng_J = _num(stat.get("J_AperMM2"), 0.0)
 
     # spec tuple: (name, ours, engine, band%, unit, note, one_sided)
     # one_sided=True → flag ONLY if the engine reads HIGHER than ours (the unsafe direction);
     # a conservative step7 (engine lower) is expected and fine.
     specs = [
         ("L0 nominal",  _num(R.get("L0_nom_uH")),     _num(stat.get("L0_nom_uH")),    2,  "µH",    "", False),
-        ("DCR @100°C",  _num(R.get("DCR_100C_mOhm")), _num(stat.get("DCR100_mohm")),  5,  "mOhm",  "engine geometry DCR excludes the ~150 mm lead", False),
+        ("DCR @100°C",  _num(R.get("DCR_100C_mOhm")), _num(stat.get("DCR100_mohm")), 10,  "mOhm",  "engine geometry DCR excludes the ~150 mm lead wire that Step-7 includes — a documented basis difference, so the band is widened to cover it", False),
         ("Ptotal @90V", _num(R.get("Ptotal_100C_W")), _num(p90.get("Ptot_typ")),      15, "W",     "", False),
         ("Bmax @90V",   _num(R.get("Bmax_FL_T")),     _num(p90.get("Bmax")),          12, "T",     "step7 conservative (B_dc from L_target); engine uses biased L(H) — flagged only if engine reads higher", True),
         ("ΔT surface",  _num(R.get("dT_rise_C")) or _num(R.get("dT_hotspot_C")),

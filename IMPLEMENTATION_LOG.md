@@ -4295,3 +4295,41 @@ Implementation (doc_report_builder):
 
 Verified: 12 family figures render; CONCEPT/THEORY text present; provenance note; no black
 squares; app.main imports clean. Pure backend, no frontend.
+
+## C93 — 2026-07-19 — Report notes 4-pack (§4.1 caption, §4.8 verdict, Table 5.2.1 dims, §5.3 hardcode) + legacy-generator hardcode cleanup
+
+Designer review (4 items) + broad hardcode audit request.
+
+Item 4 — §5.3 DC-bus cap section hardcoded powers/voltages/eta/PF: calculate_thermal_table
+iterated _DEFAULT_OPS_9 (90-264V/1700-3600W/eta/PF literals). Now builds the grid from intake
+via canonical_ops_table (same operating-point def as the inductor chapters — one-engine). Also
+run_capacitor_design worst/low corners: eta/PF were 0.965/0.9889 and 0.945/0.9987 literals →
+now from canonical_ops_table; low corner voltage = designer vin_min. Verified with 2000/4000W,
+85-265V intake → cap section reflects them, not 1700/3600/90-264.
+
+Item 2 — §4.8 "Verdict REJECT · 4/6" three root causes:
+- Engine REJECT ← field-engine L_guarantee used stale pre-C88 rule (85% of L_target at AL_min);
+  aligned to C88 NOMINAL basis (pfc_inductor_engine). AL_min/peak now informational only.
+- J per-cond review ← stale eng_J ×n_par in adapter.crosscheck_rows (from before C88 fixed
+  step7 J); removed — parallel windings no longer double-count.
+- DCR@100°C review ← engine excludes the ~150mm lead (documented); DCR band ±5→±10%.
+  → now verdict APPROVE, 6/6 within band (verified).
+
+Item 3 — Table 5.2.1: added capacitance tolerance (± encoding cleaned from CSV mojibake),
+diameter×height, lead spacing from the part CSV record (_rec5).
+
+Item 1 — §4.1: CONCEPT/how-to-read box (worst-case low-line crest; flux brightest at bore
+B∝1/r; temperature hottest at interior) + caption states operating condition + Bmax/T_hotspot.
+
+Broad hardcode audit + LEGACY cleanup (user: clean fallbacks so they can never silently emit
+wrong values; confirmed no damage — chapter report untouched, all guarded try/except):
+- generate_steps13_14: _build_ops_table DEFAULT_OPS → build_design_ops_table (intake, 5-col);
+  _resolve_params scalar Irms/Ipk_line 10.07/28.3 → canonical chain; added Vin_hi/Pout_lo/hi/
+  r_input/eta_target to D.
+- generate_full_report: eta/PF 0.945/0.9987 → canonical_ops_table; dIL 5.161 → V·D/(L·fsw);
+  Irms 10.07 → canonical chain. Removed dead DEFAULT_OPS_ROW0_RMS ref.
+- ACTIVE chapter path (doc_report_builder + step15) confirmed clean; _DEFAULT_OPS_9/DEFAULT_OPS
+  remain ONLY as guarded exception fallbacks.
+
+Verified: 4 items render/compute correctly; legacy generators still build (3.9MB/1.7MB) +
+intake-derived; app.main imports clean; both servers 200.

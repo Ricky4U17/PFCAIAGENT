@@ -3312,13 +3312,30 @@ def _ch4(story, state, d):
     _amb4 = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
     _rv = _fig_ring_views(d, _amb4)
     if _rv:
-        story.append(_rv)
+        # Operating conditions the render represents (report notes 2026-07-18 #1): the
+        # worst-case low-line crest — maximum current / heaviest DC bias / highest flux.
+        _vw41  = float((state.get("intake", {}).get("application", {}) or {}).get("vin_rms_min", 90) or 90)
+        _bmx41 = float(d.get("Bmax_FL_T", 0) or 0)
+        _bin41 = float(d.get("Bmax_inner_FL_T", 0) or 0)
+        _thot41 = float(d.get("T_hotspot_C", 0) or (_amb4 + float(d.get("dT_rise_C", 0) or 0)))
+        annotation(story, "CONCEPT",
+            f"<b>Operating condition.</b> These field views are rendered at the design's "
+            f"worst-case corner — the <b>{_vw41:.0f} V<sub>ac</sub> low-line crest</b>, where the "
+            "input current, DC bias and flux density are all highest. "
+            "<b>How to read.</b> LEFT is the flux-density field: the colour follows "
+            "B(r) &prop; 1/r, brightest at the inner bore (smallest radius) where the flux "
+            "crowds and saturation risk is greatest, fading toward the outer edge. RIGHT is the "
+            "temperature field: hottest at the interior winding hotspot, cooling toward the "
+            "outer surface. The &otimes; marks are the winding turns entering the bore, "
+            "&#9679; the turns on the outer wall.", 4)
         fig_caption(story,
-            f"Figure 4.1 — Wound-core ring views rendered from the approved design's field "
-            f"model: flux-density crowding B(r) &prop; 1/r across the {stacks}-core stack "
-            "(left) and the radial temperature field from the interior hotspot to the "
-            "cooled surface (right), both overlaid with the exact per-layer winding turns "
-            "(&otimes; bore / &#9679; outer).", 4)
+            f"Figure 4.1 — Wound-core ring views at the worst-case {_vw41:.0f} V<sub>ac</sub> "
+            f"low-line crest: flux-density crowding B(r) &prop; 1/r "
+            f"(B<sub>max</sub> = {_bmx41:.3f} T"
+            + (f", inner-bore {_bin41:.3f} T" if _bin41 else "")
+            + f") across the {stacks}-core stack (left) and the radial temperature field "
+            f"(interior hotspot &asymp; {_thot41:.0f} °C &rarr; cooled surface, right), both "
+            "overlaid with the exact per-layer winding turns (&otimes; bore / &#9679; outer).", 4)
 
     # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
     step_h(story, "4.2", "Inductance Performance — Bias Retention at All 9 Points", 4)
@@ -4015,22 +4032,39 @@ def _ch5(story, state, s15):
             "PASS" if verified.get("valid") else "UNDERSIZED", ch=5)
 
     if sel:
+        # Physical dimensions + tolerance from the part's DB record (report notes 2026-07-18 #3).
+        # The CSV `tolerance` field can carry a mis-encoded ± ("�20%") — reconstruct it cleanly.
+        _rows521 = [
+            ["Supplier / Series",       f"{sel.get('supplier','—')} / {sel.get('series','—')}"],
+            ["Part number",             sel.get("part_number","—")],
+            ["Value × Qty",             f"{sel.get('value_uF','—')} µF × {sel.get('qty','—')}"],
+            ["Installed capacitance",   f"{(verified or {}).get('C_total_uF','—')} µF"],
+            ["Voltage rating",          f"{sel.get('voltage_rating_V','—')} V"],
+            ["ESR each / bank parallel",
+             f"{sel.get('ESR_each_mohm','—')} mΩ / {(verified or {}).get('ESR_parallel_mohm','—')} mΩ"],
+            ["Rated I<sub>rms</sub>",   f"{sel.get('I_rated_A','—')} A"],
+            ["Temperature rating",      f"{sel.get('op_temp','—')}"],
+            ["Lifetime",                f"{sel.get('lifetime','—')}"],
+        ]
+        if _rec5 is not None:
+            import re as _re521
+            _tolm = _re521.search(r"(\d+(?:\.\d+)?)\s*%", str(_rec5.get("tolerance", "") or ""))
+            _tol  = f"±{_tolm.group(1)}%" if _tolm else "—"
+            _dia  = _rec5.get("diameter_mm"); _hgt = _rec5.get("height_mm")
+            _lsp  = _rec5.get("lead_spacing_mm")
+            _rows521 += [
+                ["Capacitance tolerance", _tol],
+                ["Diameter × Height",
+                 (f"Ø{float(_dia):.1f} mm × {float(_hgt):.1f} mm"
+                  if _dia and _hgt else "—")],
+                ["Lead spacing",
+                 (f"{float(_lsp):.1f} mm" if _lsp else "—")],
+            ]
         data_table(story, "5.2.1", "Selected Capacitor Bank",
             f"Approved capacitor bank from the database — {_val} µF × {_qty} in parallel, "
-            f"{_i(V_sel)} V class.",
+            f"{_i(V_sel)} V class (electrical ratings, tolerance and physical dimensions).",
             ["Parameter", "Value"],
-            [
-                ["Supplier / Series",       f"{sel.get('supplier','—')} / {sel.get('series','—')}"],
-                ["Part number",             sel.get("part_number","—")],
-                ["Value × Qty",             f"{sel.get('value_uF','—')} µF × {sel.get('qty','—')}"],
-                ["Installed capacitance",   f"{(verified or {}).get('C_total_uF','—')} µF"],
-                ["Voltage rating",          f"{sel.get('voltage_rating_V','—')} V"],
-                ["ESR each / bank parallel",
-                 f"{sel.get('ESR_each_mohm','—')} mΩ / {(verified or {}).get('ESR_parallel_mohm','—')} mΩ"],
-                ["Rated I<sub>rms</sub>",   f"{sel.get('I_rated_A','—')} A"],
-                ["Temperature rating",      f"{sel.get('op_temp','—')}"],
-                ["Lifetime",                f"{sel.get('lifetime','—')}"],
-            ],
+            _rows521,
             col_widths=[CW*0.45, CW*0.55], ch=5)
 
     # ── 5.4 Ripple current and voltage verification — all 9 operating points ──
