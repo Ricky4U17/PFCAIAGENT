@@ -406,6 +406,12 @@ function Viewer(ev,doc){
   else if(tt<0.67){const u=(tt-0.34)/0.33;r=0.05+(0.95-0.05)*u;g=0.75+(0.85-0.75)*u;b=0.85+(0.15-0.85)*u;}
   else{const u=(tt-0.67)/0.33;r=0.95+(0.90-0.95)*u;g=0.85+(0.15-0.85)*u;b=0.15+(0.10-0.15)*u;}
   return [r,g,b];}
+ // Copper-loss ramp for the WebGL 3D winding — mirrors the CM.copper stops used by cross/ring
+ // (dark slate → amber → bright), returned as normalised [r,g,b] floats.
+ function _rampCu(tt){const S=[[0,[40,52,80]],[.4,[150,110,50]],[.72,[235,150,40]],[1,[255,205,95]]];tt=Math.max(0,Math.min(1,tt));
+  for(let i=0;i<S.length-1;i++){if(tt<=S[i+1][0]){let f=(tt-S[i][0])/(S[i+1][0]-S[i][0]||1);f=f*f*(3-2*f);const a=S[i][1],b=S[i+1][1];
+   return [(a[0]+(b[0]-a[0])*f)/255,(a[1]+(b[1]-a[1])*f)/255,(a[2]+(b[2]-a[2])*f)/255];}}
+  const e=S[S.length-1][1];return [e[0]/255,e[1]/255,e[2]/255];}
  function _rrectPath(rIn,rOut,Y,cr,nE,nC){const pts=[];cr=Math.min(cr,(rOut-rIn)/2.2,Y/1.2);
   const seg=(x0,y0,x1,y1,k)=>{for(let i=0;i<k;i++){const u=i/k;pts.push([x0+(x1-x0)*u,y0+(y1-y0)*u]);}};
   const arc=(cx,cy,a0,a1,k)=>{for(let i=0;i<k;i++){const a=a0+(a1-a0)*i/k;pts.push([cx+cr*Math.cos(a),cy+cr*Math.sin(a)]);}};
@@ -497,9 +503,13 @@ function Viewer(ev,doc){
    c.addEventListener('wheel',e=>{if(e.preventDefault)e.preventDefault();st.dist=Math.max(geom.rout*1.4,Math.min(geom.rout*9,st.dist*(1+(e.deltaY>0?0.08:-0.08))));render();},{passive:false});}
   return st;}catch(e){return null;}}
  function drawGL(op,f){const st=GLH.st,gl=st.gl,me=st.mesh,{vmax,vmin,valAt}=fieldSetup(op,f);
+  const cu=(mode==='copper')?copperLoss(op,f):null,rSpan=Math.max(geom.rout-geom.rin,1e-6);
   for(let i=0;i<me.nVert;i++){let r,g,b;
-   if(me.vM[i]===1){r=0.80;g=0.47;b=0.20;}
-   else if(mode==='copper'){r=0.40;g=0.42;b=0.48;}
+   if(mode==='copper'){
+    if(me.vM[i]===1){ // winding: per-phase loss, radius-interpolated inner(lI)→outer(lO), cycle-peak scale
+     const t=Math.max(0,Math.min(1,(me.vR[i]-geom.rin)/rSpan)),loss=cu.lI+(cu.lO-cu.lI)*t,c3=_rampCu(loss/cu.lmx);r=c3[0];g=c3[1];b=c3[2];}
+    else{r=0.40;g=0.42;b=0.48;}} // core stays gray in copper mode
+   else if(me.vM[i]===1){r=0.80;g=0.47;b=0.20;} // winding fixed copper in flux/core modes
    else{const tt=(valAt(me.vR[i])-vmin)/Math.max(vmax-vmin,1e-9);const c3=_ramp(tt);r=c3[0];g=c3[1];b=c3[2];}
    st.cols[i*3]=r;st.cols[i*3+1]=g;st.cols[i*3+2]=b;}
   gl.bindBuffer(gl.ARRAY_BUFFER,st.colBuf);gl.bufferData(gl.ARRAY_BUFFER,st.cols,gl.DYNAMIC_DRAW);
