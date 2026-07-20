@@ -4370,3 +4370,25 @@ Points 3 & 4 — Chapter 6 title "Control Scheme — Steps 1–14 + Appendices A
 
 Verified: review_magnetics.html JS parses; ripple magnitude sanity 4.9–5.6 A across 90–264 Vac;
 both servers 200. Commits 017b909 (C94), 3c60245 (C95).
+
+## C96 — 2026-07-19 — Sim-Agent Cu-loss gradient animates over the half cycle (was static)
+
+Designer: in Magnetic Material → Review → Simulation Agent → Cu loss, the winding colour did not
+change as the half-cycle phase slider played, unlike Flux B and Core loss.
+
+Root cause (pfc_sim_agent_v14.html): Flux/Core colour each ring from valAt(r), built from the
+PER-PHASE field f=ev.inst(op,phase) (f.Bmean) → pulses with phase on an absolute 0→crest scale.
+Copper coloured the winding from op.Pcu_dc/op.Pcu_ac — the cycle-AVERAGE worst-case operating
+point, constant over the half cycle → never changed. (Thermal is also static, but that's correct —
+thermal mass integrates, doesn't pulse at line frequency; copper was the genuine odd-one-out.)
+
+Fix: inst() now also returns the instantaneous split Pcu_dc=Rdc·Iavg(t)² and Pcu_ac=Rac·Ihf(t)²
+(it already computed the sum). New copperLoss(op,f) helper computes per-phase inner/outer/top-
+bottom winding loss (lI/lO/lTB) with the inner-vs-outer crowding weights preserved, and lmx =
+CYCLE-PEAK inner-radius loss (sampled 21 phases) so the winding sweeps the FULL colour ramp — the
+same absolute-scale treatment flux/core get. drawCross / drawRing / drawWire3D (3D iso) now pull
+lI/lO/lTB/lmx from copperLoss(op,f) instead of the static op.Pcu_*.
+
+Verified: sim-agent JS parses; no stray op.Pcu_dc/op.Pcu_ac in the draw path; ratio lI/lmx sweeps
+0.00 (zero-crossing) → 1.00 (crest, phase 0.5) → 0.00, symmetric. GUI-only; report captures use
+crest phase (0.5) so exported images unaffected. Commit c9e2334.
