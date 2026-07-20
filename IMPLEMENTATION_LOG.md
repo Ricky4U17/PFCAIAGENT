@@ -4392,3 +4392,24 @@ lI/lO/lTB/lmx from copperLoss(op,f) instead of the static op.Pcu_*.
 Verified: sim-agent JS parses; no stray op.Pcu_dc/op.Pcu_ac in the draw path; ratio lI/lmx sweeps
 0.00 (zero-crossing) → 1.00 (crest, phase 0.5) → 0.00, symmetric. GUI-only; report captures use
 crest phase (0.5) so exported images unaffected. Commit c9e2334.
+
+## C97 — 2026-07-19 — Sim-Agent 3D (WebGL) winding shows animated Cu-loss gradient too
+
+Designer follow-up to C96: cross-section and ring now animate the Cu-loss gradient over the cycle,
+but the 3D view did not.
+
+Root cause: the 3D tab (geo==='threeD') dispatches to draw3D → drawGL, the WebGL renderer — NOT
+drawWire3D, which is only the 2D-canvas fallback (the one C96 edited, and the one the report snapshot
+uses). In drawGL the winding vertices (mesh material vM===1) were painted a fixed copper colour
+(0.80,0.47,0.20) in every mode, so 3D copper never showed loss at all — nothing to animate.
+
+Fix: new _rampCu(tt) copper ramp mirroring the CM.copper stops (dark slate → amber → bright) as
+normalised [r,g,b] floats for WebGL. drawGL copper mode now colours each winding vertex by the
+per-phase copper loss from the same copperLoss(op,f) helper (C96): the vertex radius mesh.vR
+interpolates the loss inner(lI)→outer(lO) across [geom.rin, geom.rout], normalised to the cycle-peak
+lmx, mapped through _rampCu. Core stays gray in copper mode; flux/core modes keep the winding solid
+copper (unchanged).
+
+Verified: sim-agent JS parses; _rampCu sweeps dark slate (0.16,0.20,0.31) → bright amber
+(1.00,0.80,0.37). drawGL re-renders every animation frame so it animates automatically. GUI-only;
+report 3D snapshot uses drawWire3D fallback, untouched. Commit 3a2e00d.
