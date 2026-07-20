@@ -4333,3 +4333,40 @@ wrong values; confirmed no damage — chapter report untouched, all guarded try/
 
 Verified: 4 items render/compute correctly; legacy generators still build (3.9MB/1.7MB) +
 intake-derived; app.main imports clean; both servers 200.
+
+## C94 — 2026-07-19 — §4.1 two band-worst corner ring views (4.1.1 low-line, 4.1.2 high-line)
+
+Designer: keep the §4.1 wound-core ring figure but show BOTH the worst low-line corner and the
+worst high-line corner (was a single worst-case render). New _corner_field(d, vin, t_amb) derives
+per-corner Bmax / inner-B / T_hot / dT from the design's own per-Vin flux+loss tables (one engine —
+same numbers as the Ch4 tables), temperature scaled by that corner's loss vs the worst point.
+_fig_ring_views() parameterised (bmax/binner/thot/dt) so identical geometry renders at any corner;
+caller loops ("4.1.1" low-line minimum, "4.1.2" high-line minimum = min(180, Vin_hi)). Falls back to
+the single worst-case render when per-V tables are absent. Shared how-to-read note above the pair.
+
+## C95 — 2026-07-19 — Review Current-Waveforms screen + wire Rac/Rdc actual value + Ch6 title/splash
+
+Designer 4-point batch (points 2–4 report/GUI, point 1 GUI-only — report already has the families).
+
+Point 1 — new "Current Waveforms" screen (Magnetic Material → Review, inserted before Design Review
+Summary). Per-phase and input current over one half line cycle for the voltage selected in the LEFT
+Operating-point preset dropdown. Each graph draws the average line, the switching-ripple envelope
+band, and the RMS. Two iterations after designer testing:
+- flat-line bug: renderAll replaces o.wave with the injected __STEP7_DATA__.waveforms_by_vin, which
+  omits dIpp → ripple width 0. Fixed by computing ΔIpp(t)=Vin(t)·D(t)/(L·fsw) locally in the section
+  (robust to either wave source). Ripple ≈5 A pk-pk, widest mid-cycle — clearly visible.
+- reverted from a zoomed switching-detail (µs) view back to the half-line-cycle (mSec) axis per
+  designer; input band is K(D)-narrowed vs the per-phase band — the visible effect of the 180° phase
+  interleave at half-cycle scale (individual switching cycles can't be resolved across ~540 of them).
+- removed the redundant in-screen voltage dropdown; the screen now follows the left Operating-point
+  preset only (whole studio already re-renders off it).
+
+Point 2 — Step7 wire options table showed Rac/Rdc = 1.000× for every wire (was the HF-weighted
+effective ratio, ≈1.00 because only ~11% of current is HF ripple). Now shows F_skin (intrinsic
+AC/DC @fsw, e.g. 1.63× for solid AWG14 @65kHz), coloured by the effective ratio; header "Rac/Rdc @fsw".
+
+Points 3 & 4 — Chapter 6 title "Control Scheme — Steps 1–14 + Appendices A–E (full detail)" →
+"Control Scheme"; splash description → "The complete FAN9672 control-loop design."
+
+Verified: review_magnetics.html JS parses; ripple magnitude sanity 4.9–5.6 A across 90–264 Vac;
+both servers 200. Commits 017b909 (C94), 3c60245 (C95).
