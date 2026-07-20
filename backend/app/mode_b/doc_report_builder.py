@@ -472,6 +472,58 @@ def _fig_wave_family(wbv, vins, ykey, ylabel, title):
         return None
 
 
+def _fig_dcbus_wave(rows, Vout, f_line, kind):
+    """DC-bus ripple waveform over two line cycles, overlaid across the 9 operating points — the
+    SAME two-band model the interactive DC-bus capacitor simulation plots, driven by this design's
+    own per-point ripple table (§5.3.1), so the figure equals the tabulated numbers by construction:
+        v_bus(t)  = V_out − (ΔV_pp/2)·sin(2ωt)          (120 Hz LF ripple; ΔV_pp = V_ripple_pp_V)
+        i_cap(t)  = −√2·I_LF·cos(2ωt)                    (120 Hz LF capacitor current)
+    the switching-frequency HF component (I_HF, §5.3.1) rides on top as the shaded ±envelope.
+    kind='v' → bus ripple voltage; kind='i' → capacitor current."""
+    try:
+        rows = [r for r in rows if r.get("V_ripple_pp_V") is not None]
+        if not rows:
+            return None
+        T = 1.0 / float(f_line)
+        t = np.linspace(0.0, 2.0 * T, 240)          # two line cycles
+        th = 2.0 * np.pi * float(f_line) * t
+        x_ms = t * 1e3
+        fig, ax = plt.subplots(figsize=(7, 3.0))
+        cmap = plt.get_cmap("viridis")
+        n = len(rows)
+        for i, r in enumerate(rows):
+            col = cmap(i / max(n - 1, 1))
+            lbl = f"{r['Vin_rms']:.0f} Vac"
+            if kind == "v":
+                vpp = float(r["V_ripple_pp_V"])
+                ax.plot(x_ms, -(vpp / 2.0) * np.sin(2.0 * th), lw=1.4, color=col, label=lbl)
+            else:
+                ilf = float(r.get("I_LF_A", 0) or 0)
+                ihf = float(r.get("I_HF_A", 0) or 0)
+                y = -np.sqrt(2.0) * ilf * np.cos(2.0 * th)
+                ax.plot(x_ms, y, lw=1.4, color=col, label=lbl)
+                if ihf > 0:                          # switching-ripple ±envelope (HF, thin band)
+                    band = np.sqrt(2.0) * ihf * np.abs(np.sin(th))
+                    ax.fill_between(x_ms, y - band / 2.0, y + band / 2.0,
+                                    color=col, alpha=0.06, lw=0)
+        ax.axhline(0.0, color="#94a3b8", ls=":", lw=0.8)
+        ax.set_xlabel(f"t (ms — two line cycles @ {f_line:.0f} Hz)", fontsize=9)
+        ax.set_ylabel("$v_{bus}$ ripple (V, about $V_{out}$)" if kind == "v" else "$i_{cap}$ (A)",
+                      fontsize=9)
+        ax.set_title(("DC-Bus Ripple Voltage" if kind == "v" else "DC-Bus Capacitor Current")
+                     + " Over the Line Cycle — all 9 operating points", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=6.5, ncol=5)
+        fig.tight_layout()
+        return _mpl_img(fig, 165)
+    except Exception:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+        return None
+
+
 def _fig_img(fig, width_mm=150):
     """Render a matplotlib figure to an Image flowable, preserving its aspect ratio."""
     buf = io.BytesIO()
@@ -4271,6 +4323,36 @@ def _ch5(story, state, s15):
                 "precedence over both the model and the clamp. Below 20 °C the ESR is additionally "
                 "held at the 20 °C datasheet value (no cold-side anchor; the datasheet's "
                 "low-temperature impedance ratio could supply one as a future data enrichment).", 5)
+
+        # ── 5.3.3 DC-bus ripple waveforms (same model as the DC-bus simulation page) ──
+        _tt5 = thermal.get("thermal_table") or []
+        _wv5 = _fig_dcbus_wave(_tt5, Vout, f_line, "v")
+        _wi5 = _fig_dcbus_wave(_tt5, Vout, f_line, "i")
+        if _wv5 or _wi5:
+            sub_h(story, "5.3.3", "DC-Bus Ripple Waveforms — Voltage and Current vs Input Voltage", 5)
+            annotation(story, "CONCEPT",
+                "The two figures below show the bus-voltage ripple and the capacitor current over "
+                "two line cycles, one trace per input voltage — the same two-band model the "
+                "interactive DC-bus capacitor simulation plots, driven by this design's own §5.3.1 "
+                "ripple table so figure and table agree by construction. The dominant component is "
+                "the 120 Hz line-frequency ripple: the bus discharges then recharges twice per line "
+                "cycle (v<sub>bus</sub> = V<sub>out</sub> − ½ΔV<sub>pp</sub>·sin 2ωt), and the "
+                "capacitor sources/sinks the difference between the pulsating boost output and the "
+                "steady load (i<sub>cap</sub> = −√2·I<sub>LF</sub>·cos 2ωt). The switching-frequency "
+                "ripple (I<sub>HF</sub>, tabulated in §5.3.1) rides on top as the shaded ±envelope.", 5)
+            if _wv5:
+                story.append(_wv5)
+                annotation(story, "NOTE",
+                    "Figure 5.3.3a — DC-bus ripple voltage about V<sub>out</sub>. Peak-to-peak swing "
+                    "grows toward high line (higher per-phase power), matching the ΔV<sub>pp</sub> "
+                    "column of Table 5.3.1.", 5)
+            if _wi5:
+                story.append(_wi5)
+                annotation(story, "NOTE",
+                    "Figure 5.3.3b — DC-bus capacitor current. The 120 Hz component sets the RMS "
+                    "heating current; the shaded band is the switching-frequency excursion "
+                    "(√N-reduced by interleaving), consistent with the I<sub>LF</sub>/I<sub>HF</sub> "
+                    "split in Table 5.3.1.", 5)
 
     # ── 5.5 Capacitor lifetime analysis (Arrhenius model) ─────────────────────
     life = s15.get("lifetime")

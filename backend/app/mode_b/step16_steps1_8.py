@@ -229,8 +229,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         "m2_rows": m2_rows, "rcs_sel": rcs_sel,
         "vee_ll": vee_ll, "vee_hl": vee_hl,
         "vea_max_ll": vee_ll + c["vea_min"], "vea_max_hl": vee_hl + c["vea_min"],
-        "pdiss_lo_each": pdiss_lo1, "pdiss_lo_total": 2*pdiss_lo1,
-        "pdiss_hi_each": pdiss_hi1, "pdiss_hi_total": 2*pdiss_hi1,
+        "pdiss_lo_each": pdiss_lo1, "pdiss_lo_total": p["nch"]*pdiss_lo1,
+        "pdiss_hi_each": pdiss_hi1, "pdiss_hi_total": p["nch"]*pdiss_hi1,
         "combined_rows": [
             ["AN4165 Eq. 31", f"{rcs1_ll*1e3:.2f} mΩ", f"{rcs1_hl*1e3:.2f} mΩ", "Power-stage approach"],
             ["AND9925 Eq. 11 @ V_EA=4.0 V", f"{rcs_m2(c['riac_fr'],3.4,pmax_nch_lo)*1e3:.2f} mΩ",

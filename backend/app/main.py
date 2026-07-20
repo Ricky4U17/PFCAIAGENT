@@ -2076,6 +2076,38 @@ def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def _control_corner_currents(ci: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-phase RMS + peak inductor current at the low-line (lowest Vin < 180) and high-line
+    (lowest Vin >= 180) band-worst corners, from the shared build_design_ops engine — so Chapter 6's
+    R_CS power dissipation and the ILIMIT/ILIMIT2 protection thresholds track the designer's actual
+    low/high-line power rather than the 10.12/10.59/16.76/17.51 reference-design defaults. Guarded:
+    returns {} on any failure so compute_steps_1_8 keeps its defaults (no regression)."""
+    try:
+        from app.mode_b.semiconductor.adapter import build_design_ops
+        from app.mode_b.calculations import step5_phase_rms
+        if not (ci.get("pout_lo") and ci.get("pout_hi")):
+            return {}
+        nch = int(ci.get("nch") or 2)
+        d = {"vin_min": ci.get("vin_min", 90.0), "vin_max": ci.get("vin_max", 264.0),
+             "pout_lo": ci["pout_lo"], "pout_hi": ci["pout_hi"],
+             "vout": ci.get("vout") or 393.7, "fsw": ci.get("fsw") or 70000.0,
+             "r_input": ci.get("r_input", 0.20),
+             "L_phi_uH": ci.get("lphi_uH"), "L_phi_curve": ci.get("l_curve")}
+        ops, s2, _Lp, iph, L_pts = build_design_ops(d)
+        out: Dict[str, Any] = {}
+        for band, lo, hi in (("lo", 0.0, 180.0), ("hi", 180.0, 1e9)):
+            idxs = [i for i in range(len(ops)) if lo <= float(ops[i, 0]) < hi]
+            if not idxs:
+                continue
+            j = min(idxs, key=lambda i: float(ops[i, 0]))   # lowest Vin in band = highest current
+            dILc = step5_phase_rms(s2["Vin_pk"][j], s2["Iin_pk"][j], L_pts[j], d["fsw"], d["vout"])[3]
+            out[f"iphi_rms_{band}"] = float(iph[j])
+            out[f"iphi_pk_{band}"] = float(s2["Iin_pk"][j] / nch + 0.5 * dILc)
+        return out
+    except Exception:
+        return {}
+
+
 def _merge_pdfs(parts: List[bytes]) -> bytes:
     """Concatenate several PDF byte-strings into one."""
     import io as _io
@@ -2288,6 +2320,15 @@ def doc_generate_report(req: _DocReportReq):
             _ci.setdefault("vin_max", _num(_app.get("vin_rms_max")) or 264.0)
             _ci.setdefault("r_input", _num((req.state.get("topology_specific_inputs", {}) or {})
                                            .get("default_crest_ripple_ratio")) or 0.20)
+            # Chapter 6 max-power spec: the designer's low/high-line output powers come from the
+            # SAME intake keys every other chapter uses (output_power_w_low/high_line) — never the
+            # 1700/3600 engine defaults. Applied here so all of Ch6 (R_CS Methods 1 & 2, GMOD,
+            # ILIMIT, R_CS dissipation) tracks the spec page.
+            _plo = _num(_app.get("output_power_w_low_line"))
+            _phi = _num(_app.get("output_power_w_high_line"))
+            if _plo: _ci["pout_lo"] = _plo
+            if _phi: _ci["pout_hi"] = _phi
+            _ci.setdefault("vout", _num(_app.get("output_bus_voltage_v")))
             # As-built 9-point inductance curve (designer decision 2026-07-17): Ch6 designs
             # at the MINIMUM as-built full-load L (worst case for the current loop) and its
             # new §1.b table verifies all nine points; Ch7's scalar anchors there too while
@@ -2305,6 +2346,11 @@ def doc_generate_report(req: _DocReportReq):
             if _asb_curve and _asb_min_uH:
                 _ci["lphi_uH"] = _asb_min_uH
                 _ci["l_curve"] = _asb_curve
+            # Per-phase corner currents (RMS + peak at the 90 V / 180 V band-worst points) from the
+            # SAME design-ops engine every chapter uses, so Ch6's R_CS dissipation (§6.5) and the
+            # ILIMIT/ILIMIT2 protection thresholds scale with the designer's power instead of the
+            # 10.12/10.59/16.76/17.51 reference-design defaults. Guarded: any failure keeps defaults.
+            _ci.update(_control_corner_currents(_ci))
             ch6 = build_control_report(_ci)
             parts = [ch1_5, ch6]
             # ONE inductance everywhere: Chapter 7 anchors on the same as-built minimum

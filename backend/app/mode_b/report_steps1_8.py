@@ -252,7 +252,8 @@ def _build_step6(story, data):
     body(story, "<b>Low Line Calculation — V<sub>IN,min</sub> = 90 Vac, R<sub>IAC</sub> = 6 MΩ</b>", C6)
     m1 = s6["m1_ll"]
     _wstep(story, "Step 1 — Per-channel maximum power:",
-           r"P_{max,per-ch}=\dfrac{1700}{2}\times1.49=%.1f\ \mathrm{W}" % m1["pmaxn"])
+           r"P_{max,per-ch}=\dfrac{%.0f}{%d}\times%.2f=%.1f\ \mathrm{W}"
+           % (p["pout_lo"], p["nch"], c["kmax"], m1["pmaxn"]))
     _wstep(story, "Step 2 — Numerator:",
            r"90^2\times2\times7\,500=8\,100\times15\,000=%s" % _sci(m1["num"]))
     _wstep(story, "Step 3 — Denominator:",
@@ -262,7 +263,8 @@ def _build_step6(story, data):
     body(story, "<b>High Line Reference — V<sub>IN,min</sub> = 180 Vac, R<sub>IAC</sub> = 12 MΩ</b>", C6)
     m1h = s6["m1_hl"]
     _wstep(story, "Step 1 — Per-channel maximum power:",
-           r"P_{max,per-ch}=\dfrac{3600}{2}\times1.49=%.1f\ \mathrm{W}" % m1h["pmaxn"])
+           r"P_{max,per-ch}=\dfrac{%.0f}{%d}\times%.2f=%.1f\ \mathrm{W}"
+           % (p["pout_hi"], p["nch"], c["kmax"], m1h["pmaxn"]))
     _wstep(story, "Step 2 — Numerator:",
            r"180^2\times2\times7\,500=32\,400\times15\,000=%s" % _sci(m1h["num"]))
     _wstep(story, "Step 3 — Denominator:",
@@ -342,14 +344,17 @@ def _build_step6(story, data):
     body(story, "The R<sub>CS</sub> shunt dissipates I<sub>φ,rms</sub>²·R<sub>CS</sub> per phase. "
                 "The shunt power rating must exceed this with margin.", C6)
     eq_box(story, [r"P_{R_{CS}}=I_{\phi,rms}^2\times R_{CS}"], ch=C6)
-    _wstep(story, "Step 1 — Low line (I_φ,rms = 10.12 A):",
-           r"(10.12)^2\times0.015=102.41\times0.015=%.3f\ \mathrm{W\ per\ phase}" % s6["pdiss_lo_each"])
-    _wstep(story, "Step 2 — Low line total (2 phases):", r"2\times%.3f=%.3f\ \mathrm{W}"
-           % (s6["pdiss_lo_each"], s6["pdiss_lo_total"]))
-    _wstep(story, "Step 3 — High line (I_φ,rms = 10.59 A):",
-           r"(10.59)^2\times0.015=112.15\times0.015=%.3f\ \mathrm{W\ per\ phase}" % s6["pdiss_hi_each"])
-    _wstep(story, "Step 4 — High line total (2 phases):", r"2\times%.3f=%.3f\ \mathrm{W}"
-           % (s6["pdiss_hi_each"], s6["pdiss_hi_total"]))
+    _il, _ih, _rcs, _nch = p["iphi_rms_lo"], p["iphi_rms_hi"], s6["rcs_sel"], p["nch"]
+    _wstep(story, "Step 1 — Low line (I_φ,rms = %.2f A):" % _il,
+           r"(%.2f)^2\times%.4f=%.2f\times%.4f=%.3f\ \mathrm{W\ per\ phase}"
+           % (_il, _rcs, _il*_il, _rcs, s6["pdiss_lo_each"]))
+    _wstep(story, "Step 2 — Low line total (%d phases):" % _nch, r"%d\times%.3f=%.3f\ \mathrm{W}"
+           % (_nch, s6["pdiss_lo_each"], s6["pdiss_lo_total"]))
+    _wstep(story, "Step 3 — High line (I_φ,rms = %.2f A):" % _ih,
+           r"(%.2f)^2\times%.4f=%.2f\times%.4f=%.3f\ \mathrm{W\ per\ phase}"
+           % (_ih, _rcs, _ih*_ih, _rcs, s6["pdiss_hi_each"]))
+    _wstep(story, "Step 4 — High line total (%d phases):" % _nch, r"%d\times%.3f=%.3f\ \mathrm{W}"
+           % (_nch, s6["pdiss_hi_each"], s6["pdiss_hi_total"]))
     # full R_CS loss across all nine input voltages (from the shared operating grid)
     try:
         from app.mode_b.semiconductor.adapter import build_design_ops
@@ -380,7 +385,7 @@ def _build_step6(story, data):
 
 
 def _build_step7(story, data):
-    s7 = data["step7"]
+    s7, p, c, s6 = data["step7"], data["inputs"], data["const"], data["step6"]
     step_h(story, "7", "GMOD Verification — Three Independent Paths", C6)
     annotation(story, "CONCEPT",
         "K<sub>max</sub> is the multiplier-gain headroom — how much of the modulator's range the "
@@ -476,26 +481,28 @@ def _build_step7(story, data):
     eq_box(story, [r"V_{EA,eff}=\dfrac{R_{CS}\times8\times K_{RLPK}^2\times R_{RLPK}^2\times(P_{max}/N_{ch})}"
                    r"{K_{RM}\times R_{IAC}}"], ch=C6)
     _wstep(story, "Step 1 — Low line:",
-           r"V_{EA,eff}=\dfrac{0.015\times%s\times1266.5}{6\,000\times6\,000\,000}=%.4f\ \mathrm{V}"
-           % (_sci(data["step6"]["den_common"]), v["vee"]))
+           r"V_{EA,eff}=\dfrac{%.4f\times%s\times%.1f}{6\,000\times6\,000\,000}=%.4f\ \mathrm{V}"
+           % (s6["rcs_sel"], _sci(s6["den_common"]), s6["pmax_nch_lo"], v["vee"]))
     _wstep(story, "Step 2 — Low line V_EA,max:",
            r"%.4f+0.6=%.4f\ \mathrm{V}\quad(\mathrm{inside\ 4\text{-}5\ V\ window}\ \checkmark)" % (v["vee"], v["vee"]+0.6))
     _wstep(story, "Step 3 — High line:",
-           r"V_{EA,eff}=\dfrac{0.015\times%s\times2682.0}{6\,000\times12\,000\,000}=%.4f\ \mathrm{V}"
-           % (_sci(data["step6"]["den_common"]), vh["vee"]))
+           r"V_{EA,eff}=\dfrac{%.4f\times%s\times%.1f}{6\,000\times12\,000\,000}=%.4f\ \mathrm{V}"
+           % (s6["rcs_sel"], _sci(s6["den_common"]), s6["pmax_nch_hi"], vh["vee"]))
     _wstep(story, "Step 4 — High line V_EA,max:",
            r"%.4f+0.6=%.4f\ \mathrm{V}\quad(\mathrm{inside\ 4\text{-}5\ V\ window}\ \checkmark)" % (vh["vee"], vh["vee"]+0.6))
 
     # 7.4 LL worked
     sub_h(story, "7.4", "Step-by-Step Calculations — Low Line", C6)
-    body(story, "Fixed values: R<sub>IAC</sub> = 6 MΩ · P<sub>out</sub> = 1700 W · K<sub>max</sub> "
-                "= 1.49 · V<sub>EA,eff</sub> = 3.7557 V.", C6)
-    _gmod_paths(story, s7["A_ll"], s7["B_ll"], s7["C_ll"], "LL", s7["bc_ratio"])
+    body(story, "Fixed values: R<sub>IAC</sub> = 6 MΩ · P<sub>out</sub> = %.0f W · K<sub>max</sub> "
+                "= %.2f · V<sub>EA,eff</sub> = %.4f V." % (p["pout_lo"], c["kmax"], s6["vee_ll"]), C6)
+    _gmod_paths(story, s7["A_ll"], s7["B_ll"], s7["C_ll"], "LL", s7["bc_ratio"],
+                pout=p["pout_lo"], nch=p["nch"], vout=p["vout"], rcs=s6["rcs_sel"], kmax=c["kmax"])
     # 7.5 HL worked
     sub_h(story, "7.5", "Step-by-Step Calculations — High Line", C6)
-    body(story, "Fixed values: R<sub>IAC</sub> = 12 MΩ · P<sub>out</sub> = 3600 W · K<sub>max</sub> "
-                "= 1.49 · V<sub>EA,eff</sub> = 3.9766 V.", C6)
-    _gmod_paths(story, s7["A_hl"], s7["B_hl"], s7["C_hl"], "HL", s7["bc_ratio"], hl=True)
+    body(story, "Fixed values: R<sub>IAC</sub> = 12 MΩ · P<sub>out</sub> = %.0f W · K<sub>max</sub> "
+                "= %.2f · V<sub>EA,eff</sub> = %.4f V." % (p["pout_hi"], c["kmax"], s6["vee_hl"]), C6)
+    _gmod_paths(story, s7["A_hl"], s7["B_hl"], s7["C_hl"], "HL", s7["bc_ratio"], hl=True,
+                pout=p["pout_hi"], nch=p["nch"], vout=p["vout"], rcs=s6["rcs_sel"], kmax=c["kmax"])
     data_table(story, "7.5", "GMOD Three-Path Summary — All 8 Operating Points",
         "All three paths agree at every point (A/B = 1.0000; B/C = 2.9527 structural).",
         ["V_AC", "Range", "GMOD crest", "Path A", "Path B", "Path C", "A / B", "B / C"],
@@ -555,20 +562,20 @@ def _build_step7(story, data):
         "(high line)." % (s7["gC_ll"], s7["gC_hl"]), C6)
 
 
-def _gmod_paths(story, A, B, Cc, rng, bc, hl=False):
+def _gmod_paths(story, A, B, Cc, rng, bc, hl=False, pout=1700.0, nch=2, vout=393.7, rcs=0.015, kmax=1.49):
     body(story, "<b>Path A — Signal Chain</b>", C6)
     _wstep(story, "Step 1 — Numerator (K_RM × R_IAC):", r"6\,000\times%s=%s"
            % ("12\\,000\\,000" if hl else "6\\,000\\,000", _sci(A["num"])))
     _wstep(story, "Step 2 — Denominator:", r"8\,K_{RLPK}^2\,R_{RLPK}^2=%s" % _sci(A["den"]))
     _wstep(story, "Step 3 — GMOD_A:", r"%s\,/\,%s=%.4f\ \mathrm{A/V}" % (_sci(A["num"]), _sci(A["den"]), A["res"]))
     body(story, "<b>Path B — Power Stage + R_CS</b>", C6)
-    _wstep(story, "Step 1 — P_max/N_ch:", r"\dfrac{%s\times1.49}{2}=%.1f\ \mathrm{W}"
-           % ("3600" if hl else "1700", B["pmaxn"]))
-    _wstep(story, "Step 2 — R_CS × P_max/N_ch:", r"0.015\times%.1f=%.4f" % (B["pmaxn"], B["rcs_pmax"]))
+    _wstep(story, "Step 1 — P_max/N_ch:", r"\dfrac{%.0f\times%.2f}{%d}=%.1f\ \mathrm{W}"
+           % (pout, kmax, nch, B["pmaxn"]))
+    _wstep(story, "Step 2 — R_CS × P_max/N_ch:", r"%.4f\times%.1f=%.4f" % (rcs, B["pmaxn"], B["rcs_pmax"]))
     _wstep(story, "Step 3 — GMOD_B:", r"%.4f\,/\,%.4f=%.4f\ \mathrm{A/V}" % (B["rcs_pmax"], B["vee"], B["res"]))
     body(story, "<b>Path C — Output Specification</b>", C6)
-    _wstep(story, "Step 1 — I_out:", r"%s\,/\,393.7=%.5f\ \mathrm{A}" % ("3600" if hl else "1700", Cc["iout"]))
-    _wstep(story, "Step 2 — K_max × I_out:", r"1.49\times%.5f=%.5f" % (Cc["iout"], Cc["kmax_iout"]))
+    _wstep(story, "Step 1 — I_out:", r"%.0f\,/\,%.1f=%.5f\ \mathrm{A}" % (pout, vout, Cc["iout"]))
+    _wstep(story, "Step 2 — K_max × I_out:", r"%.2f\times%.5f=%.5f" % (kmax, Cc["iout"], Cc["kmax_iout"]))
     _wstep(story, "Step 3 — GMOD_C:", r"%.5f\,/\,%.4f=%.4f\ \mathrm{A/V}" % (Cc["kmax_iout"], Cc["vee"], Cc["res"]))
     _wstep(story, "Consistency check (%s):" % rng,
            [r"A/B=%.4f/%.4f=1.000000\ \to\ \mathrm{PASS}\ \checkmark" % (A["res"], B["res"]),
@@ -726,10 +733,11 @@ def build_story(inp: dict | None = None):
     story = []
     chapter_splash(story, 6, _TITLE,
         "The complete FAN9672 control-loop design.",
-        ["Steps 1–8 spec → gain-modulator, current-sense & protection",
-         "9 BIBO  ·  10 inner current loop  ·  11 outer voltage loop (Type-2 / Type-3 OTA)",
-         "12 step-load transient  ·  13 input THD & 120 Hz rejection  ·  14 compensator optimization",
-         "Appendix A derivations  ·  B BOM  ·  C bench test plan  ·  D references  ·  E quick-reference"])
+        ["Gain-modulator and current-sense design — R_CS by two methods, GMOD verification",
+         "Inner current loop and outer voltage loop — Type-II / Type-III compensator design",
+         "Step-load transient response, input THD and 120 Hz rejection, compensator optimization",
+         "Soft-start, current-limit protection, and the control-network bill of materials",
+         "Appendices — derivations, bill of materials, bench test plan, references, quick-reference"])
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
