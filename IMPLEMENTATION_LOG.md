@@ -4413,3 +4413,42 @@ copper (unchanged).
 Verified: sim-agent JS parses; _rampCu sweeps dark slate (0.16,0.20,0.31) → bright amber
 (1.00,0.80,0.37). drawGL re-renders every animation frame so it animates automatically. GUI-only;
 report 3D snapshot uses drawWire3D fallback, untouched. Commit 3a2e00d.
+
+## C98 — 2026-07-19 — Ch6 R_CS powers from designer spec (no hardcode) + Ch6 splash bullets + §5.3.3 DC-bus ripple waveforms
+
+Designer report notes, points 1/3/4 of a 4-point batch (point 2 = Ch6 renumber to 6.x + broader
+hardcode audit, agreed to do next as its own batch).
+
+POINT 4 — R_CS Methods 1 & 2 (and the whole Ch6) were pinned to 1700/3600 W. Root cause was two-fold:
+(a) hardcoded LaTeX display literals in report_steps1_8.py, and (b) data-flow — the compute
+(step16_steps1_8) uses p['pout_lo/hi'] cleanly, but they only reached it if step16_params carried
+Pout_lo_W/Pout_hi_W. Fixes:
+- main.py: Ch6 now sources pout_lo/pout_hi from the SAME intake keys every other chapter uses
+  (output_power_w_low/high_line) — applied to _ci before build_control_report — so it never falls
+  back to the 1700/3600 engine defaults. New _control_corner_currents(ci) derives per-phase RMS +
+  peak at the 90 V / 180 V band-worst corners via the shared build_design_ops engine (+ step5_phase_rms
+  for the crest ripple), passed as iphi_rms_lo/hi + iphi_pk_lo/hi. So §6.5 R_CS dissipation and the
+  ILIMIT/ILIMIT2 protection thresholds scale with the designer power instead of the 10.12/10.59/
+  16.76/17.51 reference defaults. Guarded: returns {} on any failure → compute keeps its defaults.
+- report_steps1_8.py: every 1700/3600 literal + the power-derived 1266.5/2682.0, 10.12/10.59, 393.7
+  and 0.015 sitting in the SAME equations now substitute p['pout_lo/hi'], p['nch'], c['kmax'],
+  s6['pmax_nch_*'], p['iphi_rms_*'], p['vout'], s6['rcs_sel'] — across §6.1 Method 1, §6.5 dissipation,
+  §7.3 V_EA, §7.4/7.5 GMOD paths. _gmod_paths() gained pout/nch/vout/rcs/kmax params; _build_step7
+  now unpacks p,c,s6. step16_steps1_8: pdiss_*_total uses p['nch'] not literal 2.
+- Verified: compute at 2500/5000 W → Pmax/ch 1862.5 W (=2500×1.49/2), Method 1 → 10.87 mΩ, pdiss
+  scales; reference 1700/3600 reproduces 10.07/16.77/10.58/17.55 A corner currents (shared engine,
+  ≈ the old 10.12/16.76/10.59/17.51 and consistent with the §5.3.1 table); control report builds
+  3.87 MB with rcs=12 mΩ / vout=400 / 2500-5000 W (no crash). Method 2 tracks via the same pmax_nch.
+  NON-power hardcodes (prose "15 mΩ", other constants) intentionally deferred to the point-2 audit.
+
+POINT 3 — Ch6 splash (report_steps1_8.py line 727): crammed "·"-separated bullets with bare step
+numbers → clean one-topic-per-line phrases matching Chapters 1–5.
+
+POINT 1 — new §5.3.3 "DC-Bus Ripple Waveforms" (doc_report_builder.py): _fig_dcbus_wave(rows, Vout,
+f_line, kind) overlays the bus ripple voltage and capacitor current over two line cycles across all
+9 operating points — the SAME two-band model the CapSim page (pfc_dcbus_agent_v4.html) plots, driven
+by this design's own §5.3.1 thermal_table (v_bus = Vout − ½ΔVpp·sin2ωt from V_ripple_pp_V; i_cap =
+−√2·I_LF·cos2ωt from I_LF_A) with the HF switching component (I_HF_A) as the shaded ±envelope, so
+figure and table agree by construction. Inserted at the end of the §5.3 `if thermal:` block.
+Verified: figure helper renders v + i for a 9-row synthetic table; empty rows → None; all four files
+syntax-clean; app.main imports; both servers 200. Commit e3024f7.
