@@ -671,7 +671,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                 <thead>
                   <tr style={{background:C.bg3,borderBottom:`0.5px solid ${C.border}`}}>
-                    {['Designation','d (mm)','Cu (mm²)','J A/mm²','Rac/Rdc','R/m @100°C',''].map(h=>(
+                    {['Designation','d (mm)','Cu (mm²)','J A/mm²','Rac/Rdc @fsw','R/m @100°C',''].map(h=>(
                       <th key={h} style={{padding:'6px 8px',textAlign:'left',color:C.hint,
                         fontFamily:'IBM Plex Mono,monospace',fontWeight:400,fontSize:10}}>{h}</th>
                     ))}
@@ -704,8 +704,10 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                         <td style={{padding:'7px 8px',fontFamily:'IBM Plex Mono,monospace',
                           color:(w.Rac_Rdc_eff??1)>1.10?C.red:(w.Rac_Rdc_eff??1)>1.03?C.amber:C.green,
                           cursor:'default'}}
-                          title={`F_skin=${(w.F_skin??1).toFixed(3)}× (wire intrinsic at ${Math.round(fsw_Hz/1e3)}kHz)\nRac/Rdc_eff = 1+(IL_HF/IL_rms)²×(F_skin-1)\nApplies only to HF ripple fraction of current`}>
-                          {(w.Rac_Rdc_eff??1).toFixed(3)}×
+                          title={`Rac/Rdc @${Math.round(fsw_Hz/1e3)}kHz = ${(w.F_skin??1).toFixed(3)}× — the wire's intrinsic skin AC/DC ratio at fsw.\n`+
+                                 `Effective on total current = ${(w.Rac_Rdc_eff??1).toFixed(3)}× — skin only affects the HF ripple fraction (IL_HF/IL_rms)², so the impact on total loss is small (the colour reflects this effective value).\n`+
+                                 `Full bundle Rac/Rdc incl. layer proximity is higher and is computed after a core is chosen.`}>
+                          {(w.F_skin??1).toFixed(3)}×
                         </td>
                         <td style={{padding:'7px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>
                           {((w.R_per_m_at_T/nPar)*1000).toFixed(2)} mΩ/m

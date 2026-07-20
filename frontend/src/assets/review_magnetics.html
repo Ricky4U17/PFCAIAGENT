@@ -99,6 +99,7 @@
       <button class="tab-btn" data-tab="waveforms">Waveform Panes</button>
       <button class="tab-btn" data-tab="sweep">Voltage Sweep</button>
       <button class="tab-btn" id="navSimAgent" style="border-color:#60a5fa;color:#bfdbfe">🔬 Simulation Agent</button>
+      <button class="tab-btn" data-tab="currentwave">Current Waveforms</button>
       <button class="tab-btn" data-tab="review">Design Review Summary</button>
     </div>
 
@@ -181,6 +182,26 @@
       <div class="table-wrap"><table><thead><tr><th>Vac</th><th>Icrest (A)</th><th>Lfull (µH)</th><th>Bac,pk crest (T)</th><th>Pcore (W)</th><th>Pcu (W)</th><th>Ptotal (W)</th><th>Uncertainty range (W)</th></tr></thead><tbody id="sweepTbl"></tbody></table></div>
     </section>
 
+    <section id="currentwave" class="tab">
+      <div style="margin-bottom:8px">
+        <div class="status" id="cwStatus" style="margin:0"></div>
+      </div>
+      <div class="toolbar">
+        <button id="exportIinPng">Export Input Current PNG</button>
+        <button id="exportIphPng">Export Phase Current PNG</button>
+      </div>
+      <div class="split">
+        <div class="stack">
+          <canvas id="waveIin" class="plot-sm" width="780" height="300"></canvas>
+        </div>
+        <div class="stack">
+          <canvas id="waveIph" class="plot-sm" width="780" height="300"></canvas>
+        </div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Current metric (at selected Vac, full load)</th><th>Value</th></tr></thead><tbody id="cwTbl"></tbody></table></div>
+      <div class="tiny" style="margin-top:6px">Both graphs span one half line cycle. The line drawn is the current <em>average</em>; the shaded band is the peak-to-peak <em>switching ripple</em> ΔI_pp riding on it, and the dashed line is the RMS. <strong>Input</strong> = sum of the interleaved phase currents; its ripple band is narrower than N× the per-phase band because the phases are 180° apart and the ripple partly cancels (K(D) factor). <strong>Per-phase</strong> = one inductor's rectified-sine average with its full switching ripple. Voltage is chosen from the Operating-point dropdown on the left.</div>
+    </section>
+
     <section id="review" class="tab">
       <div class="split">
         <div class="stack">
@@ -234,7 +255,7 @@
       const Pv=a*Math.pow(Math.max(BacPk,1e-12),cfg.b)*Math.pow(i.fsw/1000,cfg.c)*Fd(D), Pcore=(Pv/1000)*Ve;
       const dIpp=(Vin*D)/(Lth*i.fsw), Ihf=dIpp/(2*Math.sqrt(3)), PcuInst=Rdc*Iavg*Iavg + Rac*Ihf*Ihf, Ptot=Pcore+PcuInst;
       pCoreAcc+=Pcore; i2+=Iavg*Iavg; r2+=Ihf*Ihf; BdcMax=Math.max(BdcMax,Bdc); Bmax=Math.max(Bmax,Bmx); pCorePk=Math.max(pCorePk,Pcore); pCuPk=Math.max(pCuPk,PcuInst); pTotPk=Math.max(pTotPk,Ptot);
-      wave.push({t_ms,H,Bdc,BacPk,Bmax:Bmx,Pcore,Pcu:PcuInst,Ptotal:Ptot,Iavg,D}); }
+      wave.push({t_ms,H,Bdc,BacPk,Bmax:Bmx,Pcore,Pcu:PcuInst,Ptotal:Ptot,Iavg,D,dIpp,Ihf}); }
     const Pcore=pCoreAcc/M, Irms=Math.sqrt(i2/M), IhfRms=Math.sqrt(r2/M);
     const Pac=IhfRms*IhfRms*Rac;                       // full HF-ripple copper loss (Ihf² · Rac)
     const Pcu=Irms*Irms*Rdc+Pac, Ptotal=Pcore+Pcu, PuncLo=Pcu+1.05*Pcore, PuncHi=Pcu+1.20*Pcore;
@@ -360,6 +381,55 @@
     $('waveStatus').innerHTML=`Selected point: <strong>${i.vinRms} Vac</strong>, <strong>${fmt(i.Icrest,2)} A crest / phase</strong>, <strong>${i.tempC} °C</strong>. Separate waveform panes now isolate <strong>core loss</strong>, <strong>copper loss</strong>, and <strong>total instantaneous loss</strong>. Use the legend toggles above to show or hide individual traces.`;
     $('waveTbl').innerHTML=[['Peak H(t)',`${fmt(o.Hcrest,1)} Oe`],['Peak Bdc(t)',`${fmt(o.BdcMax,3)} T`],['Peak Bmax(t)',`${fmt(o.Bmax,3)} T`],['Peak Pcore(t)',`${fmt(o.pCorePk,2)} W`],['Peak Pcu(t)',`${fmt(o.pCuPk,2)} W`],['Peak Ptotal(t)',`${fmt(o.pTotPk,2)} W`],['Half-line period',`${fmt(1000/(2*cfg.lineHz),3)} mSec`]].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
   }
+  // Current Waveforms screen — per-phase and input current over one half line cycle, for the voltage
+  // selected in the left Operating-point dropdown. Each graph shows the average line, the switching-
+  // ripple envelope band (ΔIpp computed locally so it survives the injected step7 wave), and the RMS.
+  // Input ripple band is K(D)-narrowed vs the per-phase band — the visible benefit of the 180° interleave.
+  function _KofD(D){ D=clamp(D,0.001,0.999); return Math.abs(2*D-1)/Math.max(D,1-D); }
+  function drawCurrentSection(i,o){
+    if(!o||!o.wave||!o.wave.length) return;
+    var NPH=(typeof window!=='undefined'&&window.__STEP7_DATA__&&+window.__STEP7_DATA__.nph)||2;
+    var halfMs=1000/(2*cfg.lineHz);
+    var Vpk=i.vinRms*Math.SQRT2, L=(o.Lfull_uH||1)*1e-6, fsw=i.fsw;
+    // Local switching ripple ΔIpp(t) = Vin(t)·D(t)/(L·fsw). Computed here (not read from p.dIpp)
+    // so the band is correct even when o.wave is the injected step7 waveform, which omits dIpp.
+    function ripAt(p){ var th=Math.PI*(p.t_ms/halfMs), Vin=Math.max(0,Vpk*Math.sin(th));
+      var D=clamp(p.D!=null?p.D:0,0,1); return Vin*D/(L*fsw); }
+    // Per-phase: rectified-sine average + switching-ripple envelope (±ΔIpp/2)
+    var phAvg=o.wave.map(p=>({x:p.t_ms,y:p.Iavg}));
+    var phBand=o.wave.map(p=>{var r=ripAt(p);return {x:p.t_ms,yLow:Math.max(0,p.Iavg-r/2),yHigh:p.Iavg+r/2};});
+    var phRms=Math.sqrt(o.wave.reduce((a,p)=>{var ih=ripAt(p)/(2*Math.sqrt(3));return a+p.Iavg*p.Iavg+ih*ih;},0)/o.wave.length);
+    var phPk=Math.max.apply(null,o.wave.map(p=>p.Iavg+ripAt(p)/2));
+    var maxRip=Math.max.apply(null,o.wave.map(ripAt));
+    // Input: sum of NPH interleaved phases — ripple envelope narrowed by K(D) cancellation
+    var inAvg=o.wave.map(p=>({x:p.t_ms,y:NPH*p.Iavg}));
+    var inBand=o.wave.map(p=>{var r=ripAt(p)*_KofD(clamp(p.D!=null?p.D:0,0,1));return {x:p.t_ms,yLow:Math.max(0,NPH*p.Iavg-r/2),yHigh:NPH*p.Iavg+r/2};});
+    var inRms=Math.sqrt(o.wave.reduce((a,p)=>{var lf=NPH*p.Iavg,rip=ripAt(p)*_KofD(clamp(p.D!=null?p.D:0,0,1))/(2*Math.sqrt(3));return a+lf*lf+rip*rip;},0)/o.wave.length);
+    var inPk=Math.max.apply(null,o.wave.map(p=>NPH*p.Iavg+ripAt(p)*_KofD(clamp(p.D!=null?p.D:0,0,1))/2));
+    var maxInRip=Math.max.apply(null,o.wave.map(p=>ripAt(p)*_KofD(clamp(p.D!=null?p.D:0,0,1))));
+    drawPlot('waveIin',[
+      {band:true,name:'switching ripple (interleave-reduced)',color:'rgba(56,189,248,.32)',data:inBand},
+      {name:'average i_in(t)',color:'#38bdf8',data:inAvg},
+      {name:'RMS',color:'#f59e0b',dash:[6,4],data:[{x:0,y:inRms},{x:halfMs,y:inRms}]},
+    ],{title:'Input Current i_in(t) — sum of '+NPH+' interleaved phases',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Input Current (A)',xmin:0,xmax:halfMs,ymin:0});
+    drawPlot('waveIph',[
+      {band:true,name:'switching ripple ΔI_pp',color:'rgba(167,139,250,.34)',data:phBand},
+      {name:'average i_φ(t)',color:'#a78bfa',data:phAvg},
+      {name:'RMS',color:'#f59e0b',dash:[6,4],data:[{x:0,y:phRms},{x:halfMs,y:phRms}]},
+    ],{title:'Per-Phase Current i_φ(t) — average + switching ripple',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Phase Current (A)',xmin:0,xmax:halfMs,ymin:0});
+    $('cwStatus').innerHTML='Selected: <strong>'+i.vinRms+' Vac</strong>, full load, '+NPH+'-phase interleaved (use the <em>Operating point → preset</em> dropdown on the left to change voltage). Shaded band = switching ripple ΔI_pp about the average, over one half line cycle.';
+    $('cwTbl').innerHTML=[
+      ['Per-phase average current (crest)',fmt(i.Icrest,3)+' A'],
+      ['Per-phase RMS current',fmt(phRms,3)+' A'],
+      ['Per-phase peak current (with ripple)',fmt(phPk,3)+' A'],
+      ['Per-phase peak switching ripple ΔI_pp',fmt(maxRip,3)+' A'],
+      ['Input average current (crest)',fmt(NPH*i.Icrest,3)+' A'],
+      ['Input RMS current',fmt(inRms,3)+' A'],
+      ['Input peak current (with ripple)',fmt(inPk,3)+' A'],
+      ['Input peak ripple (after K(D) cancellation)',fmt(maxInRip,3)+' A'],
+      ['Half-line period',fmt(halfMs,3)+' mSec'],
+    ].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+  }
   // Phase C: render step7's authoritative waveform for the current Vin (nearest OPS point)
   // when an upstream contract has been posted in. No-op without it → studio behaves as before.
   function _step7WaveFor(vin){
@@ -410,6 +480,7 @@
     drawPlot('miniPlot',[{name:'Pcore(t)',color:'#f59e0b',data:o.wave.map(p=>({x:p.t_ms,y:p.Pcore}))}],{title:'Core Loss Pcore(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Core Loss (W)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     drawPlot('miniPlot2',[{name:'Bmax(t)',color:'#38bdf8',data:o.wave.map(p=>({x:p.t_ms,y:p.Bmax}))}],{title:'Peak Flux Density Bmax(t) Vs Time Over Half Line Cycle (mSec)',xlabel:'Time Over Half Line Cycle (mSec)',ylabel:'Flux Density (T)',xmin:0,xmax:1000/(2*cfg.lineHz)});
     drawWaveSection(i,o);
+    drawCurrentSection(i,o);
     // sweep
     const regs=[sw.lo,sw.hi];
     drawPlot('sweepPlot',[].concat(
@@ -456,6 +527,8 @@
   ['N','stacks','tempC','explode','vin','Icrest','Vout','fsw','lossAnchor','boreID','bundleOD','woundOD','holeID','htBuild'].forEach(id=>$(id).addEventListener('input',renderAll));
   ['showH','showBdc','showBmax','showBac','showPcore','showPcu','showPtot'].forEach(id=>$(id).addEventListener('input',()=>{ if(state.last) drawWaveSection(state.last.i,state.last.o); }));
   $('preset').addEventListener('change',()=>{ const v=+$('preset').value; $('vin').value=v; $('Icrest').value=crestCurrent(v); renderAll(); });
+  if($('exportIinPng')) $('exportIinPng').onclick=()=>exportCanvasPng('waveIin','Input_Current_vs_Time_Over_Half_Line_Cycle.png');
+  if($('exportIphPng')) $('exportIphPng').onclick=()=>exportCanvasPng('waveIph','Phase_Current_vs_Time_Over_Half_Line_Cycle.png');
   $$('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{ if(!btn.dataset.tab)return; $$('.tab-btn').forEach(b=>b.classList.remove('active')); $$('.tab').forEach(t=>t.classList.remove('active')); btn.classList.add('active'); $(btn.dataset.tab).classList.add('active'); fitSummary(); }));
   { const _na=$('navSimAgent'); if(_na)_na.addEventListener('click',function(){ try{ window.parent.postMessage({__navSimAgent:true},'*'); }catch(e){} }); }
   const model=$('model'); model.addEventListener('mousedown',e=>{ state.drag=true; state.lx=e.clientX; state.ly=e.clientY; }); window.addEventListener('mouseup',()=>state.drag=false); window.addEventListener('mousemove',e=>{ if(!state.drag||!state.last) return; state.yaw += (e.clientX-state.lx)/180; state.pitch = clamp(state.pitch + (e.clientY-state.ly)/180, -1.35, 1.35); state.lx=e.clientX; state.ly=e.clientY; draw3D(state.last.i, state.last.o); }); model.addEventListener('wheel',e=>{ e.preventDefault(); state.zoom=clamp(state.zoom + Math.sign(e.deltaY)*0.12,0.4,2.4); if(state.last) draw3D(state.last.i,state.last.o); },{passive:false});

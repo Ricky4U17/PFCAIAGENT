@@ -642,7 +642,7 @@ def _build_step8(story, data):
         s8["scorecard"], col_widths=[CW*0.15, CW*0.18, CW*0.16, CW*0.14, CW*0.21, CW*0.13], ch=C6)
 
 
-_TITLE = "Control Scheme — Steps 1–14 + Appendices A–E (full detail)"
+_TITLE = "Control Scheme"
 
 
 def _build_asbuilt_L_section(story, inp: dict, prior: dict):
@@ -725,9 +725,7 @@ def build_story(inp: dict | None = None):
     prior = compute_steps_1_8(inp)            # designer specs merged here, threaded below
     story = []
     chapter_splash(story, 6, _TITLE,
-        "The complete FAN9672 control-loop design — gain-modulator, current-sense, protection, "
-        "brown-in/brown-out, both compensators, transient / THD verification, the design trade-off, "
-        "and the full thesis-level derivations — per FAN9672-D, AN4165-D, AND9925-D and SLVA662.",
+        "The complete FAN9672 control-loop design.",
         ["Steps 1–8 spec → gain-modulator, current-sense & protection",
          "9 BIBO  ·  10 inner current loop  ·  11 outer voltage loop (Type-2 / Type-3 OTA)",
          "12 step-load transient  ·  13 input THD & 120 Hz rejection  ·  14 compensator optimization",
