@@ -241,7 +241,7 @@ function Evaluator(rawPkg){
  function transient(R,Pcore,Pcu,minutes,TcoreSS,TwdgSS){const dt=0.5,steps=Math.max(8,Math.round((minutes||20)*60/dt));let Tc=Tamb,Tw=Tamb;const arr=[];
    for(let i=0;i<=steps;i++){const t=i*dt;arr.push({t_min:t/60,Tcore:Tc,Twdg:Tw,Thot:Tamb+Math.max(Tc-Tamb,Tw-Tamb)*cool.hotspotFactor});
     const qca=(Tc-Tamb)/R.Rca,qwa=(Tw-Tamb)/R.Rwa,qcw=(Tc-Tw)/R.Rcw;Tc+=(Pcore-qca-qcw)/Math.max(cool.CthCore_J_perK,1e-3)*dt;Tw+=(Pcu+qcw-qwa)/Math.max(cool.CthWdg_J_perK,1e-3)*dt}return arr}
- function inst(op,frac){const th=frac*Math.PI,s=Math.sin(th),Vin=op.Vpk*s,D=clamp(1-Vin/cfg.Vout,0,.98),Iavg=op.Ic*s,Le=geomIn.Le_mm/10,H=0.4*Math.PI*N*Iavg/Le,Lt=Math.max(fp.Lh(H),1e-9),BacPk=(Vin*D)/(2*N*op.Ae*cfg.fsw),Bdc=(Lt*Iavg)/(N*op.Ae),dIpp=(Vin*D)/(Lt*cfg.fsw),Ihf=dIpp/(2*Math.sqrt(3)),Pcore=mat.steinmetz.a*Math.pow(Math.max(BacPk,1e-12),mat.steinmetz.b)*Math.pow(cfg.fsw/1000,mat.steinmetz.c)*am.Fd(D)/1000*(geomIn.Ve_mm3*stacks/1000),Pcu=op.Rdc0*Iavg*Iavg+op.Rac0*Ihf*Ihf;return {Bmean:Bdc+BacPk,Bdc,BacPk,L_inst:Lt,H,D,dIpp,Pcore,Pcu,t_ms:frac*1000/(2*cfg.lineHz)}}
+ function inst(op,frac){const th=frac*Math.PI,s=Math.sin(th),Vin=op.Vpk*s,D=clamp(1-Vin/cfg.Vout,0,.98),Iavg=op.Ic*s,Le=geomIn.Le_mm/10,H=0.4*Math.PI*N*Iavg/Le,Lt=Math.max(fp.Lh(H),1e-9),BacPk=(Vin*D)/(2*N*op.Ae*cfg.fsw),Bdc=(Lt*Iavg)/(N*op.Ae),dIpp=(Vin*D)/(Lt*cfg.fsw),Ihf=dIpp/(2*Math.sqrt(3)),Pcore=mat.steinmetz.a*Math.pow(Math.max(BacPk,1e-12),mat.steinmetz.b)*Math.pow(cfg.fsw/1000,mat.steinmetz.c)*am.Fd(D)/1000*(geomIn.Ve_mm3*stacks/1000),Pcu_dc=op.Rdc0*Iavg*Iavg,Pcu_ac=op.Rac0*Ihf*Ihf,Pcu=Pcu_dc+Pcu_ac;return {Bmean:Bdc+BacPk,Bdc,BacPk,L_inst:Lt,H,D,dIpp,Pcore,Pcu,Pcu_dc,Pcu_ac,t_ms:frac*1000/(2*cfg.lineHz)}}
  function waveform(op){const M=200,half=1000/(2*cfg.lineHz),W=[];let pcMax=0,puMax=0,lMin=Infinity,lMax=0,dcmFrac=0;for(let n=0;n<=M;n++){const fr=inst(op,n/M),Iavg=op.Ic*Math.sin((n/M)*Math.PI),dcm=(Iavg<fr.dIpp/2);if(dcm)dcmFrac++;W.push({fr:n/M,t:fr.t_ms,H:fr.H,Bdc:fr.Bdc,BacPk:fr.BacPk,dIpp:fr.dIpp,Pcore:fr.Pcore,Pcu:fr.Pcu,L_uH:fr.L_inst*1e6,dcm});pcMax=Math.max(pcMax,fr.Pcore);puMax=Math.max(puMax,fr.Pcu);lMin=Math.min(lMin,fr.L_inst*1e6);lMax=Math.max(lMax,fr.L_inst*1e6)}return {W,half,pcMax,puMax,lMin,lMax,dcmFrac:dcmFrac/(M+1)}}
  const Brad=(Bm,r)=>Bm*fp.bCrowd(r);
  function dcmBoundaryPct(vin){ // load% where crest just reaches CCM (Iavg_crest = dIpp_crest/2)
@@ -289,12 +289,20 @@ function Viewer(ev,doc){
    else{valAt=r=>0;vmax=1;}
    if(!(vmax>vmin))vmax=vmin+1e-6;
    return {vmax,vmin,valAt};}
+ // Per-phase winding copper loss for the current phase `f` (inner/outer/top-bottom bands), with the
+ // inner-vs-outer crowding weights. lmx is the CYCLE-PEAK inner-radius loss so the winding sweeps the
+ // full colour ramp over the half cycle (dark at the zero-crossing → bright at the crest) — the same
+ // absolute-scale treatment flux/core get, instead of the old static cycle-average op.Pcu.
+ function copperLoss(op,f){const crowd=ev.crowdPeak,wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2;
+   const lI=f.Pcu_dc/4+f.Pcu_ac*wIn/sw4,lO=f.Pcu_dc/4+f.Pcu_ac*wOut/sw4,lTB=f.Pcu_dc/4+f.Pcu_ac/sw4;
+   let lmx=1e-9;for(let k=0;k<=20;k++){const fk=ev.inst(op,k/20);lmx=Math.max(lmx,fk.Pcu_dc/4+fk.Pcu_ac*wIn/sw4);}
+   return {lI,lO,lTB,lmx};}
  function drawCross(op,f){const c=$('fieldC'),ctx=c.getContext('2d'),W=c.width,H=c.height;ctx.clearRect(0,0,W,H);
   const wg=windowGeom(),od=wg.bundleOD,rb=Math.min(wg.radialBuildActual_mm,geom.rin*0.92),holeR=Math.max(geom.rin-rb,geom.rin*0.04),outB=od,axB=od;
   const span=geom.rout+outB+2,pz=Math.min((W*0.40)/span,(H*0.62)/(geom.h+2*axB+12)),cx=W*0.46,cy=H/2,hh=geom.h/2,Y=z=>cy-z*pz;
   ctx.strokeStyle='rgba(148,163,184,.4)';ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(cx,28);ctx.lineTo(cx,H-46);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#9ca3af';ctx.font='11px Segoe UI';ctx.fillText('bore axis',cx-20,22);
-  const {vmax,vmin,valAt}=fieldSetup(op,f);const crowd=ev.crowdPeak;
-  const wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2,lI=op.Pcu_dc/4+op.Pcu_ac*wIn/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wOut/sw4,lTB=op.Pcu_dc/4+op.Pcu_ac/sw4,lmx=Math.max(lI,lO,lTB,1e-9);
+  const {vmax,vmin,valAt}=fieldSetup(op,f);
+  const {lI,lO,lTB,lmx}=copperLoss(op,f);
   const wtemp=clamp((op.TwdgSS-Tamb)/Math.max(op.ThotSS-Tamb,1e-9),0,1);
   const wcol=loss=>(mode==='copper')?cmap('copper',loss/lmx):(mode==='thermal')?cmap('thermal',wtemp):'rgba(196,120,32,.95)';
   function half(sign,ftype){const X=r=>cx+sign*r*pz,strips=56,sw=geom.w*pz/strips+1.5;
@@ -317,7 +325,7 @@ function Viewer(ev,doc){
   const px=(Math.min(W,H)*0.36)/(geom.rout+od*1.6),rings=80,{vmax,vmin,valAt}=fieldSetup(op,f);
   for(let i=0;i<rings;i++){const r=geom.rin+(i+.5)*geom.w/rings;ctx.beginPath();ctx.strokeStyle=(mode==='copper')?'rgba(120,128,150,.45)':cmap(mode,(valAt(r)-vmin)/Math.max(vmax-vmin,1e-9));ctx.lineWidth=geom.w*px/rings+1.2;ctx.arc(cx,cy,r*px,0,7);ctx.stroke()}
   ctx.strokeStyle='rgba(148,163,184,.55)';ctx.lineWidth=1.3;ctx.beginPath();ctx.arc(cx,cy,geom.rin*px,0,7);ctx.stroke();ctx.beginPath();ctx.arc(cx,cy,geom.rout*px,0,7);ctx.stroke();
-  const crowd=ev.crowdPeak,wIn=Math.pow(crowd,2),wOut=Math.pow(geom.rmean/geom.rout,2),sw4=wIn+wOut+2,lI=op.Pcu_dc/4+op.Pcu_ac*wIn/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wOut/sw4,lmx=Math.max(lI,lO,1e-9),sR=Math.max(od*px*0.42,2.4);
+  const {lI,lO,lmx}=copperLoss(op,f),sR=Math.max(od*px*0.42,2.4);
   var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
   let placed=0;for(let L=0;L<_nl&&placed<_tot;L++){const rr=(geom.rin-(L+0.5)*od)*px,cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed);for(let i=0;i<cnt;i++){const a=i/cnt*2*Math.PI+L*0.4;sym(ctx,cx+rr*Math.cos(a),cy+rr*Math.sin(a),sR,(mode==='copper')?cmap('copper',lI/lmx):'#2a6fb0','x')}placed+=cnt}
   /* outer (OD) winding: same TOTAL pass count as the bore (every turn crosses OD once), packed by
@@ -369,7 +377,7 @@ function Viewer(ev,doc){
    quad([[geom.rin,a0,hh],[geom.rin,a1,hh],[geom.rin,a1,-hh],[geom.rin,a0,-hh]],shade(coreCol(geom.rin),nsh(-Math.cos(am),0,-Math.sin(am))));
    quad([[geom.rin,a0,hh],[geom.rout,a0,hh],[geom.rout,a1,hh],[geom.rin,a1,hh]],shade(coreCol(geom.rmean),nsh(0,1,0)));
    quad([[geom.rin,a1,-hh],[geom.rout,a1,-hh],[geom.rout,a0,-hh],[geom.rin,a0,-hh]],shade(coreCol(geom.rmean),nsh(0,-1,0)));}
-  const crowd=ev.crowdPeak,wI=Math.pow(crowd,2),wO=Math.pow(geom.rmean/geom.rout,2),sw4=wI+wO+2,lI=op.Pcu_dc/4+op.Pcu_ac*wI/sw4,lO=op.Pcu_dc/4+op.Pcu_ac*wO/sw4,lmx=Math.max(lI,lO,1e-9),tcol=(mode==='copper')?cmap('copper',lI/lmx):'rgb(196,120,32)';
+  const {lI,lmx}=copperLoss(op,f),tcol=(mode==='copper')?cmap('copper',lI/lmx):'rgb(196,120,32)';
   var _caps=wg.layerCaps,_tot=_caps?wg.passes:N,_nl=_caps?_caps.length:wg.layersNeeded;
   let placed=0;for(let L=0;L<_nl&&placed<_tot;L++){const cnt=_caps?_caps[L]:Math.min(wg.turnsPerLayer,_tot-placed),rIn=Math.max(geom.rin-(L+1)*od,od*0.6),rOut=geom.rout+od*0.6,yt=hh+od*0.6,yb=-hh-od*0.6;
    for(let j=0;j<cnt;j++){const phi=(j+0.5)/cnt*2*Math.PI+L*0.25,loop=[[rIn,phi,yb],[rOut,phi,yb],[rOut,phi,yt],[rIn,phi,yt],[rIn,phi,yb]].map(q=>P(q[0],q[1],q[2])),depth=loop.reduce((s,p)=>s+p.z,0)/loop.length;prims.push({loop,col:tcol,depth,wire:true});}placed+=cnt;}
