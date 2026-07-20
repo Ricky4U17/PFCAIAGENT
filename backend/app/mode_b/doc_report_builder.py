@@ -482,16 +482,50 @@ def _fig_img(fig, width_mm=150):
     return Image(buf, width=width_mm*mm, height=width_mm*mm*(h_in/max(w_in, 0.1)))
 
 
-def _fig_ring_views(d, t_amb=50.0):
+def _corner_field(d, vin, t_amb):
+    """Per-operating-corner field magnitudes for the §4.1 ring views, from the design's own
+    per-V_in tables (one engine): B_max = B_dc + B_ac at that corner (flux table + bias L),
+    inner-bore B_max via the radial-crowding factor, and the temperature scaled by that
+    corner's total loss relative to the worst point (the two-node ΔT the design was sized at).
+    Returns {bmax, binner, thot, dt} or None if the tables are absent."""
+    try:
+        lt = {round(float(r.get("Vin_rms", 0) or 0)): r for r in (d.get("loss_table_100C") or [])}
+        lv = {round(float(r.get("Vin_rms", 0) or 0)): r for r in (d.get("L_vs_Vin_table") or [])}
+        N  = int(d.get("N", 0) or 0)
+        Ae = float(d.get("Ae_total_mm2", 0) or 0) * 1e-6
+        vk = round(float(vin))
+        if vk not in lt or vk not in lv or not (N and Ae):
+            return None
+        bac = float(lt[vk].get("Bac_pk", 0) or 0)
+        Lh  = float(lv[vk].get("L_full_nom_uH", 0) or 0) * 1e-6
+        ic  = float(lv[vk].get("Iavg_crest", 0) or 0)
+        bdc = Lh * ic / (N * Ae)
+        bmax = bdc + bac
+        crowd = float(d.get("crowd_axial", 0) or 0)
+        binner = bmax * crowd if crowd else 0.0
+        # temperature scaled by this corner's loss vs the worst point
+        p_here = float(lt[vk].get("Ptotal_W", 0) or 0)
+        p_max  = max((float(r.get("Ptotal_W", 0) or 0) for r in lt.values()), default=p_here) or p_here
+        ratio  = (p_here / p_max) if p_max else 1.0
+        dt_w   = float(d.get("dT_rise_C", 0) or 0)
+        dth_w  = float(d.get("dT_hotspot_C", 0) or dt_w)
+        dt     = dt_w * ratio
+        thot   = t_amb + dth_w * ratio
+        return {"bmax": bmax, "binner": binner, "thot": thot, "dt": dt}
+    except Exception:
+        return None
+
+
+def _fig_ring_views(d, t_amb=50.0, bmax=None, binner=None, thot=None, dt=None):
     """Server-side ring views of the wound toroid — flux-density field (left) and temperature
     field (right), each overlaid with the ACCURATE per-layer winding turns (same packing math
     as the Simulation-Agent drawRing: bore layer capacities from each layer's shrinking
     circumference + outer-layer packing of the full pass count).
 
-    This is the ALWAYS-AVAILABLE fallback for the report: the live Simulation-Agent captures
-    (sim_views) are preferred when the designer visited that page, but they live in browser
-    state — reports generated without that visit (or after a restart) previously lost the ring
-    views entirely. Rendered from the approved design's own field data instead."""
+    Renders from the approved design's own field data. Optional bmax/binner/thot/dt overrides
+    let the caller render the SAME geometry at a specific operating corner (e.g. §4.1.1 low-line
+    90 V vs §4.1.2 high-line 180 V) — the winding geometry is identical, only the field
+    magnitudes / colour scales differ. Defaults fall back to the design's worst-case values."""
     try:
         OD = float(d.get("OD_mm", 0) or 0); ID = float(d.get("ID_mm", 0) or 0)
         N  = int(d.get("N", 0) or 0)
@@ -503,10 +537,10 @@ def _fig_ring_views(d, t_amb=50.0):
         passes = N * npar
         r_mean = (rin + rout) / 2.0
 
-        Bmax   = float(d.get("Bmax_FL_T", 0) or d.get("Bac_pk_T", 0) or 0.3)
-        Binner = float(d.get("Bmax_inner_FL_T", 0) or (Bmax * r_mean / rin))
-        dT     = float(d.get("dT_rise_C", 0) or 10.0)
-        Thot   = float(d.get("T_hotspot_C", 0) or (t_amb + dT * 1.12))
+        Bmax   = float(bmax) if bmax else float(d.get("Bmax_FL_T", 0) or d.get("Bac_pk_T", 0) or 0.3)
+        Binner = float(binner) if binner else float(d.get("Bmax_inner_FL_T", 0) or (Bmax * r_mean / rin))
+        dT     = float(dt) if dt else float(d.get("dT_rise_C", 0) or 10.0)
+        Thot   = float(thot) if thot else float(d.get("T_hotspot_C", 0) or (t_amb + dT * 1.12))
         Tsurf  = t_amb + dT
 
         # winding turn positions — bore (per-layer capacities) and outer (full pass count)
@@ -3310,31 +3344,46 @@ def _ch4(story, state, d):
     # own field model so it is always present and looks identical regardless of whether the
     # Simulation-Agent page was opened.
     _amb4 = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
-    _rv = _fig_ring_views(d, _amb4)
-    if _rv:
-        # Operating conditions the render represents (report notes 2026-07-18 #1): the
-        # worst-case low-line crest — maximum current / heaviest DC bias / highest flux.
-        _vw41  = float((state.get("intake", {}).get("application", {}) or {}).get("vin_rms_min", 90) or 90)
-        _bmx41 = float(d.get("Bmax_FL_T", 0) or 0)
-        _bin41 = float(d.get("Bmax_inner_FL_T", 0) or 0)
-        _thot41 = float(d.get("T_hotspot_C", 0) or (_amb4 + float(d.get("dT_rise_C", 0) or 0)))
-        annotation(story, "CONCEPT",
-            f"<b>Operating condition.</b> These field views are rendered at the design's "
-            f"worst-case corner — the <b>{_vw41:.0f} V<sub>ac</sub> low-line crest</b>, where the "
-            "input current, DC bias and flux density are all highest. "
-            "<b>How to read.</b> LEFT is the flux-density field: the colour follows "
-            "B(r) &prop; 1/r, brightest at the inner bore (smallest radius) where the flux "
-            "crowds and saturation risk is greatest, fading toward the outer edge. RIGHT is the "
-            "temperature field: hottest at the interior winding hotspot, cooling toward the "
-            "outer surface. The &otimes; marks are the winding turns entering the bore, "
-            "&#9679; the turns on the outer wall.", 4)
+    _vlo41 = float((state.get("intake", {}).get("application", {}) or {}).get("vin_rms_min", 90) or 90)
+    _vhi41 = float((state.get("intake", {}).get("application", {}) or {}).get("vin_rms_max", 264) or 264)
+    _vhc41 = min(180.0, _vhi41)   # high-line band minimum (worst high-line corner)
+
+    # Shared how-to-read note (report notes 2026-07-19): the two corners below are each band's
+    # worst case. The winding geometry and the B(r) &prop; 1/r crowding pattern are identical in
+    # both — only the field magnitudes / colour scales differ (labelled per corner).
+    annotation(story, "CONCEPT",
+        "The wound-core ring views below are rendered at the two band-worst corners — the "
+        f"<b>low-line minimum ({_vlo41:.0f} V<sub>ac</sub>)</b> and the "
+        f"<b>high-line minimum ({_vhc41:.0f} V<sub>ac</sub>)</b>, each at full load. "
+        "<b>How to read.</b> LEFT is the flux-density field: the colour follows B(r) &prop; 1/r, "
+        "brightest at the inner bore (smallest radius) where the flux crowds and saturation risk "
+        "is greatest, fading toward the outer edge. RIGHT is the temperature field: hottest at "
+        "the interior winding hotspot, cooling toward the outer surface. The &otimes; marks are "
+        "the winding turns entering the bore, &#9679; the turns on the outer wall. The two "
+        "corners share the same geometry and 1/r pattern; the flux magnitude and temperature "
+        "differ modestly between them (labelled in each caption).", 4)
+
+    for _num41, _title41, _v41 in (("4.1.1", "Low-line minimum, full load", _vlo41),
+                                   ("4.1.2", "High-line minimum, full load", _vhc41)):
+        _fld41 = _corner_field(d, _v41, _amb4)
+        _rv = (_fig_ring_views(d, _amb4, bmax=_fld41["bmax"], binner=_fld41["binner"],
+                               thot=_fld41["thot"], dt=_fld41["dt"]) if _fld41
+               else _fig_ring_views(d, _amb4))   # fall back to worst-case render if tables absent
+        if not _rv:
+            continue
+        _bm41 = (_fld41["bmax"] if _fld41 else float(d.get("Bmax_FL_T", 0) or 0))
+        _bi41 = (_fld41["binner"] if _fld41 else float(d.get("Bmax_inner_FL_T", 0) or 0))
+        _th41 = (_fld41["thot"] if _fld41 else
+                 float(d.get("T_hotspot_C", 0) or (_amb4 + float(d.get("dT_rise_C", 0) or 0))))
+        sub_h(story, _num41, f"{_title41} — {_v41:.0f} V<sub>ac</sub>", 4)
+        story.append(_rv)
         fig_caption(story,
-            f"Figure 4.1 — Wound-core ring views at the worst-case {_vw41:.0f} V<sub>ac</sub> "
-            f"low-line crest: flux-density crowding B(r) &prop; 1/r "
-            f"(B<sub>max</sub> = {_bmx41:.3f} T"
-            + (f", inner-bore {_bin41:.3f} T" if _bin41 else "")
+            f"Figure {_num41} — Wound-core ring views at the {_v41:.0f} V<sub>ac</sub> crest "
+            f"(worst {'low' if _num41.endswith('1') else 'high'}-line corner): flux-density "
+            f"crowding B(r) &prop; 1/r (B<sub>max</sub> = {_bm41:.3f} T"
+            + (f", inner-bore {_bi41:.3f} T" if _bi41 else "")
             + f") across the {stacks}-core stack (left) and the radial temperature field "
-            f"(interior hotspot &asymp; {_thot41:.0f} °C &rarr; cooled surface, right), both "
+            f"(interior hotspot &asymp; {_th41:.0f} °C &rarr; cooled surface, right), both "
             "overlaid with the exact per-layer winding turns (&otimes; bore / &#9679; outer).", 4)
 
     # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
