@@ -71,7 +71,7 @@ def build_step13(story, data: dict):
     d = data
     lo, hi = d["lo"], d["hi"]
 
-    step_h(story, "13", "Input Current THD and 120 Hz Rejection", CH)
+    step_h(story, "6.13", "Input Current THD and 120 Hz Rejection", CH)
     annotation(story, "THEORY",
         "Input-current distortion from the control loop is set by how strongly the loop rejects the "
         "120 Hz bus ripple. Any loop gain at 120 Hz modulates the current command at twice the line "
@@ -84,7 +84,7 @@ def build_step13(story, data: dict):
         "this step.", CH)
 
     # ── 13.1 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "13.1", "Mechanism — Why 120 Hz Rejection Sets THD", CH)
+    sub_h(story, "6.13.1", "Mechanism — Why 120 Hz Rejection Sets THD", CH)
     body(story,
         "In a PFC the bus carries a twice-line-frequency (120 Hz at 60 Hz line) ripple. The voltage "
         "loop senses this ripple through the FBPFC divider. Any loop gain at 120 Hz modulates the "
@@ -95,7 +95,7 @@ def build_step13(story, data: dict):
         "this contribution small.", CH)
     body(story, "The peak 120 Hz bus ripple from the delivered power is:", CH)
     eq_box(story, [r"V_{ripple,pk}=\dfrac{P_{OUT}}{2\times\omega_{line}\times V_{OUT}\times C_O}"],
-           number="13.1", ch=CH)
+           number="6.13.1", ch=CH)
     body(story, "The 120 Hz rejection is the inverse of the open-loop gain at 120 Hz:", CH)
     eq_box(story, [r"\mathrm{Rejection\ (dB)}=-20\log_{10}|T_v(j2\pi\cdot120)|"], ch=CH)
     body(story,
@@ -106,11 +106,11 @@ def build_step13(story, data: dict):
                    r"THD_3\approx 50\times\dfrac{V_{EA,120}}{V_{EA}}\ \%"], ch=CH)
 
     # ── 13.2 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "13.2", "Results — 120 Hz Rejection and THD Contribution", CH)
+    sub_h(story, "6.13.2", "Results — 120 Hz Rejection and THD Contribution", CH)
     body(story,
         "Computed for the baseline design (f<sub>cv</sub> = 17 Hz). The bus ripple and rejection "
         "depend on power level, so values are grouped by line range:", CH)
-    data_table(story, "13.2", "120 Hz Rejection and THD Contribution",
+    data_table(story, "6.13.2", "120 Hz Rejection and THD Contribution",
         "Control-loop (2nd-harmonic-feedback) contribution to input-current THD.",
         ["Operating range", "V_ripple,pk (120 Hz)", "Ripple %", "120 Hz Rejection", "THD3 contribution"],
         [["Low line  90–132 Vac / 1700 W", f"{lo['vrip']:.2f} V", f"{lo['rip_pct']:.2f}%",
@@ -140,18 +140,18 @@ def build_step13(story, data: dict):
         "Input-current THD — 120 Hz rejection is %.0f dB (low line) and %.1f dB (high line), giving "
         "an estimated 2nd-harmonic-feedback THD contribution of ~%.1f%% and ~%.0f%% respectively. "
         "Both exceed the 20 dB minimum. To reduce THD further, lower the voltage-loop crossover (see "
-        "Step 14, Design A) at the cost of a larger load-transient dip."
+        "§6.14, Design A) at the cost of a larger load-transient dip."
         % (lo['rej_db'], hi['rej_db'], lo['thd3'], hi['thd3']), CH)
 
     # ── 13.3 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "13.3", "Compensator Optimization: Transient vs 120 Hz Rejection", CH)
+    sub_h(story, "6.13.3", "Compensator Optimization: Transient vs 120 Hz Rejection", CH)
     annotation(story, "CONCEPT",
         "Crossover frequency is the single knob trading transient stiffness against ripple rejection. "
         "The table below re-designs the voltage compensator at four candidate bandwidths "
         "(f<sub>z2</sub>/f<sub>p2</sub> held at 12/17 Hz; f<sub>z1</sub>, f<sub>p1</sub> scaled with "
         "f<sub>cv</sub>; components snapped to the selected series) and recomputes everything from the "
         "model.", CH)
-    data_table(story, "13.3", "Crossover Trade-off — Transient vs Rejection",
+    data_table(story, "6.13.3", "Crossover Trade-off — Transient vs Rejection",
         "Each row is a full re-design at that crossover, recomputed from the model.",
         ["f_cv", "PM LL/HL (°)", "Rej. LL/HL (dB)", "Dip 0→100% LL/HL (V)", "Recovery LL/HL (ms)", "Note"],
         [[f"{s['fcv']:.0f} Hz", f"{s['pm_lo']:.1f} / {s['pm_hi']:.1f}",
@@ -174,7 +174,7 @@ def make_pdf(path: str, inp: dict | None = None):
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 13 (Input THD & 120 Hz Rejection, full detail)",
         "120 Hz rejection, 2nd-harmonic-feedback THD contribution and the crossover trade-off sweep "
-        "— computed from the Step 11 voltage loop and bus ripple.",
+        "— computed from the §6.11 voltage loop and bus ripple.",
         ["13.1 mechanism (why rejection sets THD)  ·  13.2 rejection & THD results + Figure 6",
          "13.3 compensator optimization — transient vs rejection trade-off sweep"])
     build_step13(story, data)

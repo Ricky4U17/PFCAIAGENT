@@ -25,7 +25,7 @@ def _ws(story, label, eq, num=None):
 def build_step9(story, data: dict):
     d = data
 
-    step_h(story, "9", "BIBO Pin — Brown-In / Brown-Out Design", CH)
+    step_h(story, "6.9", "BIBO Pin — Brown-In / Brown-Out Design", CH)
     annotation(story, "THEORY",
         "Brown-in/brown-out sets the line voltages at which the converter starts and stops, with "
         "hysteresis so it cannot chatter near the threshold. The BIBO divider must guarantee "
@@ -42,7 +42,7 @@ def build_step9(story, data: dict):
         "SEMI F47.", CH)
 
     # ── 9.1 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.1", "How the BIBO Pin Works", CH)
+    sub_h(story, "6.9.1", "How the BIBO Pin Works", CH)
     body(story,
         "The BIBO pin senses the average value of the full-wave rectified line voltage. The "
         "averaging filter removes the twice-line-frequency ripple so the FAN9672 comparator sees a "
@@ -50,12 +50,12 @@ def build_step9(story, data: dict):
         "voltage and V<sub>BIBO</sub> is:", CH)
     eq_box(story, [r"V_{BIBO}=V_{LINE,rms}\times\dfrac{2\sqrt{2}}{\pi}\times"
                    r"\dfrac{R_{B4}}{R_{B1}+R_{B2}+R_{B3}+R_{B4}}"],
-           heading="BIBO sense relation", number="9.1", ch=CH)
+           heading="BIBO sense relation", number="6.9.1", ch=CH)
     body(story,
         "The factor 2√2/π = 0.9003 is the ratio of average to RMS for a full-wave rectified sine. "
         "All thresholds are referred to V<sub>BIBO</sub>, not the AC line directly. The FAN9672-D "
         "internal thresholds are fixed and mode-dependent:", CH)
-    data_table(story, "9.1", "FAN9672-D Internal BIBO Thresholds (fixed)",
+    data_table(story, "6.9.1", "FAN9672-D Internal BIBO Thresholds (fixed)",
         "Mode-dependent comparator thresholds — referred to V_BIBO.",
         ["Parameter", "Symbol", "FR Mode (V_VIR < 1.5 V)", "HV Mode (V_VIR > 3.5 V)", "Source"],
         [["Brownout — PFC stops", "V_BIBO,BO", "1.05 V", "1.05 V  (same)", "FAN9672-D elec. spec"],
@@ -71,9 +71,9 @@ def build_step9(story, data: dict):
         "level is always 1.8095× higher. This ratio is fixed and cannot be adjusted externally.", CH)
 
     # ── 9.2 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.2", "Design Targets and Constraint Analysis", CH)
+    sub_h(story, "6.9.2", "Design Targets and Constraint Analysis", CH)
     body(story, "Three requirements must be satisfied simultaneously:", CH)
-    data_table(story, "9.2", "BIBO Design Requirements",
+    data_table(story, "6.9.2", "BIBO Design Requirements",
         "The binding constraints that drive the divider design.",
         ["Requirement", "Target", "Drives Design?"],
         [["PFC starts at or before 87 Vac (3 V margin below 90 Vac spec minimum)",
@@ -90,7 +90,7 @@ def build_step9(story, data: dict):
     body(story,
         "The FAN9672-D brownout debounce (t<sub>UVP</sub> = 450 ms) automatically handles all test "
         "dips shorter than 450 ms — these cannot trigger brownout regardless of voltage level:", CH)
-    data_table(story, "9.2b", "Standardised Dip Tests vs 450 ms Debounce",
+    data_table(story, "6.9.2b", "Standardised Dip Tests vs 450 ms Debounce",
         "Dips shorter than the 450 ms debounce cannot fire brownout at any level.",
         ["Standard", "Test Voltage", "Duration", "Criteria", "Mode", "BO Fires?", "Constraint"],
         [["EN61000-4-11  100V/60Hz", "40 V", "200 ms", "A derate 150W", "FR", "No — 200ms < 450ms", "None (debounce)"],
@@ -110,12 +110,12 @@ def build_step9(story, data: dict):
         col_widths=[CW*0.19, CW*0.10, CW*0.09, CW*0.13, CW*0.07, CW*0.16, CW*0.26], ch=CH)
 
     # ── 9.3 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.3", "Voltage Divider Ratio Calculation", CH)
+    sub_h(story, "6.9.3", "Voltage Divider Ratio Calculation", CH)
     body(story,
         "The divider ratio is derived from the brown-in startup requirement: V<sub>BIBO</sub> must "
         "reach the internal threshold of 1.90 V when V<sub>LINE</sub> = 87 Vac.", CH)
     eq_box(story, [r"V_{BIBO,BI}=V_{LINE,BI}\times\dfrac{2\sqrt{2}}{\pi}\times"
-                   r"\dfrac{R_{B4}}{R_{total}}=1.90\ \mathrm{V}"], number="9.2", ch=CH)
+                   r"\dfrac{R_{B4}}{R_{total}}=1.90\ \mathrm{V}"], number="6.9.2", ch=CH)
     body(story, "Rearranging for the divider ratio:", CH)
     eq_box(story, [r"\dfrac{R_{B4}}{R_{total}}=\dfrac{V_{BIBO,BI}}{V_{LINE,BI}\times(2\sqrt{2}/\pi)}"], ch=CH)
     _ws(story, "Step 1 — Substitute V<sub>BIBO,BI</sub> = 1.90 V (FR brown-in), "
@@ -129,7 +129,7 @@ def build_step9(story, data: dict):
     body(story, "&nbsp;&nbsp;&nbsp;&nbsp;80.13 Vac &lt; 180 Vac HV minimum ✓", CH)
 
     # ── 9.4 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.4", "Resistor Network Sizing", CH)
+    sub_h(story, "6.9.4", "Resistor Network Sizing", CH)
     body(story,
         "Four resistors form the divider following the AN4165-D reference circuit. R<sub>B3</sub> is "
         "set to approximately 10% of R<sub>B12</sub> (= R<sub>B1</sub> + R<sub>B2</sub>) to form a "
@@ -167,7 +167,7 @@ def build_step9(story, data: dict):
         r"\dfrac{1.90}{0.9003\times0.023880}=88.37\ \mathrm{Vac}\quad(\leq90\ \mathrm{Vac\ spec\ minimum})")
     eq_box(story, [r"R_{B1}=R_{B2}=560\ \mathrm{k\Omega}\qquad R_{B3}=82\ \mathrm{k\Omega}"
                    r"\qquad R_{B4}=30\ \mathrm{k\Omega}"], ch=CH)
-    data_table(story, "9.4", "Threshold Summary — Standard Values",
+    data_table(story, "6.9.4", "Threshold Summary — Standard Values",
         "Resulting AC thresholds with the selected E24 resistors.",
         ["Threshold", "V_BIBO", "Nominal AC Voltage", "1% Worst Case", "Requirement"],
         d["thresh_rows"], col_widths=[CW*0.34, CW*0.12, CW*0.20, CW*0.16, CW*0.18], ch=CH)
@@ -179,14 +179,14 @@ def build_step9(story, data: dict):
         "startup is unaffected on the high line.", CH)
 
     # ── 9.5 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.5", "Low-Pass Filter Capacitor Sizing", CH)
+    sub_h(story, "6.9.5", "Low-Pass Filter Capacitor Sizing", CH)
     body(story,
         "A two-pole RC low-pass filter attenuates the twice-line-frequency (100/120 Hz) ripple on "
         "the rectified AC average. Pole 1 is formed by C<sub>B1</sub> across R<sub>B3</sub>; Pole 2 "
         "is formed by C<sub>B2</sub> across R<sub>B4</sub>. AN4165-D recommends placing the poles "
         "between 10 Hz and 20 Hz.", CH)
     eq_box(story, [r"f_{P1}=\dfrac{1}{2\pi\,C_{B1}\,R_{B3}}",
-                   r"f_{P2}=\dfrac{1}{2\pi\,C_{B2}\,R_{B4}}"], number="9.3", ch=CH)
+                   r"f_{P2}=\dfrac{1}{2\pi\,C_{B2}\,R_{B4}}"], number="6.9.3", ch=CH)
     _ws(story, "Step 1 — C<sub>B1</sub> for f<sub>P1</sub> = 15 Hz (target):",
         r"\dfrac{1}{2\pi\times15\times82\,000}=129\ \mathrm{nF}\ \rightarrow\ \mathrm{select}\ 100\ \mathrm{nF}")
     _ws(story, "Step 2 — C<sub>B2</sub> for f<sub>P2</sub> = 10 Hz (target):",
@@ -200,7 +200,7 @@ def build_step9(story, data: dict):
 
     # ── interim component summary (doc: "Scorecard and Verdict") ──────────────
     body(story, "<b>Scorecard and Verdict</b>", CH)
-    data_table(story, "9.5b", "BIBO Component Summary",
+    data_table(story, "6.9.5b", "BIBO Component Summary",
         "Selected divider and filter components.",
         ["Component", "Value", "Function"],
         [["RB1 / RB2", "560 kΩ / 560 kΩ", "HV-rated series sense"],
@@ -213,7 +213,7 @@ def build_step9(story, data: dict):
         "their required windows.", CH)
 
     # ── 9.6 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.6", "FR Mode and HV Mode Interaction — Single Network Verification", CH)
+    sub_h(story, "6.9.6", "FR Mode and HV Mode Interaction — Single Network Verification", CH)
     body(story,
         "The V<sub>VIR</sub> resistor switches between FR mode (10 kΩ, V<sub>VIR</sub> &lt; 1.5 V, "
         "active for low-line 90–264 Vac range) and HV mode (470 kΩ, V<sub>VIR</sub> &gt; 3.5 V, "
@@ -222,7 +222,7 @@ def build_step9(story, data: dict):
         "both modes.", CH)
     body(story, "The table below confirms V<sub>BIBO</sub> and PFC status across the full AC range in "
         "each mode:", CH)
-    data_table(story, "9.6", "V_BIBO and PFC Status Across the AC Range",
+    data_table(story, "6.9.6", "V_BIBO and PFC Status Across the AC Range",
         "Same external divider in both modes; only the brown-in threshold differs.",
         ["V_LINE (Vac)", "V_BIBO (V)", "FR Mode Status  (V_VIR < 1.5 V)", "HV Mode Status  (V_VIR > 3.5 V)"],
         d["vbibo_rows"], col_widths=[CW*0.16, CW*0.16, CW*0.34, CW*0.34], ch=CH)
@@ -234,7 +234,7 @@ def build_step9(story, data: dict):
         "operating ranges.", CH)
 
     # ── 9.7 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.7", "Test Compliance Verification — EN61000-4-11:2020 and SEMI F47", CH)
+    sub_h(story, "6.9.7", "Test Compliance Verification — EN61000-4-11:2020 and SEMI F47", CH)
     body(story,
         "Pass/fail logic: (1) duration &lt; 450 ms: brownout cannot fire — PASS regardless of "
         "voltage. (2) V<sub>BIBO</sub> &gt; 1.05 V throughout test: brownout does not fire — PASS "
@@ -247,7 +247,7 @@ def build_step9(story, data: dict):
     body(story, "<b>EN61000-4-11:2020 — 100 Vac / 60 Hz  (FR Mode Active)</b>", CH)
     body(story, "FR brownout threshold = 47.89 Vac. V<sub>BIBO</sub> scaling = V<sub>LINE</sub> × "
         "0.021923 V/Vac.", CH)
-    data_table(story, "9.7a", "EN61000-4-11 — 100 Vac / 60 Hz (FR)", "",
+    data_table(story, "6.9.7a", "EN61000-4-11 — 100 Vac / 60 Hz (FR)", "",
         _h7,
         [["40 V", "200 ms", "A derate 150W", "0.8769 V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
          ["70 V", "500 ms", "A derate 700W", "1.5346 V", "In hyst", "V_BIBO=1.5346V in hysteresis zone — stays off if previously tripped", "PASS ✓"],
@@ -258,7 +258,7 @@ def build_step9(story, data: dict):
     body(story, "<b>EN61000-4-11:2020 — 240 Vac / 50 Hz  (HV Mode Active)</b>", CH)
     body(story, "HV brownout = 47.89 Vac. HV brown-in = 79.82 Vac. Normal HV range 180–264 Vac is "
         "entirely above the brown-in threshold.", CH)
-    data_table(story, "9.7b", "EN61000-4-11 — 240 Vac / 50 Hz (HV)", "",
+    data_table(story, "6.9.7b", "EN61000-4-11 — 240 Vac / 50 Hz (HV)", "",
         _h7,
         [["96 V", "200 ms", "A derate 650W", "2.1046 V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
          ["168 V", "500 ms", "A derate 1010W", "3.6831 V", "No", "V_BIBO=3.6831V > BI threshold — PFC operating", "PASS ✓"],
@@ -267,7 +267,7 @@ def build_step9(story, data: dict):
         col_widths=_cw7, ch=CH)
 
     body(story, "<b>SEMI F47 — 100 Vac / 50 Hz  (FR Mode Active)</b>", CH)
-    data_table(story, "9.7c", "SEMI F47 — 100 Vac / 50 Hz (FR)", "",
+    data_table(story, "6.9.7c", "SEMI F47 — 100 Vac / 50 Hz (FR)", "",
         _h7,
         [["45 V", "200 ms", "B", "0.9865 V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
          ["67 V", "500 ms", "B", "1.4689 V", "In hyst", "V_BIBO=1.4689V in hysteresis zone — stays off if previously tripped", "PASS ✓"],
@@ -275,7 +275,7 @@ def build_step9(story, data: dict):
         col_widths=_cw7, ch=CH)
 
     body(story, "<b>SEMI F47 — 200 Vac / 50 Hz  (HV Mode Active)</b>", CH)
-    data_table(story, "9.7d", "SEMI F47 — 200 Vac / 50 Hz (HV)", "",
+    data_table(story, "6.9.7d", "SEMI F47 — 200 Vac / 50 Hz (HV)", "",
         _h7,
         [["90 V", "200 ms", "B", "1.9731 V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
          ["134 V", "500 ms", "B", "2.9377 V", "No", "V_BIBO=2.9377V > BI threshold — PFC operating", "PASS ✓"],
@@ -283,27 +283,27 @@ def build_step9(story, data: dict):
         col_widths=_cw7, ch=CH)
 
     # ── 9.8 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.8", "Startup Voltage Verification", CH)
+    sub_h(story, "6.9.8", "Startup Voltage Verification", CH)
     body(story,
         "The primary design requirement is that the PFC enables at or before 87 Vac during "
         "power-on. This is verified by confirming V<sub>BIBO</sub> ≥ 1.90 V (FR brown-in threshold) "
         "at 87 Vac:", CH)
     eq_box(story, [r"V_{BIBO}\ \mathrm{at\ 87\ Vac}=87\times0.9003\times0.024351=1.9073\ \mathrm{V}\quad>1.9\ \mathrm{V}",
                    r"V_{BIBO}\ \mathrm{at\ 90\ Vac}=90\times0.9003\times0.024351=1.9731\ \mathrm{V}\quad>1.9\ \mathrm{V}"], ch=CH)
-    data_table(story, "9.8", "Startup Verification",
+    data_table(story, "6.9.8", "Startup Verification",
         "PFC enables at or before 87 Vac across nominal and 1% worst-case tolerance.",
         ["Startup Condition", "V_BIBO", "Threshold", "Margin", "Starts?"],
         d["startup_rows"], col_widths=[CW*0.40, CW*0.13, CW*0.13, CW*0.16, CW*0.18], ch=CH)
 
     # ── 9.9 ───────────────────────────────────────────────────────────────────
-    sub_h(story, "9.9", "Final Scorecard — Component Summary", CH)
-    data_table(story, "9.9", "BIBO Verification Scorecard",
+    sub_h(story, "6.9.9", "Final Scorecard — Component Summary", CH)
+    data_table(story, "6.9.9", "BIBO Verification Scorecard",
         "Every brown-in/brown-out, startup, compliance and filter check.",
         ["Check", "Value / Result", "Criterion", "Verdict"],
         d["scorecard"], col_widths=[CW*0.36, CW*0.28, CW*0.20, CW*0.16], ch=CH)
 
     # ── 9.10 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "9.10", "Verdict", CH)
+    sub_h(story, "6.9.10", "Verdict", CH)
     annotation(story, "DECISION", "DESIGN PASS  —  ALL CHECKS CONFIRMED  ✓", CH)
     body(story,
         "The resistor network R<sub>B1</sub> = R<sub>B2</sub> = 560 kΩ, R<sub>B3</sub> = 82 kΩ, "

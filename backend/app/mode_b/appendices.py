@@ -35,7 +35,7 @@ def _appendix_a(story):
         "This appendix derives, from the averaged converter model, the two transfer functions the "
         "main report quotes: the boost small-signal plant (with its right-half-plane zero) and the "
         "OTA Type-III compensator. The aim is that a reader can reconstruct every plant and "
-        "compensator expression used in Steps 10 and 11 without consulting the source application "
+        "compensator expression used in §6.10 and §6.11 without consulting the source application "
         "notes.", CH)
 
     sub_h(story, "A.1", "Boost Power Stage — Plant and the RHP Zero", CH)
@@ -59,12 +59,12 @@ def _appendix_a(story):
     annotation(story, "INSIGHT",
         "For the two interleaved phases the effective inductance is L<sub>eq</sub> = L/2, so "
         "ω<sub>RHP</sub> is twice what a single phase would give. This is the quantitative reason the "
-        "voltage loop in Step 11 can be placed where it is: interleaving pushes the RHP-zero ceiling "
+        "voltage loop in §6.11 can be placed where it is: interleaving pushes the RHP-zero ceiling "
         "higher.", CH)
     body(story,
         "For the inner current loop the relevant plant is the duty-to-inductor-current transfer "
         "function G<sub>id</sub>(s); including the winding resistance r<sub>L</sub> damps the "
-        "resonance to the finite Q used in Step 10 (the lossless model would give Q → ∞). Its "
+        "resonance to the finite Q used in §6.10 (the lossless model would give Q → ∞). Its "
         "denominator is the same complex pair; its numerator places a low-frequency zero from the "
         "output network.", CH)
 
@@ -98,7 +98,7 @@ def _appendix_a(story):
     sub_h(story, "A.3", "Thesis-Level Derivation — Scope and Method", CH)
     body(story,
         "Sections A.3 through A.6 reproduce, in full, the thesis-level derivation of the inner current "
-        "loop and outer voltage loop on which Steps 10 and 11 and the summary derivations of A.1–A.2 "
+        "loop and outer voltage loop on which §6.10 and §6.11 and the summary derivations of A.1–A.2 "
         "are based. They are included so that the report is self-contained: every plant, compensator "
         "and loop-gain expression used in the main body can be reconstructed here from the averaged "
         "converter model, with no model terms discarded.", CH)
@@ -413,20 +413,20 @@ def _appendix_b(story):
     data_table(story, "B.1", "Control Bill of Materials",
         "External components that set the control behaviour.",
         ["Designator", "Value", "Type / Rating", "Tol.", "Function (step)"],
-        [["R_RI", "11.5 kΩ", "Thin film, 1/16 W", "1%", "Oscillator — 70 kHz (Step 4)"],
-         ["R_FB1", "3.63 MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (Step 5)"],
-         ["R_FB2", "23.2 kΩ", "Thin film", "1%", "Output sense bottom (Step 5)"],
-         ["R_CS", "15 mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (Step 6)"],
-         ["R_IAC", "6 / 12 MΩ", "HV, ≥ 400 V", "1%", "IAC line sense, FR/HV (Step 3)"],
-         ["R_RLPK", "12.1 kΩ", "Thin film", "1%", "Peak detector (Step 3)"],
-         ["R_IC", "120 kΩ", "Thin film", "1%", "Current comp gain (Step 10)"],
-         ["C_IC1", "1.3 nF", "C0G/NP0", "5%", "Current comp zero (Step 10)"],
-         ["C_IC2", "51 pF", "C0G/NP0", "5%", "Current comp pole (Step 10)"],
-         ["R2", "143 kΩ", "Thin film", "1%", "Voltage comp R2 (Step 11)"],
-         ["R3", "8.66 MΩ", "Thin film", "1%", "Voltage comp R3 (Step 11)"],
-         ["C1", "390 nF", "Film", "5%", "Voltage comp C1 (Step 11)"],
-         ["C2", "1.1 nF", "C0G/NP0", "5%", "Voltage comp C2 (Step 11)"],
-         ["C3", "24 nF", "Film/C0G", "5%", "Voltage comp C3 (Step 11)"]],
+        [["R_RI", "11.5 kΩ", "Thin film, 1/16 W", "1%", "Oscillator — 70 kHz (§6.4)"],
+         ["R_FB1", "3.63 MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (§6.5)"],
+         ["R_FB2", "23.2 kΩ", "Thin film", "1%", "Output sense bottom (§6.5)"],
+         ["R_CS", "15 mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (§6.6)"],
+         ["R_IAC", "6 / 12 MΩ", "HV, ≥ 400 V", "1%", "IAC line sense, FR/HV (§6.3)"],
+         ["R_RLPK", "12.1 kΩ", "Thin film", "1%", "Peak detector (§6.3)"],
+         ["R_IC", "120 kΩ", "Thin film", "1%", "Current comp gain (§6.10)"],
+         ["C_IC1", "1.3 nF", "C0G/NP0", "5%", "Current comp zero (§6.10)"],
+         ["C_IC2", "51 pF", "C0G/NP0", "5%", "Current comp pole (§6.10)"],
+         ["R2", "143 kΩ", "Thin film", "1%", "Voltage comp R2 (§6.11)"],
+         ["R3", "8.66 MΩ", "Thin film", "1%", "Voltage comp R3 (§6.11)"],
+         ["C1", "390 nF", "Film", "5%", "Voltage comp C1 (§6.11)"],
+         ["C2", "1.1 nF", "C0G/NP0", "5%", "Voltage comp C2 (§6.11)"],
+         ["C3", "24 nF", "Film/C0G", "5%", "Voltage comp C3 (§6.11)"]],
         col_widths=[CW*0.14, CW*0.13, CW*0.26, CW*0.09, CW*0.38], ch=CH)
     annotation(story, "PITFALL",
         "Use C0G/NP0 or film dielectrics for every compensator capacitor. Class-II ceramics (X7R and "
@@ -451,18 +451,18 @@ def _appendix_c(story):
     annotation(story, "INSIGHT",
         "ON THE BENCH — Apply 0→100% and 100→0% electronic-load steps at low and high line. Capture "
         "bus deviation and recovery time with an AC-coupled probe. Expect a worst-case dip near 7.3% "
-        "(28.9 V) recovering within ~150 ms (Step 12); confirm the response is monotonic, with no "
+        "(28.9 V) recovering within ~150 ms (§6.12); confirm the response is monotonic, with no "
         "ringing, consistent with the >80° phase margin.", CH)
     sub_h(story, "C.3", "Input-current THD and 120 Hz rejection", CH)
     annotation(story, "INSIGHT",
         "ON THE BENCH — Measure input-current THD with a precision power analyzer across line and "
-        "load. Expect the loop contribution to track the 120 Hz rejection of Step 13 (30 dB low line, "
-        "23.5 dB high line). Separately verify the bus 120 Hz ripple amplitude against the Step 13 "
+        "load. Expect the loop contribution to track the 120 Hz rejection of §6.13 (30 dB low line, "
+        "23.5 dB high line). Separately verify the bus 120 Hz ripple amplitude against the §6.13 "
         "prediction (2.6 V low line, 5.5 V high line).", CH)
     sub_h(story, "C.4", "Brown-in / brown-out and start-up", CH)
     annotation(story, "INSIGHT",
         "ON THE BENCH — Ramp the AC line up and down slowly and record the start and stop thresholds "
-        "(expect brown-in ≈ 86.7 Vac, brown-out ≈ 47.9 Vac, Step 9). Apply IEC 61000-4-11 and "
+        "(expect brown-in ≈ 86.7 Vac, brown-out ≈ 47.9 Vac, §6.9). Apply IEC 61000-4-11 and "
         "SEMI F47 voltage dips and confirm ride-through without nuisance shutdown.", CH)
     annotation(story, "NOTE",
         "Record all measurements against the predicted values in a sign-off table. A deviation beyond "
@@ -488,7 +488,7 @@ def _appendix_d(story):
     annotation(story, "INSIGHT",
         "For the reader new to the field, [5] (Erickson & Maksimovic) is the canonical text for the "
         "plant derivations in Appendix A, and [6] (Dixon) is the original and most readable treatment "
-        "of the average current-mode current loop in Step 10.", CH)
+        "of the average current-mode current loop in §6.10.", CH)
 
 
 # ════════════════════════════ Appendix E ════════════════════════════════════
@@ -497,7 +497,7 @@ def _appendix_e(story):
     body(story,
         "The working equations of the report on a single card, with the result each produces. Symbols "
         "are defined in the Nomenclature.", CH)
-    body(story, "<b>Current loop (Step 10)</b>", CH)
+    body(story, "<b>Current loop (§6.10)</b>", CH)
     data_table(story, "E.1", "Current Loop — Quick Reference", "",
         ["Quantity", "Expression / result"],
         [["RHP zero (per phase)", "f_RHP = R_LOAD · D'² / (2π L)"],
@@ -505,7 +505,7 @@ def _appendix_e(story):
          ["Compensator zero / pole", "f_z = 1/(2π R_IC C_IC1) = 1.02 kHz,  f_p = 1/(2π R_IC C_IC2) = 26 kHz"],
          ["Crossover / margin", "f_ci = 8.12 kHz,  PM = 62.8°"]],
         col_widths=[CW*0.32, CW*0.68], ch=CH)
-    body(story, "<b>Voltage loop (Step 11)</b>", CH)
+    body(story, "<b>Voltage loop (§6.11)</b>", CH)
     data_table(story, "E.2", "Voltage Loop — Quick Reference", "",
         ["Quantity", "Expression / result"],
         [["Loop gain", "T_v = (K_max·I_OUT/V_RAMP) · G_i,cl · G_vp · H_OTA"],

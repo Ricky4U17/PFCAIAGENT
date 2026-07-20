@@ -83,7 +83,7 @@ def build_step14(story, data: dict):
     d = data
     sweep = d["sweep"]
 
-    step_h(story, "14", "Loop Equation Accuracy and Compensator Optimization", CH)
+    step_h(story, "6.14", "Loop Equation Accuracy and Compensator Optimization", CH)
     annotation(story, "INSIGHT",
         "With the power stage frozen, the only remaining design freedom is the compensator pole/zero "
         "placement. Every performance axis — transient dip, 120 Hz rejection / THD, phase margin — "
@@ -91,7 +91,7 @@ def build_step14(story, data: dict):
         "that trade-off explicit and quantifies four operating points along it.", CH)
 
     # ── 14.1 (was 17.2) ───────────────────────────────────────────────────────
-    sub_h(story, "14.1", "Compensator Optimization — Transient vs 120 Hz Rejection / THD", CH)
+    sub_h(story, "6.14.1", "Compensator Optimization — Transient vs 120 Hz Rejection / THD", CH)
     _co = d.get("cout_uF"); _l = d.get("lphi_uH")
     _co_s = f"{float(_co):.0f} µF" if _co else "2200 µF"
     _l_s = f"{float(_l):.0f} µH" if _l else "235 µH"
@@ -108,7 +108,7 @@ def build_step14(story, data: dict):
                       f"{s['rej_lo']:.1f} / {s['rej_hi']:.1f} dB",
                       f"{s['dip_lo']:.1f} / {s['dip_hi']:.1f} V",
                       f"{s['trec_lo']:.0f} / {s['trec_hi']:.0f} ms"])
-    data_table(story, "14.1", "Crossover Trade-off — Four Designs",
+    data_table(story, "6.14.1", "Crossover Trade-off — Four Designs",
         "Each design is a full re-design at that crossover, recomputed from the model.",
         ["Design", "f_cv (HL)", "PM_v (LL / HL)", "120 Hz Rej (LL / HL)", "0→100% dip (LL / HL)",
          "Recovery (LL/HL)"],
@@ -123,7 +123,7 @@ def build_step14(story, data: dict):
         tag = "Baseline (17 Hz)" if fcv == 17.0 else f"{label.split(' ')[0]} ({ftxt})"
         rows2.append([tag, f"{s['r2s']/1e3:.0f} kΩ", f"{s['c1s']*1e9:.0f} nF",
                       f"{s['c3s']*1e9:.0f} nF", effect])
-    data_table(story, "14.2", "Compensator Values per Design",
+    data_table(story, "6.14.2", "Compensator Values per Design",
         "Only R2, C1 and C3 change between designs.",
         ["Design", "R2", "C1", "C3", "Effect"],
         rows2, col_widths=[CW*0.20, CW*0.13, CW*0.13, CW*0.13, CW*0.41], ch=CH)

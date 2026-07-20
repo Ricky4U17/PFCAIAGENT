@@ -100,7 +100,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         ["Peak-detector resistor", "R_RLPK", f"{c['r_rlpk']/1e3:.1f} kΩ", "Selected for V_LPK compliance"],
         ["VIR resistor — FR (low)", "R_VIR", f"{c['r_vir_fr']/1e3:.0f} kΩ", "V_VIR < 1.5 V → FR mode"],
         ["VIR resistor — HV (high)", "R_VIR", f"{c['r_vir_hv']/1e3:.0f} kΩ", "V_VIR > 3.5 V → HV mode"],
-        ["Selected K_max", "K_max", f"{c['kmax']} ({c['kmax']*100:.0f}%)", "Satisfies both R_CS methods (Step 6)"],
+        ["Selected K_max", "K_max", f"{c['kmax']} ({c['kmax']*100:.0f}%)", "Satisfies both R_CS methods (§6.6)"],
     ]}
 
     # ── Step 3.1 — RIAC selection + IAC check ──────────────────────────────────

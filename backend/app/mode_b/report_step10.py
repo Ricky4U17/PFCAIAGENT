@@ -118,7 +118,7 @@ def build_step10(story, data: dict):
     ti_ang = math.degrees(cmath.phase(b["ti_unc"]))
     wci = 2 * math.pi * fci
 
-    step_h(story, "10", "Inner Current Loop Design", CH)
+    step_h(story, "6.10", "Inner Current Loop Design", CH)
     annotation(story, "THEORY",
         "The inner loop closes around the duty-to-current plant G<sub>id</sub>(s). Its job is to make "
         "the inductor current track a rectified-sinusoid command faithfully out to several kHz, so it "
@@ -128,10 +128,10 @@ def build_step10(story, data: dict):
     annotation(story, "PITFALL",
         "Model the plant with the inductor resistance r<sub>L</sub> included. The lossless form gives "
         "an infinite-Q resonance that wildly overstates the peaking; r<sub>L</sub> damps the "
-        "resonance to a finite, realistic Q (see Step 14 for the side-by-side comparison).", CH)
+        "resonance to a finite, realistic Q (see §6.14 for the side-by-side comparison).", CH)
 
     # ── 10.1 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.1", "Control Architecture — The Two-Loop Structure", CH)
+    sub_h(story, "6.10.1", "Control Architecture — The Two-Loop Structure", CH)
     body(story,
         "The FAN9672 interleaved continuous-conduction-mode (CCM) PFC stage employs a cascaded "
         "two-loop control architecture. The inner current loop runs at high bandwidth (8 kHz "
@@ -146,18 +146,18 @@ def build_step10(story, data: dict):
         "loop. Third, cycle-by-cycle current limiting provides inherent inductor protection.", CH)
 
     # ── 10.2 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.2", "Full Current Loop Gain T_i(s)", CH)
+    sub_h(story, "6.10.2", "Full Current Loop Gain T_i(s)", CH)
     body(story,
         "The open-loop current-loop gain T<sub>i</sub>(s) is the product of four cascaded transfer "
         "functions. The boost plant relates duty cycle to inductor current:", CH)
     eq_box(story, [r"G_{id}(s)=\dfrac{V_{OUT}}{L_\phi}\cdot\dfrac{R_{LOAD}+2r_C}{R_{LOAD}+r_C}\cdot"
-                   r"\dfrac{s+\omega_z}{s^2+a_1 s+a_0}"], number="10.1", ch=CH)
+                   r"\dfrac{s+\omega_z}{s^2+a_1 s+a_0}"], number="6.10.1", ch=CH)
     body(story,
         "Multiplying the plant by the current-sense normalization, the anti-alias filter and the "
         "compensator gives the complete loop gain:", CH)
     eq_box(story, [r"T_i(s)=G_{id}(s)\cdot\dfrac{R_{CS}}{V_{RAMP}}\cdot H_{CS}(s)\cdot G_{mi}(s)"],
-           number="10.2", ch=CH)
-    data_table(story, "10.2", "Current-Loop Gain — Cascaded Blocks",
+           number="6.10.2", ch=CH)
+    data_table(story, "6.10.2", "Current-Loop Gain — Cascaded Blocks",
         "The four transfer functions whose product forms T_i(s).",
         ["Block", "Symbol", "Physical meaning and role"],
         [["Boost plant", "G_id(s)",
@@ -180,7 +180,7 @@ def build_step10(story, data: dict):
         col_widths=[CW*0.16, CW*0.16, CW*0.68], ch=CH)
 
     # ── 10.3 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.3", "Plant Transfer Function G_id(s) — Complete Form", CH)
+    sub_h(story, "6.10.3", "Plant Transfer Function G_id(s) — Complete Form", CH)
     body(story,
         "The boost small-signal plant, relating inductor current to the control input, follows from "
         "the state-space averaged model. Including the inductor series resistance r<sub>L</sub>, the "
@@ -209,7 +209,7 @@ def build_step10(story, data: dict):
         "therefore admissible even at 90 Vac, where f<sub>RHP</sub>/f<sub>ci</sub> = 0.81.", CH)
 
     # ── 10.4 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.4", "CS Filter and Ramp Normalization", CH)
+    sub_h(story, "6.10.4", "CS Filter and Ramp Normalization", CH)
     body(story, "The current-sense anti-alias filter places a first-order pole well above the "
         "crossover frequency:", CH)
     eq_box(story, [r"f_{RC}=\dfrac{1}{2\pi R_M C_M}=\dfrac{1}{2\pi\times2000\times470\times10^{-12}}"
@@ -222,7 +222,7 @@ def build_step10(story, data: dict):
                    % (_n(rcs, 3), _n(d["ramp_norm"], 3))], ch=CH)
 
     # ── 10.5 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.5", "Type-2 OTA Compensator G_mi(s)", CH)
+    sub_h(story, "6.10.5", "Type-2 OTA Compensator G_mi(s)", CH)
     body(story,
         "The compensator uses the integrating form Z<sub>IEA</sub>(s) = R<sub>IC</sub>·(1 + "
         "ω<sub>z</sub>/s)/(1 + s/ω<sub>p</sub>). The (1 + ω<sub>z</sub>/s) term is an integrator "
@@ -233,8 +233,8 @@ def build_step10(story, data: dict):
                    r"\dfrac{1+\dfrac{\omega_z}{s}}{1+\dfrac{s}{\omega_p}}"], ch=CH)
 
     # ── 10.6 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.6", "Design Specifications", CH)
-    data_table(story, "10.6", "Inner-Loop Design Specifications",
+    sub_h(story, "6.10.6", "Design Specifications", CH)
+    data_table(story, "6.10.6", "Inner-Loop Design Specifications",
         "Sourced from prior steps and the power-stage specification.",
         ["Parameter", "Symbol", "Value", "Source / notes"],
         [["Output voltage", "V_OUT", f"{vout:.1f} V", "Step 5 — feedback divider"],
@@ -254,7 +254,7 @@ def build_step10(story, data: dict):
         col_widths=[CW*0.30, CW*0.13, CW*0.17, CW*0.40], ch=CH)
 
     # ── 10.7 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.7", "Operating-Point Parameters — All 8 Conditions", CH)
+    sub_h(story, "6.10.7", "Operating-Point Parameters — All 8 Conditions", CH)
     body(story,
         "For each of the eight operating points the load resistance, duty cycle, natural frequency, "
         "quality factor and RHP-zero frequency are evaluated. These quantities fix the plant shape "
@@ -267,7 +267,7 @@ def build_step10(story, data: dict):
     op_rows = [[f"{o['vac']}", f"{o['pout']}", f"{o['vinpk']:.3f}", f"{o['D']:.5f}",
                 f"{o['rload']:.4f}", f"{o['f0']:.2f}", f"{o['q']:.3f}",
                 f"{o['frhp']/1e3:.3f}", f"{o['frhp']/fci:.2f}"] for o in rows]
-    data_table(story, "10.7", "Operating-Point Parameters — 8 Conditions",
+    data_table(story, "6.10.7", "Operating-Point Parameters — 8 Conditions",
         "Plant shape and RHP-zero across the universal-input range.",
         ["V_AC (V)", "P_OUT (W)", "V_IN,pk (V)", "D", "R_LOAD (Ω)", "F0 (Hz)", "Q",
          "f_RHP (kHz)", "f_RHP/f_ci"],
@@ -279,7 +279,7 @@ def build_step10(story, data: dict):
         "current-loop phase margin of 62.8° is preserved at every operating point.", CH)
 
     # ── 10.8 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.8", "Uncompensated Loop Gain and Why It Is Calculated", CH)
+    sub_h(story, "6.10.8", "Uncompensated Loop Gain and Why It Is Calculated", CH)
     body(story,
         "Before any compensator component is sized, the loop gain is evaluated at the 8 kHz target "
         "crossover with the compensator block G<sub>mi</sub>(s) omitted. The uncompensated gain is "
@@ -300,7 +300,7 @@ def build_step10(story, data: dict):
         "calculation.", CH)
 
     # ── 10.9 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "10.9", "Detailed Step-by-Step Calculation — 90 Vac / 1700 W", CH)
+    sub_h(story, "6.10.9", "Detailed Step-by-Step Calculation — 90 Vac / 1700 W", CH)
     body(story,
         "The full calculation is carried out for 90 Vac / 1700 W — the lowest input voltage, highest "
         "duty cycle and most demanding condition. Each quantity is shown with its formula, numerical "
@@ -365,14 +365,14 @@ def build_step10(story, data: dict):
                    % (gid_ang, h_ang, ti_ang)], ch=CH)
 
     # ── 10.10 ─────────────────────────────────────────────────────────────────
-    sub_h(story, "10.10", "Uncompensated T_i Summary — All 8 Operating Points", CH)
+    sub_h(story, "6.10.10", "Uncompensated T_i Summary — All 8 Operating Points", CH)
     sum_rows = []
     for o in rows:
         gm = abs(o["gid_ci"]); ga = math.degrees(cmath.phase(o["gid_ci"]))
         tm = abs(o["ti_unc"]); ta = math.degrees(cmath.phase(o["ti_unc"]))
         sum_rows.append([f"{o['vac']}", f"{o['pout']}", f"{o['rload']:.4f}", f"{o['D']:.5f}",
                          f"{gm:.4f}", f"{ga:.2f}", f"{tm:.5f}", f"{20*math.log10(tm):.4f}", f"{ta:.4f}"])
-    data_table(story, "10.10", "Uncompensated T_i — 8 Operating Points",
+    data_table(story, "6.10.10", "Uncompensated T_i — 8 Operating Points",
         "Uncompensated loop gain at 8 kHz is constant within ±0.01 dB.",
         ["V_AC (V)", "P_OUT (W)", "R_LOAD (Ω)", "D", "|G_id|", "∠G_id (°)", "|T_i,unc|",
          "T_i (dB)", "∠T_i (°)"],
@@ -385,9 +385,9 @@ def build_step10(story, data: dict):
         "therefore delivers a stable crossover across the entire universal-input range.", CH)
 
     # ── 10.11 ─────────────────────────────────────────────────────────────────
-    sub_h(story, "10.11", "Compensator Design — Type-2 OTA", CH)
-    sub_h(story, "10.11.1", "Compensator Specifications", CH)
-    data_table(story, "10.11.1", "Compensator Specifications", "",
+    sub_h(story, "6.10.11", "Compensator Design — Type-2 OTA", CH)
+    sub_h(story, "6.10.11.1", "Compensator Specifications", CH)
+    data_table(story, "6.10.11.1", "Compensator Specifications", "",
         ["Parameter", "Value", "Rationale"],
         [["OTA transconductance G_MI", "88 µS", "Fixed internal FAN9672 parameter — cannot be changed"],
          ["Target crossover f_ci", "8 kHz", "Well below the 70 kHz switching frequency — a separation "
@@ -398,47 +398,47 @@ def build_step10(story, data: dict):
           "without degrading PM"],
          ["Target phase margin", "≥45°", "Industry-standard minimum; this design achieves 62.8°"]],
         col_widths=[CW*0.28, CW*0.12, CW*0.60], ch=CH)
-    sub_h(story, "10.11.2", "Compensator Form", CH)
+    sub_h(story, "6.10.11.2", "Compensator Form", CH)
     body(story, "The OTA output current is I = G<sub>MI</sub> × Z<sub>IEA</sub>(s) × V<sub>in</sub>. "
         "The impedance uses the integrating form to provide high DC gain:", CH)
     eq_box(story, [r"G_{mi}(s)=G_{MI}\cdot Z_{IEA}(s)=G_{MI}\cdot R_{IC}\cdot"
                    r"\dfrac{1+\dfrac{\omega_z}{s}}{1+\dfrac{s}{\omega_p}}"], ch=CH)
-    sub_h(story, "10.11.3", "Unity-Gain Condition at Crossover", CH)
+    sub_h(story, "6.10.11.3", "Unity-Gain Condition at Crossover", CH)
     body(story, "At the crossover frequency ω<sub>ci</sub> the compensated loop gain must equal "
         "unity:", CH)
     eq_box(story, [r"T_{i,unc}\cdot G_{MI}\cdot R_{IC}\cdot\kappa=1\qquad\mathrm{at}\ f_{ci}=8\ \mathrm{kHz}"], ch=CH)
     body(story, "The shape factor κ captures the compensator magnitude relative to R<sub>IC</sub> at "
         "crossover:", CH)
     eq_box(story, [r"\kappa=\dfrac{\sqrt{1+(f_z/f_{ci})^2}}{\sqrt{1+(f_{ci}/f_p)^2}}"], ch=CH)
-    sub_h(story, "10.11.4", "Shape Magnitude κ at 8 kHz", CH)
+    sub_h(story, "6.10.11.4", "Shape Magnitude κ at 8 kHz", CH)
     num_k = math.sqrt(1 + (d["fz"]/fci)**2); den_k = math.sqrt(1 + (fci/d["fp"])**2)
     eq_box(story, [r"\mathrm{numerator}=\sqrt{1+(f_z/f_{ci})^2}=\sqrt{1+(1000/8000)^2}=%.6f" % num_k,
                    r"\mathrm{denominator}=\sqrt{1+(f_{ci}/f_p)^2}=\sqrt{1+(8000/26000)^2}=%.6f" % den_k,
                    r"\kappa=\dfrac{%.6f}{%.6f}=%.6f" % (num_k, den_k, d["kappa"])], ch=CH)
-    sub_h(story, "10.11.5", "Calculate R_IC", CH)
+    sub_h(story, "6.10.11.5", "Calculate R_IC", CH)
     body(story, "Solving the unity-gain condition for R<sub>IC</sub>, using |T<sub>i,unc</sub>| = "
         "%.5f from the 90 Vac calculation:" % ti_mag, CH)
     eq_box(story, [r"R_{IC}=\dfrac{1}{T_{i,unc}\cdot G_{MI}\cdot\kappa}"
                    r"=\dfrac{1}{%.6f\cdot88\times10^{-6}\cdot%.6f}" % (ti_mag, d["kappa"]),
                    r"R_{IC}=%.1f\ \mathrm{k\Omega}\ \rightarrow\ %.0f\ \mathrm{k\Omega\ (standard)}"
                    % (d["ric_calc"]/1e3, d["ric"]/1e3)], ch=CH)
-    sub_h(story, "10.11.6", "Calculate C_IC1  (Sets f_z = 1 kHz)", CH)
+    sub_h(story, "6.10.11.6", "Calculate C_IC1  (Sets f_z = 1 kHz)", CH)
     eq_box(story, [r"C_{IC1}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_z}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot1000}"
                    % (d["ric_calc"]/1e3),
                    r"C_{IC1}=%.4f\ \mathrm{nF}\ \rightarrow\ %.1f\ \mathrm{nF\ (standard)}"
                    % (d["cic1_calc"]*1e9, d["cic1"]*1e9)], ch=CH)
-    sub_h(story, "10.11.7", "Calculate C_IC2  (Sets f_p = 26 kHz)", CH)
+    sub_h(story, "6.10.11.7", "Calculate C_IC2  (Sets f_p = 26 kHz)", CH)
     eq_box(story, [r"C_{IC2}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_p}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot26000}"
                    % (d["ric_calc"]/1e3),
                    r"C_{IC2}=%.2f\ \mathrm{pF}\ \rightarrow\ %.0f\ \mathrm{pF\ (standard)}"
                    % (d["cic2_calc"]*1e12, d["cic2"]*1e12)], ch=CH)
-    sub_h(story, "10.11.8", "Verify Pole/Zero Frequencies with Standard Values", CH)
+    sub_h(story, "6.10.11.8", "Verify Pole/Zero Frequencies with Standard Values", CH)
     eq_box(story, [r"f_z=\dfrac{1}{2\pi\cdot%.0f\,\mathrm{k\Omega}\cdot%.1f\,\mathrm{nF}}=%.1f\ \mathrm{Hz}"
                    % (d["ric"]/1e3, d["cic1"]*1e9, d["fz_act"]),
                    r"f_p=\dfrac{1}{2\pi\cdot%.0f\,\mathrm{k\Omega}\cdot%.0f\,\mathrm{pF}}=%.3f\ \mathrm{kHz}"
                    % (d["ric"]/1e3, d["cic2"]*1e12, d["fp_act"]/1e3)], ch=CH)
-    sub_h(story, "10.11.9", "Component Summary", CH)
-    data_table(story, "10.11.9", "Inner-Loop Compensator Components",
+    sub_h(story, "6.10.11.9", "Component Summary", CH)
+    data_table(story, "6.10.11.9", "Inner-Loop Compensator Components",
         "Calculated values, standard E24 selections and realised frequencies.",
         ["Component", "Symbol", "Calculated", "Standard", "Actual frequency", "Function"],
         [["OTA gain R", "R_IC", f"{d['ric_calc']/1e3:.1f} kΩ", f"{d['ric']/1e3:.0f} kΩ", "—", "Sets loop gain at f_ci"],
@@ -458,7 +458,7 @@ def build_step10(story, data: dict):
                                      d["fp_act"]/1e3, d["rm"]/1e3, d["cm"]*1e12), CH)
 
     # ── 10.12 ─────────────────────────────────────────────────────────────────
-    sub_h(story, "10.12", "Bode Plots", CH)
+    sub_h(story, "6.10.12", "Bode Plots", CH)
     body(story, "<b>Figure 10A — Type-II Current-Loop Compensator Schematic</b>", CH)
     body(story,
         "The current error amplifier (transconductance G<sub>MI</sub> = 88 µS) drives the "
@@ -493,7 +493,7 @@ def build_step10(story, data: dict):
         "−3 dB bandwidth ≈ 12 kHz.</i>", CH)
 
     # ── 10.13 ─────────────────────────────────────────────────────────────────
-    sub_h(story, "10.13", "Final Summary Table — All 8 Operating Points", CH)
+    sub_h(story, "6.10.13", "Final Summary Table — All 8 Operating Points", CH)
     body(story, "The table below consolidates the key parameters and stability metrics for the inner "
         "current loop. The phase-margin column confirms every point exceeds the 45° minimum "
         "requirement.", CH)
@@ -503,7 +503,7 @@ def build_step10(story, data: dict):
         fin_rows.append([f"{o['vac']}", f"{o['pout']}", f"{o['D']:.5f}", f"{o['f0']:.2f}",
                          f"{o['q']:.3f}", f"{o['frhp']/1e3:.3f}", f"{20*math.log10(tm):.3f}",
                          f"{ta:.2f}", f"{o['fco']/1e3:.2f}", f"{o['pm']:.1f}"])
-    data_table(story, "10.13", "Inner Current Loop — Final Summary",
+    data_table(story, "6.10.13", "Inner Current Loop — Final Summary",
         "Key parameters and stability metrics; PM exceeds the 45° minimum at every point.",
         ["V_AC", "P_OUT", "D", "F0 (Hz)", "Q", "f_RHP (kHz)", "T_i,unc (dB)", "∠T_i,unc (°)",
          "f_ci (kHz)", "PM (°)"],

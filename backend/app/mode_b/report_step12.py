@@ -64,19 +64,19 @@ def build_step12(story, data: dict):
     ifl_lo = d["ifull_lo"]; ifl_hi = d["iful_hi"]
     wh = d["worst_hl"]; wl = d["worst_ll"]
 
-    step_h(story, "12", "Step Load Transient Response", CH)
+    step_h(story, "6.12", "Step Load Transient Response", CH)
     annotation(story, "CONCEPT",
         "A load step is rejected through the closed-loop output impedance Z<sub>cl</sub>(s) = "
         "Z<sub>open</sub>(s)/(1+T<sub>v</sub>(s)). Because the compensator integrates, "
         "Z<sub>cl</sub> is zero at DC — so the bus always recovers fully; the only questions are how "
         "far it dips and how long it takes.", CH)
     annotation(story, "INSIGHT",
-        "The transient dip is the unavoidable price of the slow voltage loop chosen in Step 11. With "
+        "The transient dip is the unavoidable price of the slow voltage loop chosen in §6.11. With "
         "the power components fixed, the dip can only be traded against 120 Hz rejection (THD) — which "
-        "is exactly what Step 13 quantifies.", CH)
+        "is exactly what §6.13 quantifies.", CH)
 
     # ── 12.1 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "12.1", "Method — Closed-Loop Output Impedance", CH)
+    sub_h(story, "6.12.1", "Method — Closed-Loop Output Impedance", CH)
     body(story,
         "A load-current step is rejected by the closed voltage loop. The output-voltage deviation is "
         "the load step acting through the closed-loop output impedance, which is the open-loop output "
@@ -84,7 +84,7 @@ def build_step12(story, data: dict):
         "contains an integrator, the closed-loop output impedance is zero at DC, so the deviation "
         "always recovers fully to the regulation point.", CH)
     eq_box(story, [r"\Delta V_{OUT}(s)=-\Delta I_{LOAD}(s)\times\dfrac{Z_{open}(s)}{1+T_v(s)}"],
-           number="12.1", ch=CH)
+           number="6.12.1", ch=CH)
     body(story,
         "The open-loop output impedance is set by the bus capacitor working into the boost "
         "small-signal load term (the same denominator as the voltage plant); the ESR adds a small "
@@ -96,34 +96,34 @@ def build_step12(story, data: dict):
         "recovers; recovery time is measured to the ±1%% band (±%.2f V about the %.1f V bus). The peak "
         "scales linearly with step size, and at this small-signal level step-up and step-down are "
         "symmetric." % (d["band"], vout), CH)
-    data_table(story, "12.1", "Transient Method Parameters",
+    data_table(story, "6.12.1", "Transient Method Parameters",
         "Inputs to the closed-loop output-impedance response.",
         ["Quantity", "Value", "Note"],
         [["Bus capacitor  C_O", f"{src['co']*1e6:.0f} µF", "Fixed (power stage)"],
          ["Recovery band", f"±1%  =  ±{d['band']:.2f} V", f"About {vout:.1f} V bus"],
-         ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "Step 11 design"],
+         ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "§6.11 design"],
          ["Full-load current  I_full = P_OUT/V_OUT",
           f"{ifl_lo:.3f} A (1700 W) / {ifl_hi:.3f} A (3600 W)", "Step magnitude reference"]],
         col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
 
     # ── 12.2 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "12.2", "Step Magnitudes", CH)
+    sub_h(story, "6.12.2", "Step Magnitudes", CH)
     body(story,
         "Six load transitions are evaluated — three load-increase (dip) and three load-decrease "
         "(overshoot) — at both line ranges. The current step ΔI for each transition:", CH)
-    data_table(story, "12.2", "Load-Step Magnitudes",
+    data_table(story, "6.12.2", "Load-Step Magnitudes",
         "Current step ΔI per transition and line range.",
         ["Load transition", "ΔI  (Low line, 1700 W)", "ΔI  (High line, 3600 W)"],
         [[r["label"], f"{r['di_lo']:+.3f} A", f"{r['di_hi']:+.3f} A"] for r in d["rows"]],
         col_widths=[CW*0.40, CW*0.30, CW*0.30], ch=CH)
 
     # ── 12.3 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "12.3", "Results — Peak Deviation and Recovery Time", CH)
+    sub_h(story, "6.12.3", "Results — Peak Deviation and Recovery Time", CH)
     body(story,
         "Peak deviation and recovery time to the ±1% band, computed for our design. Values are "
         "identical across the four voltages within each line range (the load resistance and loop "
         "shape depend on power, not on line voltage):", CH)
-    data_table(story, "12.3", "Transient Results — Peak Deviation and Recovery",
+    data_table(story, "6.12.3", "Transient Results — Peak Deviation and Recovery",
         "Peak ΔVout and recovery time to the ±1% band.",
         ["Load transition", "LL ΔV (V)", "LL %", "LL t_rec", "HL ΔV (V)", "HL %", "HL t_rec"],
         [[r["label"], f"{r['dv_lo']:+.1f}", f"{r['pct_lo']:+.1f}%", f"{r['trec_lo']*1e3:.0f} ms",
@@ -134,7 +134,7 @@ def build_step12(story, data: dict):
         "recovering in %.0f ms. This is expected for a PFC whose voltage loop is intentionally slow "
         "(17 Hz) to reject the 120 Hz bus ripple. If the application requires a smaller dip, the bus "
         "capacitor must be increased or the loop bandwidth raised — the latter at the cost of 120 Hz "
-        "rejection / THD, as quantified in Step 13."
+        "rejection / THD, as quantified in §6.13."
         % (abs(wh["dv_hi"]), abs(wh["pct_hi"]), wh["trec_hi"]*1e3), CH)
 
     # Figure 5
@@ -165,7 +165,7 @@ def make_pdf(path: str, inp: dict | None = None):
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 12 (Step Load Transient, full detail)",
         "Closed-loop output-impedance step response — peak bus dip and recovery time for six load "
-        "transitions across both line ranges, computed from the Step 11 voltage loop.",
+        "transitions across both line ranges, computed from the §6.11 voltage loop.",
         ["12.1 method (closed-loop output impedance)  ·  12.2 step magnitudes",
          "12.3 results (peak deviation + recovery)  ·  Figure 5 transient waveforms"])
     build_step12(story, data)
