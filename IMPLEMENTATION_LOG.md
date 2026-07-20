@@ -4452,3 +4452,40 @@ by this design's own §5.3.1 thermal_table (v_bus = Vout − ½ΔVpp·sin2ωt fr
 figure and table agree by construction. Inserted at the end of the §5.3 `if thermal:` block.
 Verified: figure helper renders v + i for a 9-row synthetic table; empty rows → None; all four files
 syntax-clean; app.main imports; both servers 200. Commit e3024f7.
+
+## C99 — 2026-07-20 — Chapter 6 renumbered to the 6.x scheme (was "Step 1..14") + Ch6 hardcode audit
+
+Point 2 of the report-notes batch. Ch6 (delivered via build_control_report = report_steps1_8.build_story:
+Steps 1-8 + as-built L + Steps 9-14 + Appendices A-E) was internally numbered "Step 1..14 / N.x",
+unlike Chapters 1-5's chapter.section scheme — so it appeared to "start at 1 not 6.1".
+
+Renumbering (headings + tables + equations) across all 8 files, done with a scoped transform script
+(scratchpad/renumber_ch6.py, dry-run reviewed then applied):
+- Step N → section 6.N (1:1 for all 14 — lowest cross-ref risk): 6.1..6.8 in report_steps1_8,
+  6.9..6.14 in report_step9..14. Sub-sections/tables N.x → 6.N.x (nested 10.11.1 → 6.10.11.1 etc.).
+  One numbered eq (step11 number="11.6") also caught.
+- As-built inductance section ("1.b" / table "6.1b") → 6.8.7 (renders after 6.8.6, before 6.9).
+- Appendices kept lettered (A-E / A.1 — conventional, not "starting at 1").
+- TRANSFORM BUG caught + fixed: the startswith("6.") idempotency guard skipped Step 6's OWN
+  "6.1..6.5" subsections, which would have collided with sections 6.1..6.5 → fixed to 6.6.1..6.6.5
+  (scratchpad/fix_step6_labels.py).
+- Prose cross-refs "Step N[.x]" / "§N.x" → "§6.N[.x]" in body text + table cells (scratchpad/
+  fix_xrefs.py, guarded + dry-run reviewed): worked-step labels ("Step 1 — Numerator") preserved
+  (negative lookahead on em-dash); external reference-doc refs (§17.x in Step 14) preserved (N≤14
+  guard); docstrings/comments untouched (rendered-line filter). report_steps1_8 prose refs done by
+  hand; one compute table cell in step16_steps1_8 "(Step 6)" → "(§6.6)".
+
+Ch6 hardcode audit (the "§6.4/6.5 use 15 not selected R_CS" thread + §8.2 R_LS + §8.4):
+- R_CS "15 mΩ"/"0.015" literals across §6.6.3/6.6.4/6.6.5 prose+eqs and §6.7 B/C-ratio +
+  verdict → selected rcs_sel (new _rms display helper in _build_step6; _build_step7 already had s6).
+- §6.8.2 R_LS eq "235 µH"/"15 mΩ" → p[lphi_uH]/rcs_sel; R_LS/R_GC decision values (66.5/38.3 kΩ,
+  9.972/9.664 kHz) and the §6.8.1 divider substitution (3.63 MΩ/23.2 kΩ) → computed s8/s5 values
+  (_build_step8 now unpacks p,c,s5,s6). §6.8.4 ILIMIT already used s8 vars.
+- Verified: compute reproduces reference (r_ls 66.5, r_gc 38.3 kΩ) and tracks L/rcs (L300/rcs12 →
+  r_ls 105 kΩ, r_gc unchanged — correct, R_GC depends only on the divider).
+
+Verified: all 8 files + step16_steps1_8 syntax-clean; app.main imports; Ch6 builds 3.88 MB; rendered
+top-level sections 6.1..6.14 in order (no "Step N" labels, no gaps, 86 sub-headings 6.x); no bare
+Step-N cross-refs remain in rendered text; external §17 refs not rendered. Commit 1b411a8.
+DEFERRED: appendix static BOM component values (15 mΩ / 0.015 etc.) — build_appendices(story) takes
+no design data, so making them dynamic is a separate enhancement (thread design into the appendix).
