@@ -2057,6 +2057,13 @@ def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "fp1": js.get("vfp1_Hz"), "fp2": js.get("vfp2_Hz"), "gmv": js.get("gmv_S"),
         "r_m": js.get("rf"), "c_m": js.get("cf"), "rfb1_unit": js.get("r1fb"),
     }
+    # The GUI carries the crossovers inside js_design_state, but step16_params may also hold them at
+    # top level (programmatic callers / the regression harness that don't embed a js_design_state).
+    # Fall back to the top-level values so the combined report honours the designer's f_ci / f_cv
+    # (and the §6.14 sweep pivots with f_cv) instead of defaulting to f_sw/8 and 17 Hz. js wins.
+    for _k, _spk in (("fci", "fci_Hz"), ("fcv", "fcv_Hz")):
+        if _num(jsmap.get(_k)) is None and _num(sp.get(_spk)) is not None:
+            jsmap[_k] = sp.get(_spk)
     for k, v in jsmap.items():
         n = _num(v)
         if n is not None:

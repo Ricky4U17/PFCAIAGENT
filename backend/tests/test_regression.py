@@ -396,6 +396,16 @@ class TestCombinedReport:
         assert "Field engine agrees with Step-7" in t, "§4.8 agreement-based cross-check verdict missing"
         assert "Control Scheme" in t, "Chapter 6 (Control Scheme) missing"
 
+    def test_control_chapter_pivots_with_fcv(self):
+        """Ch6 crossover labels + the §6.14 optimization sweep track the designer's f_cv through the
+        COMBINED path (regression for the _control_inputs_from_step16 top-level fcv_Hz fallback).
+        Builds a second report at f_cv = 22 Hz."""
+        import matplotlib; matplotlib.use('Agg')
+        from verify_combined_report import build_combined
+        _pdf, _pages, text, _meta = build_combined(22.0)
+        assert "Baseline (22 Hz)" in text, "§6.14 baseline did not pivot to f_cv = 22 Hz"
+        assert "Baseline (17 Hz)" not in text, "stale 17 Hz baseline still present at f_cv = 22 Hz"
+
 
 # ── Step registry integrity ────────────────────────────────────────────────
 

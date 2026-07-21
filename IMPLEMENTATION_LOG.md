@@ -4560,3 +4560,19 @@ NOTE (out of scope, flagged): step16_params.fcv_Hz is NOT forwarded by _control_
 so the §6.14 f_cv pivot only takes effect in the standalone control report, not the combined path
 (combined always shows Baseline 17 Hz) — a separate plumbing gap, no test asserts the combined pivot.
 Commit <pending>.
+
+## C103 — 2026-07-20 — fcv plumbing fix: combined report honours designer's crossover
+
+Resolves the C102 gap. _control_inputs_from_step16 (main.py) mapped f_ci/f_cv ONLY from
+js_design_state (js.get fci_Hz/fcv_Hz); step16_params top-level fci_Hz/fcv_Hz were ignored, so a
+programmatic caller / the regression harness that sets them at top level (no embedded js_design_state)
+got the engine defaults (f_sw/8, 17 Hz) and the §6.14 sweep never pivoted in the combined path.
+
+Fix: after building jsmap, fall back to sp["fci_Hz"]/sp["fcv_Hz"] when js does not supply them
+(js still wins). GUI behaviour is unchanged — the GUI carries crossovers inside js_design_state and
+its top-level step16_params has no fci_Hz/fcv_Hz — but step16_params is now self-sufficient: a caller
+can pivot the combined report by setting fcv_Hz alone.
+
+Verified: combined report fcv=17 → Baseline 17/A 12/B 20/C 25 (reference); fcv=22 → Baseline 22/A 16/
+B 26/C 32 (pivoted); both 178 pp. Added TestCombinedReport.test_control_chapter_pivots_with_fcv
+(2nd build at 22 Hz asserts "Baseline (22 Hz)" present, "Baseline (17 Hz)" absent). Commit <pending>.
