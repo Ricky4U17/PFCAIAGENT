@@ -76,9 +76,9 @@ def build_step12(story, data: dict):
         "Z<sub>cl</sub> is zero at DC — so the bus always recovers fully; the only questions are how "
         "far it dips and how long it takes.", CH)
     annotation(story, "INSIGHT",
-        "The transient dip is the unavoidable price of the slow voltage loop chosen in §6.11. With "
+        "The transient dip is the unavoidable price of the slow voltage loop chosen in Section 6.11. With "
         "the power components fixed, the dip can only be traded against 120 Hz rejection (THD) — which "
-        "is exactly what §6.13 quantifies.", CH)
+        "is exactly what Section 6.13 quantifies.", CH)
 
     # ── 12.1 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.12.1", "Method — Closed-Loop Output Impedance", CH)
@@ -106,7 +106,7 @@ def build_step12(story, data: dict):
         ["Quantity", "Value", "Note"],
         [["Bus capacitor  C_O", f"{src['co']*1e6:.0f} µF", "Fixed (power stage)"],
          ["Recovery band", f"±1%  =  ±{d['band']:.2f} V", f"About {vout:.1f} V bus"],
-         ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "§6.11 design"],
+         ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "Section 6.11 design"],
          ["Full-load current  I_full = P_OUT/V_OUT",
           f"{ifl_lo:.3f} A ({_plo} W) / {ifl_hi:.3f} A ({_phi} W)", "Step magnitude reference"]],
         col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
@@ -139,7 +139,7 @@ def build_step12(story, data: dict):
         "recovering in %.0f ms. This is expected for a PFC whose voltage loop is intentionally slow "
         "(%.0f Hz) to reject the 120 Hz bus ripple. If the application requires a smaller dip, the bus "
         "capacitor must be increased or the loop bandwidth raised — the latter at the cost of 120 Hz "
-        "rejection / THD, as quantified in §6.13."
+        "rejection / THD, as quantified in Section 6.13."
         % (abs(wh["dv_hi"]), abs(wh["pct_hi"]), wh["trec_hi"]*1e3, fcv_hi), CH)
 
     # Figure 5
@@ -171,7 +171,7 @@ def make_pdf(path: str, inp: dict | None = None):
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 12 (Step Load Transient, full detail)",
         "Closed-loop output-impedance step response — peak bus dip and recovery time for six load "
-        "transitions across both line ranges, computed from the §6.11 voltage loop.",
+        "transitions across both line ranges, computed from the Section 6.11 voltage loop.",
         ["12.1 method (closed-loop output impedance)  ·  12.2 step magnitudes",
          "12.3 results (peak deviation + recovery)  ·  Figure 5 transient waveforms"])
     build_step12(story, data)

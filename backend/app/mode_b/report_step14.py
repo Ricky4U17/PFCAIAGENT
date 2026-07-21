@@ -3,8 +3,8 @@ app/mode_b/report_step14.py — Step 14 (Compensator Optimization) report.
 
 Reproduces the reference document's "Step 17 — Loop Equation Accuracy and
 Compensator Optimization", renumbered as our report Step 14. Per the design
-engineer's instruction the PITFALL and §17.1 (and its Figure 7) are omitted; only
-§17.2 is reproduced, placed after the INSIGHT as §14.1.
+engineer's instruction the PITFALL and Section 17.1 (and its Figure 7) are omitted; only
+Section 17.2 is reproduced, placed after the INSIGHT as Section 14.1.
 
 The four trade-off designs are computed by re-designing the compensator at each
 candidate crossover (the Step 13 optimization sweep) — not transcribed. Figure 8
@@ -22,7 +22,7 @@ CH = 6
 # Per-position design descriptors, ordered ascending by crossover. The optimization sweep is
 # always [slower-than-baseline, baseline, faster, fastest] around the designer's f_cv (index 1 =
 # baseline); labels/colours track that ordering rather than fixed 12/17/20/25 Hz values, so the
-# chapter stays consistent with the designer's actual voltage-loop crossover (§6.11).
+# chapter stays consistent with the designer's actual voltage-loop crossover (Section 6.11).
 _DESIGN_META = [
     ("A", "A — THD / rejection focus", "Best THD, worst transient",     "#1456b8"),
     ("Baseline", "Baseline",           "Reference — balanced",          "#111"),
@@ -182,7 +182,7 @@ def build_step14(story, data: dict):
         "a %.0f V worst-case dip. If THD is the priority, the %s design adds ~%.0f dB of 120 Hz "
         "rejection at the cost of a larger, slower transient. If transient response is the priority, "
         "the %s design cuts the worst-case dip by ~%.0f%% while keeping rejection ≥ %.0f dB. "
-        "The %s design %s. The current loop is left unchanged (as designed in §6.10); its phase "
+        "The %s design %s. The current loop is left unchanged (as designed in Section 6.10); its phase "
         "margin can be raised slightly by increasing the compensator pole f<sub>p</sub> if more "
         "current-loop margin is desired."
         % (base_ftxt, sBase["rej_lo"], sBase["rej_hi"], abs(sBase["dip_hi"]),

@@ -75,7 +75,7 @@ def build_steps_1_8(story, data: dict):
         data["step1"]["rows"], col_widths=[CW*0.34, CW*0.16, CW*0.18, CW*0.18, CW*0.14], ch=C6)
     annotation(story, "INSIGHT",
         "Per-phase current figures are taken from the power-stage design document and are used in "
-        "§6.6.5 to verify R<sub>CS</sub> power-dissipation rating.", C6)
+        "Section 6.6.5 to verify R<sub>CS</sub> power-dissipation rating.", C6)
 
     # ═══════════════ Step 2 ═══════════════
     step_h(story, "6.2", "Set the Base", C6)
@@ -93,9 +93,9 @@ def build_steps_1_8(story, data: dict):
         ["Parameter", "Symbol", "Value", "Source and Constraint"],
         data["step2"]["rows"], col_widths=[CW*0.34, CW*0.14, CW*0.20, CW*0.32], ch=C6)
     annotation(story, "INSIGHT",
-        "K<sub>max</sub> = 1.49 is selected after evaluating §6.6.1 and §6.6.2 simultaneously. It "
+        "K<sub>max</sub> = 1.49 is selected after evaluating Section 6.6.1 and Section 6.6.2 simultaneously. It "
         "places the calculated R<sub>CS</sub> inside the overlap band of both the AN4165 and "
-        "AND9925 methods, verified in §6.6.3.", C6)
+        "AND9925 methods, verified in Section 6.6.3.", C6)
 
     # ═══════════════ Step 3 ═══════════════
     step_h(story, "6.3", "Gain Modulator and IAC Check", C6)
@@ -477,8 +477,8 @@ def _build_step7(story, data):
     v, vh = data["step6"]["v64_ll"], data["step6"]["v64_hl"]
     body(story, "For Paths B and C, V<sub>EA,eff</sub> must be the value actually implied by the "
                 "selected R<sub>CS</sub> — not the base V<sub>EA,max</sub> = 5.6 V from "
-                "§6.2. The selected R<sub>CS</sub> was chosen from the AND9925 table to "
-                "give V<sub>EA,max</sub> in the 4.0 V to 4.25 V region (§6.4). The correct "
+                "Section 6.2. The selected R<sub>CS</sub> was chosen from the AND9925 table to "
+                "give V<sub>EA,max</sub> in the 4.0 V to 4.25 V region (Section 6.4). The correct "
                 "V<sub>EA,eff</sub> is therefore back-calculated as:", C6)
     eq_box(story, [r"V_{EA,eff}=\dfrac{R_{CS}\times8\times K_{RLPK}^2\times R_{RLPK}^2\times(P_{max}/N_{ch})}"
                    r"{K_{RM}\times R_{IAC}}"], ch=C6)
@@ -558,7 +558,7 @@ def _build_step7(story, data):
         "within the 3.8 V limit.", C6)
     body(story, "<b>6.</b> Implied V<sub>EA,max</sub> = 4.36 V (LL) and 4.58 V (HL) both fall "
         "squarely inside the AND9925-D preferred 4 V to 5 V operating window, confirming adequate "
-        "VEA headroom and consistent with the selection rationale in §6.6.", C6)
+        "VEA headroom and consistent with the selection rationale in Section 6.6.", C6)
     body(story, "The design proceeds to voltage-loop compensator design using GMOD<sub>C</sub> as "
         "the averaged loop gain coefficient: GMOD<sub>C</sub> = %.4f A/V (low line) and %.4f A/V "
         "(high line)." % (s7["gC_ll"], s7["gC_hl"]), C6)
@@ -588,7 +588,7 @@ def _build_step8(story, data):
     s8, p, c, s5, s6 = data["step8"], data["inputs"], data["const"], data["step5"], data["step6"]
     step_h(story, "6.8", "GC, LS, Soft-Start and Current Limits (AN4165-D)", C6)
     body(story, "This step closes the GC / LS / soft-start / current-limit components with explicit "
-                "AN4165-D procedures. The divider ratio from §6.5.1 and R<sub>RI</sub> from §6.4 "
+                "AN4165-D procedures. The divider ratio from Section 6.5.1 and R<sub>RI</sub> from Section 6.4 "
                 "feed directly into these equations — the step ordering is deliberate.", C6)
     sub_h(story, "6.8.1", "R_GC — Gain Control (AN4165-D Eq. 40)", C6)
     annotation(story, "CONCEPT",
@@ -614,7 +614,7 @@ def _build_step8(story, data):
                 % (s8["r_ls_sel"]/1e3, s8["c_ls"]*1e12, s8["f_ls"]/1e3), C6)
     annotation(story, "PITFALL",
         "Eq. 39 uses the per-phase inductance and the selected R<sub>CS</sub> — changing the shunt "
-        "in §6.6 moves R<sub>LS</sub> proportionally. Update them together.", C6)
+        "in Section 6.6 moves R<sub>LS</sub> proportionally. Update them together.", C6)
     sub_h(story, "6.8.3", "Soft Start — C_SS (AN4165-D Eq. 64)", C6)
     eq_box(story, [r"C_{SS}=\dfrac{I_{SS}\,t_{SS}}{V_{SS}}=\dfrac{20\,\mu A\times100\,\mathrm{ms}}{5\,\mathrm{V}}=%.0f\ \mathrm{nF}"
                    % (s8["c_ss"]*1e9)], ch=C6)
@@ -624,27 +624,50 @@ def _build_step8(story, data):
         "The ILIMIT pin sources a current mirrored from R<sub>RI</sub>; the pin voltage (÷4 "
         "internally) clamps the maximum current command, placed at a chosen ratio above the "
         "worst-case crest command.", C6)
-    body(story, "The crest current command is evaluated at <b>both</b> corners (90 Vac low line and "
-                "180 Vac high line); the larger drives the clamp sizing.", C6)
-    eq_box(story, [r"I_{ILIMIT}=\dfrac{1.2\times1.0208}{R_{RI}}=%.2f\ \mu A" % (s8["i_ilimit"]*1e6),
-                   r"\mathrm{crest}=\dfrac{\sqrt{2}\,P}{\eta\,N_{CH}\,V_{AC,min}}:\quad"
-                   r"\mathrm{LL}\,(90\,\mathrm{V})=%.2f\ \mathrm{A},\ \ \mathrm{HL}\,(180\,\mathrm{V})=%.2f\ \mathrm{A}"
-                   % (s8["crest_ll"], s8["crest_hl"]),
-                   r"\mathrm{worst}=%.2f\ \mathrm{A}\ (\mathrm{at\ %s})\ \to\ V_{CS,crest}=%.1f\ \mathrm{mV}"
-                   % (s8["crest_cmd"], s8["crest_corner"].replace(" ", "\\ "), s8["vcs_crest"]*1e3),
-                   r"R_{ILIMIT}=\dfrac{1.8\times\mathrm{crest}\times R_{CS}\times4}{I_{ILIMIT}}=%.3f\ \mathrm{k\Omega}"
-                   % (s8["r_ilimit"]/1e3)], ch=C6)
-    body(story, "Decision: R<sub>ILIMIT</sub> = %.1f kΩ (E96) → command clamp ≈ 1.8× crest (window "
-                "1.2–2.0×). C<sub>ILIMIT</sub> = 18 nF." % (s8["r_ilimit_sel"]/1e3), C6)
+    body(story, "The crest current command is evaluated at <b>both</b> corners (%.0f Vac low line and "
+                "%.0f Vac high line); the larger drives the clamp sizing. Values used: "
+                "R<sub>RI</sub> = %.2f kΩ (RT/RI oscillator resistor, Section 6.4), "
+                "R<sub>CS</sub> = %.1f mΩ (Section 6.6), P = %g W (LL) / %g W (HL), "
+                "η = %.3f (LL) / %.3f (HL), N<sub>CH</sub> = %d, and command-clamp ratio = %.1f×."
+                % (s8["vin_ll_min"], s8["vin_hl_min"], s8["rri"]/1e3, s8["rcs_sel"]*1e3,
+                   s8["pout_lo"], s8["pout_hi"], s8["eta_lo"], s8["eta_hi"], s8["nch"],
+                   s8["ilimit_clamp_ratio"]), C6)
+    eq_box(story, [
+        r"I_{ILIMIT}=\dfrac{1.2\times1.0208}{R_{RI}}=\dfrac{1.2\times1.0208}{%.0f}=%.2f\ \mu A"
+        % (s8["rri"], s8["i_ilimit"]*1e6),
+        r"\mathrm{crest}_{LL}=\dfrac{\sqrt{2}\times%g}{%.3f\times%d\times%g}=%.2f\ \mathrm{A}"
+        % (s8["pout_lo"], s8["eta_lo"], s8["nch"], s8["vin_ll_min"], s8["crest_ll"]),
+        r"\mathrm{crest}_{HL}=\dfrac{\sqrt{2}\times%g}{%.3f\times%d\times%g}=%.2f\ \mathrm{A}"
+        % (s8["pout_hi"], s8["eta_hi"], s8["nch"], s8["vin_hl_min"], s8["crest_hl"]),
+        r"\mathrm{crest}_{worst}=%.2f\ \mathrm{A}\ (\mathrm{at\ %s})\ \Rightarrow\ "
+        r"V_{CS,crest}=%.2f\times%.1f\,\mathrm{m\Omega}=%.1f\ \mathrm{mV}"
+        % (s8["crest_cmd"], s8["crest_corner"].replace(" ", "\\ "),
+           s8["crest_cmd"], s8["rcs_sel"]*1e3, s8["vcs_crest"]*1e3),
+        r"R_{ILIMIT}=\dfrac{%.1f\times\mathrm{crest}\times R_{CS}\times4}{I_{ILIMIT}}"
+        r"=\dfrac{%.1f\times%.2f\times%.4f\times4}{%.2f\times10^{-6}}=%.0f\ \Omega\ (%.2f\ \mathrm{k\Omega})"
+        % (s8["ilimit_clamp_ratio"], s8["ilimit_clamp_ratio"], s8["crest_cmd"], s8["rcs_sel"],
+           s8["i_ilimit"]*1e6, s8["r_ilimit"], s8["r_ilimit"]/1e3)], ch=C6)
+    body(story, "Decision: R<sub>ILIMIT</sub> = %.1f kΩ (E96) → command clamp ≈ %.1f× crest (window "
+                "1.2–2.0×). C<sub>ILIMIT</sub> = 18 nF." % (s8["r_ilimit_sel"]/1e3, s8["ilimit_clamp_ratio"]), C6)
     sub_h(story, "6.8.5", "ILIMIT2 — Cycle-by-Cycle Peak Limit (Eqs. 33, 36, 37)", C6)
     body(story, "The peak inductor current I<sub>L,pk</sub> is the per-phase peak, taken as the "
-                "<b>worst of both corners</b> (90 Vac and 180 Vac).", C6)
-    eq_box(story, [r"I_{ILIMIT2}=\dfrac{1.2\times1.03125}{R_{RI}}=%.2f\ \mu A" % (s8["i_ilimit2"]*1e6),
-                   r"I_{L,PK}=\max(I_{\phi,pk}@90\,\mathrm{V},\ I_{\phi,pk}@180\,\mathrm{V})="
-                   r"\max(%.2f,\ %.2f)=%.2f\ \mathrm{A}\ (\mathrm{at\ %s})"
-                   % (s8["ilpk_ll"], s8["ilpk_hl"], s8["il_pk"], s8["ilpk_corner"].replace(" ", "\\ ")),
-                   r"V_{CS,PK}=I_{L,PK}\times R_{CS}=%.0f\ \mathrm{mV}" % (s8["vcs_pk"]*1e3),
-                   r"R_{ILIMIT2}=\dfrac{1.5\times V_{CS,PK}}{I_{ILIMIT2}}=%.3f\ \mathrm{k\Omega}" % (s8["r_ilimit2"]/1e3)], ch=C6)
+                "<b>worst of both corners</b> (%.0f Vac and %.0f Vac). Values used: R<sub>RI</sub> = "
+                "%.2f kΩ, R<sub>CS</sub> = %.1f mΩ, peak-limit ratio = %.1f×."
+                % (s8["vin_ll_min"], s8["vin_hl_min"], s8["rri"]/1e3, s8["rcs_sel"]*1e3,
+                   s8["ilimit2_ratio"]), C6)
+    eq_box(story, [
+        r"I_{ILIMIT2}=\dfrac{1.2\times1.03125}{R_{RI}}=\dfrac{1.2\times1.03125}{%.0f}=%.2f\ \mu A"
+        % (s8["rri"], s8["i_ilimit2"]*1e6),
+        r"I_{L,PK}=\max(I_{\phi,pk}@%.0f\,\mathrm{V},\ I_{\phi,pk}@%.0f\,\mathrm{V})="
+        r"\max(%.2f,\ %.2f)=%.2f\ \mathrm{A}\ (\mathrm{at\ %s})"
+        % (s8["vin_ll_min"], s8["vin_hl_min"], s8["ilpk_ll"], s8["ilpk_hl"], s8["il_pk"],
+           s8["ilpk_corner"].replace(" ", "\\ ")),
+        r"V_{CS,PK}=I_{L,PK}\times R_{CS}=%.2f\times%.1f\,\mathrm{m\Omega}=%.0f\ \mathrm{mV}"
+        % (s8["il_pk"], s8["rcs_sel"]*1e3, s8["vcs_pk"]*1e3),
+        r"R_{ILIMIT2}=\dfrac{%.1f\times V_{CS,PK}}{I_{ILIMIT2}}=\dfrac{%.1f\times%.3f}{%.2f\times10^{-6}}"
+        r"=%.0f\ \Omega\ (%.2f\ \mathrm{k\Omega})"
+        % (s8["ilimit2_ratio"], s8["ilimit2_ratio"], s8["vcs_pk"], s8["i_ilimit2"]*1e6,
+           s8["r_ilimit2"], s8["r_ilimit2"]/1e3)], ch=C6)
     body(story, "Decision: R<sub>ILIMIT2</sub> = %.2f kΩ (E96) → no nuisance trips in normal "
                 "operation. C<sub>ILIMIT2</sub> = 75 nF." % (s8["r_ilimit2_sel"]/1e3), C6)
     sub_h(story, "6.8.6", "Component Scorecard", C6)
@@ -674,7 +697,7 @@ def _build_asbuilt_L_section(story, inp: dict, prior: dict):
     fci   = float(_p.get("fci", inp.get("fci", 8000)) or 8000)
     if not L_des:
         L_des = min(float(l) for _, l in curve)
-    sub_h(story, "6.8.7", "As-built inductance basis — verification at all nine operating points", C6)
+    sub_h(story, "6.10.14", "As-built inductance basis — verification at all nine operating points", C6)
     annotation(story, "CONCEPT",
         f"The control design uses L<sub>φ</sub> = <b>{L_des:.1f} µH</b> — the MINIMUM "
         "as-built full-load inductance of the approved inductor across the nine operating "
@@ -693,7 +716,7 @@ def _build_asbuilt_L_section(story, inp: dict, prior: dict):
         rows.append([f"{float(vac):.0f}", f"{l_uh:.1f}",
                      f"{(L_des / l_uh):.3f}" if l_uh else "—",
                      f"{fci_i/1e3:.2f}", "✓" if ok else "✗"])
-    data_table(story, "6.8.7",
+    data_table(story, "6.10.14",
         "As-Built Inductance and Effective Current-Loop Crossover — All 9 Points",
         f"Per-point as-built L (nominal A<sub>L</sub>) from the approved inductor design; "
         f"plant-gain ratio and effective crossover relative to the design basis "
@@ -750,9 +773,9 @@ def build_story(inp: dict | None = None):
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
-    _build_asbuilt_L_section(story, inp or {}, prior)
     build_step9(story, compute_step9_bibo(inp))
     build_step10(story, compute_step10_iloop(inp, prior))
+    _build_asbuilt_L_section(story, inp or {}, prior)   # Section 6.10.14 — current-loop as-built L basis
     build_step11(story, compute_step11_vloop(inp, prior))
     build_step12(story, compute_step12_transient(inp, prior))
     s13 = compute_step13_thd(inp, prior)

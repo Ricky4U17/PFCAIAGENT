@@ -143,7 +143,7 @@ def build_step13(story, data: dict):
         "Input-current THD — 120 Hz rejection is %.0f dB (low line) and %.1f dB (high line), giving "
         "an estimated 2nd-harmonic-feedback THD contribution of ~%.1f%% and ~%.0f%% respectively. "
         "Both exceed the 20 dB minimum. To reduce THD further, lower the voltage-loop crossover (see "
-        "§6.14, Design A) at the cost of a larger load-transient dip."
+        "Section 6.14, Design A) at the cost of a larger load-transient dip."
         % (lo['rej_db'], hi['rej_db'], lo['thd3'], hi['thd3']), CH)
 
     # ── 13.3 ──────────────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ def make_pdf(path: str, inp: dict | None = None):
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 13 (Input THD & 120 Hz Rejection, full detail)",
         "120 Hz rejection, 2nd-harmonic-feedback THD contribution and the crossover trade-off sweep "
-        "— computed from the §6.11 voltage loop and bus ripple.",
+        "— computed from the Section 6.11 voltage loop and bus ripple.",
         ["13.1 mechanism (why rejection sets THD)  ·  13.2 rejection & THD results + Figure 6",
          "13.3 compensator optimization — transient vs rejection trade-off sweep"])
     build_step13(story, data)

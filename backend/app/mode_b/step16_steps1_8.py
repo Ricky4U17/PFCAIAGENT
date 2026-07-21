@@ -100,7 +100,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         ["Peak-detector resistor", "R_RLPK", f"{c['r_rlpk']/1e3:.1f} kΩ", "Selected for V_LPK compliance"],
         ["VIR resistor — FR (low)", "R_VIR", f"{c['r_vir_fr']/1e3:.0f} kΩ", "V_VIR < 1.5 V → FR mode"],
         ["VIR resistor — HV (high)", "R_VIR", f"{c['r_vir_hv']/1e3:.0f} kΩ", "V_VIR > 3.5 V → HV mode"],
-        ["Selected K_max", "K_max", f"{c['kmax']} ({c['kmax']*100:.0f}%)", "Satisfies both R_CS methods (§6.6)"],
+        ["Selected K_max", "K_max", f"{c['kmax']} ({c['kmax']*100:.0f}%)", "Satisfies both R_CS methods (Section 6.6)"],
     ]}
 
     # ── Step 3.1 — RIAC selection + IAC check ──────────────────────────────────
@@ -344,6 +344,12 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         "crest_corner": crest_corner, "vcs_crest": vcs_crest, "r_ilimit": r_ilimit,
         "i_ilimit2": i_ilimit2, "ilpk_ll": ilpk_ll, "ilpk_hl": ilpk_hl, "il_pk": il_pk,
         "ilpk_corner": ilpk_corner, "vcs_pk": vcs_pk, "r_ilimit2": r_ilimit2,
+        # inputs surfaced for the Section 6.8.4/6.8.5 worked-example substitution steps
+        "rri": rri, "rcs_sel": rcs_sel,
+        "pout_lo": p["pout_lo"], "pout_hi": p["pout_hi"],
+        "eta_lo": p["eta_lo"], "eta_hi": p["eta_hi"], "nch": p["nch"],
+        "vin_ll_min": p["vin_ll_min"], "vin_hl_min": p["vin_hl_min"],
+        "ilimit_clamp_ratio": c["ilimit_clamp_ratio"], "ilimit2_ratio": c["ilimit2_ratio"],
         "r_ilimit_sel": _nearest_e96(r_ilimit), "r_ilimit2_sel": _nearest_e96(r_ilimit2),
         "scorecard": [
             ["R_GC", "AN4165 Eq. 40", f"{r_gc/1e3:.3f} kΩ", f"{r_gc_sel/1e3:.1f} kΩ", "±5 %", "PASS"],

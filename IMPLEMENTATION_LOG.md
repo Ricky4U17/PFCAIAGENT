@@ -4576,3 +4576,32 @@ can pivot the combined report by setting fcv_Hz alone.
 Verified: combined report fcv=17 → Baseline 17/A 12/B 20/C 25 (reference); fcv=22 → Baseline 22/A 16/
 B 26/C 32 (pivoted); both 178 pp. Added TestCombinedReport.test_control_chapter_pivots_with_fcv
 (2nd build at 22 Hz asserts "Baseline (22 Hz)" present, "Baseline (17 Hz)" absent). Commit <pending>.
+
+## C104 — 2026-07-20 — Ch6 report notes quick wins (points 3, 6, 7)
+
+Three small report-review items (discussed, then implemented):
+
+(3) As-built inductance section moved into the CURRENT LOOP. _build_asbuilt_L_section was §6.8.7
+(under GC/LS/soft-start/current-limit components) but its content is entirely about the current-loop
+plant ("lowest inductance → highest plant gain → highest crossover"). Moved the build_story call to
+AFTER build_step10 (before build_step11) and renumbered §6.8.7 → §6.10.14 (heading + table id). Now
+renders in order 6.10.13 (design summary/verdict) → 6.10.14 (as-built verification) → 6.11.
+
+(6) "§" symbol removed from Chapter 6. Replaced 52 "§" across report_step10-14 + report_steps1_8 +
+appendices, plus 1 rendered "(§6.6)" table cell in step16_steps1_8, with the spelled-out "Section"
+(matching the Ch1-5 convention C89 established). Mechanical §→"Section " (with the intervening space).
+Left the plural word "Sections" in appendices untouched.
+
+(7) §6.8.4 (ILIMIT) and §6.8.5 (ILIMIT2) now show worked substitution steps. Added a "Values used:"
+line (R_RI, R_CS, P, η, N_CH, ratios) and expanded each equation to substitute the variable VALUES
+before the result: I_ILIMIT=1.2×1.0208/13700=89.41 µA; crest_LL=√2×1700/(0.945×2×90)=14.13 A;
+crest_HL similarly; V_CS,crest=14.66×15.0 mΩ=219.8 mV; R_ILIMIT=1.8×14.66×0.0150×4/(89.41e-6)=
+17702 Ω. Same for ILIMIT2. New keys surfaced in step16_steps1_8 step8 dict (rri, rcs_sel, powers,
+etas, nch, vin corners, clamp ratios). Corner labels (90/180 Vac) and clamp ratios de-hardcoded to
+the data. Also fixes the crest corner labels to track vin_ll_min/vin_hl_min.
+
+Verified: all files syntax-clean; standalone Ch6 builds 83 pp (was 82; +1 from the added worked
+steps); no "§" in rendered text, "Section 6.x" throughout; §6.10.14 renders in-order inside the
+current loop (6.10.13 < 6.10.14 < 6.11.1); §6.8.4/6.8.5 equations render (⇒, mΩ, √2, ×10^-6 all OK)
+with arithmetic-consistent substitutions (visual spot-check of pages 22/23/49). Combined report
+builds ~178 pp, no legacy fallback. Commit <pending>.

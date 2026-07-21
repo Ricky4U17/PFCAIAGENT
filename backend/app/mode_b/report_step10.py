@@ -135,7 +135,7 @@ def build_step10(story, data: dict):
     annotation(story, "PITFALL",
         "Model the plant with the inductor resistance r<sub>L</sub> included. The lossless form gives "
         "an infinite-Q resonance that wildly overstates the peaking; r<sub>L</sub> damps the "
-        "resonance to a finite, realistic Q (see §6.14 for the side-by-side comparison).", CH)
+        "resonance to a finite, realistic Q (see Section 6.14 for the side-by-side comparison).", CH)
 
     # ── 10.1 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.1", "Control Architecture — The Two-Loop Structure", CH)
@@ -143,7 +143,7 @@ def build_step10(story, data: dict):
         "The FAN9672 interleaved continuous-conduction-mode (CCM) PFC stage employs a cascaded "
         "two-loop control architecture. The inner current loop runs at high bandwidth (%s kHz "
         "crossover) and forces the instantaneous inductor current to follow the rectified-sinusoidal "
-        "input voltage. The outer voltage loop runs at a far lower bandwidth (designed in §6.11) and "
+        "input voltage. The outer voltage loop runs at a far lower bandwidth (designed in Section 6.11) and "
         "regulates the output by commanding a sinusoidal current reference to the inner loop." % _fk, CH)
     body(story,
         "This separation of bandwidths delivers three objectives simultaneously. First, power-factor "
@@ -210,7 +210,7 @@ def build_step10(story, data: dict):
     annotation(story, "NOTE",
         "The RHP zero at f<sub>RHP</sub> is a fundamental property of the boost converter in CCM: it "
         "adds gain while contributing phase lag — the most destabilising combination. As shown in "
-        "§6.10.7, f<sub>RHP</sub> ranges from %.2f kHz at %s Vac to %.2f kHz at %s Vac. "
+        "Section 6.10.7, f<sub>RHP</sub> ranges from %.2f kHz at %s Vac to %.2f kHz at %s Vac. "
         "Critically, this zero appears in the duty-to-output-voltage path, not in the "
         "duty-to-inductor-current path that governs the current loop; the %s kHz crossover is "
         "therefore admissible even at %s Vac, where f<sub>RHP</sub>/f<sub>ci</sub> = %.2f."
@@ -315,7 +315,7 @@ def build_step10(story, data: dict):
         f"The full calculation is carried out for {rows[0]['vac']} Vac / {rows[0]['pout']} W — the "
         "lowest input voltage, highest duty cycle and most demanding condition. Each quantity is shown "
         "with its formula, numerical substitution and result. The eight operating points are "
-        "consolidated in §6.10.10.", CH)
+        "consolidated in Section 6.10.10.", CH)
     _ws(story, "1.  Load resistance and duty cycle",
         [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{%g}=%.4f\ \Omega" % (vout, b["pout"], b["rload"]),
          r"V_{IN,pk}=\sqrt{2}\cdot V_{AC}=\sqrt{2}\cdot90=%.4f\ \mathrm{V}" % b["vinpk"],
@@ -535,7 +535,7 @@ def build_step10(story, data: dict):
         "sinusoidal current reference while rejecting switching-frequency noise.", CH)
     annotation(story, "DECISION",
         "Inner current loop — DESIGN PASS. All 8 operating points: crossover = %.2f kHz, "
-        "PM = %.1f°. Proceed to §6.11 — Outer Voltage Loop Design." % (d["fco_nom"]/1e3, d["pm_nom"]), CH)
+        "PM = %.1f°. Proceed to Section 6.11 — Outer Voltage Loop Design." % (d["fco_nom"]/1e3, d["pm_nom"]), CH)
 
 
 def make_pdf(path: str, inp: dict | None = None):
