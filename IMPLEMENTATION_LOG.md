@@ -4535,3 +4535,16 @@ tracks to (Baseline 22 / A 16 / B 26 / C 32) at f_cv=22. Data-level pivot (L=300
 Ch6) builds 200 OK, 178 pp WITH a selected_cap (171 pp without — the missing 7 pp are §5.3/5.4/5.5,
 correctly gated on selected_cap per rule 8; a harness artifact, not a regression), no legacy
 fallback ("via Mode A HITL" absent), §4.8 new text + §6.14 present. Commit <pending>.
+
+## C101 — 2026-07-20 — Persistent combined-report verify harness (always carries selected_cap)
+
+Follow-up to C100. Added backend/verify_combined_report.py — a reusable headless harness that builds
+the full combined report (Ch1-5 doc agent + Ch6 control) via the real
+/mode-b/documentation/generate-report endpoint. Motivation: run_capacitor_design() returns no
+selected_cap (that is a GUI Step-15 approve choice), and §5.3/5.4/5.5 are gated on it (rule 8), so a
+headless build without one silently reads 171 pp instead of 178. The harness therefore ALWAYS attaches
+a real catalog part: pick_selected_cap() picks the largest-capacitance DB part at/above the required
+voltage class and parallels enough to meet C_required (known-good 383LX122M450B082VS fallback). It
+prints the page count + PASS/FAIL checks (no legacy fallback, §5.3/5.4/5.5, §4.8, Ch6) and exits
+non-zero if not ~178 pp. Optional argv[1] = f_cv (Hz) to exercise the §6.14 pivot.
+Verified: 178 pp, all checks OK, exit 0 (auto-picked 2×1200µF/450V → 2400µF bank). Commit <pending>.
