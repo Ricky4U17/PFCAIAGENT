@@ -4614,3 +4614,29 @@ section refs (§1..§6), none inside eq_img/LaTeX. Two-step mechanical replace (
 "Section<d>"→"Section <d>" for d=1..6); the plural word "Sections" (8×) and the 30 pre-existing
 "Section " refs were left intact (no double-spacing). Verified: 0 § remaining, 0 broken tokens,
 syntax clean, combined report builds with no "§" anywhere. Commit <pending>.
+
+## C106 — 2026-07-21 — Combined-report index now covers every chapter (post-merge TOC pass)
+
+Report-review point 5: the printed Table of Contents only listed Chapters 1-5. The combined report is
+_merge_pdfs([ch1_5, ch6, ch7, ch8-9, ch10]) of separately-built PDFs, and the native printed TOC
+(build_full_report multiBuild) only sees Ch1-5; Ch6-10 merge in with no TOC entries. Bookmarks were
+already handled by _add_pdf_outline (scans the merged doc for CHAPTER/section headings → PDF outline).
+
+(b) Printed TOC: new doc_report_builder.build_combined_toc_pdf(entries) renders a standalone "Table
+of Contents" PDF from (level, text, page) entries, styled identically to the native TOC (same
+levelStyles, dot leaders, navy chapters). New main.py _rebuild_printed_toc(doc, entries): locates the
+cover + old-TOC span, builds the combined TOC (2-pass to fix its own length), drops the old Ch1-5 TOC
+pages, inserts the new one after the cover, and shifts every content page by (new_toc_len -
+old_toc_len). _add_pdf_outline now calls it (guarded: on any failure keeps pages + writes bookmarks
+only), then writes bookmarks over the final layout. Level mapping: scan levels 1/2/3 → printed-TOC
+styles 0/1/2, kept 1/2/3 for fitz set_toc.
+
+Index completeness: relaxed the section-heading scan cap 58→110 chars — 12 real headings were being
+silently dropped from BOTH the index and bookmarks because their titles were long or had an internal
+em-dash (e.g. 5.3 "Ripple Current and Voltage Verification", 5.3.3 DC-bus waveforms, 6.10.14 as-built,
+6.9.6/6.9.7, 6.11.4/6.11.9, 6.14.1, 2.7, 2.8.2, 3.1.2, 3.5.1). Now captured.
+
+Verified: combined report 179 pp (was 178; +1 for the longer TOC); printed TOC covers Chapters 1-6
+incl. 6.10.14 with correct page numbers (Ch1→p7, Ch6→p97, 6.10.14→p145, all cross-checked against
+real content); bookmarks 184 (was 172); no § anywhere; no legacy fallback. Chapter-agnostic — Ch7-10
+picked up automatically when present. Commit <pending>.

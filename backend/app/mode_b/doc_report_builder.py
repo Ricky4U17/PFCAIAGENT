@@ -5160,3 +5160,48 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     # multiBuild = two passes so the TOC page numbers resolve correctly.
     doc.multiBuild(story)
     return buf.getvalue()
+
+
+def build_combined_toc_pdf(entries):
+    """Standalone "Table of Contents" PDF built from pre-computed (level, text, page) entries.
+
+    The main document (Chapters 1-5) builds its own printed TOC natively, but Chapters 6-10 are
+    merged in as separate PDFs whose headings never reach it. The combined-report post-merge index
+    pass scans the whole document for headings, then calls this to render ONE printed TOC covering
+    every chapter — styled identically to the native TOC (build_full_report). Returns PDF bytes.
+
+    entries: iterable of (level, text, page_number) with level 0=chapter, 1=section, 2=sub-section.
+    """
+    import io as _io
+    from reportlab.platypus import SimpleDocTemplate, Spacer
+    from reportlab.platypus.tableofcontents import TableOfContents
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
+                            topMargin=18 * mm, bottomMargin=18 * mm, title="Table of Contents")
+    toc = TableOfContents()
+    toc.dotsMinLevel = 0
+    toc.levelStyles = [
+        ParagraphStyle("ctoc0", fontName="Helvetica-Bold", fontSize=11, textColor=NAVY,
+                       leading=16, spaceBefore=8, spaceAfter=2),
+        ParagraphStyle("ctoc1", fontName="Helvetica", fontSize=9.5, textColor=BLACK,
+                       leftIndent=14, leading=13, spaceAfter=1),
+        ParagraphStyle("ctoc2", fontName="Helvetica", fontSize=8.5, textColor=MUTED,
+                       leftIndent=30, leading=11.5, spaceAfter=0),
+    ]
+    # TableOfContents renders its _lastEntries (4-tuples: level, text, pageNum, key). Pre-populate
+    # both buffers so a single build() draws them directly (no notify/multiBuild needed here).
+    e4 = [(max(0, min(2, int(lvl))), str(text), int(pg), None) for (lvl, text, pg) in entries]
+    toc._entries = list(e4)
+    toc._lastEntries = list(e4)
+    story = [
+        Paragraph("Table of Contents",
+                  ParagraphStyle("ctoc_t", fontName="Helvetica-Bold", fontSize=18,
+                                 textColor=CH_COLORS[1], leading=24, spaceAfter=8)),
+        HRFlowable(width=CW, thickness=1, color=RULE),
+        Spacer(1, 4 * mm),
+        toc,
+    ]
+    doc.build(story)
+    return buf.getvalue()

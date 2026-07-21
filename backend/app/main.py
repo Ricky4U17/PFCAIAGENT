@@ -2243,7 +2243,9 @@ def _add_pdf_outline(pdf_bytes):
         import fitz, re
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         chap_re = re.compile(r"CHAPTER\s+(\d+)\b")
-        sec_re = re.compile(r"(?m)^\s*(\d+\.\d+(?:\.\d+)?)\s*[—–-]\s*([A-Za-z(][^\n]{1,58})$")
+        # title cap kept generous (110) so long section headings — e.g. "6.10.14 — As-built
+        # inductance basis — verification at all nine operating points" — are not dropped.
+        sec_re = re.compile(r"(?m)^\s*(\d+\.\d+(?:\.\d+)?)\s*[—–-]\s*([A-Za-z(][^\n]{1,110})$")
         toc = []; seen = set(); cur_chap = 0; last_lvl = 0
         for pno in range(doc.page_count):
             text = doc[pno].get_text()
@@ -2270,12 +2272,75 @@ def _add_pdf_outline(pdf_bytes):
                 lvl = min(1 + num.count("."), last_lvl + 1)     # X.Y → 2, X.Y.Z → 3 (no level jumps)
                 toc.append([lvl, f"{num}  {ttl}", pno + 1]); seen.add(("s", num)); last_lvl = lvl
         if toc:
-            doc.set_toc(toc)
+            # (b) Replace the native (Chapters 1-5 only) printed Table of Contents with one covering
+            # every chapter. Guarded: on any failure keep the existing pages and just write bookmarks.
+            try:
+                rebuilt = _rebuild_printed_toc(doc, toc)
+                if rebuilt is not None:
+                    new_doc, toc = rebuilt
+                    doc.close(); doc = new_doc
+            except Exception:
+                log.exception("rebuild printed toc")
+            # (a) Navigable bookmarks over the final page layout.
+            doc.set_toc([list(e) for e in toc])
             out = doc.tobytes(deflate=True); doc.close(); return out
         doc.close()
     except Exception:
         log.exception("add pdf outline")
     return pdf_bytes
+
+
+def _rebuild_printed_toc(doc, entries):
+    """Replace the native printed Table of Contents (which only covers Chapters 1-5) with one that
+    covers EVERY chapter. `doc` is the merged fitz document; `entries` are [level, text, page] from
+    the outline scan (level 1=chapter, 2=section, 3=sub-section; page 1-indexed). Returns
+    (new_fitz_doc, shifted_entries) or None when there is no locatable printed TOC to replace (the
+    caller then keeps the pages as-is and only writes bookmarks)."""
+    import fitz
+    from app.mode_b.doc_report_builder import build_combined_toc_pdf
+    if not entries:
+        return None
+    # Locate the printed-TOC heading (always near the front) and the first chapter page.
+    toc_start = None
+    for pno in range(min(doc.page_count, 8)):
+        if "Table of Contents" in doc[pno].get_text():
+            toc_start = pno
+            break
+    first_chap_idx = int(entries[0][2]) - 1            # 0-indexed page of the first scanned heading
+    if toc_start is None or first_chap_idx <= toc_start:
+        return None                                    # no recognisable TOC span to replace
+    cover_count = toc_start                            # pages [0 .. cover_count-1] = cover
+    old_toc_count = first_chap_idx - toc_start         # pages [toc_start .. first_chap_idx-1] = old TOC
+
+    def _pages(b):
+        d = fitz.open(stream=b, filetype="pdf"); n = d.page_count; d.close(); return n
+
+    # printed-TOC level styles are 0-indexed (chapter/section/sub); the scan levels are 1/2/3.
+    def _toc_pdf(ents):
+        return build_combined_toc_pdf([(max(0, int(l) - 1), t, int(p)) for (l, t, p) in ents])
+
+    # Pass 1 measures the new TOC length (page numbers don't affect it); then shift the content pages
+    # by (new_toc_len - old_toc_len) and re-render. Iterate a couple of times in case the extra digit
+    # width nudges the line count.
+    t_new = _pages(_toc_pdf(entries))
+    shifted, toc_bytes = None, None
+    for _ in range(3):
+        shift = t_new - old_toc_count
+        shifted = [[int(l), str(t), int(p) + shift] for (l, t, p) in entries]
+        toc_bytes = _toc_pdf(shifted)
+        t2 = _pages(toc_bytes)
+        if t2 == t_new:
+            break
+        t_new = t2
+
+    # Assemble: cover + new printed TOC + content (old TOC pages dropped).
+    new = fitz.open()
+    if cover_count > 0:
+        new.insert_pdf(doc, from_page=0, to_page=cover_count - 1)
+    toc_doc = fitz.open(stream=toc_bytes, filetype="pdf")
+    new.insert_pdf(toc_doc); toc_doc.close()
+    new.insert_pdf(doc, from_page=first_chap_idx, to_page=doc.page_count - 1)
+    return new, shifted
 
 
 @app.post("/mode-b/documentation/generate-report", tags=["documentation"])
