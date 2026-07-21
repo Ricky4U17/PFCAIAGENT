@@ -3329,9 +3329,22 @@ def _sim_verification(story, state, d):
         "k<sub>harm</sub> ~ 1.213; two-node thermal ΔT from our R<sub>ca</sub>/R<sub>wa</sub>/"
         "R<sub>cw</sub> network. Full S0-S13 set in the engine equation reference.", 4)
 
+    # This section IS the independent cross-check: its verdict reflects whether the field engine
+    # AGREES with our Step-7 design within band (the table above), NOT the field engine's own
+    # separate design-acceptance opinion. That opinion (sim['verdict']) applies stricter internal
+    # asserts (e.g. crowded inner-radius flux) that are not part of this quantity-by-quantity
+    # comparison, so it is reported as an informational note rather than the section verdict —
+    # otherwise a 6/6-within-band agreement could show a contradictory "REJECT".
+    _xok = (n_tot > 0 and n_ok == n_tot)
+    _engine_note = ""
+    if sim.get("verdict") and sim["verdict"] != "APPROVE":
+        _engine_note = (f"  Field-engine internal acceptance: {sim['verdict']} — its stricter "
+                        "standalone asserts (e.g. crowded inner-radius flux) flag an item outside "
+                        "this comparison; see Chapters 3–4 for the governing design acceptance.")
     verdict_row(story, "Independent field-engine cross-check",
-        f"Verdict {sim.get('verdict','—')} · {n_ok}/{n_tot} within band",
-        "PASS" if (sim.get("verdict") == "APPROVE" and n_ok == n_tot) else "REVIEW", 4)
+        f"Field engine agrees with Step-7 within band on {n_ok}/{n_tot} cross-checked quantities."
+        + ("" if _xok else f" {n_tot - n_ok} flagged for review.") + _engine_note,
+        "PASS" if _xok else "REVIEW", 4)
 
 
 def _ch4(story, state, d):

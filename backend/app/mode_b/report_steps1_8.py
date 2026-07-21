@@ -738,11 +738,15 @@ def build_story(inp: dict | None = None):
     story = []
     chapter_splash(story, 6, _TITLE,
         "The complete FAN9672 control-loop design.",
-        ["Gain-modulator and current-sense design — R_CS by two methods, GMOD verification",
-         "Inner current loop and outer voltage loop — Type-II / Type-III compensator design",
-         "Step-load transient response, input THD and 120 Hz rejection, compensator optimization",
-         "Soft-start, current-limit protection, and the control-network bill of materials",
-         "Appendices — derivations, bill of materials, bench test plan, references, quick-reference"])
+        ["6.1–6.5 Power-stage spec, controller base, gain modulator, oscillator, output sensing",
+         "6.6 R_CS current-sense resistor — two methods",
+         "6.7 GMOD verification — three independent paths",
+         "6.8 GC, LS, soft-start and current-limit components",
+         "6.9 BIBO — brown-in / brown-out design",
+         "6.10 Inner current loop — Type-II compensator",
+         "6.11 Outer voltage loop — Type-II / Type-III compensator",
+         "6.12–6.14 Step-load transient, input THD & 120 Hz rejection, compensator optimization",
+         "Appendices A–E — derivations, BOM, bench test plan, references, quick-reference"])
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)

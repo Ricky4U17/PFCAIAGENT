@@ -110,6 +110,7 @@ def build_step10(story, data: dict):
     d = data
     s = d["src"]
     vout, lphi, co, rcs, fci = s["vout"], s["lphi"], s["co"], s["rcs"], s["fci"]
+    pout_lo, pout_hi = s.get("pout_lo", 1700.0), s.get("pout_hi", 3600.0)
     rows = d["rows"]
     b = rows[0]; pl = b["plant"]
     gid_mag = abs(b["gid_ci"]); gid_ang = math.degrees(cmath.phase(b["gid_ci"]))
@@ -117,6 +118,12 @@ def build_step10(story, data: dict):
     ti_mag = abs(b["ti_unc"]); ti_db = 20 * math.log10(ti_mag)
     ti_ang = math.degrees(cmath.phase(b["ti_unc"]))
     wci = 2 * math.pi * fci
+    _fk = "%g" % (fci / 1e3)          # designer current-loop crossover in kHz, e.g. "8"
+    _plo = "%g" % pout_lo; _phi = "%g" % pout_hi   # low/high-line output power, W
+    # plant / controller constants for the worked-example equations (never hardcoded in the strings)
+    _rc = float(d["p"]["r_c"]); _rl = float(d["p"]["r_l"])   # output-cap ESR, inductor DCR (Ω)
+    _vr = float(d["p"]["v_ramp"]); _gmi = float(d["p"]["g_mi"])   # PWM ramp (V), OTA gm (S)
+    _vac0 = rows[0]["vac"]                                    # worked-example corner (lowest V_AC)
 
     step_h(story, "6.10", "Inner Current Loop Design", CH)
     annotation(story, "THEORY",
@@ -134,10 +141,10 @@ def build_step10(story, data: dict):
     sub_h(story, "6.10.1", "Control Architecture — The Two-Loop Structure", CH)
     body(story,
         "The FAN9672 interleaved continuous-conduction-mode (CCM) PFC stage employs a cascaded "
-        "two-loop control architecture. The inner current loop runs at high bandwidth (8 kHz "
+        "two-loop control architecture. The inner current loop runs at high bandwidth (%s kHz "
         "crossover) and forces the instantaneous inductor current to follow the rectified-sinusoidal "
-        "input voltage. The outer voltage loop runs at a far lower bandwidth (17 Hz crossover) and "
-        "regulates the output by commanding a sinusoidal current reference to the inner loop.", CH)
+        "input voltage. The outer voltage loop runs at a far lower bandwidth (designed in §6.11) and "
+        "regulates the output by commanding a sinusoidal current reference to the inner loop." % _fk, CH)
     body(story,
         "This separation of bandwidths delivers three objectives simultaneously. First, power-factor "
         "correction is achieved because the current is forced to track a sinusoidal reference in "
@@ -166,17 +173,17 @@ def build_step10(story, data: dict):
           "and the right-half-plane zero characteristic of every boost topology."],
          ["CS normalization", "R_CS / V_RAMP",
           "Converts the sensed inductor-current voltage to a duty-cycle-equivalent signal referenced "
-          "to the 5 V internal PWM ramp. This scalar (= 0.003) sets how much of the inductor-current "
-          "signal reaches the comparator."],
+          f"to the {d['p']['v_ramp']:.0f} V internal PWM ramp. This scalar (= {d['ramp_norm']:.3f}) sets "
+          "how much of the inductor-current signal reaches the comparator."],
          ["CS filter", "H_CS(s)",
           "First-order RC low-pass (R_M = 2 kΩ, C_M = 470 pF, pole at 169.3 kHz) placed across the "
           "current-sense resistor. It removes switching-frequency noise and contributes negligible "
-          "phase lag at the 8 kHz crossover."],
+          f"phase lag at the {_fk} kHz crossover."],
          ["Compensator", "G_mi(s)",
-          "Type-2 OTA: a transconductance amplifier (G_MI = 88 µS) with external impedance Z_IEA(s). "
-          "It provides an integrating zero at f_z = 1 kHz to boost phase at crossover and a "
-          "high-frequency pole at f_p = 26 kHz to limit noise gain. The block is sized for unity loop "
-          "gain at exactly 8 kHz."]],
+          f"Type-2 OTA: a transconductance amplifier (G_MI = {d['p']['g_mi']*1e6:.0f} µS) with external impedance Z_IEA(s). "
+          f"It provides an integrating zero at f_z = {d['fz']/1e3:g} kHz to boost phase at crossover and a "
+          f"high-frequency pole at f_p = {d['fp']/1e3:g} kHz to limit noise gain. The block is sized "
+          f"for unity loop gain at exactly {_fk} kHz."]],
         col_widths=[CW*0.16, CW*0.16, CW*0.68], ch=CH)
 
     # ── 10.3 ──────────────────────────────────────────────────────────────────
@@ -203,10 +210,12 @@ def build_step10(story, data: dict):
     annotation(story, "NOTE",
         "The RHP zero at f<sub>RHP</sub> is a fundamental property of the boost converter in CCM: it "
         "adds gain while contributing phase lag — the most destabilising combination. As shown in "
-        "Section 10.7, f<sub>RHP</sub> ranges from 6.45 kHz at 90 Vac to 26.22 kHz at 264 Vac. "
+        "§6.10.7, f<sub>RHP</sub> ranges from %.2f kHz at %s Vac to %.2f kHz at %s Vac. "
         "Critically, this zero appears in the duty-to-output-voltage path, not in the "
-        "duty-to-inductor-current path that governs the current loop; the 8 kHz crossover is "
-        "therefore admissible even at 90 Vac, where f<sub>RHP</sub>/f<sub>ci</sub> = 0.81.", CH)
+        "duty-to-inductor-current path that governs the current loop; the %s kHz crossover is "
+        "therefore admissible even at %s Vac, where f<sub>RHP</sub>/f<sub>ci</sub> = %.2f."
+        % (rows[0]["frhp"]/1e3, rows[0]["vac"], rows[-1]["frhp"]/1e3, rows[-1]["vac"],
+           _fk, rows[0]["vac"], rows[0]["frhp"]/fci), CH)
 
     # ── 10.4 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.4", "CS Filter and Ramp Normalization", CH)
@@ -218,8 +227,8 @@ def build_step10(story, data: dict):
     eq_box(story, [r"|H_{CS}|=\dfrac{1}{\sqrt{1+(f_{ci}/f_{RC})^2}},\qquad"
                    r"\angle H_{CS}=-\arctan\!\left(\dfrac{f_{ci}}{f_{RC}}\right)"], ch=CH)
     body(story, "The ramp normalization scales the sensed current to the internal PWM ramp:", CH)
-    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%s}{5}=%s"
-                   % (_n(rcs, 3), _n(d["ramp_norm"], 3))], ch=CH)
+    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%s}{%g}=%s"
+                   % (_n(rcs, 3), _vr, _n(d["ramp_norm"], 3))], ch=CH)
 
     # ── 10.5 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.5", "Type-2 OTA Compensator G_mi(s)", CH)
@@ -228,7 +237,7 @@ def build_step10(story, data: dict):
         "ω<sub>z</sub>/s)/(1 + s/ω<sub>p</sub>). The (1 + ω<sub>z</sub>/s) term is an integrator "
         "plus lead: it produces high gain at DC — ensuring accurate average-current tracking of the "
         "sinusoidal reference — and adds phase lead at the crossover. The (1 + s/ω<sub>p</sub>) term "
-        "rolls gain off beyond 26 kHz to prevent noise amplification.", CH)
+        "rolls gain off beyond the compensator HF pole to prevent noise amplification.", CH)
     eq_box(story, [r"G_{mi}(s)=G_{MI}\cdot Z_{IEA}(s)=G_{MI}\cdot R_{IC}\cdot"
                    r"\dfrac{1+\dfrac{\omega_z}{s}}{1+\dfrac{s}{\omega_p}}"], ch=CH)
 
@@ -258,8 +267,8 @@ def build_step10(story, data: dict):
     body(story,
         "For each of the eight operating points the load resistance, duty cycle, natural frequency, "
         "quality factor and RHP-zero frequency are evaluated. These quantities fix the plant shape "
-        "and confirm that the chosen 8 kHz crossover is achievable across the universal-input range. "
-        "The governing relations are:", CH)
+        "and confirm that the chosen %s kHz crossover is achievable across the universal-input range. "
+        "The governing relations are:" % _fk, CH)
     eq_box(story, [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}",
                    r"D=1-\dfrac{V_{IN,pk}}{V_{OUT}}=1-\dfrac{\sqrt{2}\cdot V_{AC}}{V_{OUT}}",
                    r"f_{RHP}=\dfrac{R_{LOAD}\cdot(D')^2}{2\pi L},\qquad F_0=\dfrac{\sqrt{a_0}}{2\pi},"
@@ -274,55 +283,57 @@ def build_step10(story, data: dict):
         op_rows, col_widths=[CW*0.09, CW*0.10, CW*0.12, CW*0.10, CW*0.12, CW*0.10,
                              CW*0.09, CW*0.13, CW*0.11], ch=CH)
     annotation(story, "NOTE",
-        "At 90 Vac, f<sub>RHP</sub> = 6.45 kHz, which is below the 8 kHz crossover. Because the RHP "
+        "At %s Vac, f<sub>RHP</sub> = %.2f kHz, which is below the %s kHz crossover. Because the RHP "
         "zero acts in the duty-to-output-voltage path — not in the current-sensing path — the "
-        "current-loop phase margin of 62.8° is preserved at every operating point.", CH)
+        "current-loop phase margin of %.1f° is preserved at every operating point."
+        % (rows[0]["vac"], rows[0]["frhp"]/1e3, _fk, d["pm_nom"]), CH)
 
     # ── 10.8 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.8", "Uncompensated Loop Gain and Why It Is Calculated", CH)
     body(story,
-        "Before any compensator component is sized, the loop gain is evaluated at the 8 kHz target "
+        "Before any compensator component is sized, the loop gain is evaluated at the %s kHz target "
         "crossover with the compensator block G<sub>mi</sub>(s) omitted. The uncompensated gain is "
-        "the product of the plant, the ramp normalization and the CS filter:", CH)
+        "the product of the plant, the ramp normalization and the CS filter:" % _fk, CH)
     eq_box(story, [r"T_{i,unc}(s)=G_{id}(s)\cdot\dfrac{R_{CS}}{V_{RAMP}}\cdot H_{CS}(s)"], ch=CH)
     body(story,
         "Why evaluate at the crossover frequency? The design requirement is |T<sub>i</sub>(jω"
-        "<sub>ci</sub>)| = 1 (0 dB) — the compensated loop gain must be exactly unity at 8 kHz. Once "
-        "the uncompensated gain at 8 kHz is known, the required compensator gain follows directly "
-        "from the unity-gain condition:", CH)
+        "<sub>ci</sub>)| = 1 (0 dB) — the compensated loop gain must be exactly unity at %s kHz. Once "
+        "the uncompensated gain at %s kHz is known, the required compensator gain follows directly "
+        "from the unity-gain condition:" % (_fk, _fk), CH)
     eq_box(story, [r"T_{i,unc}(j\omega_{ci})\cdot G_{MI}\cdot Z_{IEA}(j\omega_{ci})=1"], ch=CH)
     body(story,
         "Solving this relation for R<sub>IC</sub> — the resistor that sets the compensator gain — "
         "yields the exact value required. The approach is robust because (1) the uncompensated gain "
-        "is essentially constant across all operating points (≈−20 dB at 8 kHz), so a single "
+        "is essentially constant across all operating points (≈−20 dB at %s kHz), so a single " % _fk +
         "compensator serves every condition, and (2) the compensator poles and zeros are set "
         "independently by C<sub>IC1</sub> and C<sub>IC2</sub>, fully decoupled from the gain "
         "calculation.", CH)
 
     # ── 10.9 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "6.10.9", "Detailed Step-by-Step Calculation — 90 Vac / 1700 W", CH)
+    sub_h(story, "6.10.9", f"Detailed Step-by-Step Calculation — {rows[0]['vac']} Vac / {rows[0]['pout']} W", CH)
     body(story,
-        "The full calculation is carried out for 90 Vac / 1700 W — the lowest input voltage, highest "
-        "duty cycle and most demanding condition. Each quantity is shown with its formula, numerical "
-        "substitution and result. The eight operating points are consolidated in Section 10.10.", CH)
+        f"The full calculation is carried out for {rows[0]['vac']} Vac / {rows[0]['pout']} W — the "
+        "lowest input voltage, highest duty cycle and most demanding condition. Each quantity is shown "
+        "with its formula, numerical substitution and result. The eight operating points are "
+        "consolidated in §6.10.10.", CH)
     _ws(story, "1.  Load resistance and duty cycle",
-        [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{1700}=%.4f\ \Omega" % (vout, b["rload"]),
+        [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{%g}=%.4f\ \Omega" % (vout, b["pout"], b["rload"]),
          r"V_{IN,pk}=\sqrt{2}\cdot V_{AC}=\sqrt{2}\cdot90=%.4f\ \mathrm{V}" % b["vinpk"],
          r"D=1-\dfrac{V_{IN,pk}}{V_{OUT}}=1-\dfrac{%.4f}{%.1f}=%.6f" % (b["vinpk"], vout, b["D"]),
          r"D=%.6f,\qquad D'=1-D=%.6f" % (b["D"], b["Dp"])])
     body(story, "<b>2.  Front factor K<sub>front</sub></b>", CH)
     body(story, "The front factor combines the V<sub>OUT</sub>/L<sub>ϕ</sub> gain with the ESR "
         "correction ratio.", CH)
-    eq_box(story, [r"\dfrac{R_{LOAD}+2r_C}{R_{LOAD}+r_C}=\dfrac{%.4f+0.02}{%.4f+0.01}=%.6f"
-                   % (b["rload"], b["rload"], pl.esr_ratio),
-                   r"\dfrac{V_{OUT}}{L_\phi}=\dfrac{%.1f}{235\times10^{-6}}=%s" % (vout, _sx(pl.vout_over_l, 5)),
+    eq_box(story, [r"\dfrac{R_{LOAD}+2r_C}{R_{LOAD}+r_C}=\dfrac{%.4f+%g}{%.4f+%g}=%.6f"
+                   % (b["rload"], 2*_rc, b["rload"], _rc, pl.esr_ratio),
+                   r"\dfrac{V_{OUT}}{L_\phi}=\dfrac{%.1f}{%.0f\times10^{-6}}=%s" % (vout, lphi*1e6, _sx(pl.vout_over_l, 5)),
                    r"K_{front}=\dfrac{V_{OUT}}{L_\phi}\cdot\dfrac{R_{LOAD}+2r_C}{R_{LOAD}+r_C}=%s\times%.6f"
                    % (_sx(pl.vout_over_l, 5), pl.esr_ratio),
                    r"K_{front}=%s" % _sx(pl.kfront, 5)], ch=CH)
     body(story, "<b>3.  Plant zero ω<sub>z</sub></b>", CH)
     body(story, "The output-capacitor ESR creates a zero in the plant transfer function.", CH)
     eq_box(story, [r"\omega_z=\dfrac{1}{C_O\left(\dfrac{R_{LOAD}}{2}+r_C\right)}"
-                   r"=\dfrac{1}{2200\mu\cdot(%.4f+0.01)}" % (b["rload"]/2),
+                   r"=\dfrac{1}{%.0f\mu\cdot(%.4f+%g)}" % (co*1e6, b["rload"]/2, _rc),
                    r"\omega_z=%.4f\ \mathrm{rad/s},\qquad f_z=%.4f\ \mathrm{Hz}"
                    % (pl.wz, pl.wz/(2*math.pi))], ch=CH)
     body(story, "<b>4.  Denominator coefficient a<sub>1</sub></b>", CH)
@@ -331,8 +342,8 @@ def build_step10(story, data: dict):
                    r"a_1=\dfrac{N_{a1}}{D_{a1}}=\dfrac{%s}{%s}=%.4f\ \mathrm{rad/s}"
                    % (_sx(pl.na1, 7), _sx(pl.da1, 7), pl.a1)], ch=CH)
     body(story, "<b>5.  Denominator coefficient a<sub>0</sub></b>", CH)
-    eq_box(story, [r"N_{a0}=(1-D)^2 R_{LOAD}+r_L=%.6f^2\cdot%.4f+0.01=%.6f"
-                   % (b["Dp"], b["rload"], pl.na0),
+    eq_box(story, [r"N_{a0}=(1-D)^2 R_{LOAD}+r_L=%.6f^2\cdot%.4f+%g=%.6f"
+                   % (b["Dp"], b["rload"], _rl, pl.na0),
                    r"a_0=\dfrac{N_{a0}}{D_{a1}}=\dfrac{%.6f}{%s}=%s\ \mathrm{(rad/s)^2}"
                    % (pl.na0, _sx(pl.da1, 7), _sx(pl.a0, 5))], ch=CH)
     body(story, "<b>6.  Natural frequency F<sub>0</sub> and quality factor Q</b>", CH)
@@ -344,21 +355,21 @@ def build_step10(story, data: dict):
     body(story, "The RHP-zero frequency depends on the duty complement D′ = V<sub>IN,pk</sub> / "
         "V<sub>OUT</sub>.", CH)
     eq_box(story, [r"f_{RHP}=\dfrac{R_{LOAD}\cdot(D')^2}{2\pi L}"
-                   r"=\dfrac{%.4f\cdot%.6f^2}{2\pi\cdot235\times10^{-6}}=%.4f\ \mathrm{kHz}"
-                   % (b["rload"], b["Dp"], b["frhp"]/1e3)], ch=CH)
-    body(story, "<b>8.  Plant G<sub>id</sub> evaluated at f<sub>ci</sub> = 8 kHz</b>", CH)
-    eq_box(story, [r"s=j\omega_{ci}=j\cdot2\pi\cdot8000=j\cdot%.1f\ \mathrm{rad/s}" % wci,
+                   r"=\dfrac{%.4f\cdot%.6f^2}{2\pi\cdot%.0f\times10^{-6}}=%.4f\ \mathrm{kHz}"
+                   % (b["rload"], b["Dp"], lphi*1e6, b["frhp"]/1e3)], ch=CH)
+    body(story, "<b>8.  Plant G<sub>id</sub> evaluated at f<sub>ci</sub> = %s kHz</b>" % _fk, CH)
+    eq_box(story, [r"s=j\omega_{ci}=j\cdot2\pi\cdot%.0f=j\cdot%.1f\ \mathrm{rad/s}" % (fci, wci),
                    r"G_{id}=K_{front}\cdot\dfrac{s+\omega_z}{s^2+a_1 s+a_0}",
                    r"|G_{id}|=%.4f,\qquad\angle G_{id}=%.4f^\circ" % (gid_mag, gid_ang)], ch=CH)
     body(story, "<b>9.  Ramp normalization R<sub>CS</sub> / V<sub>RAMP</sub></b>", CH)
-    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{5}=%.3f" % (rcs, d["ramp_norm"])], ch=CH)
-    body(story, "<b>10.  CS filter H<sub>CS</sub> at 8 kHz</b>", CH)
-    eq_box(story, [r"|H_{CS}|=\dfrac{1}{\sqrt{1+(f_{ci}/f_{RC})^2}}=\dfrac{1}{\sqrt{1+(8000/%.1f\times10^3)^2}}"
-                   % (d["f_rc"]/1e3),
+    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{%g}=%.3f" % (rcs, _vr, d["ramp_norm"])], ch=CH)
+    body(story, "<b>10.  CS filter H<sub>CS</sub> at %s kHz</b>" % _fk, CH)
+    eq_box(story, [r"|H_{CS}|=\dfrac{1}{\sqrt{1+(f_{ci}/f_{RC})^2}}=\dfrac{1}{\sqrt{1+(%.0f/%.1f\times10^3)^2}}"
+                   % (fci, d["f_rc"]/1e3),
                    r"|H_{CS}|=%.6f,\qquad\angle H_{CS}=%.4f^\circ" % (h_mag, h_ang)], ch=CH)
-    body(story, "<b>11.  Final uncompensated loop gain T<sub>i,unc</sub> at 8 kHz</b>", CH)
-    eq_box(story, [r"T_{i,unc}=G_{id}\cdot\dfrac{R_{CS}}{V_{RAMP}}\cdot H_{CS}=%.4f\cdot0.003\cdot%.6f"
-                   % (gid_mag, h_mag),
+    body(story, "<b>11.  Final uncompensated loop gain T<sub>i,unc</sub> at %s kHz</b>" % _fk, CH)
+    eq_box(story, [r"T_{i,unc}=G_{id}\cdot\dfrac{R_{CS}}{V_{RAMP}}\cdot H_{CS}=%.4f\cdot%.3f\cdot%.6f"
+                   % (gid_mag, d["ramp_norm"], h_mag),
                    r"|T_{i,unc}|=%.6f" % ti_mag,
                    r"T_{i,unc}\,\mathrm{(dB)}=20\log_{10}(%.6f)=%.4f\ \mathrm{dB}" % (ti_mag, ti_db),
                    r"\angle T_{i,unc}=\angle G_{id}+\angle H_{CS}=%.4f^\circ+(%.4f^\circ)=%.4f^\circ"
@@ -373,30 +384,31 @@ def build_step10(story, data: dict):
         sum_rows.append([f"{o['vac']}", f"{o['pout']}", f"{o['rload']:.4f}", f"{o['D']:.5f}",
                          f"{gm:.4f}", f"{ga:.2f}", f"{tm:.5f}", f"{20*math.log10(tm):.4f}", f"{ta:.4f}"])
     data_table(story, "6.10.10", "Uncompensated T_i — 8 Operating Points",
-        "Uncompensated loop gain at 8 kHz is constant within ±0.01 dB.",
+        "Uncompensated loop gain at %s kHz is constant within ±0.01 dB." % _fk,
         ["V_AC (V)", "P_OUT (W)", "R_LOAD (Ω)", "D", "|G_id|", "∠G_id (°)", "|T_i,unc|",
          "T_i (dB)", "∠T_i (°)"],
         sum_rows, col_widths=[CW*0.09, CW*0.10, CW*0.12, CW*0.10, CW*0.10, CW*0.11, CW*0.11,
                               CW*0.10, CW*0.11], ch=CH)
     annotation(story, "NOTE",
-        "The uncompensated gain is remarkably consistent: −20.01 dB (±0.01 dB) at 8 kHz across all "
-        "eight operating points. The dominant term at 8 kHz is V<sub>OUT</sub>/(ω·L<sub>ϕ</sub>), "
+        "The uncompensated gain is remarkably consistent: %.2f dB (±0.01 dB) at %s kHz across all "
+        "eight operating points. The dominant term at %s kHz is V<sub>OUT</sub>/(ω·L<sub>ϕ</sub>), "
         "which depends only on fixed hardware and not on duty cycle or load. A single compensator "
-        "therefore delivers a stable crossover across the entire universal-input range.", CH)
+        "therefore delivers a stable crossover across the entire universal-input range."
+        % (ti_db, _fk, _fk), CH)
 
     # ── 10.11 ─────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.11", "Compensator Design — Type-2 OTA", CH)
     sub_h(story, "6.10.11.1", "Compensator Specifications", CH)
     data_table(story, "6.10.11.1", "Compensator Specifications", "",
         ["Parameter", "Value", "Rationale"],
-        [["OTA transconductance G_MI", "88 µS", "Fixed internal FAN9672 parameter — cannot be changed"],
-         ["Target crossover f_ci", "8 kHz", "Well below the 70 kHz switching frequency — a separation "
-          "of ≈0.94 decade (8.75× ratio)"],
-         ["Compensator zero f_z", "1 kHz", "One decade below f_ci — adds phase boost across the "
+        [["OTA transconductance G_MI", f"{d['p']['g_mi']*1e6:.0f} µS", "Fixed internal FAN9672 parameter — cannot be changed"],
+         ["Target crossover f_ci", f"{_fk} kHz", "Well below the switching frequency — a wide "
+          "frequency separation for noise rejection"],
+         ["Compensator zero f_z", f"{d['fz']/1e3:g} kHz", "Below f_ci — adds phase boost across the "
           "crossover region"],
-         ["Compensator HF pole f_p", "26 kHz", "3.25× above crossover — limits noise amplification "
+         ["Compensator HF pole f_p", f"{d['fp']/1e3:g} kHz", "Above crossover — limits noise amplification "
           "without degrading PM"],
-         ["Target phase margin", "≥45°", "Industry-standard minimum; this design achieves 62.8°"]],
+         ["Target phase margin", "≥45°", f"Industry-standard minimum; this design achieves {d['pm_nom']:.1f}°"]],
         col_widths=[CW*0.28, CW*0.12, CW*0.60], ch=CH)
     sub_h(story, "6.10.11.2", "Compensator Form", CH)
     body(story, "The OTA output current is I = G<sub>MI</sub> × Z<sub>IEA</sub>(s) × V<sub>in</sub>. "
@@ -406,30 +418,30 @@ def build_step10(story, data: dict):
     sub_h(story, "6.10.11.3", "Unity-Gain Condition at Crossover", CH)
     body(story, "At the crossover frequency ω<sub>ci</sub> the compensated loop gain must equal "
         "unity:", CH)
-    eq_box(story, [r"T_{i,unc}\cdot G_{MI}\cdot R_{IC}\cdot\kappa=1\qquad\mathrm{at}\ f_{ci}=8\ \mathrm{kHz}"], ch=CH)
+    eq_box(story, [r"T_{i,unc}\cdot G_{MI}\cdot R_{IC}\cdot\kappa=1\qquad\mathrm{at}\ f_{ci}=%s\ \mathrm{kHz}" % _fk], ch=CH)
     body(story, "The shape factor κ captures the compensator magnitude relative to R<sub>IC</sub> at "
         "crossover:", CH)
     eq_box(story, [r"\kappa=\dfrac{\sqrt{1+(f_z/f_{ci})^2}}{\sqrt{1+(f_{ci}/f_p)^2}}"], ch=CH)
-    sub_h(story, "6.10.11.4", "Shape Magnitude κ at 8 kHz", CH)
+    sub_h(story, "6.10.11.4", "Shape Magnitude κ at %s kHz" % _fk, CH)
     num_k = math.sqrt(1 + (d["fz"]/fci)**2); den_k = math.sqrt(1 + (fci/d["fp"])**2)
-    eq_box(story, [r"\mathrm{numerator}=\sqrt{1+(f_z/f_{ci})^2}=\sqrt{1+(1000/8000)^2}=%.6f" % num_k,
-                   r"\mathrm{denominator}=\sqrt{1+(f_{ci}/f_p)^2}=\sqrt{1+(8000/26000)^2}=%.6f" % den_k,
+    eq_box(story, [r"\mathrm{numerator}=\sqrt{1+(f_z/f_{ci})^2}=\sqrt{1+(%.0f/%.0f)^2}=%.6f" % (d["fz"], fci, num_k),
+                   r"\mathrm{denominator}=\sqrt{1+(f_{ci}/f_p)^2}=\sqrt{1+(%.0f/%.0f)^2}=%.6f" % (fci, d["fp"], den_k),
                    r"\kappa=\dfrac{%.6f}{%.6f}=%.6f" % (num_k, den_k, d["kappa"])], ch=CH)
     sub_h(story, "6.10.11.5", "Calculate R_IC", CH)
     body(story, "Solving the unity-gain condition for R<sub>IC</sub>, using |T<sub>i,unc</sub>| = "
-        "%.5f from the 90 Vac calculation:" % ti_mag, CH)
+        "%.5f from the %.0f Vac calculation:" % (ti_mag, _vac0), CH)
     eq_box(story, [r"R_{IC}=\dfrac{1}{T_{i,unc}\cdot G_{MI}\cdot\kappa}"
-                   r"=\dfrac{1}{%.6f\cdot88\times10^{-6}\cdot%.6f}" % (ti_mag, d["kappa"]),
+                   r"=\dfrac{1}{%.6f\cdot%g\times10^{-6}\cdot%.6f}" % (ti_mag, _gmi*1e6, d["kappa"]),
                    r"R_{IC}=%.1f\ \mathrm{k\Omega}\ \rightarrow\ %.0f\ \mathrm{k\Omega\ (standard)}"
                    % (d["ric_calc"]/1e3, d["ric"]/1e3)], ch=CH)
-    sub_h(story, "6.10.11.6", "Calculate C_IC1  (Sets f_z = 1 kHz)", CH)
-    eq_box(story, [r"C_{IC1}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_z}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot1000}"
-                   % (d["ric_calc"]/1e3),
+    sub_h(story, "6.10.11.6", "Calculate C_IC1  (Sets f_z = %g kHz)" % (d["fz"]/1e3), CH)
+    eq_box(story, [r"C_{IC1}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_z}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot%g}"
+                   % (d["ric_calc"]/1e3, d["fz"]),
                    r"C_{IC1}=%.4f\ \mathrm{nF}\ \rightarrow\ %.1f\ \mathrm{nF\ (standard)}"
                    % (d["cic1_calc"]*1e9, d["cic1"]*1e9)], ch=CH)
-    sub_h(story, "6.10.11.7", "Calculate C_IC2  (Sets f_p = 26 kHz)", CH)
-    eq_box(story, [r"C_{IC2}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_p}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot26000}"
-                   % (d["ric_calc"]/1e3),
+    sub_h(story, "6.10.11.7", "Calculate C_IC2  (Sets f_p = %g kHz)" % (d["fp"]/1e3), CH)
+    eq_box(story, [r"C_{IC2}=\dfrac{1}{2\pi\cdot R_{IC}\cdot f_p}=\dfrac{1}{2\pi\cdot%.1f\mathrm{k}\cdot%g}"
+                   % (d["ric_calc"]/1e3, d["fp"]),
                    r"C_{IC2}=%.2f\ \mathrm{pF}\ \rightarrow\ %.0f\ \mathrm{pF\ (standard)}"
                    % (d["cic2_calc"]*1e12, d["cic2"]*1e12)], ch=CH)
     sub_h(story, "6.10.11.8", "Verify Pole/Zero Frequencies with Standard Values", CH)
@@ -461,7 +473,7 @@ def build_step10(story, data: dict):
     sub_h(story, "6.10.12", "Bode Plots", CH)
     body(story, "<b>Figure 10A — Type-II Current-Loop Compensator Schematic</b>", CH)
     body(story,
-        "The current error amplifier (transconductance G<sub>MI</sub> = 88 µS) drives the "
+        "The current error amplifier (transconductance G<sub>MI</sub> = %.0f µS) drives the " % (_gmi*1e6) +
         "compensation network that shapes the loop. R<sub>IC</sub> in series with C<sub>IC1</sub> "
         "forms the integrator and the compensating zero; C<sub>IC2</sub> across the output adds the "
         "high-frequency pole that rolls the loop off before the switching frequency.", CH)
@@ -476,9 +488,9 @@ def build_step10(story, data: dict):
         "Points</b>", CH)
     body(story,
         "The open-loop magnitude and phase are plotted for all eight operating points. Every trace "
-        "crosses 0 dB at 8.12 kHz with a 62.8° phase margin. Solid traces are low-line (90–132 Vac, "
-        "1700 W); dashed traces are high-line (180–264 Vac, 3600 W). Circles mark the 0 dB crossover "
-        "on each trace.", CH)
+        "crosses 0 dB at %.2f kHz with a %.1f° phase margin. Solid traces are low-line (%s W); dashed "
+        "traces are high-line (%s W). Circles mark the 0 dB crossover on each trace."
+        % (d["fco_nom"]/1e3, d["pm_nom"], _plo, _phi), CH)
     story.append(_fig_open_loop(d))
     body(story, "<i>Figure 1 — Open-loop T<sub>i</sub>(s): gain (dB, top) and phase (°, bottom). "
         "Crossover = %.2f kHz; phase margin = %.1f°.</i>" % (d["fco_nom"]/1e3, d["pm_nom"]), CH)
@@ -510,19 +522,20 @@ def build_step10(story, data: dict):
         fin_rows, col_widths=[CW*0.08, CW*0.09, CW*0.10, CW*0.10, CW*0.08, CW*0.12, CW*0.12,
                               CW*0.12, CW*0.10, CW*0.09], ch=CH)
     body(story, "<b>Key findings</b>", CH)
-    body(story, "<b>Uncompensated gain:</b> −20.01 dB (±0.01 dB) at 8 kHz across all eight operating "
+    body(story, "<b>Uncompensated gain:</b> %.2f dB (±0.01 dB) at %s kHz across all eight operating "
         "points. The loop gain is dominated by the inductive impedance V<sub>OUT</sub>/(ω·L"
-        "<sub>ϕ</sub>), independent of duty cycle or load.", CH)
-    body(story, "<b>Phase margin:</b> 62.8° at every condition — 17.8° above the 45° minimum — giving "
-        "comfortable margin against component tolerances and parasitics.", CH)
-    body(story, "<b>Crossover frequency:</b> 8.12 kHz, ≈1.27× the lowest f<sub>RHP</sub> (6.45 kHz "
-        "at 90 Vac). The phase margin is unaffected because the RHP zero acts in the duty-to-voltage "
-        "path, not in the current-sensing path.", CH)
+        "<sub>ϕ</sub>), independent of duty cycle or load." % (ti_db, _fk), CH)
+    body(story, "<b>Phase margin:</b> %.1f° at every condition — %.1f° above the 45° minimum — giving "
+        "comfortable margin against component tolerances and parasitics." % (d["pm_nom"], d["pm_nom"]-45), CH)
+    body(story, "<b>Crossover frequency:</b> %.2f kHz, ≈%.2f× the lowest f<sub>RHP</sub> (%.2f kHz "
+        "at %s Vac). The phase margin is unaffected because the RHP zero acts in the duty-to-voltage "
+        "path, not in the current-sensing path."
+        % (d["fco_nom"]/1e3, d["fco_nom"]/rows[0]["frhp"], rows[0]["frhp"]/1e3, rows[0]["vac"]), CH)
     body(story, "<b>Closed-loop bandwidth:</b> ≈12 kHz (−3 dB) — fast enough to track the 100/120 Hz "
         "sinusoidal current reference while rejecting switching-frequency noise.", CH)
     annotation(story, "DECISION",
         "Inner current loop — DESIGN PASS. All 8 operating points: crossover = %.2f kHz, "
-        "PM = %.1f°. Proceed to Step 11 — Outer Voltage Loop Design." % (d["fco_nom"]/1e3, d["pm_nom"]), CH)
+        "PM = %.1f°. Proceed to §6.11 — Outer Voltage Loop Design." % (d["fco_nom"]/1e3, d["pm_nom"]), CH)
 
 
 def make_pdf(path: str, inp: dict | None = None):

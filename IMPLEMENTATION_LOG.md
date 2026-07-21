@@ -4489,3 +4489,49 @@ top-level sections 6.1..6.14 in order (no "Step N" labels, no gaps, 86 sub-headi
 Step-N cross-refs remain in rendered text; external §17 refs not rendered. Commit 1b411a8.
 DEFERRED: appendix static BOM component values (15 mΩ / 0.015 etc.) — build_appendices(story) takes
 no design data, so making them dynamic is a separate enhancement (thread design into the appendix).
+
+## C100 — 2026-07-20 — Ch6 control-loop de-hardcode (steps 10-14) + §6.14 f_cv pivot + §4.8 verdict
+
+Continuation of the C99 hardcode audit into the control-LOOP report sections (§6.10-6.14, delivered
+via build_control_report), plus the §4.8 "REJECT-while-within-band" verdict fix. Goal: every
+design-dependent value in the control chapter is sourced from the design/spec, so the report tracks
+the designer's actual crossovers, powers, L/C/ESR and controller constants instead of the reference
+design's literals. At the reference design every value reproduces the old report exactly.
+
+De-hardcoded (report_step10/11/12/13/14):
+- Crossovers: current-loop 8 kHz → d[fci]/_fk; voltage-loop 17 Hz + low-line 7.8 Hz → s[fcv] and the
+  computed low-line row f_co. Phase margins 62.8/81/82° → d[pm_nom] / computed min-max over rows.
+- Powers 1700/3600 W and corners 90/180/264 Vac → src pout_lo/hi and rows[i][vac]/[pout] everywhere
+  (§6.12 transient labels, §6.13 THD bands, table headers, worked-example section titles).
+- §6.10.9 worked example (the deepest remaining nest): L_phi (235) → lphi*1e6; C_O (2200 µF) →
+  co*1e6; ESR/DCR (0.01/0.02) → d[p][r_c]/[r_l]; f_z (1000) → d[fz]; f_p (26000) → d[fp]; G_MI
+  (88 µS, eq + prose) → d[p][g_mi]; V_RAMP (5, ×2) → d[p][v_ramp]; worked corner "90 Vac" →
+  rows[0][vac]. §6.11.3: K_MAX (1.49) → s[kmax]; V_RAMP (5) → s[vramp]; design corner 180 → dr[vac].
+- Cross-refs "Section 10.7 / Step 11" → "§6.10.7 / §6.11"; current-loop "8.12 kHz, PM 62.8°" in
+  §6.14 → "as designed in §6.10".
+
+§6.14 optimization sweep pivoted to the designer's f_cv (step16_step13_thd.py + report_step14.py):
+- The sweep was pinned to {12,17,20,25} Hz with 17 the "Baseline". Now the candidates, the held 2nd
+  zero/pole and the 1st zero/pole are RATIOS of f_cv_base (sweep_ratios = 12/17,1,20/17,25/17;
+  z1_ratio 3/17, p1_ratio 50/17; hold_z2/p2 12/17,1). At a 17 Hz baseline this reproduces the
+  reference set byte-for-byte; at any other f_cv the whole chapter tracks it.
+- report_step14._DESIGNS (fixed constant) replaced by _designs(d): orders the sweep by position
+  relative to the baseline (slower = "A THD focus", baseline, faster = "B"/"C"), colours/labels/
+  splash all derived. _by_fcv now nearest-match. NOTE/DECISION deltas (rej gain, dip reduction, C
+  fails-floor verdict) computed from the sweep, not hardcoded ("~6 dB"/"~25%").
+- report_step13 §6.13.3 CONCEPT prose "four candidate bandwidths (f_z2/f_p2 held at 12/17 Hz)" →
+  {len(sweep)} candidates, d[hold_z2]/[hold_p2].
+
+§4.8 (doc_report_builder._sim_verification): the section verdict was "PASS iff sim.verdict==APPROVE
+AND n_ok==n_tot", so a 6/6-within-band cross-check could still show REJECT from the field engine's
+stricter standalone asserts (crowded inner-radius flux). Verdict is now agreement-based (PASS iff all
+cross-checked quantities within band); the field engine's internal acceptance is demoted to an
+informational note.
+
+Verification: all 8 files syntax-clean; standalone step10-14 build; full Ch6 (build_control_report)
+builds 82 pp and reproduces the reference labels (Baseline 17 Hz / A 12 / B 20 / C 25) at default,
+tracks to (Baseline 22 / A 16 / B 26 / C 32) at f_cv=22. Data-level pivot (L=300/C=1500/fci=10k) →
+§6.10 equations show 300/1500/10 kHz, old 235/2200/8 kHz GONE. Combined report (Ch1-5 doc-agent +
+Ch6) builds 200 OK, 178 pp WITH a selected_cap (171 pp without — the missing 7 pp are §5.3/5.4/5.5,
+correctly gated on selected_cap per rule 8; a harness artifact, not a regression), no legacy
+fallback ("via Mode A HITL" absent), §4.8 new text + §6.14 present. Commit <pending>.

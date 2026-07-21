@@ -70,6 +70,9 @@ def _fig_rejection(d):
 def build_step13(story, data: dict):
     d = data
     lo, hi = d["lo"], d["hi"]
+    _fcv_v = float(d["src"]["fcv"])                      # designer voltage-loop crossover, Hz
+    _fcv = "%g" % _fcv_v
+    _plo = "%g" % d["src"]["pout_lo"]; _phi = "%g" % d["src"]["pout_hi"]
 
     step_h(story, "6.13", "Input Current THD and 120 Hz Rejection", CH)
     annotation(story, "THEORY",
@@ -91,8 +94,8 @@ def build_step13(story, data: dict):
         "current-command reference at 120 Hz, which mixes with the rectified-sine reference to inject "
         "a 3rd-harmonic distortion into the input current. The dominant control-loop contribution to "
         "input-current THD is therefore set by how strongly the loop attenuates 120 Hz — the 120 Hz "
-        "rejection. A deliberately slow voltage loop (17 Hz crossover, far below 120 Hz) is what keeps "
-        "this contribution small.", CH)
+        "rejection. A deliberately slow voltage loop (%s Hz crossover, far below 120 Hz) is what keeps "
+        "this contribution small." % _fcv, CH)
     body(story, "The peak 120 Hz bus ripple from the delivered power is:", CH)
     eq_box(story, [r"V_{ripple,pk}=\dfrac{P_{OUT}}{2\times\omega_{line}\times V_{OUT}\times C_O}"],
            number="6.13.1", ch=CH)
@@ -108,14 +111,14 @@ def build_step13(story, data: dict):
     # ── 13.2 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.13.2", "Results — 120 Hz Rejection and THD Contribution", CH)
     body(story,
-        "Computed for the baseline design (f<sub>cv</sub> = 17 Hz). The bus ripple and rejection "
-        "depend on power level, so values are grouped by line range:", CH)
+        "Computed for the baseline design (f<sub>cv</sub> = %s Hz). The bus ripple and rejection "
+        "depend on power level, so values are grouped by line range:" % _fcv, CH)
     data_table(story, "6.13.2", "120 Hz Rejection and THD Contribution",
         "Control-loop (2nd-harmonic-feedback) contribution to input-current THD.",
         ["Operating range", "V_ripple,pk (120 Hz)", "Ripple %", "120 Hz Rejection", "THD3 contribution"],
-        [["Low line  90–132 Vac / 1700 W", f"{lo['vrip']:.2f} V", f"{lo['rip_pct']:.2f}%",
+        [[f"Low line / {_plo} W", f"{lo['vrip']:.2f} V", f"{lo['rip_pct']:.2f}%",
           f"{lo['rej_db']:.1f} dB", f"≈ {lo['thd3']:.2f}%"],
-         ["High line  180–264 Vac / 3600 W", f"{hi['vrip']:.2f} V", f"{hi['rip_pct']:.2f}%",
+         [f"High line / {_phi} W", f"{hi['vrip']:.2f} V", f"{hi['rip_pct']:.2f}%",
           f"{hi['rej_db']:.1f} dB", f"≈ {hi['thd3']:.2f}%"]],
         col_widths=[CW*0.32, CW*0.22, CW*0.12, CW*0.16, CW*0.18], ch=CH)
     annotation(story, "NOTE",
@@ -147,10 +150,10 @@ def build_step13(story, data: dict):
     sub_h(story, "6.13.3", "Compensator Optimization: Transient vs 120 Hz Rejection", CH)
     annotation(story, "CONCEPT",
         "Crossover frequency is the single knob trading transient stiffness against ripple rejection. "
-        "The table below re-designs the voltage compensator at four candidate bandwidths "
-        "(f<sub>z2</sub>/f<sub>p2</sub> held at 12/17 Hz; f<sub>z1</sub>, f<sub>p1</sub> scaled with "
+        "The table below re-designs the voltage compensator at %d candidate bandwidths "
+        "(f<sub>z2</sub>/f<sub>p2</sub> held at %.0f/%.0f Hz; f<sub>z1</sub>, f<sub>p1</sub> scaled with "
         "f<sub>cv</sub>; components snapped to the selected series) and recomputes everything from the "
-        "model.", CH)
+        "model." % (len(d["sweep"]), d["hold_z2"], d["hold_p2"]), CH)
     data_table(story, "6.13.3", "Crossover Trade-off — Transient vs Rejection",
         "Each row is a full re-design at that crossover, recomputed from the model.",
         ["f_cv", "PM LL/HL (°)", "Rej. LL/HL (dB)", "Dip 0→100% LL/HL (V)", "Recovery LL/HL (ms)", "Note"],
@@ -158,11 +161,12 @@ def build_step13(story, data: dict):
           f"{s['rej_lo']:.1f} / {s['rej_hi']:.1f}", f"{s['dip_lo']:.1f} / {s['dip_hi']:.1f}",
           f"{s['trec_lo']:.0f} / {s['trec_hi']:.0f}", s["note"]] for s in d["sweep"]],
         col_widths=[CW*0.10, CW*0.18, CW*0.18, CW*0.22, CW*0.18, CW*0.14], ch=CH)
-    sel = next((s for s in d["sweep"] if abs(s["fcv"]-17.0) < 0.01), d["sweep"][1])
+    # select the swept row matching the designer's crossover (closest), not a fixed 17 Hz
+    sel = min(d["sweep"], key=lambda s: abs(s["fcv"] - _fcv_v))
     annotation(story, "DECISION",
-        "f<sub>cv</sub> = 17.0 Hz balances a sub-8%% worst dip against ≥ %.1f dB rejection. Raising "
-        "the bandwidth beyond ~20 Hz starts to violate the rejection floor at high line."
-        % sel["rej_hi"], CH)
+        "f<sub>cv</sub> = %s Hz balances the worst-case transient dip against ≥ %.1f dB rejection. "
+        "Raising the bandwidth further starts to violate the rejection floor at high line."
+        % (_fcv, sel["rej_hi"]), CH)
 
 
 def make_pdf(path: str, inp: dict | None = None):

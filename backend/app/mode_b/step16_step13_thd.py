@@ -20,7 +20,15 @@ DEFAULT_INPUTS = {
     "f_line": 60.0,            # mains frequency (Hz) → 120 Hz ripple
     "f_ripple": 120.0,
     "rej_min_db": 20.0,        # minimum acceptable 120 Hz rejection
-    "sweep_fcv": [12.0, 17.0, 20.0, 25.0],
+    # Optimization sweep candidates expressed as RATIOS of the designer's baseline f_cv (the
+    # reference design sweeps 12/17/20/25 Hz around a 17 Hz baseline → 12/17, 1, 20/17, 25/17).
+    # Held as ratios so the whole sweep pivots with whatever crossover the designer actually chose;
+    # at a 17 Hz baseline this reproduces the reference 12/17/20/25 Hz set exactly.
+    "sweep_ratios": [12.0/17.0, 1.0, 20.0/17.0, 25.0/17.0],
+    "hold_z2_ratio": 12.0/17.0,   # Type-III 2nd zero, held across the sweep, as ratio of baseline f_cv
+    "hold_p2_ratio": 1.0,         # Type-III 2nd pole, held across the sweep, as ratio of baseline f_cv
+    "z1_ratio": 3.0/17.0,         # 1st zero placed at this fraction of EACH candidate crossover
+    "p1_ratio": 50.0/17.0,        # 1st pole placed at this fraction of EACH candidate crossover
 }
 
 
@@ -74,29 +82,36 @@ def compute_step13_thd(inp: dict | None = None, prior: dict | None = None) -> di
         return dict(vrip=vrip, rip_pct=vrip/vout*100, rej_db=rej_db,
                     thd3=thd3, tvmag=tvmag, vea=vea)
 
-    lo = band(0, src["pout_lo"], vea_lo)     # low line 1700 W
-    hi = band(4, src["pout_hi"], vea_hi)     # high line 3600 W
+    lo = band(0, src["pout_lo"], vea_lo)     # low line
+    hi = band(4, src["pout_hi"], vea_hi)     # high line
 
     # ── 16.3 optimization sweep — redesign at each candidate f_cv ─────────────
+    # The sweep pivots around the designer's actual voltage-loop crossover: candidate crossovers,
+    # the held 2nd zero/pole and the 1st zero/pole are all fractions of f_cv_base, so at the
+    # reference 17 Hz design this reproduces the 12/17/20/25 Hz set (and its shaping) exactly.
     from app.mode_b.step16_step12_transient import compute_step12_transient
+    fcv_base = float(src["fcv"])
+    fz2_h = p["hold_z2_ratio"] * fcv_base
+    fp2_h = p["hold_p2_ratio"] * fcv_base
+    if inp and inp.get("sweep_fcv"):
+        sweep_fcv = [float(x) for x in inp["sweep_fcv"]]
+    else:
+        sweep_fcv = sorted(fcv_base * r for r in p["sweep_ratios"])
     sweep = []
-    for fcv in p["sweep_fcv"]:
-        # scale Type-III zero1/pole1 with crossover; hold z2/p2 at 12/17 Hz
-        sc = fcv / 17.0
-        ci = {"comp_type": "type3", "fz1": 3.0*sc, "fz2": 12.0, "fp1": 50.0*sc, "fp2": 17.0,
-              "fcv_override": fcv}
+    for fcv in sweep_fcv:
+        # 1st zero/pole track each candidate crossover (fixed shape); 2nd zero/pole held at baseline
+        comp_kw = {"comp_type": "type3", "fz1": p["z1_ratio"]*fcv, "fz2": fz2_h,
+                   "fp1": p["p1_ratio"]*fcv, "fp2": fp2_h}
         # prior carries fcv into step11 via inputs; pass fcv through
-        s11b = compute_step11_vloop({"comp_type": "type3", "fz1": 3.0*sc, "fz2": 12.0,
-                                     "fp1": 50.0*sc, "fp2": 17.0}, _prior_with_fcv(prior, fcv))
+        s11b = compute_step11_vloop(comp_kw, _prior_with_fcv(prior, fcv))
         pm_lo = s11b["rows"][0]["pm"]; pm_hi = s11b["rows"][4]["pm"]
         rb_lo = _rej(s11b, 0, src["pout_lo"], wline, vout, co, fr)
         rb_hi = _rej(s11b, 4, src["pout_hi"], wline, vout, co, fr)
-        tr = compute_step12_transient({"comp_type": "type3", "fz1": 3.0*sc, "fz2": 12.0,
-                                       "fp1": 50.0*sc, "fp2": 17.0},
-                                      _prior_with_fcv(prior, fcv))
+        tr = compute_step12_transient(comp_kw, _prior_with_fcv(prior, fcv))
         w = tr["rows"][0]
         cb = s11b["comp"]
-        note = "selected" if abs(fcv-17.0) < 0.01 else ("fails 20 dB floor" if rb_hi < p["rej_min_db"] else "—")
+        note = ("selected" if abs(fcv-fcv_base) < 0.01
+                else ("fails %g dB floor" % p["rej_min_db"] if rb_hi < p["rej_min_db"] else "—"))
         bd_hi = s11b["bode"][4]                     # HL open-loop T_v sweep
         tw0 = tr["waves"][0]                        # 0→100% transition (LL & HL)
         sweep.append(dict(fcv=fcv, pm_lo=pm_lo, pm_hi=pm_hi, rej_lo=rb_lo, rej_hi=rb_hi,
@@ -109,7 +124,8 @@ def compute_step13_thd(inp: dict | None = None, prior: dict | None = None) -> di
     return {"s11": s11, "src": src, "vout": vout, "lo": lo, "hi": hi,
             "vea_lo": vea_lo, "vea_hi": vea_hi,
             "f_line": p["f_line"], "f_ripple": fr, "rej_min_db": p["rej_min_db"],
-            "wline": wline, "sweep": sweep, "p": p}
+            "wline": wline, "sweep": sweep, "p": p,
+            "fcv_base": fcv_base, "hold_z2": fz2_h, "hold_p2": fp2_h}
 
 
 def _rej(s11, idx, pout, wline, vout, co, fr):

@@ -37,12 +37,15 @@ def _fig_transient(d):
     import matplotlib.pyplot as plt
     vout = d["vout"]; band = d["band"]
     t = d["t"] * 1e3
+    _rw = d["s11"]["rows"]
+    _lll = f"LL {_rw[0]['vac']:.0f} V/{d['src']['pout_lo']:g} W"
+    _hll = f"HL {_rw[4]['vac']:.0f} V/{d['src']['pout_hi']:g} W"
     fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.6), sharex=True)
     for k, w in enumerate(d["waves"]):
         ax = axes[k // 3][k % 3]
         ax.axhspan(-band, band, color="0.85", alpha=0.6)
-        ax.plot(t, w["ll"], "-", color="#1456b8", lw=1.0, label="LL 90 V/1700 W")
-        ax.plot(t, w["hl"], "--", color="#c0392b", lw=1.0, label="HL 180 V/3600 W")
+        ax.plot(t, w["ll"], "-", color="#1456b8", lw=1.0, label=_lll)
+        ax.plot(t, w["hl"], "--", color="#c0392b", lw=1.0, label=_hll)
         ax.axhline(0, color="0.4", lw=0.6)
         ax.set_title(w["label"], fontsize=7)
         ax.grid(True, alpha=0.3)
@@ -62,6 +65,8 @@ def build_step12(story, data: dict):
     src = d["src"]; vout = d["vout"]
     fcv_lo = d["s11"]["rows"][0]["fco"]; fcv_hi = d["s11"]["rows"][4]["fco"]
     ifl_lo = d["ifull_lo"]; ifl_hi = d["iful_hi"]
+    _plo = "%g" % src["pout_lo"]; _phi = "%g" % src["pout_hi"]
+    _vlo = "%.0f" % d["s11"]["rows"][0]["vac"]; _vhi = "%.0f" % d["s11"]["rows"][4]["vac"]
     wh = d["worst_hl"]; wl = d["worst_ll"]
 
     step_h(story, "6.12", "Step Load Transient Response", CH)
@@ -103,7 +108,7 @@ def build_step12(story, data: dict):
          ["Recovery band", f"±1%  =  ±{d['band']:.2f} V", f"About {vout:.1f} V bus"],
          ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "§6.11 design"],
          ["Full-load current  I_full = P_OUT/V_OUT",
-          f"{ifl_lo:.3f} A (1700 W) / {ifl_hi:.3f} A (3600 W)", "Step magnitude reference"]],
+          f"{ifl_lo:.3f} A ({_plo} W) / {ifl_hi:.3f} A ({_phi} W)", "Step magnitude reference"]],
         col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
 
     # ── 12.2 ──────────────────────────────────────────────────────────────────
@@ -113,7 +118,7 @@ def build_step12(story, data: dict):
         "(overshoot) — at both line ranges. The current step ΔI for each transition:", CH)
     data_table(story, "6.12.2", "Load-Step Magnitudes",
         "Current step ΔI per transition and line range.",
-        ["Load transition", "ΔI  (Low line, 1700 W)", "ΔI  (High line, 3600 W)"],
+        ["Load transition", f"ΔI  (Low line, {_plo} W)", f"ΔI  (High line, {_phi} W)"],
         [[r["label"], f"{r['di_lo']:+.3f} A", f"{r['di_hi']:+.3f} A"] for r in d["rows"]],
         col_widths=[CW*0.40, CW*0.30, CW*0.30], ch=CH)
 
@@ -132,18 +137,19 @@ def build_step12(story, data: dict):
     annotation(story, "NOTE",
         "The worst-case transient is the full 0→100%% step at high line: a %.1f V (%.1f%%) dip "
         "recovering in %.0f ms. This is expected for a PFC whose voltage loop is intentionally slow "
-        "(17 Hz) to reject the 120 Hz bus ripple. If the application requires a smaller dip, the bus "
+        "(%.0f Hz) to reject the 120 Hz bus ripple. If the application requires a smaller dip, the bus "
         "capacitor must be increased or the loop bandwidth raised — the latter at the cost of 120 Hz "
         "rejection / THD, as quantified in §6.13."
-        % (abs(wh["dv_hi"]), abs(wh["pct_hi"]), wh["trec_hi"]*1e3), CH)
+        % (abs(wh["dv_hi"]), abs(wh["pct_hi"]), wh["trec_hi"]*1e3, fcv_hi), CH)
 
     # Figure 5
     body(story, "<b>Figure 5 — Step Load Transient Response  |  All 6 Transitions, Low Line vs High "
         "Line</b>", CH)
     body(story,
         "Closed-loop output-voltage deviation for each load transition. Blue = low line "
-        "(90 Vac/1700 W), red = high line (180 Vac/3600 W). The shaded band is the ±1% recovery "
-        "window. Load-increase steps (top row) dip; load-decrease steps (bottom row) overshoot.", CH)
+        "(%s Vac/%s W), red = high line (%s Vac/%s W). The shaded band is the ±1%% recovery "
+        "window. Load-increase steps (top row) dip; load-decrease steps (bottom row) overshoot."
+        % (_vlo, _plo, _vhi, _phi), CH)
     story.append(_fig_transient(d))
     body(story, "<i>Figure 5 — ΔVout vs time for the six load transitions. Worst case: HL 0→100%% = "
         "%.1f V (%.1f%%), recovering in %.0f ms.</i>"

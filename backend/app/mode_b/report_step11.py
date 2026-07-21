@@ -56,7 +56,8 @@ def _fig_open_loop_v(d):
     ax1.set_ylabel("Magnitude (dB)")
     ax1.set_title("Figure 3 — Open-loop voltage loop $T_v(s)$ — all 8 operating points")
     ax1.grid(True, which="both", alpha=0.3); ax1.legend(fontsize=6, ncol=2, loc="upper right")
-    ax1.annotate("7.8 Hz (LL)\n17 Hz (HL)", xy=(d["rows"][4]["fco"], 0),
+    ax1.annotate(f"{d['rows'][0]['fco']:.1f} Hz (LL)\n{d['rows'][4]['fco']:.0f} Hz (HL)",
+                 xy=(d["rows"][4]["fco"], 0),
                  xytext=(40, 25), fontsize=7, arrowprops=dict(arrowstyle="->", lw=0.6))
     ax2.set_ylabel("Phase (°)"); ax2.set_xlabel("Frequency (Hz)")
     ax2.grid(True, which="both", alpha=0.3); ax2.set_xlim(0.5, 1000)
@@ -90,11 +91,14 @@ def build_step11(story, data: dict):
     cm = d["comp"]
     dr = rows[d["design_idx"]]
     vout = s["vout"]
+    fcv = s["fcv"]
+    _fcv = "%g" % fcv                                   # designer voltage-loop crossover, Hz
+    _plo = "%g" % s["pout_lo"]; _phi = "%g" % s["pout_hi"]   # low/high-line output power, W
 
     step_h(story, "6.11", "Outer Voltage Loop Design", CH)
     annotation(story, "THEORY",
         "The outer loop sets the amplitude of the current command to regulate the bus. It must be "
-        "slow — crossover near 17 Hz — so it does not respond to the 120 Hz ripple inherent on a "
+        "slow — crossover near %s Hz — so it does not respond to the 120 Hz ripple inherent on a " % _fcv +
         "single-phase-fed bus; responding to that ripple would distort the current reference and "
         "wreck the power factor. A Type-III OTA compensator provides the phase boost needed for "
         "adequate margin at such a low crossover.", CH)
@@ -164,19 +168,19 @@ def build_step11(story, data: dict):
         % (s["leq"]*1e6, s["lphi"]*1e6, rows[0]["frhp"]/1e3, s["fcv"]), CH)
 
     # ── 11.3 ──────────────────────────────────────────────────────────────────
-    sub_h(story, "6.11.3", "Detailed Calculation — 180 Vac / 3600 W (design point)", CH)
+    sub_h(story, "6.11.3", f"Detailed Calculation — {dr['vac']} Vac / {dr['pout']} W (design point)", CH)
     body(story,
-        "The compensator is sized at the 3600 W high-line design point, where the loop must cross over "
-        "at 17 Hz at full power. All quantities are evaluated at f<sub>cv</sub> = %.0f Hz, "
-        "s = j·2π·%.0f = j%.2f rad/s." % (s["fcv"], s["fcv"], 2*math.pi*s["fcv"]), CH)
+        "The compensator is sized at the %s W high-line design point, where the loop must cross over "
+        "at %s Hz at full power. All quantities are evaluated at f<sub>cv</sub> = %.0f Hz, "
+        "s = j·2π·%.0f = j%.2f rad/s." % (_phi, _fcv, s["fcv"], s["fcv"], 2*math.pi*s["fcv"]), CH)
     _ws(story, "Step 1 — Load resistance and output current:",
-        [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{3600}=%.4f\ \Omega" % (vout, dr["rload"]),
-         r"I_{OUT}=\dfrac{P_{OUT}}{V_{OUT}}=\dfrac{3600}{%.1f}=%.4f\ \mathrm{A}" % (vout, dr["iout"])])
+        [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{%g}=%.4f\ \Omega" % (vout, dr["pout"], dr["rload"]),
+         r"I_{OUT}=\dfrac{P_{OUT}}{V_{OUT}}=\dfrac{%g}{%.1f}=%.4f\ \mathrm{A}" % (dr["pout"], vout, dr["iout"])])
     _ws(story, "Step 2 — Multiplier gain term:",
-        r"GMOD=K_{MAX}\times\dfrac{I_{OUT}}{V_{RAMP}}=1.49\times\dfrac{%.4f}{5}=%.4f"
-        % (dr["iout"], dr["gmod"]))
+        r"GMOD=K_{MAX}\times\dfrac{I_{OUT}}{V_{RAMP}}=%g\times\dfrac{%.4f}{%g}=%.4f"
+        % (s["kmax"], dr["iout"], s["vramp"], dr["gmod"]))
     _ws(story, "Step 3 — Duty complement and RHP zero:",
-        [r"D'=\dfrac{\sqrt{2}\times180}{%.1f}=%.4f" % (vout, dr["Dp"]),
+        [r"D'=\dfrac{\sqrt{2}\times%g}{%.1f}=%.4f" % (dr["vac"], vout, dr["Dp"]),
          r"\omega_{RHP}=\dfrac{%.4f\times%.4f^2}{%.1f\,\mu H}=%.0f\ \mathrm{rad/s}"
          % (dr["rload"], dr["Dp"], s["leq"]*1e6, dr["wrhp"]),
          r"f_{RHP}=%.2f\ \mathrm{kHz}" % (dr["frhp"]/1e3)])
@@ -188,8 +192,8 @@ def build_step11(story, data: dict):
                    % (s["fcv"], dr["gicl"].real, dr["gicl"].imag),
                    r"|G_{i,cl}|=%.5f\qquad\angle G_{i,cl}=%.4f^\circ"
                    % (abs(dr["gicl"]), _ang(dr["gicl"]))], ch=CH)
-    body(story, "At %.0f Hz the current loop is essentially unity (its bandwidth is 8.12 kHz), but it "
-        "is retained for accuracy." % s["fcv"], CH)
+    body(story, "At %.0f Hz the current loop is essentially unity (its bandwidth is orders of magnitude "
+        "higher — see §6.10), but it is retained for accuracy." % s["fcv"], CH)
     _ws(story, "Step 5 — Voltage plant at %.0f Hz:" % s["fcv"],
         [r"G_{vp}(j2\pi\cdot%.0f)=%.5f%+.5fj" % (s["fcv"], dr["gvp"].real, dr["gvp"].imag),
          r"|G_{vp}|=%.5f\qquad\angle G_{vp}=%.2f^\circ" % (abs(dr["gvp"]), _ang(dr["gvp"]))])
@@ -224,12 +228,12 @@ def build_step11(story, data: dict):
         "(which now contains the divider H<sub>v</sub>) must supply a magnitude equal to the inverse "
         "of the uncompensated base gain:" % s["fcv"], CH)
     eq_box(story, [r"H_{OTA}(%.0f\ \mathrm{Hz})=\dfrac{1}{T_{v,base}}" % s["fcv"]], ch=CH)
-    body(story, "Sizing at the high-line 3600 W design point:", CH)
+    body(story, "Sizing at the high-line %s W design point:" % _phi, CH)
     eq_box(story, [r"H_{OTA}=\dfrac{1}{%.4f}=%.6f\quad(%.2f\ \mathrm{dB})"
                    % (d["tvbase_mag_design"], d["G"], 20*math.log10(d["G"]))], ch=CH)
-    body(story, "At low line (1700 W) the base gain is lower (|T<sub>v,base</sub>| ≈ %.2f), so the "
-        "same compensator yields a lower crossover — quantified in Section 11.9."
-        % abs(rows[0]["tvbase"]), CH)
+    body(story, "At low line (%s W) the base gain is lower (|T<sub>v,base</sub>| ≈ %.2f), so the "
+        "same compensator yields a lower crossover — quantified in §6.11.9."
+        % (_plo, abs(rows[0]["tvbase"])), CH)
 
     if cm["type"] == "type2":
         _build_step11_type2(story, d, cm, s, rows)
@@ -309,20 +313,23 @@ def build_step11(story, data: dict):
 
     # ── 11.9 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.11.9", "Voltage-Loop Crossover and Stability — All 8 Operating Points", CH)
+    _pmlo = min(o["pm"] for o in rows); _pmhi = max(o["pm"] for o in rows)
     body(story,
         "With the final standard components the loop is evaluated across all operating points. Because "
-        "the compensator is sized for the 3600 W design point, the high-line crossover is 17 Hz; at "
-        "low line (1700 W) the lower plant gain shifts the crossover down to about 7.8 Hz. Phase "
-        "margin is high (~81–82°) at every condition.", CH)
+        "the compensator is sized for the %s W design point, the high-line crossover is %s Hz; at "
+        "low line (%s W) the lower plant gain shifts the crossover down to about %.1f Hz. Phase "
+        "margin is high (~%.0f–%.0f°) at every condition."
+        % (_phi, _fcv, _plo, rows[0]["fco"], _pmlo, _pmhi), CH)
     data_table(story, "6.11.9", "Voltage-Loop Crossover and Stability — 8 Conditions", "",
-        ["V_AC (V)", "P_OUT (W)", "Loop gain at 17 Hz (dB)", "Crossover f_cv (Hz)", "Phase margin (°)"],
+        ["V_AC (V)", "P_OUT (W)", "Loop gain at %s Hz (dB)" % _fcv, "Crossover f_cv (Hz)", "Phase margin (°)"],
         [[f"{o['vac']}", f"{o['pout']}", f"{o['loopdb_fcv']:.2f}", f"{o['fco']:.2f}", f"{o['pm']:.1f}"]
          for o in rows], col_widths=[CW*0.15, CW*0.16, CW*0.27, CW*0.22, CW*0.20], ch=CH)
     annotation(story, "NOTE",
         "The voltage loop is unconditionally stable across the universal-input range: phase margin "
-        "stays near 81–82° and the gain margin is large because the loop has rolled well below 0 dB "
-        "long before the phase reaches −180°. The 1700 W crossover of 7.8 Hz is expected — the "
-        "compensator is sized at the 3600 W full-power design point.", CH)
+        "stays near %.0f–%.0f° and the gain margin is large because the loop has rolled well below 0 dB "
+        "long before the phase reaches −180°. The %s W crossover of %.1f Hz is expected — the "
+        "compensator is sized at the %s W full-power design point."
+        % (_pmlo, _pmhi, _plo, rows[0]["fco"], _phi), CH)
 
     # Figures
     body(story, "<b>Figure 14A — Type-III OTA Voltage-Loop Compensator Schematic</b>", CH)
@@ -342,9 +349,10 @@ def build_step11(story, data: dict):
     body(story, "<b>Figure 3 — Open-Loop Voltage Loop T<sub>v</sub>(s)  |  All 8 Operating "
         "Points</b>", CH)
     body(story,
-        "The open-loop voltage gain crosses 0 dB at 7.8 Hz (low line, solid) and 17 Hz (high line, "
-        "dashed). The Type-III compensator lifts the phase near crossover, giving ≈81–82° phase "
-        "margin. Vertical markers indicate the two crossover frequencies.", CH)
+        "The open-loop voltage gain crosses 0 dB at %.1f Hz (low line, solid) and %s Hz (high line, "
+        "dashed). The Type-III compensator lifts the phase near crossover, giving ≈%.0f–%.0f° phase "
+        "margin. Vertical markers indicate the two crossover frequencies."
+        % (rows[0]["fco"], _fcv, min(o["pm"] for o in rows), max(o["pm"] for o in rows)), CH)
     story.append(_fig_open_loop_v(d))
     body(story, "<i>Figure 3 — Open-loop T<sub>v</sub>(s): gain (dB, top) and phase (°, bottom). "
         "Crossover %.1f Hz (LL) / %.0f Hz (HL); PM ≈ %.0f–%.0f°.</i>"
@@ -359,16 +367,18 @@ def build_step11(story, data: dict):
     body(story, "<i>Figure 4 — Closed-loop T<sub>v</sub>(s)/(1+T<sub>v</sub>(s)): gain and phase "
         "across all 8 operating points.</i>", CH)
     annotation(story, "DECISION",
-        "Outer voltage loop — DESIGN PASS. Crossover %.0f Hz at 3600 W (PM %.0f°) and %.1f Hz at "
-        "1700 W (PM %.0f°). Compensator: R2 = %.0f kΩ, R3 = %.2f MΩ, C1 = %.0f nF, C2 = %.1f nF, "
+        "Outer voltage loop — DESIGN PASS. Crossover %.0f Hz at %s W (PM %.0f°) and %.1f Hz at "
+        "%s W (PM %.0f°). Compensator: R2 = %.0f kΩ, R3 = %.2f MΩ, C1 = %.0f nF, C2 = %.1f nF, "
         "C3 = %.0f nF (OTA Type-III, GMV = %.0f µS)."
-        % (rows[4]["fco"], rows[4]["pm"], rows[0]["fco"], rows[0]["pm"],
+        % (rows[4]["fco"], _phi, rows[4]["pm"], rows[0]["fco"], _plo, rows[0]["pm"],
            cm["r2s"]/1e3, cm["r3s"]/1e6, cm["c1s"]*1e9, cm["c2s"]*1e9, cm["c3s"]*1e9, s["gmv"]*1e6), CH)
 
 
 def _build_step11_type2(story, d, cm, s, rows):
     """§11.6–11.9 + figures + verdict when the designer selects a Type-II voltage
     compensator (one zero, one HF pole; no R3-C2 feed-forward branch)."""
+    _fcv = "%g" % s["fcv"]
+    _plo = "%g" % s["pout_lo"]; _phi = "%g" % s["pout_hi"]
     sub_h(story, "6.11.6", "OTA Type-II Compensator Design (Method B)", CH)
     body(story,
         "The designer selected a Type-II voltage compensator. Method B folds the feedback divider "
@@ -416,10 +426,10 @@ def _build_step11_type2(story, d, cm, s, rows):
     sub_h(story, "6.11.9", "Voltage-Loop Crossover and Stability — All 8 Operating Points", CH)
     body(story,
         "With the final standard components the loop is evaluated across all operating points. The "
-        "compensator is sized for the 3600 W design point; at low line (1700 W) the lower plant gain "
-        "shifts the crossover down.", CH)
+        "compensator is sized for the %s W design point; at low line (%s W) the lower plant gain "
+        "shifts the crossover down." % (_phi, _plo), CH)
     data_table(story, "6.11.9", "Voltage-Loop Crossover and Stability — 8 Conditions", "",
-        ["V_AC (V)", "P_OUT (W)", "Loop gain at 17 Hz (dB)", "Crossover f_cv (Hz)", "Phase margin (°)"],
+        ["V_AC (V)", "P_OUT (W)", "Loop gain at %s Hz (dB)" % _fcv, "Crossover f_cv (Hz)", "Phase margin (°)"],
         [[f"{o['vac']}", f"{o['pout']}", f"{o['loopdb_fcv']:.2f}", f"{o['fco']:.2f}", f"{o['pm']:.1f}"]
          for o in rows], col_widths=[CW*0.15, CW*0.16, CW*0.27, CW*0.22, CW*0.20], ch=CH)
     annotation(story, "NOTE",
@@ -450,9 +460,9 @@ def _build_step11_type2(story, d, cm, s, rows):
     body(story, "<i>Figure 4 — Closed-loop T<sub>v</sub>(s)/(1+T<sub>v</sub>(s)): gain and phase "
         "across all 8 operating points.</i>", CH)
     annotation(story, "DECISION",
-        "Outer voltage loop (Type-II) — crossover %.0f Hz at 3600 W (PM %.0f°) and %.1f Hz at 1700 W "
+        "Outer voltage loop (Type-II) — crossover %.0f Hz at %s W (PM %.0f°) and %.1f Hz at %s W "
         "(PM %.0f°). Compensator: R2 = %.0f kΩ, C1 = %.0f nF, C3 = %.0f nF (OTA Type-II, GMV = %.0f µS)."
-        % (rows[4]["fco"], rows[4]["pm"], rows[0]["fco"], rows[0]["pm"],
+        % (rows[4]["fco"], _phi, rows[4]["pm"], rows[0]["fco"], _plo, rows[0]["pm"],
            cm["r2s"]/1e3, cm["c1s"]*1e9, cm["c3s"]*1e9, s["gmv"]*1e6), CH)
 
 
