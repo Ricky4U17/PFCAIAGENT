@@ -2,7 +2,7 @@
 doc_report_builder.py  v3
 Chapter-based report per PFC_Report_Structure_Agreement.pdf (June 2026).
 
-Annotation box colours (from Structure Agreement §5):
+Annotation box colours (from Structure Agreement Section 5):
   CONCEPT  — blue   left border  #1D4ED8
   THEORY   — green  left border  #065F46
   PITFALL  — red    left border  #991B1B
@@ -77,7 +77,7 @@ def _mpl_c(c):
     """Convert a ReportLab Color to a matplotlib-compatible hex string."""
     return f"#{int(c.red*255):02x}{int(c.green*255):02x}{int(c.blue*255):02x}"
 
-# ── Annotation box colours — per agreed spec §5 ───────────────────────────────
+# ── Annotation box colours — per agreed spec Section 5 ───────────────────────────────
 ANN = {
     "CONCEPT":  {"bg": colors.HexColor("#DBEAFE"), "border": colors.HexColor("#1D4ED8")},
     "THEORY":   {"bg": colors.HexColor("#D1FAE5"), "border": colors.HexColor("#065F46")},
@@ -314,7 +314,7 @@ def eq_box(story, expr, heading=None, number=None, ch=1):
 
 def annotation(story, box_type, text, ch=1):
     """
-    Annotation box per agreed spec §5:
+    Annotation box per agreed spec Section 5:
       CONCEPT=blue, THEORY=green, PITFALL=red, DECISION=navy, INSIGHT=amber
     """
     cfg = ANN.get(box_type.upper(), ANN["CONCEPT"])
@@ -475,10 +475,10 @@ def _fig_wave_family(wbv, vins, ykey, ylabel, title):
 def _fig_dcbus_wave(rows, Vout, f_line, kind):
     """DC-bus ripple waveform over two line cycles, overlaid across the 9 operating points — the
     SAME two-band model the interactive DC-bus capacitor simulation plots, driven by this design's
-    own per-point ripple table (§5.3.1), so the figure equals the tabulated numbers by construction:
+    own per-point ripple table (Section 5.3.1), so the figure equals the tabulated numbers by construction:
         v_bus(t)  = V_out − (ΔV_pp/2)·sin(2ωt)          (120 Hz LF ripple; ΔV_pp = V_ripple_pp_V)
         i_cap(t)  = −√2·I_LF·cos(2ωt)                    (120 Hz LF capacitor current)
-    the switching-frequency HF component (I_HF, §5.3.1) rides on top as the shaded ±envelope.
+    the switching-frequency HF component (I_HF, Section 5.3.1) rides on top as the shaded ±envelope.
     kind='v' → bus ripple voltage; kind='i' → capacitor current."""
     try:
         rows = [r for r in rows if r.get("V_ripple_pp_V") is not None]
@@ -535,7 +535,7 @@ def _fig_img(fig, width_mm=150):
 
 
 def _corner_field(d, vin, t_amb):
-    """Per-operating-corner field magnitudes for the §4.1 ring views, from the design's own
+    """Per-operating-corner field magnitudes for the Section 4.1 ring views, from the design's own
     per-V_in tables (one engine): B_max = B_dc + B_ac at that corner (flux table + bias L),
     inner-bore B_max via the radial-crowding factor, and the temperature scaled by that
     corner's total loss relative to the worst point (the two-node ΔT the design was sized at).
@@ -575,8 +575,8 @@ def _fig_ring_views(d, t_amb=50.0, bmax=None, binner=None, thot=None, dt=None):
     circumference + outer-layer packing of the full pass count).
 
     Renders from the approved design's own field data. Optional bmax/binner/thot/dt overrides
-    let the caller render the SAME geometry at a specific operating corner (e.g. §4.1.1 low-line
-    90 V vs §4.1.2 high-line 180 V) — the winding geometry is identical, only the field
+    let the caller render the SAME geometry at a specific operating corner (e.g. Section 4.1.1 low-line
+    90 V vs Section 4.1.2 high-line 180 V) — the winding geometry is identical, only the field
     magnitudes / colour scales differ. Defaults fall back to the design's worst-case values."""
     try:
         OD = float(d.get("OD_mm", 0) or 0); ID = float(d.get("ID_mm", 0) or 0)
@@ -893,16 +893,16 @@ def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIS
 # Moved to app.mode_b.calculations.canonical_ops_table — it is now the SINGLE
 # source of η/PF values for the whole report AND for the sizing engine
 # (step7_run_sizing builds its OPS via build_design_ops_table, which wraps this
-# same table). Chapter 1 §1.2 reproduces it for reference and every later
+# same table). Chapter 1 Section 1.2 reproduces it for reference and every later
 # chapter (2, 3, …) derives its per-point η/PF figures from it — never from a
 # re-typed literal. Local alias kept so existing call sites below need no churn.
 _canonical_ops_table = canonical_ops_table
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CHAPTER 1 — SPECIFICATIONS   (per PFC_Report_Structure_Agreement §3.1, Ch.1)
-# Sections 1.1–1.4. (Former §1.4 "Operating Points Matrix" and §1.6 "Design
+# CHAPTER 1 — SPECIFICATIONS   (per PFC_Report_Structure_Agreement Section 3.1, Ch.1)
+# Sections 1.1–1.4. (Former Section 1.4 "Operating Points Matrix" and Section 1.6 "Design
 # Targets Summary" were removed — both depended on selections (N_ph, f_sw,
-# crest ripple ratio) made later, in Chapter 2 §§2.4–2.6; §1.5 renumbered → 1.4.)
+# crest ripple ratio) made later, in Chapter 2 SectionSection 2.4–2.6; Section 1.5 renumbered → 1.4.)
 # ═══════════════════════════════════════════════════════════════════════════════
 def _ch1(story, state):
     from app.design_state import DesignState
@@ -1089,7 +1089,7 @@ def _ch1(story, state):
             "candidate is screened for creepage compliance during sizing.", 1)
 
     # ── 1.4 Thermal and Mechanical Constraints ────────────────────────────────
-    # (renumbered from 1.5 — former §1.4 "Operating Points Matrix" and §1.6
+    # (renumbered from 1.5 — former Section 1.4 "Operating Points Matrix" and Section 1.6
     #  "Design Targets Summary" removed; see chapter banner comment for why)
     step_h(story, "1.4", "Thermal and Mechanical Constraints", 1)
     data_table(story, "1.4.1", "Thermal and Mechanical Budget",
@@ -1107,7 +1107,7 @@ def _ch1(story, state):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHAPTER 2 — TOPOLOGY AND CONTROL SCHEME SELECTION
-# Sections 2.1–2.6 per PFC_Report_Structure_Agreement §3.1, Ch.2
+# Sections 2.1–2.6 per PFC_Report_Structure_Agreement Section 3.1, Ch.2
 # ═══════════════════════════════════════════════════════════════════════════════
 def _ch2(story, state):
     from app.design_state import DesignState
@@ -1131,7 +1131,7 @@ def _ch2(story, state):
     crest   = float(tsi.default_crest_ripple_ratio if tsi else 0.20) or 0.20
     # Use the ROUNDED selected inductance (confirmed_L_uH_sel) — the value the
     # sizing engine actually consumed (main.py: step7_run_sizing reads
-    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what §3.2's
+    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what Section 3.2's
     # rigorous chain independently rounds L_phi_calc to, so ΔI_L,pp computed
     # here now matches Table 3.2.4a's dIL_crest[0] instead of drifting off it.
     L_tgt   = float((tsi.confirmed_L_uH_sel or tsi.confirmed_L_uH) if tsi else 240) or 240
@@ -1697,7 +1697,7 @@ def _ch3(story, state, d):
     fsw     = float(tsi.recommended_frequency_hz  if tsi else 70000) or 70000
     # Use the ROUNDED selected inductance (confirmed_L_uH_sel) — the value the
     # sizing engine actually consumed (main.py: step7_run_sizing reads
-    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what §3.2's
+    # confirmed_L_uH_sel, not the raw confirmed_L_uH). This is also what Section 3.2's
     # rigorous chain independently rounds L_phi_calc to, so ΔI_L,pp computed
     # here now matches Table 3.2.4a's dIL_crest[0] instead of drifting off it.
     L_tgt   = float((tsi.confirmed_L_uH_sel or tsi.confirmed_L_uH) if tsi else 240) or 240
@@ -1784,7 +1784,7 @@ def _ch3(story, state, d):
     D_90        = max(0.001, 1 - vin_pk_90 / vout)
     ipk_line_90 = math.sqrt(2) * (pout_lo/eta) / (vin_min * PF)
     iavg_90     = ipk_line_90 / (2*n_ph)
-    # Governing-corner chain for the §3.1.1 L derivation — the SAME step2 → step4
+    # Governing-corner chain for the Section 3.1.1 L derivation — the SAME step2 → step4
     # chain as the sizing engine, evaluated at the worst-case ripple-ratio corner.
     # Deriving L at 90 Vac here while the criterion actually governs at high line
     # (weak interleave cancellation at low duty) confused reviewers: the 90 Vac
@@ -2495,7 +2495,7 @@ def _ch3(story, state, d):
         "the low-line and high-line operating families.", 3)
 
     # ── 3.5.1 — Lphi sizing at the worst-case ripple corner (Step 4) ─────────
-    # §3.5.1 no longer repeats the §3.1.1 sizing derivation (report notes 2026-07-18
+    # Section 3.5.1 no longer repeats the Section 3.1.1 sizing derivation (report notes 2026-07-18
     # #3): with core, turns and per-point inductance now final, it states the
     # AS-BUILT per-phase currents — the values Chapter 2 deferred until L existed.
     sub_h(story, "3.5.1", "Per-phase currents with the as-built inductance — all 9 points", 3)
@@ -3722,7 +3722,7 @@ def _ch4(story, state, d):
             story.append(_lov)
             fig_caption(story,
                 "Figure 4.5a — Core, copper and total loss across the nine operating voltages "
-                "(same values as Table 4.2, §4.6). Copper loss rises toward low line with the "
+                "(same values as Table 4.2, Section 4.6). Copper loss rises toward low line with the "
                 "input current; core loss falls as the duty cycle nears 0.5 — total loss peaks "
                 "at the low-line corner.", 4)
 
@@ -4021,8 +4021,8 @@ def _ch5(story, state, s15):
 
     # The App-level APPROVED payload (what every page after Step 15 forwards) may carry
     # only the selected part + bank totals — worst_case/inputs/C_required arrive empty,
-    # which used to render every §5.1 sizing figure (and the ripple currents that feed
-    # §5.2 verify, the §5.3.2 sweep and the §5.4 lifetime) as 0. Re-derive the sizing
+    # which used to render every Section 5.1 sizing figure (and the ripple currents that feed
+    # Section 5.2 verify, the Section 5.3.2 sweep and the Section 5.4 lifetime) as 0. Re-derive the sizing
     # from the same engine the Step-15 page runs on this very state, then let any
     # non-empty keys the payload DOES carry override the engine values.
     if not (s15.get("worst_case") or {}) or not s15.get("C_required_uF"):
@@ -4100,8 +4100,8 @@ def _ch5(story, state, s15):
         except Exception: _qty = 1
         cfg = [{"value_uF": _val, "qty": _qty, "part_number": sel.get("part_number", "")}]
 
-    # Selected-part CSV record + intake ambient — shared by §5.2 verify (cap_ref anchors the
-    # vendor-implied ESR(T) model to the part, matching the GUI's verify call) and §5.3.2.
+    # Selected-part CSV record + intake ambient — shared by Section 5.2 verify (cap_ref anchors the
+    # vendor-implied ESR(T) model to the part, matching the GUI's verify call) and Section 5.3.2.
     _tamb5 = float(state.get("intake", {}).get("thermal", {})
                    .get("ambient_temp_c_max", 50) or 50)
     try:
@@ -4285,7 +4285,7 @@ def _ch5(story, state, s15):
                 "ripple current exceeds the NAMEPLATE 120 Hz rating (which the datasheet specifies "
                 "at the category maximum temperature) but remains within the temperature-adjusted "
                 "allowance K(T<sub>amb</sub>)·I<sub>rated</sub>, the core temperature stays within "
-                "the rating, and the Life Time Period target (§5.4) is met. This is the "
+                "the rating, and the Life Time Period target (Section 5.4) is met. This is the "
                 "vendor-sanctioned use of the ripple temperature multiplier; the acceptance is "
                 "conditional on the specified ambient — if the enclosure runs hotter than the "
                 "spec ambient, the allowance shrinks accordingly.", 5)
@@ -4346,13 +4346,13 @@ def _ch5(story, state, s15):
             annotation(story, "CONCEPT",
                 "The two figures below show the bus-voltage ripple and the capacitor current over "
                 "two line cycles, one trace per input voltage — the same two-band model the "
-                "interactive DC-bus capacitor simulation plots, driven by this design's own §5.3.1 "
+                "interactive DC-bus capacitor simulation plots, driven by this design's own Section 5.3.1 "
                 "ripple table so figure and table agree by construction. The dominant component is "
                 "the 120 Hz line-frequency ripple: the bus discharges then recharges twice per line "
                 "cycle (v<sub>bus</sub> = V<sub>out</sub> − ½ΔV<sub>pp</sub>·sin 2ωt), and the "
                 "capacitor sources/sinks the difference between the pulsating boost output and the "
                 "steady load (i<sub>cap</sub> = −√2·I<sub>LF</sub>·cos 2ωt). The switching-frequency "
-                "ripple (I<sub>HF</sub>, tabulated in §5.3.1) rides on top as the shaded ±envelope.", 5)
+                "ripple (I<sub>HF</sub>, tabulated in Section 5.3.1) rides on top as the shaded ±envelope.", 5)
             if _wv5:
                 story.append(_wv5)
                 annotation(story, "NOTE",
@@ -4836,17 +4836,17 @@ def _ch6(story, state, s16):
             ["Reference", "Value", "Function"],
             bom, col_widths=[CW*0.18, CW*0.22, CW*0.60], ch=6)
 
-        # ── §6.9 References — auto-retrieved from the local controller reference DB ──
+        # ── Section 6.9 References — auto-retrieved from the local controller reference DB ──
         _ch6_references(story, controller_id="fan9672")
 
 
 def _ch6_loop_derivation(story, res):
-    """§6.1.1–6.1.3 — step-by-step derivation of the inner current-loop and outer
+    """Section 6.1.1–6.1.3 — step-by-step derivation of the inner current-loop and outer
     voltage-loop equations from the averaged boost-PFC small-signal model. Theory
     follows the project derivation documents (Inner_Current_Loop_Theory_Derivation,
     Outer_Voltage_Loop_Theory_Derivation) and the control-loop references in the
     local reference database. First pass — the algebraic backbone and the final
-    equations; numerical compensator design is in §6.4–6.6."""
+    equations; numerical compensator design is in Section 6.4–6.6."""
     # ── operating values (from step16, with the design's reference values as fallback) ──
     Vout = float(res.get("Vout_V", 393));  Co_uF = float(res.get("C_uF", 2200))
     rC_m = float(res.get("ESR_mOhm", 10)); rL_m = float(res.get("DCR_mOhm", 10))
@@ -5009,13 +5009,13 @@ def _ch6_loop_derivation(story, res):
         "<i>Inner_Current_Loop_Theory_Derivation</i> and "
         "<i>Outer_Voltage_Loop_Theory_Derivation</i>, and rest on the average-current-mode and "
         "compensator theory in the control-loop references (SLUA079, SLUP098, SLVA662, and the "
-        "FAN9672 / FAN9673 application notes — see §6.9). This first pass gives the algebraic "
+        "FAN9672 / FAN9673 application notes — see Section 6.9). This first pass gives the algebraic "
         "backbone and the final symbolic equations; the numerical compensator values, "
-        "per-operating-point gains and stability margins follow in §6.4–§6.6.", 6)
+        "per-operating-point gains and stability margins follow in Section 6.4–Section 6.6.", 6)
 
 
 def _ch6_references(story, controller_id="fan9672"):
-    """Append §6.9 — a bibliography + per-design-aspect citations pulled from the
+    """Append Section 6.9 — a bibliography + per-design-aspect citations pulled from the
     controller reference database (app/reference_agent). Fully guarded: any failure
     (missing manifest, PyMuPDF, etc.) is swallowed so the report still builds."""
     try:

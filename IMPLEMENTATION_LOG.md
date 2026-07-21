@@ -4605,3 +4605,12 @@ steps); no "§" in rendered text, "Section 6.x" throughout; §6.10.14 renders in
 current loop (6.10.13 < 6.10.14 < 6.11.1); §6.8.4/6.8.5 equations render (⇒, mΩ, √2, ×10^-6 all OK)
 with arithmetic-consistent substitutions (visual spot-check of pages 22/23/49). Combined report
 builds ~178 pp, no legacy fallback. Commit <pending>.
+
+## C105 — 2026-07-20 — Remove "§" from Chapters 1-5 (report-wide consistency)
+
+Follow-up to C104 point 6: converted the remaining 39 "§" occurrences in doc_report_builder.py
+(Chapters 1-5) to spelled-out "Section", so the whole report uses one convention. All were "§<digit>"
+section refs (§1..§6), none inside eq_img/LaTeX. Two-step mechanical replace (§→"Section", then
+"Section<d>"→"Section <d>" for d=1..6); the plural word "Sections" (8×) and the 30 pre-existing
+"Section " refs were left intact (no double-spacing). Verified: 0 § remaining, 0 broken tokens,
+syntax clean, combined report builds with no "§" anywhere. Commit <pending>.
