@@ -4548,3 +4548,15 @@ voltage class and parallels enough to meet C_required (known-good 383LX122M450B0
 prints the page count + PASS/FAIL checks (no legacy fallback, §5.3/5.4/5.5, §4.8, Ch6) and exits
 non-zero if not ~178 pp. Optional argv[1] = f_cv (Hz) to exercise the §6.14 pivot.
 Verified: 178 pp, all checks OK, exit 0 (auto-picked 2×1200µF/450V → 2400µF bank). Commit <pending>.
+
+## C102 — 2026-07-20 — Combined-report regression test (TestCombinedReport)
+
+Added TestCombinedReport to backend/tests/test_regression.py, reusing verify_combined_report.
+build_combined() (C101). A class-scoped `combined` fixture builds the full report ONCE and 5 tests
+assert against it: selected_cap attached, page count 176-180 (~178; 171 => selected_cap dropped →
+Ch5 §5.3/5.4/5.5 gated), no legacy fallback ("via Mode A HITL" absent), §5.3/5.4/5.5 present, §4.8
+agreement-verdict + Ch6 present. Runs in ~105 s (one build). Verified: 5 passed.
+NOTE (out of scope, flagged): step16_params.fcv_Hz is NOT forwarded by _control_inputs_from_step16,
+so the §6.14 f_cv pivot only takes effect in the standalone control report, not the combined path
+(combined always shows Baseline 17 Hz) — a separate plumbing gap, no test asserts the combined pivot.
+Commit <pending>.

@@ -353,6 +353,50 @@ class TestModeBPDFReport:
             "Topology name not found in PDF cover"
 
 
+# ── Combined design report (Ch1-5 doc agent + Ch6 control) ──────────────────
+
+class TestCombinedReport:
+    """Full combined report via /mode-b/documentation/generate-report, built by the shared
+    verify_combined_report harness. The harness ALWAYS carries a real selected_cap because
+    Chapter 5 §5.3/5.4/5.5 are gated on it (doc_report_builder rule 8) — without it the report
+    silently reads ~171 pp instead of the real ~178 pp."""
+
+    @pytest.fixture(scope="class")
+    def combined(self):
+        import matplotlib; matplotlib.use('Agg')
+        from verify_combined_report import build_combined
+        pdf, pages, text, meta = build_combined(17.0)
+        return {"pdf": pdf, "pages": pages, "text": text, "meta": meta}
+
+    def test_selected_cap_is_attached(self, combined):
+        sc = combined["meta"]["selected_cap"]
+        assert sc.get("part_number") and (sc.get("value_uF") or 0) > 0 and (sc.get("qty") or 0) >= 1, \
+            f"harness did not attach a valid selected_cap: {sc}"
+
+    def test_page_count_is_full_report(self, combined):
+        pages = combined["pages"]
+        # ~178 pp with the full Chapter 5; 171 means selected_cap was dropped (Ch5 §5.3/5.4/5.5 gated).
+        assert 176 <= pages <= 180, \
+            f"combined report has {pages} pages, expected ~178 (171 => selected_cap missing)"
+
+    def test_no_legacy_fallback(self, combined):
+        # The chapter builder falls back to the OLD generator on ANY exception; this stale phrase
+        # only appears in that legacy path.
+        assert "via Mode A HITL" not in combined["text"], \
+            "legacy generator fallback detected (chapter builder threw)"
+
+    def test_chapter5_ripple_and_lifetime_sections_present(self, combined):
+        t = combined["text"]
+        assert "Ripple Current and Voltage Verification" in t, "§5.3 missing (selected_cap gate)"
+        assert "Capacitor Life Time Period" in t, "§5.4 (Life Time Period) missing"
+        assert "Capacitor Bank Summary" in t, "§5.5 (Bank Summary) missing"
+
+    def test_chapter4_crosscheck_and_chapter6_present(self, combined):
+        t = combined["text"]
+        assert "Field engine agrees with Step-7" in t, "§4.8 agreement-based cross-check verdict missing"
+        assert "Control Scheme" in t, "Chapter 6 (Control Scheme) missing"
+
+
 # ── Step registry integrity ────────────────────────────────────────────────
 
 class TestStepRegistry:
