@@ -459,14 +459,17 @@ class TestDataLoader:
             f"Pv={Pv:.3f} kW/m³ deviates >2% from the calibrated reference 58.114"
 
     def test_Pcore_EDGE60_3stack_matches_reference(self):
-        """Pcore at reference conditions — tracks the 3954c97 Steinmetz recalibration (see
-        test_core_loss_EDGE60): 0.9285 W (was 0.8593 W)."""
+        """Pcore = Pv × Ve for the 3-stack reference core. Uses the AUTHORITATIVE Magnetics/DigiKey
+        effective volume Ve = 4.15 cm³/core (Ae 65.4 mm² × le 63.5 mm) — the same value filter_cores
+        and the report use. The old 5.3258 cm³ was the *geometric* volume (Ae_geom≈81 × le≈65.6) — a
+        wrong basis (also in the specs reference doc, which mis-states Ae=77 mm²). With the 3954c97
+        Steinmetz recalibration Pv=58.11 kW/m³ → Pcore = 58.11×(4.15e-6×3)×1e3 = 0.7235 W."""
         from app.mode_b.data_loader import get_core_loss_kW_m3
-        Ve = 5.3258e-6 * 3   # 3-stack, corrected Ve
+        Ve = 4.15e-6 * 3   # 3-stack, effective Ve per Magnetics datasheet (matches catalog/report)
         Pv = get_core_loss_kW_m3('edge_60', 70e3, 0.054103, 25.0)
         Pcore = Pv * 1e3 * Ve
-        assert abs(Pcore - 0.9285) / 0.9285 < 0.02, \
-            f"Pcore={Pcore:.4f}W deviates >2% from the calibrated reference 0.9285W"
+        assert abs(Pcore - 0.7235) / 0.7235 < 0.02, \
+            f"Pcore={Pcore:.4f}W deviates >2% from the datasheet-Ve reference 0.7235W"
 
     def test_Bsat_3C95_at_100C(self):
         from app.mode_b.data_loader import get_Bsat
@@ -509,7 +512,10 @@ class TestDataLoader:
         edge3 = [c for c in cores
                  if '0059894A2' in str(c['part_number']) and c['stacks'] == 3]
         assert len(edge3) == 1, "EDGE 0059894A2, 3-stack not found in 1U filter"
-        assert abs(edge3[0]['Ve_total_cm3'] - 15.9774) < 0.01
+        # Ve_total = 3 × 4.15 cm³ = 12.45 cm³ — the AUTHORITATIVE Magnetics/DigiKey effective volume
+        # (Ae 65.4 mm² × le 63.5 mm). The old 15.9774 used the geometric volume (5.3258 cm³/core),
+        # which was never consistent with the catalog and overstates the core by ~28 %.
+        assert abs(edge3[0]['Ve_total_cm3'] - 12.45) < 0.01
         assert edge3[0]['h_effective_mm'] < 44.45
 
     def test_log_log_interpolation_accuracy(self):

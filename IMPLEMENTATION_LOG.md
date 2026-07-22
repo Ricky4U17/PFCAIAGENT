@@ -4761,3 +4761,21 @@ suite (through C112) was 23 failed / 149 passed / 2 skipped (from 33); C113 fixe
 and C114 this regression → ~19 remaining, all documented: TestCorrectLFormula (5, worst-case-
 governing semantics), TestDataLoader DC-bias (1) + EDGE_3stack Ve (1, possible real data), Mode-A
 advisory/graph-wiring/doc-check + smoke-sequence (~12, phase advisory nodes + workflow doc changes).
+
+## C115 — 2026-07-21 — Ve investigation: catalog is CORRECT; fix tests to authoritative datasheet Ve
+
+Dug into the EDGE_3stack_fits_1U "Ve change" (15.9774 → 12.45 cm³). Findings:
+- NOT a regression: toroid_catalog.csv row for 0059894A2 (Ae 65.4 mm², le 63.5 mm, Ve 4.15 cm³) is
+  UNCHANGED since the initial commit; the test's 15.9774 was never consistent with it.
+- Ve = 4.15 cm³ is AUTHORITATIVE — verified via DigiKey (Magnetics datasheet): Ae 65.4 mm², le 63.5
+  mm, Ve 4150 mm³, AL 75 nH. It is the effective volume Ae×le. The old 5.3258 cm³/core was the
+  GEOMETRIC volume (Ae_geom≈81 × le≈65.6) — wrong for core-loss (Pv×Ve uses effective Ve).
+- filter_cores + the report use the catalog (4.15) → the report is correct.
+- DISCREPANCY FLAGGED (no code change — code is right): the specs reference design doc (Step 13.2)
+  states Ae(single)=77 mm² / Ae,total=231 mm², which disagrees with the datasheet's 65.4 (Wa=156 and
+  AL=75 do match). The reference doc's Ae=77 is an error; the code correctly uses 65.4.
+
+Fixes: EDGE_3stack_fits_1U 15.9774→12.45 cm³. test_Pcore_EDGE60 — CORRECTED my own C113 update, which
+had kept the wrong geometric Ve (5.3258→0.9285 W); now uses the datasheet Ve 4.15 → 0.7235 W (matches
+Pv 58.11 × 4.15e-6×3 × 1e3). 2 passed. Remaining item-1: TestCorrectLFormula (5), DC-bias 9-value (1),
+Mode-A advisory/graph (~12).
