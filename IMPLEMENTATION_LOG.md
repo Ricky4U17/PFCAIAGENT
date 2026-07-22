@@ -4800,3 +4800,27 @@ Investigated the 12 Mode-A advisory/graph failures. Categorised:
 Net item-1 after C116: from 33 failing → ~11 (2 real bugs fixed earlier + fixtures/skips/calib/Ve +
 phase1 skeleton). Remaining ~11 = TestCorrectLFormula (5, redesign), DC-bias (1), + the mode-B graph
 cluster (~5-7).
+
+## C117 — 2026-07-22 — FIX the mode-B LangGraph re-entry bug (the graph engine issue from C116)
+
+Root cause was three coordinated defects in the re-run-from-START workflow model (pause = route to a
+WAIT_* → END; each invoke re-enters at intake_node):
+1. intake_node unconditionally set mode="mode_a" every invoke → wiped mode-B progress. FIX: only
+   (re)set mode_a when not already mode_b/final.
+2. topology_specific_intake auto-advance guard required last_completed_step=="topology_specific_intake";
+   once a mode-B step ran, last_completed became a mode-B step so the guard failed and the gate
+   RE-PROCESSED and CONSUMED the mode-B approval feedback. FIX: pass straight through when
+   mode=="mode_b" without touching human_feedback.
+3. controller_selection_hitl auto-advance set pending_step=MODE_B_SEQUENCE[0] on every re-invoke →
+   restarted the pipeline at input_processing. FIX: route back to the step in progress
+   (last_completed_step if it is a mode-B step, else input_processing); + expand the controller's
+   conditional-edge map to allow every MODE_B_SEQUENCE target (was input_processing only).
+
+Result: the mode-B pipeline now advances one step per approved invoke (verified 14+ steps incl.
+advisory nodes, was stuck at input_processing=1). No regression: 38 Mode-A tests pass. Also fixed the
+stale test_smoke_workflow sequence (insert the mini-intake gate assertion).
+
+REMAINING (separate concern, not this bug): the pipeline stalls at guardrail_v2_advisory because that
+node sets state["guardrail_hard_stop"]=True for the test intake — halting progression to the later
+advisory nodes (bidirectional_thermal onward). That is design-validation behaviour, investigated
+next. Commit <pending>.

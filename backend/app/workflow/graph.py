@@ -162,7 +162,11 @@ def _safe_node(fn, step_name, state):
 
 def intake_node(state):
     state = ensure_phase1_state_defaults(state)
-    state["mode"] = "mode_a"
+    # The graph re-runs from this entry node on every invoke (pause = route to a WAIT_* → END).
+    # Only (re)initialise mode for a fresh run — never clobber mode_b/final, or each re-invoke would
+    # wipe the mode-B progress and drop us back into the Mode-A gates.
+    if state.get("mode") not in ("mode_b", "final"):
+        state["mode"] = "mode_a"
     return state
 
 
@@ -215,6 +219,12 @@ def route_after_topology_hitl(state):
 
 def topology_specific_intake_node(state):
     state["current_step"] = "topology_specific_intake"
+    # Once we are in mode-B this Mode-A gate is already done. On the re-run-from-start model we pass
+    # through here on every invoke, so short-circuit WITHOUT consuming human_feedback — otherwise this
+    # gate would swallow the mode-B approval feedback and the pipeline could never advance.
+    if state.get("mode") == "mode_b":
+        state["pending_step"] = "controller_selection"
+        return state
     # Auto-advance if mini-intake was previously completed AND feedback is not targeting this gate.
     if state.get("last_completed_step") == "topology_specific_intake" and state.get("waiting_at") != WAIT_TOPOLOGY_SPECIFIC:
         state["pending_step"] = "controller_selection"
@@ -268,8 +278,12 @@ def controller_selection_node(state):
 
 def controller_selection_hitl_node(state):
     # Auto-advance if controller was already approved AND feedback is not targeting this gate.
+    # Re-enter the mode-B pipeline at the step it is currently paused at (last_completed_step), NOT
+    # at MODE_B_SEQUENCE[0] — otherwise every re-invoke restarts the pipeline at input_processing and
+    # it can never progress. Feedback is left untouched so mode_b_hitl consumes it downstream.
     if state.get("mode") == "mode_b" and state.get("waiting_at") != WAIT_CONTROLLER:
-        state["pending_step"] = MODE_B_SEQUENCE[0]
+        last = state.get("last_completed_step")
+        state["pending_step"] = last if last in MODE_B_SEQUENCE else MODE_B_SEQUENCE[0]
         return state
     feedback = state.get("human_feedback", {})
     if feedback.get("approved", False):
@@ -726,9 +740,12 @@ def build_graph():
     )
     g.add_conditional_edges("topology_specific_intake", route_after_topology_specific_intake, {"controller_selection":"controller_selection", WAIT_TOPOLOGY_SPECIFIC:WAIT_TOPOLOGY_SPECIFIC})
     g.add_edge("controller_selection", "controller_selection_hitl")
+    # On first approval the controller routes to input_processing; on re-invoke while in mode-B it
+    # routes back to the mode-B step currently in progress (last_completed_step), so every MODE_B
+    # step must be a valid target here — not just input_processing.
     g.add_conditional_edges(
         "controller_selection_hitl", route_after_controller_selection_hitl,
-        {"input_processing": "input_processing", WAIT_CONTROLLER: WAIT_CONTROLLER},
+        {**{name: name for name in MODE_B_SEQUENCE}, WAIT_CONTROLLER: WAIT_CONTROLLER},
     )
     for name in MODE_B_SEQUENCE:
         g.add_edge(name, "mode_b_hitl")

@@ -31,6 +31,12 @@ def test_smoke_workflow_pauses_and_advances():
 
     state["human_feedback"] = {"approved": True}
     state = graph.invoke(state)
+    # Post-selection mini-intake gate (topology-specific inputs) precedes the controller gate.
+    assert state["current_step"] == "awaiting_topology_specific_inputs"
+
+    state["human_feedback"] = {"approved": True, "switching_frequency_style": "fixed",
+                               "switching_frequency_hz": 70000.0, "crest_ripple_ratio": 0.20}
+    state = graph.invoke(state)
     assert state["current_step"] == "awaiting_controller_approval"
 
     state["human_feedback"] = {"approved": True, "controller_mode": "analog", "controller_name": "TI UC3854"}
