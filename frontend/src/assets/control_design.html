@@ -329,6 +329,7 @@
       </div>
       <div class="panel" data-sub="cur">
         <h2>Current Loop T<sub>i</sub>(s) — 10 Hz to 500 kHz</h2>
+        <label class="inline" style="font-size:12px;color:var(--muted)">Load:&nbsp;<select id="loadPctCur" class="loadSel" style="width:auto"><option value="100">100 %</option><option value="75">75 %</option><option value="50">50 %</option><option value="25">25 %</option><option value="10">10 %</option></select>&nbsp;of the selected line-range rated power</label>
         <label class="inline" style="font-size:12px;color:var(--muted)"><input type="checkbox" id="ovl" checked style="width:auto">&nbsp;Overlay all operating points (solid = low line, dashed = high line)</label>
         <div class="canvasWrap"><canvas id="bodeCur" data-h="430"></canvas><div class="hoverbox" id="hbCur"></div></div>
         <div class="legend"><span><i style="border-color:#56a3ff"></i>Loop T<sub>i</sub> (selected std values)</span><span><i style="border-color:rgba(86,163,255,.35)"></i>Other operating points (overlay)</span><span><i style="border-color:#34d399"></i>achieved fc / PM / GM</span></div>
@@ -342,6 +343,7 @@
       </div>
       <div class="panel" data-sub="vol">
         <h2>Voltage Loop T<sub>v</sub>(s) — 0.1 Hz to 1 MHz</h2>
+        <label class="inline" style="font-size:12px;color:var(--muted)">Load:&nbsp;<select id="loadPctVol" class="loadSel" style="width:auto"><option value="100">100 %</option><option value="75">75 %</option><option value="50">50 %</option><option value="25">25 %</option><option value="10">10 %</option></select>&nbsp;of each band's rated power</label>
         <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
         <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
         <h3 style="margin-top:10px">Pole–Zero Placement (drag ○ zeros / × poles)</h3>
@@ -470,7 +472,7 @@ function nearestList(v,ser,n=7){if(!(v>0))return[];const d=Math.floor(Math.log10
   return all.slice(0,n).sort((a,b)=>a-b)}
 
 /* ============ state ============ */
-const state={mode:'low',phil:'shared',rcsSel:15,rcsUser:false,bom:{},vType:'type3',cType:'T2'};
+const state={mode:'low',phil:'shared',rcsSel:15,rcsUser:false,bom:{},vType:'type3',cType:'T2',loadPct:100};
 function bomGet(key,calcVal,ser){
   const e=state.bom[key];
   if(e&&!e.auto&&Number.isFinite(e.val))return e.val;
@@ -1343,13 +1345,15 @@ function renderBoms(p,dci,dcv){
 
 function renderPlots(p,dci,dcv){
   const overlay=$('ovl').checked;
+  const lf=(state.loadPct||100)/100;                 // load fraction from the "Load" dropdown
   const set=state.phil==='shared'?opPts(p,'all'):opPts(p,state.mode);
-  const insp={vac:p.vac,pout:p.pout,line:state.mode==='low'?'LL':'HL'};
-  // --- current loop ---
+  const band=state.mode==='low'?POUT_LO:POUT_HI;
+  const insp={vac:p.vac,pout:lf*band,line:state.mode==='low'?'LL':'HL'};
+  // --- current loop ---  (same fixed compensator, plant re-evaluated at lf × band power)
   const f1c=10,f2c=5e5,Nc=300;
   const trs=[];
-  if(overlay)for(const op of set){if(op.vac===insp.vac&&op.pout===insp.pout)continue;
-    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+  if(overlay)for(const op of set){const opw=lf*op.pout; if(op.vac===insp.vac&&opw===insp.pout)continue;
+    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,opw,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
   const swMain=sweepLoop(f=>Ti(p,dci,insp.vac,insp.pout,f),f1c,f2c,Nc);
   trs.push({sw:swMain,col:'#56a3ff',wd:2.2,main:true});
   const mg=marginsOf(swMain);
@@ -1360,19 +1364,20 @@ function renderPlots(p,dci,dcv){
   const f1v=0.1,f2v=1e6,Nv=360;
   const sizeCor=sizingCorner(p);
   const trv=[];
-  trv.push({sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]});
+  const lsfx=lf<1?' @'+state.loadPct+'%':'';
+  trv.push({sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,lf*sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]});
   if(!dcv.err)trv.push({sw:sweepLoop(f=>HotaStd(p,dcv,f),f1v,f2v,Nv),col:'rgba(177,140,255,.8)',dash:[2,3]});
   let mgv={fc:NaN,pm:NaN,gm:NaN,fg:NaN},cross=[];
   if(!dcv.err){
     if(overlay)for(const op of set){if(op.vac===90||op.vac===180)continue;
-      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
-    const swLL=sweepLoop(f=>Tv(p,dci,dcv,90,POUT_LO,f),f1v,f2v,Nv);
-    const swHL=sweepLoop(f=>Tv(p,dci,dcv,180,POUT_HI,f),f1v,f2v,Nv);
+      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,lf*op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+    const swLL=sweepLoop(f=>Tv(p,dci,dcv,90,lf*POUT_LO,f),f1v,f2v,Nv);
+    const swHL=sweepLoop(f=>Tv(p,dci,dcv,180,lf*POUT_HI,f),f1v,f2v,Nv);
     const mLL=marginsOf(swLL), mHL=marginsOf(swHL);
     trv.push({sw:swLL,col:'#56a3ff',wd:2});
     trv.push({sw:swHL,col:'#f59e0b',wd:2.2,main:true});
-    cross=[{fc:mHL.fc,pm:mHL.pm,gm:mHL.gm,fg:mHL.fg,col:'#f59e0b',lab:'HL 180 V'},
-           {fc:mLL.fc,pm:mLL.pm,gm:mLL.gm,fg:mLL.fg,col:'#56a3ff',lab:'LL 90 V'}];
+    cross=[{fc:mHL.fc,pm:mHL.pm,gm:mHL.gm,fg:mHL.fg,col:'#f59e0b',lab:'HL 180 V'+lsfx},
+           {fc:mLL.fc,pm:mLL.pm,gm:mLL.gm,fg:mLL.fg,col:'#56a3ff',lab:'LL 90 V'+lsfx}];
     mgv=sizeCor.vac<150?mLL:mHL;
   }
   drawBodePanel('bodeVol',trv,{f1:f1v,f2:f2v,g1:-200,g2:60,gs:40,p1:-450,p2:0,ps:90,cross,
@@ -2496,6 +2501,13 @@ $('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.ta
 ['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb',
  'fci','ciKlock','ciPM','cfz','cfp','rf','cf','fcv','vKlock','vPM','vPlace','vSpread','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
  'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
+// Load-percentage dropdowns (current- and voltage-loop Bode) — kept in sync, re-evaluate the loop
+// plant at loadPct × the selected line-range rated power, then redraw both Bode plots.
+document.querySelectorAll('.loadSel').forEach(sel=>sel.addEventListener('change',e=>{
+  state.loadPct=+e.target.value||100;
+  document.querySelectorAll('.loadSel').forEach(s=>{s.value=String(state.loadPct)});
+  recalc();
+}));
 attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
 pzPointer('pzCur');pzPointer('pzVol');
 // crossover scroll bars drive the number field; commit (blur/enter) snaps it into the band

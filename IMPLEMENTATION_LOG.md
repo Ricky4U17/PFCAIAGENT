@@ -4688,3 +4688,24 @@ operating voltages (not 9 — the loop's native set; noted in the review).
 Verified: Ch6 87 pp (was 84; +3 figures); Figure 3 shows current-loop invariance, Figures 5/6 show
 voltage-loop load dependence + closed-loop bandwidth narrowing; combined report builds.
 GUI (JS control tool) partial-load bodes NOT done — a separate frontend effort. Commit <pending>.
+
+## C110 — 2026-07-21 — Item 2 (GUI): load-percentage dropdown on the control-loop Bode plots
+
+Report point 2, GUI side (control_design.html, the JS control tool). Added a "Load" dropdown
+(100/75/50/25/10 %) to BOTH the Current-Loop T_i(s) and Voltage-Loop T_v(s) Bode panels on Screen 2.
+Selecting a load % re-evaluates the loop plant at loadPct × the selected line-range rated power and
+redraws both plots; the two dropdowns stay in sync (shared state.loadPct).
+
+- state gains loadPct:100. renderPlots() computes lf = loadPct/100 and scales every pout used in the
+  Bode sweeps: current-loop inspected point + overlays (lf × band / lf × op.pout); voltage-loop base
+  reference, LL/HL traces and overlays (lf × POUT_LO / lf × POUT_HI / lf × op.pout). Voltage-loop
+  crossover labels gain an "@X%" suffix when lf < 1.
+- Dropdowns wired via a .loadSel change handler → set state.loadPct, sync both selects, recalc().
+
+Mirrors the C109 report engine exactly (same physics R_LOAD = V_OUT²/P_OUT, same load scaling):
+inner loop stays load-invariant; voltage-loop crossover falls with load. Backward-compatible — at
+100 % (default) lf = 1 so the inspected pout = band power, identical to before.
+
+Verified: extracted-script node --check clean; file initializes standalone (recalc on load); the
+Ti/Tv functions are already exercised at two pout values (1700/3600 W) so a scaled pout is the same
+proven path. Browser visual check pending (browser tools declined this session). Commit <pending>.
