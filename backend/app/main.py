@@ -883,6 +883,13 @@ class _GradeOptReq(BaseModel):
     Bac_pk_T: float = 0.054
     T_operating_C: float = 100.0
     topology: str = "boost_pfc"
+    # Design operating point — the GUI passes the mini-intake chain values so grades are ranked at
+    # the real design point; defaults match rank_grades() (reference design) when the caller omits
+    # them, so the endpoint never crashes on a missing field.
+    Ipk_A: float = 16.73
+    dIL_pp_A: float = 5.161
+    Le_single_m: float = 0.0655
+    L_target_uH: float = 240.0
 
 class _WireOptReq(BaseModel):
     wire_type: str                  # "litz" | "solid" | "tiw"
