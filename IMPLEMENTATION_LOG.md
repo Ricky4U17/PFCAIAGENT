@@ -4739,3 +4739,15 @@ warning, recommended_controller, controllers), mirroring main._ctrl_strategy's k
 Fixes ~19 failing tests at once: test_modea_hardening_v1_fixes 31/31 pass (was 7 failing incl. all
 MA-7 + ma1 + integration); several test_*_graph_wiring / smoke tests that reached the gate.
 Verified: 31 passed (modea_hardening); syntax clean. Commit <pending>.
+
+## C113 — 2026-07-21 — Item 1: update stale EDGE-60 core-loss test references (3954c97 recalibration)
+
+3 TestDataLoader core-loss tests referenced the pre-3954c97 Steinmetz model (Pv_ref 400 kW/m³, beta
+2.5). Commit 3954c97 recalibrated edge_60.json (Pv_ref→373.79, alpha→1.321, beta→2.263) — a committed
+intentional change — so the references are provably stale, not a regression. Updated to the current
+calibrated values with a comment citing 3954c97: test_core_loss_EDGE60 53.783→58.114 kW/m³;
+test_Pcore_EDGE60_3stack 0.8593→0.9285 W; test_log_log edge_60 points 53.783→58.114, 0.802→1.291.
+Verified: 3 passed. NOT touched (need separate judgment): TestDataLoader.test_DC_bias_rolloff (9
+k-values from the updated DC-bias curve), test_EDGE_3stack_fits_1U (Ve_total 15.98→12.45 cm³ — a 22 %
+change; potential real geometry-data issue, flagged), TestCorrectLFormula (5; _calc_l_py now returns
+the worst-case-governing corner not single-90 Vac — needs test redesign not a value bump).
