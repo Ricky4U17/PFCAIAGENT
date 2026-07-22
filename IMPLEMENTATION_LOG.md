@@ -4709,3 +4709,19 @@ inner loop stays load-invariant; voltage-loop crossover falls with load. Backwar
 Verified: extracted-script node --check clean; file initializes standalone (recalc on load); the
 Ti/Tv functions are already exercised at two pout values (1700/3600 W) so a scaled pout is the same
 proven path. Browser visual check pending (browser tools declined this session). Commit <pending>.
+
+## C111 — 2026-07-21 — Item 1 (test hygiene, batch 2): retune skip + step8 fixture
+
+- test_retuning_api.py: module-level pytest.mark.skip — the /retune/both-loops and
+  /retune/reset-default-values HTTP endpoints were never implemented (app/api/retuning.py has the
+  merge/reset HELPER functions but no FastAPI routes; no frontend caller). Kept (not deleted) to
+  document the intended API; re-activates if routes are added. (2 failing → skipped.)
+- test_regression TestStep7Step8Wiring.test_step8_time_domain: added Le_single_mm=65.5 to the
+  minimal approved_design. The endpoint reads Le_single_mm (H-field path length); the fixture omitted
+  it → Le=0 → ZeroDivision in _half_cycle_averages. Production always includes core geometry. (1
+  failing → passing.)
+Verified: 1 passed, 2 skipped. Remaining item-1 failures (~29) need careful per-test work:
+TestCorrectLFormula (5, _calc_l_py now worst-case-governing not single-90Vac — semantics changed,
+not a value bump), TestDataLoader (5, EDGE-60 calibration drift — needs domain check vs Magnetics
+graph to avoid masking a regression), Mode-A graph/hardening (~19, controller_strategy None +
+graph-sequence changes + workflow-doc checks). Commit <pending>.

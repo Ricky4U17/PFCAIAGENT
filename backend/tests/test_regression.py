@@ -711,12 +711,15 @@ class TestStep7Step8Wiring:
         from fastapi.testclient import TestClient
         client = TestClient(app)
 
-        # Use a minimal valid approved_design dict
+        # Use a minimal valid approved_design dict. Le_single_mm is the ONE-core magnetic path
+        # length (the H-field basis); production always includes it, so supply it here — without
+        # it the endpoint defaults Le to 0 and _half_cycle_averages divides by zero.
         approved = {
             "material_key": "edge_60",
             "N": 49,
             "Ae_total_mm2": 231.0,
             "Ve_total_cm3": 15.977,
+            "Le_single_mm": 65.5,
             "loss_table_25C": [
                 {"Vin_rms": v, "Bac_pk": b, "Pcore_W": p}
                 for v, b, p in [
