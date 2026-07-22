@@ -4779,3 +4779,24 @@ Fixes: EDGE_3stack_fits_1U 15.9774→12.45 cm³. test_Pcore_EDGE60 — CORRECTED
 had kept the wrong geometric Ve (5.3258→0.9285 W); now uses the datasheet Ve 4.15 → 0.7235 W (matches
 Pv 58.11 × 4.15e-6×3 × 1e3). 2 passed. Remaining item-1: TestCorrectLFormula (5), DC-bias 9-value (1),
 Mode-A advisory/graph (~12).
+
+## C116 — 2026-07-21 — Item 1: Mode-A advisory tests — phase1 skeleton + graph-bug finding
+
+Investigated the 12 Mode-A advisory/graph failures. Categorised:
+- FIXED (test_phase1_patch_skeleton, 2): schema_version 1.1→1.3 (phase2/3 advisories added); advisory
+  node statuses on a bare state are now the real values (guardrail/supply/closed-loop "incomplete",
+  magnetic "advisory_ready") — they evolved from uniform "placeholder_advisory". Test renamed.
+- REAL BUG FOUND, NOT FIXED (mode-B LangGraph re-entry) — blocks ~7 tests (phase1/2/3_graph_wiring,
+  hardening_v3 i1/i5, closed_loop_advisory, report_advisory, smoke): the workflow graph's controller
+  node auto-advance (graph.py:271-273) unconditionally sets pending_step = MODE_B_SEQUENCE[0], so on
+  every re-invoke while in mode-B it RESETS the pipeline to input_processing → the mode-B advisory
+  nodes never run and the graph oscillates controller↔mode_b_approval, never reaching 'final'. Also
+  the graph gained an awaiting_topology_specific_inputs mini-intake gate the tests don't feed. This
+  is the LangGraph workflow path (NOT the production Mode-B REST API), so it's latent in production;
+  fixing it is a focused, risky graph-engine change (preserve mode-B progress on re-entry + feed the
+  mini-intake gate) best done deliberately, not as test hygiene. DOCUMENTED for follow-up.
+- Remaining stale doc/source checks (hardening_v3 i7 safety_guardrail_agent-in-source, i12
+  latest_workflow.md missing) — low-value, left.
+Net item-1 after C116: from 33 failing → ~11 (2 real bugs fixed earlier + fixtures/skips/calib/Ve +
+phase1 skeleton). Remaining ~11 = TestCorrectLFormula (5, redesign), DC-bias (1), + the mode-B graph
+cluster (~5-7).
