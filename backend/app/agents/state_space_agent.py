@@ -10,7 +10,7 @@ def _build_common_inputs_from_state(state: Dict[str, Any]):
     controller_strategy = state.get("controller_strategy", {})
     selected_controller = state.get("selected_controller", {}) or {}
     controller_mode = selected_controller.get("type") or controller_strategy.get("selected_mode") or controller_strategy.get("recommended_controller_mode") or "analog"
-    inputs = {"Vac": app["vin_rms_min"], "Vout": app["output_bus_voltage_v"], "Pout": app.get("output_power_w_low_line", app["output_power_w_nom"]), "eff": overrides.get("eff", 0.945), "pf": app["power_factor_target"], "L": overrides.get("L", 235e-6), "Cout": overrides.get("Cout", 2200e-6), "fsw": overrides.get("fsw", 70000.0), "line_freq": app["line_frequency_hz_nom"]}
+    inputs = {"Vac": app["vin_rms_min"], "Vout": app["output_bus_voltage_v"], "Pout": app.get("output_power_w_low_line", app["output_power_w_nom"]), "eff": overrides.get("eff", 0.945), "pf": app["power_factor_target"], "L": overrides.get("L", 235e-6), "Cout": overrides.get("Cout", 2200e-6), "fsw": overrides.get("fsw", 70000.0), "line_freq": app["line_frequency_hz_nom"], "r_L": overrides.get("r_L", 0.02)}
     tuning_override = overrides.get("state_space_tuning", {})
     return topology, inputs, controller_mode, tuning_override
 

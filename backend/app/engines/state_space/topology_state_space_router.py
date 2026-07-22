@@ -9,6 +9,25 @@ def _find_fc_from_bode(freq_hz, mag_db) -> float:
     idx = min(range(len(mag_db)), key=lambda i: abs(mag_db[i]))
     return float(freq_hz[idx])
 
+
+def _calibrate_loop_gain(pnum, pden, cnum, cden, target_fc):
+    """Scale the compensator numerator so the open loop |plant × compensator| = 1 (0 dB) at
+    target_fc, i.e. the crossover lands at the design target. The auto-designed compensators use a
+    placeholder gain k=1.0 that is NOT sized against the plant, so without this the loop crosses over
+    at an arbitrary (here ~399 Hz) frequency and the design is unstable. Returns (scaled_num, scale)."""
+    try:
+        if not target_fc or target_fc <= 0:
+            return cnum, 1.0
+        s = 1j * 2.0 * np.pi * float(target_fc)
+        L = (np.polyval(pnum, s) / np.polyval(pden, s)) * (np.polyval(cnum, s) / np.polyval(cden, s))
+        mag = abs(L)
+        if not np.isfinite(mag) or mag <= 0:
+            return cnum, 1.0
+        scale = 1.0 / mag
+        return np.asarray(cnum, dtype=float) * scale, scale
+    except Exception:
+        return cnum, 1.0
+
 def analyze_selected_topology(topology: str, inputs: dict, controller_mode: str = "analog", tuning_override: dict | None = None) -> StateSpaceAnalysisResult:
     tuning_override = tuning_override or {}
     current_override = tuning_override.get("current_loop", {})
@@ -18,12 +37,18 @@ def analyze_selected_topology(topology: str, inputs: dict, controller_mode: str 
     A, B, C, D = np.array(raw["A"]), np.array(raw["B"]), np.array(raw["C"]), np.array(raw["D"])
     i_num, i_den = ss_to_siso_tf(A,B,C,D,0,0)
     ctype_i, cnum_i, cden_i, cmeta_i = build_current_loop_compensator(topology, op.fsw_hz, controller_mode, current_override if current_override else None)
+    if not current_override:
+        cnum_i, _sc_i = _calibrate_loop_gain(i_num, i_den, cnum_i, cden_i, cmeta_i.get("target_fc_hz"))
+        cmeta_i["kp"] *= _sc_i; cmeta_i["ki"] *= _sc_i
     bode_i, step_i, margins_i = build_loop_analysis(i_num, i_den, cnum_i, cden_i, 1.0, max(10*op.fsw_hz,1e4), 2e-3)
     sugg_i = LoopTuningSuggestion(loop_name="current_loop", compensator_type=ctype_i, kp=float(cmeta_i["kp"]), ki=float(cmeta_i["ki"]), kz_hz=float(cmeta_i.get("kz_hz")) if cmeta_i.get("kz_hz") is not None else None, kpole_hz=float(cmeta_i.get("kpole_hz")) if cmeta_i.get("kpole_hz") is not None else None, target_fc_hz=float(cmeta_i["target_fc_hz"]) if cmeta_i.get("target_fc_hz") is not None else 0.0, achieved_fc_hz=_find_fc_from_bode(bode_i.frequency_hz,bode_i.loop_mag_db), phase_margin_deg=float(margins_i["phase_margin_deg"]), gain_margin_db=float(margins_i["gain_margin_db"]), notes=[f"Controller mode: {controller_mode}", "User overrides applied." if current_override else "Suggested coefficients used."])
     current_loop = LoopAnalysisResult(plant_tf_num=i_num.tolist(), plant_tf_den=i_den.tolist(), compensator_tf_num=cnum_i.tolist(), compensator_tf_den=cden_i.tolist(), suggestion=sugg_i, bode=bode_i, step=step_i)
 
     v_num, v_den = ss_to_siso_tf(A,B,C,D,1,0)
     ctype_v, cnum_v, cden_v, cmeta_v = build_voltage_loop_compensator(topology, op.line_freq_hz, controller_mode, voltage_override if voltage_override else None)
+    if not voltage_override:
+        cnum_v, _sc_v = _calibrate_loop_gain(v_num, v_den, cnum_v, cden_v, cmeta_v.get("target_fc_hz"))
+        cmeta_v["kp"] *= _sc_v; cmeta_v["ki"] *= _sc_v
     bode_v, step_v, margins_v = build_loop_analysis(v_num, v_den, cnum_v, cden_v, 0.01, 1e4, 0.5)
     sugg_v = LoopTuningSuggestion(loop_name="voltage_loop", compensator_type=ctype_v, kp=float(cmeta_v["kp"]), ki=float(cmeta_v["ki"]), kz_hz=float(cmeta_v.get("kz_hz")) if cmeta_v.get("kz_hz") is not None else None, kpole_hz=float(cmeta_v.get("kpole_hz")) if cmeta_v.get("kpole_hz") is not None else None, target_fc_hz=float(cmeta_v["target_fc_hz"]) if cmeta_v.get("target_fc_hz") is not None else 0.0, achieved_fc_hz=_find_fc_from_bode(bode_v.frequency_hz,bode_v.loop_mag_db), phase_margin_deg=float(margins_v["phase_margin_deg"]), gain_margin_db=float(margins_v["gain_margin_db"]), notes=[f"Controller mode: {controller_mode}", "User overrides applied." if voltage_override else "Suggested coefficients used."])
     voltage_loop = LoopAnalysisResult(plant_tf_num=v_num.tolist(), plant_tf_den=v_den.tolist(), compensator_tf_num=cnum_v.tolist(), compensator_tf_den=cden_v.tolist(), suggestion=sugg_v, bode=bode_v, step=step_v)

@@ -6,7 +6,7 @@ I-3  Guardrail blocked: guardrail_hard_stop written to state; mode_b_hitl checks
 I-4  Disabled advisory auto-advance: ADVISORY_FLAG_MAP + mode_b_hitl fast-path.
 I-5  Design defaults: eff from intake.efficiency_target_percent; others from design_defaults.
 I-6  Report sections: structured dicts, serialised at export only.
-I-7  Deprecated safety_guardrail_agent: not imported or referenced here.
+I-7  The deprecated standalone safety-guardrail node is not imported or wired into this graph.
 I-8  SpiceBackend protocol: simulation advisory uses stable swap interface.
 I-9  CAD thermal keys: reads thermal_data nested dict correctly.
 I-10 Magnetic FEA fallback: uses magnetic_design_data when v2 disabled.

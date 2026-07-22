@@ -46,12 +46,17 @@ def build_closed_loop_simulation_advisory(
         "thd_estimate_percent":            result.thd_percent,
     }
 
+    artifacts = state.get("simulation_artifacts", {}) or {}
+    netlist_available = bool(artifacts.get("simplis_netlist") or result.netlist_used)
+
     return {
         "status":            "advisory_ready" if (result.simulation_ran or payload) else "incomplete",
         "blocking":          False,
         "backend_name":      result.backend_name,
         "simulation_ran":    result.simulation_ran,
         "netlist_used":      result.netlist_used,
+        "simulation_export_available": bool(artifacts),
+        "netlist_available": netlist_available,
         "correlation_summary": correlation,
         "notes":             result.notes,
         "recommended_next_upgrades": [

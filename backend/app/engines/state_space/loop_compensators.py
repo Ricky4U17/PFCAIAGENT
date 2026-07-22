@@ -41,4 +41,9 @@ def build_voltage_loop_compensator(topology: str, line_freq_hz: float, controlle
         forced = override.get("compensator_type", ctype)
         if forced in {"PI","Type1"}: return _apply_override_to_pi(override)
         return _apply_override_to_type2(override, target_fc)
-    fz, fp, k = target_fc/3.0, target_fc*10.0, 1.0; num, den = type2_compensator(k, fz, fp); return ctype, num, den, {"kp": k, "ki": 2*math.pi*fz*k, "kz_hz": fz, "kpole_hz": fp, "target_fc_hz": target_fc}
+    # Voltage loop: integrator-dominant (zero and pole co-located just above crossover). A wide Type-2
+    # mid-band (fz=fc/3 .. fp=10*fc) sits flat under the boost LC resonance (~70-100 Hz) and lets the
+    # lightly-damped resonance peak poke above 0 dB -> negative gain margin. Collapsing to a calibrated
+    # integrator gives a clean -1 slope through the resonance (PM ~90 deg, positive GM) while the fast
+    # current loop does the real work -- the textbook PFC voltage-loop shape.
+    fz, fp, k = target_fc*2.0, target_fc*2.0, 1.0; num, den = type2_compensator(k, fz, fp); return ctype, num, den, {"kp": k, "ki": 2*math.pi*fz*k, "kz_hz": fz, "kpole_hz": fp, "target_fc_hz": target_fc}

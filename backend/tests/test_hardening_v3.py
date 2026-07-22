@@ -29,7 +29,7 @@ def _intake():
         },
         "thermal": {
             "cooling_type": "fan_cooled", "ambient_temp_c_max": 50.0,
-            "max_temp_rise_c": 45.0, "max_enclosure_rth_c_per_w": 0.5,
+            "max_temp_rise_c": 45.0, "max_enclosure_rth_c_per_w": 0.2,
         },
         "compliance": {
             "conducted_emi_required": True, "radiated_emi_required": True,
@@ -46,6 +46,10 @@ def _intake():
 def _advance_to_mode_b(graph, state):
     state = graph.invoke(state)
     state["human_feedback"] = {"approved": True}
+    state = graph.invoke(state)
+    # Post-selection mini-intake gate (topology-specific inputs) precedes the controller gate.
+    state["human_feedback"] = {"approved": True, "switching_frequency_style": "fixed",
+                               "switching_frequency_hz": 70000.0, "crest_ripple_ratio": 0.20}
     state = graph.invoke(state)
     state["human_feedback"] = {"approved": True, "controller_mode": "analog",
                                 "controller_name": "TI UC3854"}
@@ -402,7 +406,7 @@ def test_i11_initial_state_has_all_advisory_slots():
 
 def test_i12_workflow_doc_mentions_phase3():
     import pathlib
-    doc = pathlib.Path(__file__).parents[3] / "docs" / "latest_workflow.md"
+    doc = pathlib.Path(__file__).parents[2] / "docs" / "latest_workflow.md"
     assert doc.exists(), "latest_workflow.md not found"
     content = doc.read_text()
     assert "Phase 3" in content, "Workflow doc must mention Phase 3"

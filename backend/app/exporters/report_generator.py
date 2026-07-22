@@ -22,7 +22,7 @@ ADVISORY_MAP = [
     ("Guardrail v2 Advisory",                  "guardrail_v2_results"),
     ("Supply Chain Advisory",                  "supply_chain_results"),
     ("Magnetic Design v2 Advisory",            "magnetic_design_v2_results"),
-    ("Closed-loop Simulation Verification",    "simulation_verification_results"),
+    ("Closed-loop Simulation Verification Advisory", "simulation_verification_results"),
     ("Layout Parasitics Advisory",             "layout_parasitics_results"),
     ("Firmware Generation Advisory",           "firmware_generation_results"),
     ("Reliability / MTBF Advisory",            "reliability_mtbf_results"),

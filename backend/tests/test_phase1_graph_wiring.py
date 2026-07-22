@@ -16,7 +16,7 @@ def _sample_intake():
             "cooling_type": "fan_cooled",
             "ambient_temp_c_max": 50.0,
             "max_temp_rise_c": 45.0,
-            "max_enclosure_rth_c_per_w": 0.5,
+            "max_enclosure_rth_c_per_w": 0.2,
         },
         "compliance": {
             "conducted_emi_required": True,
@@ -40,11 +40,15 @@ def test_phase1_advisory_nodes_execute_in_main_flow():
     state = graph.invoke(state)
     state["human_feedback"] = {"approved": True}
     state = graph.invoke(state)
+    # Post-selection mini-intake gate (topology-specific inputs) precedes the controller gate.
+    state["human_feedback"] = {"approved": True, "switching_frequency_style": "fixed",
+                               "switching_frequency_hz": 70000.0, "crest_ripple_ratio": 0.20}
+    state = graph.invoke(state)
     state["human_feedback"] = {"approved": True, "controller_mode": "analog", "controller_name": "TI UC3854"}
     state = graph.invoke(state)
 
     # Advance enough times to traverse all mode-b nodes
-    for _ in range(25):
+    for _ in range(40):
         state["human_feedback"] = {"approved": True}
         state = graph.invoke(state)
         if state.get("current_step") == "final":
