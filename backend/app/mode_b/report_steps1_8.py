@@ -734,6 +734,57 @@ def _build_asbuilt_L_section(story, inp: dict, prior: dict):
          "basis passed to the control design."), C6)
 
 
+def _build_app_schematic_section(story, inp, prior):
+    """§6.8.7 — the complete FAN9672 application schematic (all pin networks), rendered TWICE:
+    once for the low-line (FR) mode and once for the high-line (HV) mode. Component values are
+    identical between the two; only the mode-set items differ (R_IAC series count, VIR threshold)
+    plus the per-line operating annotations. Design-specific values are threaded from the sized
+    components; fixed-practice filters fall back to datasheet-practice defaults."""
+    from app.mode_b.schematics import fan9672_application_schematic
+    from app.mode_b.step16_step9_bibo import compute_step9_bibo
+    from app.mode_b.step16_step10_iloop import compute_step10_iloop
+    from app.mode_b.step16_step11_vloop import compute_step11_vloop
+    s8 = prior.get("step8", {}) if isinstance(prior, dict) else {}
+    try:    b = compute_step9_bibo(inp)
+    except Exception: b = {}
+    try:    d10 = compute_step10_iloop(inp, prior)
+    except Exception: d10 = {}
+    try:    d11 = compute_step11_vloop(inp, prior); cm = d11.get("comp", {}) or {}
+    except Exception: d11, cm = {}, {}
+    base = dict(
+        rb1=b.get("rb1"), rb2=b.get("rb2"), rb3=b.get("rb3"), rb4=b.get("rb4"),
+        cb1=b.get("cb1"), cb2=b.get("cb2"),
+        r_gc_sel=s8.get("r_gc_sel"), c_gc=s8.get("c_gc"),
+        r_ilimit_sel=s8.get("r_ilimit_sel"), r_ilimit2_sel=s8.get("r_ilimit2_sel"),
+        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"), css=s8.get("c_ss"),
+        rri=s8.get("rri"), rcs_mohm=(s8.get("rcs_sel") or 0.015) * 1e3,
+        r_ic=d10.get("ric"), c_ic1=d10.get("cic1"), c_ic2=d10.get("cic2"),
+        r_vc=cm.get("r2s"), c_vc1=cm.get("c1s"), c_vc2=cm.get("c3s"),
+        r3=cm.get("r3s"), c_v3=cm.get("c2s"), vType=cm.get("type", "type3"),
+        i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
+        vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
+    )
+    sub_h(story, "6.8.7", "FAN9672 Application Schematic — Low Line and High Line", C6)
+    body(story,
+        "The complete FAN9672 front-end with every external component annotated from the sized "
+        "bill of materials — amber values are live design selections; grey \"(typ)\" parts are "
+        "fixed-practice filters not sized by the loop equations. The control-network component "
+        "values are <b>identical</b> at both line ranges; only the mode-set items differ — R<sub>IAC</sub> "
+        "(FR: 3×2 MΩ / HV: 6×2 MΩ), the VIR mode threshold, and the per-line operating point in the "
+        "title block. Compensator networks (R<sub>IC</sub>, R<sub>VC</sub>, FBPFC divider) are sized "
+        "in Section 6.10 and Section 6.11.", C6)
+    for hi, tag, lab in [(False, "a", "Low line — FR mode, 90–132 Vac"),
+                         (True, "b", "High line — HV mode, 180–264 Vac")]:
+        v = dict(base)
+        v["crest_A"]   = s8.get("crest_hl" if hi else "crest_ll") or 0
+        v["iphi_pk_A"] = s8.get("ilpk_hl" if hi else "ilpk_ll") or 0
+        body(story, f"<b>Figure 6.8.7{tag} — FAN9672 application schematic ({lab})</b>", C6)
+        try:
+            story.append(fan9672_application_schematic(v, is_high=hi))
+        except Exception:
+            body(story, "<i>(schematic unavailable)</i>", C6)
+
+
 def build_story(inp: dict | None = None):
     """Assemble the full Steps 1–14 + Appendices control-design story.
 
@@ -773,6 +824,7 @@ def build_story(inp: dict | None = None):
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
+    _build_app_schematic_section(story, inp or {}, prior)   # §6.8.7 — Lo/Hi line application schematics
     build_step9(story, compute_step9_bibo(inp))
     build_step10(story, compute_step10_iloop(inp, prior))
     _build_asbuilt_L_section(story, inp or {}, prior)   # Section 6.10.14 — current-loop as-built L basis

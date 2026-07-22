@@ -4640,3 +4640,27 @@ Verified: combined report 179 pp (was 178; +1 for the longer TOC); printed TOC c
 incl. 6.10.14 with correct page numbers (Ch1→p7, Ch6→p97, 6.10.14→p145, all cross-checked against
 real content); bookmarks 184 (was 172); no § anywhere; no legacy fallback. Chapter-agnostic — Ch7-10
 picked up automatically when present. Commit <pending>.
+
+## C108 — 2026-07-21 — Item 4: FAN9672 application schematic (hi/low line) in the report
+
+Report-review point 4. Added the full FAN9672 (LQFP-32) application schematic — IC body + every
+external pin network — to Chapter 6 as §6.8.7, rendered TWICE: low line (FR mode) and high line (HV
+mode). Per the designer's decision, the control-network component VALUES are identical between the
+two; only the mode-set items differ (R_IAC series count FR 3×2 MΩ / HV 6×2 MΩ, the VIR threshold,
+and the per-line operating annotations in the title block).
+
+- schematics.py: new fan9672_application_schematic(v, is_high) — matplotlib port of the GUI's
+  Screen-5 SVG schematic, re-themed for the white printed page (navy pins, amber live values, blue
+  IC). Draws all 8×4 pins grouped by side and every network: BIBO ladder, ILIMIT/GC/RI/RLPK/ILIMIT2/
+  LPK (left), CS Kelvin filters + R_LS (right), R_IAC/C_SS/VEA comp/FBPFC divider (+Type-3 branch)/
+  VDD/gate drivers (top), IEA comp/CM/VIR (bottom), and a live-values title block. Missing keys fall
+  back to datasheet-practice defaults so it always renders.
+- report_steps1_8.py: new _build_app_schematic_section() threads the sized component values from
+  step8 (GC/LS/ILIMIT/RCS/RRI/C_SS), step9 BIBO (R_B1-4/C_B1-2) and the step10/11 compensators
+  (R_IC/C_IC1/C_IC2, R_VC/C_VC1/C_VC2, R3/C_V3), and renders Figure 6.8.7a (low) + 6.8.7b (high).
+  Called from build_story after build_steps_1_8 (guarded).
+
+Verified: standalone Ch6 84 pp (was 83; +1); §6.8.7 + both figures render with correct mode-specific
+values (FR: R_IAC 6 MΩ, V_VIR<1.5V; HV: R_IAC 12 MΩ, V_VIR>3.5V) and threaded design values
+(R_IC 120 kΩ etc.); combined report builds, §6.8.7 auto-appears in the new printed index (C106).
+Commit <pending>.
