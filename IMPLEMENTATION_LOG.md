@@ -4664,3 +4664,27 @@ Verified: standalone Ch6 84 pp (was 83; +1); §6.8.7 + both figures render with 
 values (FR: R_IAC 6 MΩ, V_VIR<1.5V; HV: R_IAC 12 MΩ, V_VIR>3.5V) and threaded design values
 (R_IC 120 kΩ etc.); combined report builds, §6.8.7 auto-appears in the new printed index (C106).
 Commit <pending>.
+
+## C109 — 2026-07-21 — Item 2: partial-load bode plots (current + voltage loops) in the report
+
+Report-review point 2 (report side). Added bode plots at 10/25/50/75/100 % load across all input
+voltages, for both loops — the same fixed compensators re-evaluated at reduced P_OUT (only the plant
+R_LOAD = V_OUT²/P_OUT changes).
+
+- step16_step10_iloop.py: bode_loads — per load fraction, per input voltage, open-loop magnitude/
+  phase + 0-dB crossover (ti_comp with an op at reduced P_OUT). Finding: the inner loop is
+  LOAD-INVARIANT (crossover ≈8.12 kHz, PM 62.8° at every load — set by V_OUT/ωL_φ, fixed hardware).
+- step16_step11_vloop.py: bode_loads — open + closed, using G_i,cl ≈ 1 at voltage-loop frequencies
+  (the report already states this). The voltage loop IS load-dependent: crossover falls from ≈17 Hz
+  (full) to ≈1.5 Hz (10 %); PM stays ≥ 34°.
+- report_step10.py §6.10.12: Figure 3 — inner current loop across load (2×3 panels/load + crossover-
+  vs-load summary; overlays confirm invariance).
+- report_step11.py §6.11.9: Figure 5 (open) + Figure 6 (closed) — voltage loop across load, both
+  compensator paths (type2/type3). Crossover-vs-load summary shows the fan-out with load.
+
+Load fractions apply to each band's rated power (LL P_lo, HL P_hi). Uses the control loop's 8
+operating voltages (not 9 — the loop's native set; noted in the review).
+
+Verified: Ch6 87 pp (was 84; +3 figures); Figure 3 shows current-loop invariance, Figures 5/6 show
+voltage-loop load dependence + closed-loop bandwidth narrowing; combined report builds.
+GUI (JS control tool) partial-load bodes NOT done — a separate frontend effort. Commit <pending>.

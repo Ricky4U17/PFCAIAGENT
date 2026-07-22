@@ -106,6 +106,45 @@ def _fig_closed_loop(d):
     return _img_from_fig(fig)
 
 
+def _fig_load_sweep(d):
+    """Open-loop current-loop magnitude at 10/25/50/75/100 % load, one panel per load level (all
+    input voltages), plus a crossover-vs-load summary panel. The inner loop is load-invariant, so
+    the panels overlay and the summary is flat — the point the figure makes."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    bl = d.get("bode_loads") or []
+    if not bl:
+        return None
+    fig, axes = plt.subplots(2, 3, figsize=(7.4, 5.0), sharex=False)
+    axes = axes.ravel()
+    for k, ld in enumerate(bl):
+        ax = axes[k]
+        for tr in ld["traces"]:
+            ls = "-" if tr["vac"] < 180 else "--"
+            ax.semilogx(ld["f"], tr["ogain"], ls, lw=0.7,
+                        color=("#1456b8" if tr["vac"] < 180 else "#c0392b"))
+            if tr["fco"]:
+                ax.plot(tr["fco"], 0, "o", ms=2, color="#333")
+        ax.axhline(0, color="0.5", lw=0.6); ax.grid(True, which="both", alpha=0.3)
+        ax.set_title(f"{ld['frac']*100:.0f}% load", fontsize=8)
+        ax.set_xlim(10, 1e5); ax.set_ylim(-40, 70); ax.tick_params(labelsize=6)
+        if k % 3 == 0: ax.set_ylabel("|T$_i$| (dB)", fontsize=7)
+        if k >= 3:     ax.set_xlabel("Hz", fontsize=7)
+    ax = axes[5]
+    fr = [ld["frac"]*100 for ld in bl]
+    for j in range(len(bl[0]["traces"])):
+        vac = bl[0]["traces"][j]["vac"]
+        ys = [(ld["traces"][j]["fco"] or float("nan"))/1e3 for ld in bl]
+        ax.plot(fr, ys, "-o", ms=2, lw=0.7, color=("#1456b8" if vac < 180 else "#c0392b"))
+    ax.set_title("Crossover vs load", fontsize=8); ax.grid(True, alpha=0.3)
+    ax.set_xlabel("Load (%)", fontsize=7); ax.set_ylabel("f$_{ci}$ (kHz)", fontsize=7); ax.tick_params(labelsize=6)
+    fig.suptitle("Figure 3 — Inner current loop across load (10 / 25 / 50 / 75 / 100 %) — all 8 input voltages",
+                 fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return _img_from_fig(fig)
+
+
 def build_step10(story, data: dict):
     d = data
     s = d["src"]
@@ -503,6 +542,22 @@ def build_step10(story, data: dict):
     story.append(_fig_closed_loop(d))
     body(story, "<i>Figure 2 — Closed-loop T<sub>i</sub>(s)/(1+T<sub>i</sub>(s)): gain and phase. "
         "−3 dB bandwidth ≈ 12 kHz.</i>", CH)
+    if d.get("bode_loads"):
+        body(story, "<b>Figure 3 — Inner Current Loop Across Load  |  10 / 25 / 50 / 75 / 100 % at "
+            "All Input Voltages</b>", CH)
+        body(story,
+            "The same fixed compensator re-evaluated at five load levels (10–100 %% of each band's "
+            "rated power) across every input voltage. The inner-loop crossover is set by "
+            "V<sub>OUT</sub>/(ω·L<sub>ϕ</sub>) — fixed hardware, independent of duty cycle and load — "
+            "so the open-loop traces overlay at every load and the crossover-vs-load summary is flat "
+            "at ≈%.2f kHz. The inner current loop is therefore <b>load-invariant</b>: full phase "
+            "margin is preserved from light load to full power." % (d["fco_nom"]/1e3), CH)
+        _f3 = _fig_load_sweep(d)
+        if _f3 is not None:
+            story.append(_f3)
+        body(story, "<i>Figure 3 — Open-loop |T<sub>i</sub>| per load level (blue = low-line band, "
+            "red = high-line band); bottom-right: crossover vs load. Traces overlay — the loop is "
+            "load-invariant.</i>", CH)
 
     # ── 10.13 ─────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.13", "Final Summary Table — All 8 Operating Points", CH)

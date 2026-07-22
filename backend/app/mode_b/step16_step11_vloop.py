@@ -217,7 +217,45 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
         bode.append(dict(vac=op["vac"], pout=op["pout"], f=fsweep,
                          ogain=og, ophase=oph, cgain=cg, cphase=cph))
 
+    # ── partial-load bode sweeps for §6.11.9 — same fixed compensator, reduced P_out ──────
+    # Re-evaluate the SAME voltage loop at 10/25/50/75/100 % of each band's rated power across
+    # every input voltage. The inner current loop is unity at the voltage-loop frequencies (its
+    # bandwidth is orders of magnitude higher), so G_i,cl ≈ 1 here; only the voltage plant (through
+    # R_LOAD and the RHP zero) changes with load.
+    def _cross0v(farr, garr):
+        for i in range(1, len(garr)):
+            if garr[i-1] >= 0.0 >= garr[i]:
+                x0, x1, y0, y1 = math.log10(farr[i-1]), math.log10(farr[i]), garr[i-1], garr[i]
+                return 10 ** (x0 + (x1 - x0) * y0 / (y0 - y1))
+        return None
+
+    def tv_partial(vac, pout, w):
+        rload = vout**2 / pout; iout = pout / vout; gmod = kmax * iout / vramp
+        Dp = SQRT2 * vac / vout; wrhp = rload * Dp**2 / leq
+        s = 1j * w
+        gvp = (1 + s*co*r_c) * (1 - s/wrhp) / (co*s + 2/rload)
+        return gmod * 1.0 * gvp * kota * hshape(w)      # G_i,cl ≈ 1 at voltage-loop frequencies
+
+    load_fracs = [0.10, 0.25, 0.50, 0.75, 1.00]
+    vac_band = [(v, pout_lo) for v in p["vac_ll"]] + [(v, pout_hi) for v in p["vac_hl"]]
+    bode_loads = []
+    for frac in load_fracs:
+        tr = []
+        for v, band_pw in vac_band:
+            pw = frac * band_pw
+            og, oph, cg, cph = [], [], [], []
+            for f in fsweep:
+                t = tv_partial(v, pw, 2*math.pi*f)
+                og.append(20*math.log10(abs(t))); oph.append(math.degrees(cmath.phase(t)))
+                cl = t/(1+t)
+                cg.append(20*math.log10(abs(cl))); cph.append(math.degrees(cmath.phase(cl)))
+            fco = _cross0v(fsweep, og)
+            pm = (180 + math.degrees(cmath.phase(tv_partial(v, pw, 2*math.pi*fco)))) if fco else None
+            tr.append(dict(vac=v, pout=pw, ogain=og, ophase=oph, cgain=cg, cphase=cph, fco=fco, pm=pm))
+        bode_loads.append(dict(frac=frac, f=fsweep, traces=tr))
+
     return {
+        "bode_loads": bode_loads,
         "src": {"vout": vout, "lphi": lphi, "co": co, "nch": nch, "leq": leq,
                 "pout_lo": pout_lo, "pout_hi": pout_hi, "kmax": kmax, "vfbpfc": vfbpfc,
                 "vramp": vramp, "r_c": r_c, "r1": r1, "r4": r4, "fcv": fcv, "gmv": gmv, "hv": hv},

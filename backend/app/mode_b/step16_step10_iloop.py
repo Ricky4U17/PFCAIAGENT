@@ -173,9 +173,37 @@ def compute_step10_iloop(inp: dict | None = None, prior: dict | None = None) -> 
         bode.append(dict(vac=op["vac"], pout=op["pout"], f=fsweep,
                          ogain=og, ophase=oph, cgain=cg, cphase=cph))
 
+    # ── partial-load bode sweeps for §6.10.12 — same fixed compensator, reduced P_out ─────
+    # The compensator is designed at full band power; here we re-evaluate the SAME loop at
+    # 10/25/50/75/100 % of each band's rated power across every input voltage, so the report can
+    # show that the inner loop stays stable (crossover only falls, phase margin is preserved) as
+    # the load drops. Only the plant (R_LOAD = V_OUT²/P_OUT) changes.
+    def _cross0(farr, garr):                     # 0-dB crossover from a swept magnitude array
+        for i in range(1, len(garr)):
+            if garr[i-1] >= 0.0 >= garr[i]:
+                x0, x1, y0, y1 = math.log10(farr[i-1]), math.log10(farr[i]), garr[i-1], garr[i]
+                return 10 ** (x0 + (x1 - x0) * y0 / (y0 - y1))
+        return None
+    load_fracs = [0.10, 0.25, 0.50, 0.75, 1.00]
+    vac_band = [(v, pout_lo) for v in p["vac_ll"]] + [(v, pout_hi) for v in p["vac_hl"]]
+    bode_loads = []
+    for frac in load_fracs:
+        tr = []
+        for v, band_pw in vac_band:
+            op = op_calc(v, frac * band_pw)
+            og, oph = [], []
+            for f in fsweep:
+                t = ti_comp(op, 2 * math.pi * f)
+                og.append(20 * math.log10(abs(t))); oph.append(math.degrees(cmath.phase(t)))
+            fco = _cross0(fsweep, og)
+            pm = (180 + math.degrees(cmath.phase(ti_comp(op, 2 * math.pi * fco)))) if fco else None
+            tr.append(dict(vac=v, pout=frac * band_pw, ogain=og, ophase=oph, fco=fco, pm=pm))
+        bode_loads.append(dict(frac=frac, f=fsweep, traces=tr))
+
     out = {
         "src": {"vout": vout, "lphi": lphi, "co": co, "rcs": rcs, "fci": fci,
                 "nch": nch, "pout_lo": pout_lo, "pout_hi": pout_hi},
+        "bode_loads": bode_loads,
         "p": p, "f_rc": f_rc, "ramp_norm": ramp_norm,
         "rows": rows, "kappa": kappa,
         "ric_calc": ric_calc, "ric": ric, "cic1_calc": cic1_calc, "cic1": cic1,
