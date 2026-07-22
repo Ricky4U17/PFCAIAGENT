@@ -4725,3 +4725,17 @@ TestCorrectLFormula (5, _calc_l_py now worst-case-governing not single-90Vac —
 not a value bump), TestDataLoader (5, EDGE-60 calibration drift — needs domain check vs Magnetics
 graph to avoid masking a regression), Mode-A graph/hardening (~19, controller_strategy None +
 graph-sequence changes + workflow-doc checks). Commit <pending>.
+
+## C112 — 2026-07-21 — Item 1: REAL bug — build_controller_strategy never returned (Mode-A broken)
+
+controller_selection_agent.build_controller_strategy() computed recommended_mode + controllers but
+FELL THROUGH WITHOUT A RETURN (no return statement in the 104-line function). graph.py:264 does
+state["controller_strategy"] = build_controller_strategy(state), so it stored None → the controller-
+approval gate (graph.py:277 state["controller_strategy"]["recommended_controller_mode"]) crashed with
+NoneType. The entire Mode-A controller-selection path was broken (latent — the Mode-B API path uses a
+separate working _ctrl_strategy). Added the missing assembly + return (reasoning incl. the TTP/Analog
+warning, recommended_controller, controllers), mirroring main._ctrl_strategy's keys.
+
+Fixes ~19 failing tests at once: test_modea_hardening_v1_fixes 31/31 pass (was 7 failing incl. all
+MA-7 + ma1 + integration); several test_*_graph_wiring / smoke tests that reached the gate.
+Verified: 31 passed (modea_hardening); syntax clean. Commit <pending>.

@@ -101,4 +101,34 @@ def build_controller_strategy(state: Dict[str, Any]) -> Dict[str, Any]:
                 {"name": "STM32G4 + X-CUBE-MCSDK", "type": "digital",
                  "reason": "Cost-effective digital option with PFC support libraries."},
             ]
-        
+
+    # Assemble and RETURN the strategy. This function previously fell through without a return, so
+    # graph.py (state["controller_strategy"] = build_controller_strategy(state)) stored None and the
+    # controller-approval gate crashed. Structure mirrors main._ctrl_strategy for consistency.
+    reasoning: List[str] = []
+    if is_ttp:
+        reasoning.append("Totem-pole PFC hard-switches the bridge — digital control is generally "
+                         "preferred for precise dead-time and current shaping.")
+        if stated_pref == "Analog":
+            reasoning.append("Analog preference honoured for the totem-pole topology as requested; "
+                             "confirm the analog controller meets the dead-time timing.")
+    else:
+        reasoning.append("Conventional boost PFC is well served by mature analog CCM controllers.")
+    if stated_pref in ("Analog", "Digital"):
+        reasoning.append(f'Designer intake specifies "{stated_pref}" as the control preference.')
+    elif stated_pref == "Recommend":
+        reasoning.append("Recommendation: digital — wide-bandgap devices present."
+                         if recommended_mode == "digital"
+                         else "Recommendation: analog — silicon devices, cost-effective and mature.")
+
+    recommended_controller = next((c for c in controllers if c["type"] == recommended_mode),
+                                  controllers[0] if controllers else None)
+
+    return {
+        "recommended_controller_mode": recommended_mode,
+        "stated_control_preference": stated_pref,
+        "reasoning": reasoning,
+        "controllers": controllers,
+        "recommended_controller": recommended_controller,
+    }
+
