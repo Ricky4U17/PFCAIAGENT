@@ -375,9 +375,10 @@ class TestCombinedReport:
 
     def test_page_count_is_full_report(self, combined):
         pages = combined["pages"]
-        # ~178 pp with the full Chapter 5; 171 means selected_cap was dropped (Ch5 §5.3/5.4/5.5 gated).
-        assert 176 <= pages <= 180, \
-            f"combined report has {pages} pages, expected ~178 (171 => selected_cap missing)"
+        # ~183 pp with the full Chapter 5 + §6.8.7 schematics (C108) + §6.10.12/6.11.9 load-sweep
+        # Bode figures (C109). A drop to ~171 means selected_cap was dropped (Ch5 §5.3/5.4/5.5 gated).
+        assert 178 <= pages <= 190, \
+            f"combined report has {pages} pages, expected ~183 (≤171 => selected_cap missing)"
 
     def test_no_legacy_fallback(self, combined):
         # The chapter builder falls back to the OLD generator on ANY exception; this stale phrase

@@ -4751,3 +4751,13 @@ Verified: 3 passed. NOT touched (need separate judgment): TestDataLoader.test_DC
 k-values from the updated DC-bias curve), test_EDGE_3stack_fits_1U (Ve_total 15.98→12.45 cm³ — a 22 %
 change; potential real geometry-data issue, flagged), TestCorrectLFormula (5; _calc_l_py now returns
 the worst-case-governing corner not single-90 Vac — needs test redesign not a value bump).
+
+## C114 — 2026-07-21 — Fix self-inflicted regression: TestCombinedReport page-count bound
+
+C109 (§6.10.12/6.11.9 load-sweep Bode figures) grew the combined report 180→183 pp, exceeding the
+176-180 bound in TestCombinedReport.test_page_count_is_full_report (added in C102). Raised the bound
+to 178-190 (expected ~183) with a comment noting the C108 schematics + C109 Bode figures. The full
+suite (through C112) was 23 failed / 149 passed / 2 skipped (from 33); C113 fixes 3 core-loss tests
+and C114 this regression → ~19 remaining, all documented: TestCorrectLFormula (5, worst-case-
+governing semantics), TestDataLoader DC-bias (1) + EDGE_3stack Ve (1, possible real data), Mode-A
+advisory/graph-wiring/doc-check + smoke-sequence (~12, phase advisory nodes + workflow doc changes).
