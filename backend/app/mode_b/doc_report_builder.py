@@ -828,7 +828,7 @@ def _fig_pcore_waveform(d, state):
         def _pick(target):
             kk = min(ks, key=lambda v: abs(v - target))
             return kk, wbv[str(kk)]
-        v_lo, w_lo = _pick(90); v_hi, w_hi = _pick(264)
+        v_lo, w_lo = _pick(min(ks)); v_hi, w_hi = _pick(max(ks))   # low/high-line corners (not literal 90/264)
         if not (w_lo.get("Pcore") and w_hi.get("Pcore")):
             return None
         fig, ax = plt.subplots(figsize=(7.2, 3.1))
@@ -862,18 +862,31 @@ def _eta_target(state) -> float | None:
         return None
 
 
+def _pf_target(state) -> float | None:
+    """Designer's intake target power factor as a fraction (None if unset). Anchors the PF
+    ladder: canonical_ops_table keeps its loss-derived shape but is scaled so the low-line
+    best corner equals this target (mirrors _eta_target)."""
+    try:
+        v = float(((state or {}).get("intake", {}) or {})
+                  .get("application", {}).get("power_factor_target", 0) or 0)
+        return v if 0 < v <= 1.0 else None
+    except Exception:
+        return None
+
+
 def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIST[-1], r_input=0.095,
-         eta_target=None):
-    ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target)
+         eta_target=None, pf_target=None):
+    ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target, pf_target)
     # Per-phase RMS through the SAME step2 -> step4 -> step5 chain that produces
     # Table 3.2.2b / Table 3.4.1's "accurate" Iφ,rms — replaces the old sinusoidal
     # "PFC approximation" (ipk_l/nph/√2 · √(π/2) · 0.98) that diverged from the
     # rigorous figures by ~20% and was the root of the Table 3.1.1 vs 3.2.x mismatch.
     ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input,
-                                           eta_target)
+                                           eta_target, pf_target)
     rows = []
-    for i, vin in enumerate(VAC_LIST):
-        pout   = pout_hi if vin >= 180 else pout_lo
+    for i in range(len(ops_ref)):
+        vin    = float(ops_ref[i, 0])   # derived grid: endpoints = vin_min/vin_max, middle 7 kept
+        pout   = float(ops_ref[i, 1])
         eta    = float(ops_ref[i, 2])
         PF     = float(ops_ref[i, 3])
         pin    = pout / eta
@@ -1007,7 +1020,7 @@ def _ch1(story, state):
         "I<sub>φ</sub>, loss, and thermal calculation that follows — Chapters 2, 3, 4, 5 and 6 "
         "all derive their per-point figures from this same table, never from a re-typed value.", 1)
 
-    ops_pf = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_tgt / 100.0)
+    ops_pf = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_tgt / 100.0, _pf_target(state))
     _e_lo, _e_hi = float(ops_pf[0, 2]) * 100, float(ops_pf[-1, 2]) * 100
     _pf_lo, _pf_hi = float(ops_pf[0, 3]), float(ops_pf[-1, 3])
     data_table(story, "1.2.2", "Operating-Point Efficiency and Power Factor — Reference Table",
@@ -1406,7 +1419,7 @@ def _ch2(story, state):
         ],
         col_widths=[CW*0.42, CW*0.58], ch=2)
 
-    OPS = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
+    OPS = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state), _pf_target(state))
     s2 = step2_input_params(vout, OPS)
     Vin_rms = s2["Vin_rms"]; Pout = s2["Pout"]; eta = s2["eta"]; PF = s2["PF"]
     Vin_pk  = s2["Vin_pk"];  Dpk  = s2["Dpk"];  Pin = s2["Pin"]
@@ -1543,7 +1556,7 @@ def _ch2(story, state):
     # the old block computed I_φ,rms from a deprecated sinusoidal approximation
     # (ipk/nph/√2·√(π/2)·0.98, ~+21% off) and listed inductance/ripple rows that
     # do not exist yet in Chapter 2 (L is derived in Chapter 3) — both removed.
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest, _eta_target(state))
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, crest, _eta_target(state), _pf_target(state))
     iph_lf_90  = float(Iin_rms[0]) / n_ph              # line-frequency component
     data_table(story, "2.8.1", "Architecture Constants — All Downstream Chapters Reference",
         "These values are derived from Sections 2.1–2.7 and locked at this point. "
@@ -1650,7 +1663,7 @@ def _ch2(story, state):
     fig, ax = plt.subplots(figsize=(7, 3))
     ax.plot(vins_plot, kd_plot, color="#1B5E20", lw=2)
     for op in ops_all:
-        ax.scatter(op["Vin"], op["KD"], color=VAC_COLORS[op["Vin"]], s=60, zorder=5)
+        ax.scatter(op["Vin"], op["KD"], color=VAC_COLORS.get(int(round(op["Vin"])), "#1f77b4"), s=60, zorder=5)
         ax.annotate(str(op["Vin"]), (op["Vin"], op["KD"]),
                     textcoords="offset points", xytext=(0,6), fontsize=7, ha="center")
     ax.axhline(0, color="grey", lw=0.8, ls="--")
@@ -1705,7 +1718,7 @@ def _ch3(story, state, d):
     # η/PF at the worst-case 90 Vac corner — taken from the canonical estimated
     # reference table (Section 1.2.4 / Table 1.2.2), not re-typed: row 0 of that
     # table is always the vin_min low-line corner.
-    _ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
+    _ops_ref = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state), _pf_target(state))
     eta      = float(_ops_ref[0, 2]); PF = float(_ops_ref[0, 3])
     # Per-phase RMS current at the 90 Vac reference corner — derived through the
     # SAME step2 -> step4 -> step5 chain as Table 3.2.4 and the sizing engine
@@ -1714,7 +1727,7 @@ def _ch3(story, state, d):
     # "accurate" per-phase RMS figures instead of reading a field
     # (IL_rms_A / Iph_rms_A) that DesignResult never actually populates.
     _ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi,
-                                             vout, fsw, r_input, _eta_target(state))
+                                             vout, fsw, r_input, _eta_target(state), _pf_target(state))
     Iph_rms_ref = float(_ops_design[0, 4])
 
     # DesignResult fields
@@ -1790,7 +1803,7 @@ def _ch3(story, state, d):
     # (weak interleave cancellation at low duty) confused reviewers: the 90 Vac
     # per-phase arithmetic produced a larger figure that then "rounded" DOWN to the
     # engine's target. Steps 1–6 now run at the governing corner and ceil to 5 µH.
-    _ops9    = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
+    _ops9    = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state), _pf_target(state))
     _s2g     = step2_input_params(vout, _ops9)
     _s4g     = step4_inductance(_s2g, r_input, fsw, vout)
     _g       = int(_s4g["ref_idx"])
@@ -1813,7 +1826,7 @@ def _ch3(story, state, d):
     rho_100     = 1.72e-8 * (1 + ALPHA_CU*80)
     skin_mm     = math.sqrt(rho_100/(math.pi*fsw*4*math.pi*1e-7))*1e3
 
-    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input, _eta_target(state))
+    ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input, _eta_target(state), _pf_target(state))
 
     chapter_splash(story, 3, "PFC Inductor Sizing",
         "What inductance and winding do we need?",
@@ -1970,7 +1983,7 @@ def _ch3(story, state, d):
         + (f"{J_Amm2:.2f} A/mm²" if J_Amm2 else "— (from winding design).")
         + " (Section 3.4.7).", 3)
 
-    OPS3 = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state))
+    OPS3 = _canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, _eta_target(state), _pf_target(state))
     s2x = step2_input_params(vout, OPS3)
     Vin_rms = s2x["Vin_rms"]; Pout = s2x["Pout"]; eta_a = s2x["eta"]; PF_a = s2x["PF"]
     Vin_pk  = s2x["Vin_pk"];  Dpk  = s2x["Dpk"];  Pin = s2x["Pin"]

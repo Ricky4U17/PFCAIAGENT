@@ -113,39 +113,60 @@ def gen_waveforms(Vin_pk_v: float, Iin_pk_v: float,
 
 def canonical_ops_table(vin_min: float, vin_max: float,
                         pout_lo: float, pout_hi: float,
-                        eta_target: float | None = None) -> np.ndarray:
-    """Nine-point eta/PF reference matrix scaled to this design's Vin/Pout
-    corners. Single source of truth for the operating-point grid — both the
-    sizing engine and every report chapter must build their OPS arrays from
-    this same table (directly or via build_design_ops_table) so that derived
-    figures such as Iph_rms never diverge between Table 3.2.4 and Table 3.4.1.
+                        eta_target: float | None = None,
+                        pf_target: float | None = None) -> np.ndarray:
+    """Nine-point eta/PF operating grid for this design, DERIVED from the internal
+    reference curve. Single source of truth for the operating-point grid — both the
+    sizing engine and every report chapter must build their OPS arrays from this same
+    table (directly or via build_design_ops_table) so that derived figures such as
+    Iph_rms never diverge between Table 3.2.4 and Table 3.4.1.
 
-    eta_target (fraction, e.g. 0.98): the designer's target efficiency from the
-    intake spec. The base ladder keeps its loss-derived SHAPE (the per-point
-    ratios vs the 264 Vac best corner are real data), and the whole ladder is
-    scaled so the best corner (vin_max, last row) equals the target. None keeps
-    the unscaled reference ladder."""
-    # High-line efficiencies lowered to realistic values (the loss-derived re-estimate in Ch 7.9
-    # showed the original 0.985–0.990 were optimistic vs the computed losses).
-    m = np.array([
-        [vin_min,  pout_lo,  0.945, 0.9987],
-        [110,      pout_lo,  0.955, 0.9986],
-        [120,      pout_lo,  0.965, 0.9985],
-        [132,      pout_lo,  0.975, 0.9980],
-        [180,      pout_hi,  0.965, 0.9889],
-        [200,      pout_hi,  0.970, 0.9884],
-        [220,      pout_hi,  0.973, 0.9790],
-        [230,      pout_hi,  0.975, 0.9789],
-        [vin_max,  pout_hi,  0.980, 0.9520],
+    Derivation rules (designer-specified 2026-07-22):
+      • Voltages: the 7 middle points (110..230) are kept; only the endpoints move to
+        the designer's vin_min / vin_max.
+      • eta/PF at the two moved endpoints are EXTRAPOLATED along the internal curve
+        (linear from the two nearest reference points), so 85 Vac ≠ the 90 Vac value.
+      • eta is scaled by a single ratio to hit eta_target at the high-line best corner
+        (last row); PF is scaled by a single ratio to hit pf_target at the low-line best
+        corner (first row). The internal reference values below are NOT changed — they
+        are the ratio/extrapolation basis only."""
+    # Internal reference design curve at the 90..264 corners — DO NOT change these values.
+    # (High-line efficiencies are the loss-derived re-estimate from Ch 7.9.)
+    _ref = np.array([
+        [90.0,   pout_lo,  0.945, 0.9987],
+        [110.0,  pout_lo,  0.955, 0.9986],
+        [120.0,  pout_lo,  0.965, 0.9985],
+        [132.0,  pout_lo,  0.975, 0.9980],
+        [180.0,  pout_hi,  0.965, 0.9889],
+        [200.0,  pout_hi,  0.970, 0.9884],
+        [220.0,  pout_hi,  0.973, 0.9790],
+        [230.0,  pout_hi,  0.975, 0.9789],
+        [264.0,  pout_hi,  0.980, 0.9520],
     ], dtype=float)
-    if eta_target:
+    Vref = _ref[:, 0]
+
+    def _extrap(ys, x):   # linear interp, linear extrapolation beyond the reference corners
+        if x <= Vref[0]:
+            return ys[0] + (ys[1] - ys[0]) / (Vref[1] - Vref[0]) * (x - Vref[0])
+        if x >= Vref[-1]:
+            return ys[-1] + (ys[-1] - ys[-2]) / (Vref[-1] - Vref[-2]) * (x - Vref[-1])
+        return float(np.interp(x, Vref, ys))
+
+    m = _ref.copy()
+    # move the endpoints to the designer's corners + extrapolate their eta/PF for the new voltage
+    m[0, 0], m[0, 2], m[0, 3] = vin_min, _extrap(_ref[:, 2], vin_min), _extrap(_ref[:, 3], vin_min)
+    m[-1, 0], m[-1, 2], m[-1, 3] = vin_max, _extrap(_ref[:, 2], vin_max), _extrap(_ref[:, 3], vin_max)
+    if eta_target:   # scale eta ladder → target at the high-line best corner (last row)
         m[:, 2] = np.clip(m[:, 2] * (float(eta_target) / m[-1, 2]), 0.0, 0.999)
+    if pf_target:    # scale PF ladder → target at the low-line best corner (first row)
+        m[:, 3] = np.clip(m[:, 3] * (float(pf_target) / m[0, 3]), 0.0, 1.0)
     return m
 
 
 def build_design_ops_table(vin_min: float, vin_max: float, pout_lo: float, pout_hi: float,
                            vout: float, fsw: float, r_input: float,
-                           eta_target: float | None = None):
+                           eta_target: float | None = None,
+                           pf_target: float | None = None):
     """Nine-point [Vin_rms, Pout, eta, PF, Iph_rms] operating matrix derived
     from THIS design's actual corner conditions, via the same rigorous
     step2_input_params -> step4_inductance -> step5_phase_rms chain that
@@ -157,7 +178,7 @@ def build_design_ops_table(vin_min: float, vin_max: float, pout_lo: float, pout_
     Returns (OPS, L_phi) where OPS columns are [Vin_rms, Pout, eta, PF, Iph_rms]
     and L_phi is the low-line target inductance (H) used to derive Iph_rms.
     """
-    ops_ref = canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target)
+    ops_ref = canonical_ops_table(vin_min, vin_max, pout_lo, pout_hi, eta_target, pf_target)
     s2 = step2_input_params(vout, ops_ref)
     s4 = step4_inductance(s2, r_input, fsw, vout)
     # ceil to the 5 µH grid (matches Chapter 3): rounding down would violate the
