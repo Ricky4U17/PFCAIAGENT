@@ -4906,4 +4906,20 @@ Follow-up to C118's env pin. requirements.txt already had `httpx~=0.27.0` (exclu
 installed env had drifted to 0.28.1, which broke FastAPI TestClient (0.28 dropped the
 `TestClient(app=…)` shortcut starlette 0.27 uses). Tightened to an exact `httpx==0.27.2` with a
 comment explaining why + the upgrade path (bump only alongside starlette). httpx is a TEST-ONLY
-dependency here — the app never imports it, so this has zero runtime effect. Commit <pending>.
+dependency here — the app never imports it, so this has zero runtime effect. Commit 3280f0c.
+
+
+## C121 — 2026-07-22 — POINT 28: deploy the GUI load-% dropdown (stale served copy)
+
+The load-% dropdown (10/25/50/75/100% → recompute current & voltage-loop Bode) was reported "still
+missing" in the GUI despite being built. Root cause: there are two hand-maintained copies of the
+Control-Design tool and they had drifted. `frontend/src/assets/control_design.html` is the canonical
+active source (last touched C110, 2026-07-21, with all July work); `frontend/public/control_design.html`
+— the copy the React iframe actually serves via `src="/control_design.html"` — was a MONTH-stale June
+snapshot (last touched 2026-06-21) with zero `loadPct` references. So C108-C110's UI work never reached
+users. FIX: synced src/assets → public (tracked) and → dist (gitignored build artifact) verbatim; all
+three now byte-identical (md5 c7cb75…). This deploys the whole missed July batch: load dropdown, C108
+application-schematic screen, an R_CS `rcsUser` fix (stop the sticky 15 mΩ placeholder), and bus-ripple
+pk-pk (C+ESR) consistency with the DC-bus cap page. HAZARD flagged: two hand-maintained copies drift —
+src/assets is canonical; a build/copy step (or single source) should be added so this can't recur.
+Commit <pending>.

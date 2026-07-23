@@ -60,6 +60,7 @@
   .card.gd .v{color:var(--good)} .card.bd .v{color:var(--bad)}
   @media (max-width:760px){.cards{grid-template-columns:1fr 1fr}}
   .tableWrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+  .tableWrap.noscroll{max-height:none;overflow:visible}
   table{width:100%;border-collapse:collapse;font-size:12px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} th{background:#16233b;color:#d5dffa;position:sticky;top:0;z-index:2}
   td.std{color:var(--good);font-weight:700} td.calcv{color:var(--muted)}
   .canvasWrap{background:#0a111f;border:1px solid var(--line);border-radius:12px;padding:8px;position:relative}
@@ -305,7 +306,7 @@
       <div class="panel" data-sub="res">
         <h2>Final Control-Loop Components — all selected values</h2>
         <div class="small" style="margin-bottom:6px">Consolidated read-only summary of every control-loop component selected across the current- and voltage-loop sub-screens, plus the R<sub>CS</sub> / CS-filter network and FB divider.</div>
-        <div class="tableWrap"><table id="allCompBom"></table></div>
+        <div class="tableWrap noscroll"><table id="allCompBom"></table></div>
       </div>
 
       <div class="panel" data-sub="res">
@@ -324,10 +325,11 @@
       <div class="panel" data-sub="res">
         <h2>Stability Scorecard — all operating points, standard values</h2>
         <div class="cards" id="cards2"></div>
-        <div class="tableWrap" style="margin-top:10px"><table id="marginTable"></table></div>
+        <div class="tableWrap noscroll" style="margin-top:10px"><table id="marginTable"></table></div>
       </div>
       <div class="panel" data-sub="cur">
         <h2>Current Loop T<sub>i</sub>(s) — 10 Hz to 500 kHz</h2>
+        <label class="inline" style="font-size:12px;color:var(--muted)">Load:&nbsp;<select id="loadPctCur" class="loadSel" style="width:auto"><option value="100">100 %</option><option value="75">75 %</option><option value="50">50 %</option><option value="25">25 %</option><option value="10">10 %</option></select>&nbsp;of the selected line-range rated power</label>
         <label class="inline" style="font-size:12px;color:var(--muted)"><input type="checkbox" id="ovl" checked style="width:auto">&nbsp;Overlay all operating points (solid = low line, dashed = high line)</label>
         <div class="canvasWrap"><canvas id="bodeCur" data-h="430"></canvas><div class="hoverbox" id="hbCur"></div></div>
         <div class="legend"><span><i style="border-color:#56a3ff"></i>Loop T<sub>i</sub> (selected std values)</span><span><i style="border-color:rgba(86,163,255,.35)"></i>Other operating points (overlay)</span><span><i style="border-color:#34d399"></i>achieved fc / PM / GM</span></div>
@@ -341,6 +343,7 @@
       </div>
       <div class="panel" data-sub="vol">
         <h2>Voltage Loop T<sub>v</sub>(s) — 0.1 Hz to 1 MHz</h2>
+        <label class="inline" style="font-size:12px;color:var(--muted)">Load:&nbsp;<select id="loadPctVol" class="loadSel" style="width:auto"><option value="100">100 %</option><option value="75">75 %</option><option value="50">50 %</option><option value="25">25 %</option><option value="10">10 %</option></select>&nbsp;of each band's rated power</label>
         <div class="canvasWrap"><canvas id="bodeVol" data-h="430"></canvas><div class="hoverbox" id="hbVol"></div></div>
         <div class="legend"><span><i style="border-color:#9aa8c4;border-top-style:dashed"></i>Uncompensated T<sub>v,base</sub></span><span><i style="border-color:#b18cff;border-top-style:dotted"></i>Compensator H<sub>OTA</sub> (incl. divider)</span><span><i style="border-color:#56a3ff"></i>Loop T<sub>v</sub> — LL 90 V</span><span><i style="border-color:#f59e0b"></i>Loop T<sub>v</sub> — HL 180 V</span></div>
         <h3 style="margin-top:10px">Pole–Zero Placement (drag ○ zeros / × poles)</h3>
@@ -414,12 +417,11 @@
   <!-- ================= SCREEN 5 ================= -->
   <section id="screen5" class="screen">
     <div class="panel">
-      <h2>Application Schematic — FAN9672 Pin Networks (live values)</h2>
+      <h2>Application Schematic — FAN9672 Pin Networks</h2>
       <div class="inline" style="margin-bottom:8px">
         <div class="seg"><button id="modeLow2" class="active">Low Line (FR)</button><button id="modeHigh2">High Line (HV)</button></div>
         <span class="small" style="margin-left:10px">Schematic shows the components for the selected line range.</span>
       </div>
-      <div class="note">Topology per the FLEX2 front-end reference (sheet 2). <span style="color:var(--warn);font-weight:700">Amber values</span> are taken live from your selections on Screens 1–2; grey "(typ)" parts are not sized by this tool.</div>
       <div class="schemWrap"><div id="schemSvg"></div></div>
       <h3 style="margin-top:12px">Components that change between Low Line (FR) and High Line (HV)</h3>
       <div class="tableWrap" style="max-height:none"><table id="lineDiffTable"></table></div>
@@ -470,7 +472,7 @@ function nearestList(v,ser,n=7){if(!(v>0))return[];const d=Math.floor(Math.log10
   return all.slice(0,n).sort((a,b)=>a-b)}
 
 /* ============ state ============ */
-const state={mode:'low',phil:'shared',rcsSel:15,bom:{},vType:'type3',cType:'T2'};
+const state={mode:'low',phil:'shared',rcsSel:15,rcsUser:false,bom:{},vType:'type3',cType:'T2',loadPct:100};
 function bomGet(key,calcVal,ser){
   const e=state.bom[key];
   if(e&&!e.auto&&Number.isFinite(e.val))return e.val;
@@ -1262,6 +1264,10 @@ function renderRCS(p){
   const g=rcsCalc(p);
   const custom=parseFloat($('rcsCustom').value);
   if(Number.isFinite(custom)&&custom>0)state.rcsSel=custom;
+  // Until the designer explicitly picks a value (chip / custom / injected S2 selection), follow the
+  // CALCULATED recommendation — never a sticky 15 mΩ placeholder (15 is a standard value, so the
+  // old !SHUNTS.includes guard silently kept it selected forever).
+  else if(!state.rcsUser)state.rcsSel=g.rec?Math.round(g.rec*1e4)/10:(SHUNTS.includes(state.rcsSel)?state.rcsSel:15);
   else if(!SHUNTS.includes(state.rcsSel))state.rcsSel=g.rec?Math.round(g.rec*1e4)/10:15;
   // chips
   const ch=$('rcsChips');ch.innerHTML='';
@@ -1270,7 +1276,7 @@ function renderRCS(p){
     const b=document.createElement('button');b.className='chip'+(inz?' inz':'')+((!Number.isFinite(custom)&&Math.abs(s-state.rcsSel)<1e-9)?' selC':'');
     b.textContent=s+' mΩ';
     if(g.rec&&Math.abs(s*1e-3-g.rec)<1e-9){const sp=document.createElement('span');sp.className='st';sp.textContent='★';b.appendChild(sp)}
-    b.onclick=()=>{$('rcsCustom').value='';state.rcsSel=s;recalc()};
+    b.onclick=()=>{$('rcsCustom').value='';state.rcsSel=s;state.rcsUser=true;recalc()};
     ch.appendChild(b);
   }
   // zone bar
@@ -1339,13 +1345,15 @@ function renderBoms(p,dci,dcv){
 
 function renderPlots(p,dci,dcv){
   const overlay=$('ovl').checked;
+  const lf=(state.loadPct||100)/100;                 // load fraction from the "Load" dropdown
   const set=state.phil==='shared'?opPts(p,'all'):opPts(p,state.mode);
-  const insp={vac:p.vac,pout:p.pout,line:state.mode==='low'?'LL':'HL'};
-  // --- current loop ---
+  const band=state.mode==='low'?POUT_LO:POUT_HI;
+  const insp={vac:p.vac,pout:lf*band,line:state.mode==='low'?'LL':'HL'};
+  // --- current loop ---  (same fixed compensator, plant re-evaluated at lf × band power)
   const f1c=10,f2c=5e5,Nc=300;
   const trs=[];
-  if(overlay)for(const op of set){if(op.vac===insp.vac&&op.pout===insp.pout)continue;
-    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,op.pout,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+  if(overlay)for(const op of set){const opw=lf*op.pout; if(op.vac===insp.vac&&opw===insp.pout)continue;
+    trs.push({sw:sweepLoop(f=>Ti(p,dci,op.vac,opw,f),f1c,f2c,160),col:'rgba(86,163,255,.30)',dash:op.line==='HL'?[6,4]:[],wd:1})}
   const swMain=sweepLoop(f=>Ti(p,dci,insp.vac,insp.pout,f),f1c,f2c,Nc);
   trs.push({sw:swMain,col:'#56a3ff',wd:2.2,main:true});
   const mg=marginsOf(swMain);
@@ -1356,19 +1364,20 @@ function renderPlots(p,dci,dcv){
   const f1v=0.1,f2v=1e6,Nv=360;
   const sizeCor=sizingCorner(p);
   const trv=[];
-  trv.push({sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]});
+  const lsfx=lf<1?' @'+state.loadPct+'%':'';
+  trv.push({sw:sweepLoop(f=>TvBase(p,dci,sizeCor.vac,lf*sizeCor.pout,f),f1v,f2v,Nv),col:'rgba(154,168,196,.75)',dash:[5,4]});
   if(!dcv.err)trv.push({sw:sweepLoop(f=>HotaStd(p,dcv,f),f1v,f2v,Nv),col:'rgba(177,140,255,.8)',dash:[2,3]});
   let mgv={fc:NaN,pm:NaN,gm:NaN,fg:NaN},cross=[];
   if(!dcv.err){
     if(overlay)for(const op of set){if(op.vac===90||op.vac===180)continue;
-      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
-    const swLL=sweepLoop(f=>Tv(p,dci,dcv,90,POUT_LO,f),f1v,f2v,Nv);
-    const swHL=sweepLoop(f=>Tv(p,dci,dcv,180,POUT_HI,f),f1v,f2v,Nv);
+      trv.push({sw:sweepLoop(f=>Tv(p,dci,dcv,op.vac,lf*op.pout,f),f1v,f2v,160),col:'rgba(86,163,255,.25)',dash:op.line==='HL'?[6,4]:[],wd:1})}
+    const swLL=sweepLoop(f=>Tv(p,dci,dcv,90,lf*POUT_LO,f),f1v,f2v,Nv);
+    const swHL=sweepLoop(f=>Tv(p,dci,dcv,180,lf*POUT_HI,f),f1v,f2v,Nv);
     const mLL=marginsOf(swLL), mHL=marginsOf(swHL);
     trv.push({sw:swLL,col:'#56a3ff',wd:2});
     trv.push({sw:swHL,col:'#f59e0b',wd:2.2,main:true});
-    cross=[{fc:mHL.fc,pm:mHL.pm,gm:mHL.gm,fg:mHL.fg,col:'#f59e0b',lab:'HL 180 V'},
-           {fc:mLL.fc,pm:mLL.pm,gm:mLL.gm,fg:mLL.fg,col:'#56a3ff',lab:'LL 90 V'}];
+    cross=[{fc:mHL.fc,pm:mHL.pm,gm:mHL.gm,fg:mHL.fg,col:'#f59e0b',lab:'HL 180 V'+lsfx},
+           {fc:mLL.fc,pm:mLL.pm,gm:mLL.gm,fg:mLL.fg,col:'#56a3ff',lab:'LL 90 V'+lsfx}];
     mgv=sizeCor.vac<150?mLL:mHL;
   }
   drawBodePanel('bodeVol',trv,{f1:f1v,f2:f2v,g1:-200,g2:60,gs:40,p1:-450,p2:0,ps:90,cross,
@@ -1508,9 +1517,13 @@ function renderScreen4(p,dci,dcv){
     const iecPass=i3<=IEC_A[3]&&i5<=IEC_A[5]&&i7<=IEC_A[7];
     return{op,veaEff,...t,i1,i3,i5,i7,iecPass};
   });
-  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple,pk 120 Hz</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th><th>I₁ (A)</th><th>IEC 61000-3-2<br>Class A</th></tr>';
+  // pk-pk 2f bus ripple = 2×peak capacitive term + ESR step — the SAME quantity (and value) the
+  // DC-bus capacitor simulation page reports, so the two pages can be compared directly.
+  const vpp2f=(Vr,pout)=>2*Vr+2*pout*p.rc/p.vout;
+  let th='<tr><th>V_AC</th><th>Range</th><th>V_ripple 120 Hz (pk-pk)</th><th>120 Hz rejection</th><th>V_EA,120</th><th>iTHD₃</th><th>≥ 20 dB?</th><th>I₁ (A)</th><th>IEC 61000-3-2<br>Class A</th></tr>';
   for(const r of rows){
-    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(r.Vr,2)} V (${fmt(100*r.Vr/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td><td>${fmt(r.i1,1)}</td><td><span class="pill ${r.iecPass?'ok':'bad'}">${r.iecPass?'PASS':'FAIL'}</span></td></tr>`;
+    const vpp=vpp2f(r.Vr,r.op.pout);
+    th+=`<tr><td>${r.op.vac} Vac</td><td>${r.op.line}</td><td>${fmt(vpp,2)} V (${fmt(100*vpp/p.vout,2)} %)</td><td><b>${fmt(r.rej,1)} dB</b></td><td>${fmt(r.vea120*1e3,0)} mV</td><td><b>${fmt(r.thd3,2)} %</b></td><td><span class="pill ${r.rej>=20?'ok':'bad'}">${r.rej>=20?'PASS':'FAIL'}</span></td><td>${fmt(r.i1,1)}</td><td><span class="pill ${r.iecPass?'ok':'bad'}">${r.iecPass?'PASS':'FAIL'}</span></td></tr>`;
   }
   $('thdTable').innerHTML=th;
   // IEC 61000-3-2 Class A compliance — worst-case odd-harmonic current vs limit
@@ -1536,7 +1549,7 @@ function renderScreen4(p,dci,dcv){
     <div class="card"><div class="k">Worst iTHD₃ — low line</div><div class="v">${fmt(wLL.thd3,2)} %</div><div class="u">@ ${wLL.op.vac} Vac · rej ${fmt(wLL.rej,1)} dB</div></div>
     <div class="card"><div class="k">Worst iTHD₃ — high line</div><div class="v">${fmt(wHL.thd3,2)} %</div><div class="u">@ ${wHL.op.vac} Vac · rej ${fmt(wHL.rej,1)} dB</div></div>
     <div class="card ${wRej.rej>=20?'gd':'bd'}"><div class="k">Worst 120 Hz rejection</div><div class="v">${fmt(wRej.rej,1)} dB</div><div class="u">floor 20 dB · @ ${wRej.op.vac} Vac</div></div>
-    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(rows.find(r=>r.op.vac===180).Vr,2)} V</div><div class="u">${fmt(100*rows.find(r=>r.op.vac===180).Vr/p.vout,2)} % of V_OUT</div></div>
+    <div class="card"><div class="k">Bus ripple (HL full load)</div><div class="v">${fmt(vpp2f(rows.find(r=>r.op.vac===180).Vr,POUT_HI),2)} V pk-pk</div><div class="u">${fmt(100*vpp2f(rows.find(r=>r.op.vac===180).Vr,POUT_HI)/p.vout,2)} % of V_OUT · C + ESR, as on the DC-bus cap page</div></div>
     <div class="card ${iecAll?'gd':'bd'}"><div class="k">IEC 61000-3-2 (Class A)</div><div class="v">${iecAll?'PASS':'FAIL'}</div><div class="u">3rd/5th/7th vs 2.30/1.14/0.77 A</div></div>`;
   drawThdPlot(rows,p);
 }
@@ -2367,8 +2380,10 @@ function renderLive(p,dci,dcv,mg,mgv,sc){
     dip=Math.abs(d.pk); rec=d.rec; dipPct=100*dip/p.vout;
     drawStepPlot([{op:{vac:180,pout:POUT_HI,line:'HL'},yr}],band,p,'liveStep');
   }
+  // settled 2f bus ripple (pk-pk, C + ESR) — same definition/value as the DC-bus capacitor page
+  const vppSettle=POUT_HI/(2*Math.PI*60*p.vout*p.co)+2*POUT_HI*p.rc/p.vout;
   $('liveMetrics').innerHTML=dcv.err?`<span style="color:var(--bad)">${dcv.err}</span>`
-    :`Peak deviation <b>${fmt(dip,1)} V</b> (${fmt(dipPct,2)} % of V_OUT) · recovery to ±1 % <b>${fmt(rec*1e3,0)} ms</b> · voltage-loop PM <b>${fmt(mgv.pm,1)}°</b> → ringing ${mgv.pm>=55?'minimal':mgv.pm>=45?'some':'high'}.`;
+    :`Peak deviation <b>${fmt(dip,1)} V</b> (${fmt(dipPct,2)} % of V_OUT) · recovery to ±1 % <b>${fmt(rec*1e3,0)} ms</b> · voltage-loop PM <b>${fmt(mgv.pm,1)}°</b> → ringing ${mgv.pm>=55?'minimal':mgv.pm>=45?'some':'high'}. After settling the bus still carries the 2f ripple: <b>${fmt(vppSettle,1)} V pk-pk</b> at 100 % load (C + ESR — matches the DC-bus capacitor page; the ΔV(t) trace above excludes it by definition).`;
   // ── current-loop tracking + iTHD contribution (worst corner HL) ──
   const den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk, rcs=state.rcsSel*1e-3;
   const veaEff=rcs*den*((POUT_HI/p.nch)*p.kmax)/(p.krm*12e6);
@@ -2486,6 +2501,13 @@ $('fileLoad').onchange=e=>{if(e.target.files[0])loadJSON(e.target.files[0]);e.ta
 ['vac','pout','vout','fsw','lphi','co','rl','rc','riac','rvir','rrlpk','kmax','eta','rfb2','r1fb','r4fb',
  'fci','ciKlock','ciPM','cfz','cfp','rf','cf','fcv','vKlock','vPM','vPlace','vSpread','vfz1','vfz2','vfp1','vfp2','rb1','rb2','rb3','rb4','cb1','cb2',
  'serR','serC','rcsCustom','tolChk','ovl','ssT','ilClamp','il2K','ilFp','gcFp','lsFp'].forEach(id=>$(id).addEventListener('input',recalc));
+// Load-percentage dropdowns (current- and voltage-loop Bode) — kept in sync, re-evaluate the loop
+// plant at loadPct × the selected line-range rated power, then redraw both Bode plots.
+document.querySelectorAll('.loadSel').forEach(sel=>sel.addEventListener('change',e=>{
+  state.loadPct=+e.target.value||100;
+  document.querySelectorAll('.loadSel').forEach(s=>{s.value=String(state.loadPct)});
+  recalc();
+}));
 attachHover('bodeCur','hbCur');attachHover('bodeVol','hbVol');
 pzPointer('pzCur');pzPointer('pzVol');
 // crossover scroll bars drive the number field; commit (blur/enter) snaps it into the band
@@ -2537,7 +2559,7 @@ window.setPythonValues = function(p){
   // Sync visible Pout and eta fields to current mode values
   $('pout').value = (state.mode==='low') ? POUT_LO : POUT_HI;
   $('eta').value  = (state.mode==='low') ? ETA_LO  : ETA_HI;
-  if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; const el=$('rcsCustom'); if(el) el.value=v; } }
+  if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; state.rcsUser=true; const el=$('rcsCustom'); if(el) el.value=v; } }
   recalc();
 };
 
