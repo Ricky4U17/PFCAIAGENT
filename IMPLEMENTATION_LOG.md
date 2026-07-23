@@ -4998,4 +4998,25 @@ per-band 120 Hz ripple (vrip), rejection (rej_db) and THD3. Threaded s12/s13 int
 `_appendix_ctx(prior, s10, s11, s12, s13)` (build_story now captures s12; still backward-compatible) and
 replaced the four E.3 hardcodes: dip 28.9 V (7.3%), ripple 2.6/5.5 V, rejection 30.1/23.6 dB,
 THD3 1.4/3.0 % — all now live. Appendices A-E are now fully de-hardcoded except the genuine reference
-material. Suite: 172 passed / 2 skipped. Commit <pending>.
+material. Suite: 172 passed / 2 skipped. Commit 9937561.
+
+
+## C126 — 2026-07-22 — Continuity / hardcode audit (designer specs → calc → report)
+
+Regenerated the full combined report OK (183 pp; all §5.3/5.4/5.5/§4.8/Ch6 checks pass; 183 is within the
+178-190 bound — C109 grew it from 178). Then audited the key design parameters for the "same parameter,
+different value" class of problem.
+FINDING: continuity in the MAIN flow is intact — Vout (C123), DCR (C122), Cout/C_uF (the combined report
+sets step16.C_uF = selected_cap.value_uF × qty, i.e. the installed 2400 µF bank — verified in
+verify_combined_report.py), L (selected inductor), Pout/fsw/eff all read from intake/selections in
+production. The problems were inconsistent FALLBACK defaults (defensive values that don't fire in the real
+flow) plus the two stale appendix hardcodes already corrected in C124.
+FIXED (fallback consistency):
+- doc_report_builder `_ch6` control-loop C_uF fallback 1410→2200 (1410 was the *required* C, not the
+  installed bank; the loop must use the installed cap, which production carries).
+- bidirectional_thermal_agent output_power_w_nom fallback 1700→3600 (nom is the high-line power).
+- appendices `_appendix_ctx` K_MAX fallback 1.4→1.49 (matches the actual design).
+- verify_combined_report.py page bound 176-180→178-190 (+ show actual count) — was stale vs C114/C109.
+NOTED (minor, not changed): eff 0.95 (thermal round default) vs 0.945 (design eta_lo); L fallback 235 vs
+240 mix (design-derived, flows in production); one standalone `fline:50` example. No BROKEN continuity.
+Suite: 172 passed / 2 skipped (green). Commit <pending>.

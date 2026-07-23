@@ -148,8 +148,8 @@ def main():
     }
     for name, ok in checks.items():
         print("  [%s] %s" % ("OK" if ok else "!!", name))
-    ok_pages = 176 <= pages <= 180
-    print("PAGE COUNT %s (expected ~178)" % ("OK" if ok_pages else "OUT OF RANGE"))
+    ok_pages = 178 <= pages <= 190   # 183 as of C109 partial-load bode figures; matches the regression bound
+    print("PAGE COUNT %s (expected 178-190, got %d)" % ("OK" if ok_pages else "OUT OF RANGE", pages))
     sys.exit(0 if (ok_pages and all(checks.values())) else 1)
 
 

@@ -46,7 +46,7 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
         c3 = c1 / (fp1a * 2*math.pi * r2 * c1 - 1.0)
     except Exception:
         c1, c2, c3 = 390e-9, 1.1e-9, 24e-9
-    kmax = float(v.get("kmax", 1.4))
+    kmax = float(v.get("kmax", 1.49))
     pout_lo = float(v.get("pout_lo", 1700.0)); pout_hi = float(v.get("pout_hi", 3600.0))
     # Appendix E.3 performance summary (worst-case load-step dip from Step 12; per-band 120 Hz ripple,
     # rejection and THD3 from Step 13 — lo = low line, hi = high line).
