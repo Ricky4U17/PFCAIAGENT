@@ -1069,7 +1069,7 @@ def _ch1(story, state):
             ["CISPR 32 / EN 55032",     "Conducted EMI",          emi_req,
              "Input filter design"],
             ["IEC 61000-3-2",           "Harmonic currents",       harm_req,
-             "PF > 0.99 achieved by ACM control"],
+             f"PF ≥ {(_pf_target(state) or 0.99):.3f} achieved by ACM control"],
             ["IEC 62368-1 / 60601-1",   "Leakage current",         leak_req,
              "Insulation and creepage"],
             ["IEC 61000-4-5  Level 3",  "Surge immunity",
