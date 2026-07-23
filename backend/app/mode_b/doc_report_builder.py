@@ -809,7 +809,8 @@ def _fig_flux_waveforms(d, state):
         ax.plot(t, bac, color="#ef6c00", lw=1.4, label=r"$B_{ac,pk}$")
         ax.set_xlabel("time over half line cycle (ms)", fontsize=9)
         ax.set_ylabel("flux density (T)", fontsize=9)
-        ax.set_title("Flux density over the half line cycle — 90 Vac", fontsize=10)
+        _vmin = float(((state or {}).get("intake", {}) or {}).get("application", {}).get("vin_rms_min", 90) or 90)
+        ax.set_title(f"Flux density over the half line cycle — {_vmin:.0f} Vac", fontsize=10)
         ax.legend(fontsize=8, ncol=4, loc="upper center"); ax.grid(True, alpha=0.3)
         ax.tick_params(labelsize=8); ax.set_ylim(bottom=0)
         fig.tight_layout()
@@ -1013,7 +1014,7 @@ def _ch1(story, state):
     sub_h(story, "1.2.4", "Efficiency and power factor across operating points", 1)
     annotation(story, "CONCEPT",
         f"Per-point efficiency (η) and power factor (PF) follow the loss-derived reference "
-        f"SHAPE of the curve (the per-point ratios versus the 264 V<sub>rms</sub> best corner "
+        f"SHAPE of the curve (the per-point ratios versus the {vin_max:.0f} V<sub>rms</sub> best corner "
         f"are real design data), ANCHORED to the designer's target: the whole ladder is scaled "
         f"so the best corner equals the specified target efficiency η = {eta_tgt:.0f}%. "
         "These nine η/PF pairs are the single source for every P<sub>in</sub>, I<sub>in</sub>, "
@@ -1025,7 +1026,7 @@ def _ch1(story, state):
     _pf_lo, _pf_hi = float(ops_pf[0, 3]), float(ops_pf[-1, 3])
     data_table(story, "1.2.2", "Operating-Point Efficiency and Power Factor — Reference Table",
         f"Nine-point η/PF reference matrix — loss-derived shape anchored so the "
-        f"264 V<sub>rms</sub> corner equals the designer's target efficiency "
+        f"{vin_max:.0f} V<sub>rms</sub> corner equals the designer's target efficiency "
         f"({eta_tgt:.0f}%), reproduced here and referred to in every subsequent calculation.",
         ["V<sub>in,rms</sub> (Vac)", "P<sub>out</sub> (W)", "η", "PF"],
         [[f"{int(r[0])}", f"{int(r[1])}", f"{r[2]:.3f}", f"{r[3]:.4f}"] for r in ops_pf],
@@ -1469,7 +1470,7 @@ def _ch2(story, state):
                 f"{int(Pout[i])}", f"{eta[i]:.3f}", f"{PF[i]:.4f}",
                 f"{Pin[i]:.3f}", f"{Iin_rms[i]:.3f}", f"{Iin_pk[i]:.3f}"] for i in range(n2)]
     data_table(story, "2.7.2", "Input Parameters and Duty Cycle — All Nine Operating Points",
-        "D<sub>pk</sub> and the input currents are maximum at 90 V<sub>rms</sub> (amber row) — "
+        f"D<sub>pk</sub> and the input currents are maximum at {vin_min:.0f} V<sub>rms</sub> (amber row) — "
         "the maximum-current corner. (The inductance requirement is governed by the worst "
         "ripple-ratio corner, identified in Section 3.1.)",
         ["V<sub>in,rms</sub> (V)", "V<sub>in,pk</sub> (V)", "D<sub>pk</sub>",
@@ -1490,7 +1491,7 @@ def _ch2(story, state):
         "Figure 2.1 — D<sub>pk</sub> falls monotonically as V<sub>in,rms</sub> rises: "
         f"from {Dpk[0]:.4f} at {int(Vin_rms[0])} V<sub>rms</sub> to "
         f"{Dpk[-1]:.4f} at {int(Vin_rms[-1])} V<sub>rms</sub>. "
-        "The 90 V<sub>rms</sub> corner has the highest duty cycle and dominates "
+        f"The {vin_min:.0f} V<sub>rms</sub> corner has the highest duty cycle and dominates "
         "magnetics sizing.", 2)
 
     sub_h(story, "2.7.3", "Ripple Cancellation Factor K(D) at Crest", 2)
@@ -1542,7 +1543,7 @@ def _ch2(story, state):
         "design is sized.", 2)
 
     annotation(story, "DECISION",
-        f"At the worst-case 90 V<sub>rms</sub> corner: D<sub>pk</sub> = {Dpk[0]:.4f}, "
+        f"At the worst-case {vin_min:.0f} V<sub>rms</sub> corner: D<sub>pk</sub> = {Dpk[0]:.4f}, "
         f"K(D<sub>pk</sub>) = {KDpk[0]:.4f} — only {KDpk[0]*100:.1f}% of the "
         "per-phase ripple reaches the input filter after interleaving cancellation. "
         "This crest value drives the ΔI<sub>in,pp</sub> → ΔI<sub>L,pp</sub> → "
@@ -1619,7 +1620,7 @@ def _ch2(story, state):
         ])
     data_table(story, "2.8.2", "K(D) and Per-Phase LF Currents — All Nine Operating Points",
         "This table is used directly in Section 3.5 ripple analysis. "
-        "Amber row = 90 V<sub>rms</sub> maximum-current corner. Only the "
+        f"Amber row = {vin_min:.0f} V<sub>rms</sub> maximum-current corner. Only the "
         "line-frequency component I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub> is "
         "stated here — the HF ripple depends on the inductance, which does not exist yet.",
         ["V<sub>in,rms</sub> (V)", "P<sub>out</sub> (W)", "V<sub>in,pk</sub> (V)",
@@ -1631,7 +1632,7 @@ def _ch2(story, state):
             f"K(D) minimum occurs near V<sub>in,rms</sub> = {vout/2/math.sqrt(2):.0f} V "
             f"(V<sub>in,pk</sub> ≈ V<sub>out</sub>/2 = {vout/2:.0f} V) where "
             "D ≈ 0.5 and interleaving cancellation is theoretically complete. "
-            "At the 90 V<sub>rms</sub> corner, K(D) = "
+            f"At the {vin_min:.0f} V<sub>rms</sub> corner, K(D) = "
             f"{ops_all[0]['KD']:.4f} — only "
             f"{ops_all[0]['KD']*100:.1f}% of per-phase ripple reaches the input filter."
         ))
@@ -1681,7 +1682,7 @@ def _ch2(story, state):
     annotation(story, "INSIGHT",
         f"The interleaving null at V<sub>in,rms</sub> ≈ {vout/2/math.sqrt(2):.0f} V "
         "means the EMI filter only needs to handle per-phase ripple at the two extremes "
-        f"(90 V and 264 V). The filter design can exploit this null — a notch filter "
+        f"({vin_min:.0f} V and {vin_max:.0f} V). The filter design can exploit this null — a notch filter "
         "tuned to 2×f<sub>sw</sub> at mid-range provides maximum attenuation where "
         "the ripple is inherently highest.", 2)
 
@@ -1944,7 +1945,7 @@ def _ch3(story, state, d):
             f"{_iinr_i:.4f}", f"{_iinr_i/n_ph:.4f}", f"{_iinp_i/(2*n_ph):.4f}",
         ])
     data_table(story, "3.1.1", "Per-Phase Operating Currents — All 9 Input Voltages",
-        "Amber row = 90 V<sub>rms</sub> maximum-current corner. Every row uses its own "
+        f"Amber row = {vin_min:.0f} V<sub>rms</sub> maximum-current corner. Every row uses its own "
         "point's η/PF from Table 1.2.2 — same canonical chain as Tables 2.7.2/2.8.2. "
         "I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub>; "
         "I<sub>φ,avg@crest</sub> = I<sub>in,pk</sub>/(2·N<sub>ph</sub>).",
@@ -1967,7 +1968,7 @@ def _ch3(story, state, d):
     body(story,
         f"Per-phase crest-average DC current I<sub>φ,avg@crest</sub> = "
         f"I<sub>pk,line</sub> / (2 × N<sub>ph</sub>) = "
-        f"{ipk_line_90:.4f} / (2 × {n_ph}) = {iavg_90:.4f} A at 90 V<sub>rms</sub>. "
+        f"{ipk_line_90:.4f} / (2 × {n_ph}) = {iavg_90:.4f} A at {vin_min:.0f} V<sub>rms</sub>. "
         "This value sets the ampere-turn bias A·T = N × I<sub>φ,avg@crest</sub> "
         "used in the inductance retention model (Section 3.4).", 3)
 
@@ -2068,7 +2069,7 @@ def _ch3(story, state, d):
             ["B<sub>sat</sub>",       "0.75–1.60 T (material dependent)",    "0.40–0.45 T",                       "Powder — higher Bsat"],
             ["Core shape",            "Toroid only",                         "ETD, EE, PQ — bobbin wound",        "Ferrite — lower winding cost"],
             ["Medical creepage",      "Factory-coated core — standard magnet wire OK", "Extended-flange bobbin ≥14 mm",     "Comparable"],
-            ["Core loss at 70 kHz",   "Moderate (material dependent)",       "Low — 3C97/N95 optimised for 70 kHz","Ferrite — lower loss"],
+            [f"Core loss at {fsw/1000:.0f} kHz",   "Moderate (material dependent)",       f"Low — 3C97/N95 optimised for {fsw/1000:.0f} kHz","Ferrite — lower loss"],
             ["Best for this design",  "High current CCM PFC > 1 kW",        "Lower current, Medical",            "—"],
         ],
         col_widths=[CW*0.22,CW*0.28,CW*0.26,CW*0.24], ch=3)
@@ -2249,7 +2250,7 @@ def _ch3(story, state, d):
     annotation(story, "CONCEPT",
         "The wire type determines how AC/DC copper loss splits, whether skin-effect "
         "limitations apply, and whether insulation satisfies creepage. "
-        "For PFC inductors at 70 kHz, the skin depth in copper is approximately "
+        f"For PFC inductors at {fsw/1000:.0f} kHz, the skin depth in copper is approximately "
         f"{skin_mm:.3f} mm — strands thicker than this carry most current on the surface "
         "and waste the inner copper.", 3)
 
@@ -3076,7 +3077,7 @@ def _ch3(story, state, d):
     # ════════════════════════════════════════════════════════
     step_h(story, "3.6", "First-Pass Loss and Thermal Estimates", 3)
     annotation(story, "CONCEPT",
-        "First-pass loss uses the peak-point Steinmetz model (crest of 90 V<sub>rms</sub>) "
+        f"First-pass loss uses the peak-point Steinmetz model (crest of {vin_min:.0f} V<sub>rms</sub>) "
         "for core loss and I<sub>rms</sub>² × DCR for copper loss. "
         "These are quick estimates used for candidate selection only. "
         "The more accurate cycle-averaged iGSE analysis is in Chapter 4.", 3)
@@ -3177,7 +3178,7 @@ def _ch3(story, state, d):
         interpretation=(
             f"Worst-case total loss at 100°C: "
             f"{loss_rows[worst_loss][8]} W at {loss_rows[worst_loss][0]} V<sub>rms</sub>. "
-            "Note that loss at 264 V<sub>rms</sub> drops sharply because D → 0 "
+            f"Note that loss at {vin_max:.0f} V<sub>rms</sub> drops sharply because D → 0 "
             "(very small volt-seconds → very small B<sub>ac,pk</sub> → very low core loss). "
             "The 180 V<sub>rms</sub> high-line corner has the highest absolute current "
             "and is often the worst thermal corner despite lower D."
@@ -3370,6 +3371,9 @@ def _ch4(story, state, d):
         fsw = float(tsi.recommended_frequency_hz if tsi else 70000) or 70000
     except Exception:
         fsw = 70000.0
+    _raw_ap = (state or {}).get("intake", {}).get("application", {}) or {}
+    vin_min = float(_raw_ap.get("vin_rms_min", 90) or 90)
+    vin_max = float(_raw_ap.get("vin_rms_max", 264) or 264)
 
     N      = int(d.get("N", 0) or 0)
     part   = d.get("part_number","—")
@@ -3573,7 +3577,7 @@ def _ch4(story, state, d):
     body(story,
         "CCM/DCM boundary: the inductor stays in continuous conduction while the average current "
         "exceeds half the switching ripple (i<sub>avg</sub> &gt; ΔI<sub>pp</sub>/2). "
-        + (f"At the 90 V<sub>ac</sub> design corner {_dcm*100:.1f}% of the half cycle dips into "
+        + (f"At the {vin_min:.0f} V<sub>ac</sub> design corner {_dcm*100:.1f}% of the half cycle dips into "
            "discontinuous conduction (only near the line zero-crossings, where it is benign)."
            if _dcm > 0 else
            "Across the design half cycle the inductor remains in CCM at every angle "
@@ -3587,7 +3591,7 @@ def _ch4(story, state, d):
         r"B_{max} = B_{dc} + B_{ac,pk}",
     ], heading="Peak, DC and total flux density", number="4.2", ch=4)
     body(story,
-        f"At the 90 V<sub>rms</sub> crest: B<sub>ac,pk</sub> = {_f(Bac,4)} T, "
+        f"At the {vin_min:.0f} V<sub>rms</sub> crest: B<sub>ac,pk</sub> = {_f(Bac,4)} T, "
         f"B<sub>dc</sub> = {_f(Bdc,4)} T, B<sub>max,FL</sub> = {_f(Bmax,4)} T.  "
         f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,2)} T  "
         f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
@@ -3652,7 +3656,7 @@ def _ch4(story, state, d):
     if _ffig:
         story.append(_ffig)
         fig_caption(story,
-            "Figure 4.3 — Flux density over the half line cycle at 90 V<sub>ac</sub>. B<sub>dc</sub> "
+            f"Figure 4.3 — Flux density over the half line cycle at {vin_min:.0f} V<sub>ac</sub>. B<sub>dc</sub> "
             "follows the rectified-sine DC bias; B<sub>ac,pk</sub> is the switching-ripple half-swing; "
             "B<sub>max</sub> = B<sub>dc</sub> + B<sub>ac,pk</sub> (shaded band) is the peak the core sees "
             "and is checked against B<sub>sat</sub>.", 4)
@@ -3717,7 +3721,7 @@ def _ch4(story, state, d):
         _igse_steps(_r_at(180))
         annotation(story, "THEORY",
             "F(D) corrects the sinusoidal Steinmetz density for the asymmetric triangular flux of a "
-            "PFC inductor. At 90 V<sub>ac</sub> the crest duty cycle is high (D far from 0.5) so the "
+            f"PFC inductor. At {vin_min:.0f} V<sub>ac</sub> the crest duty cycle is high (D far from 0.5) so the "
             "correction is large; at 180 V<sub>ac</sub> D is nearer 0.5 and the correction is milder. "
             "The database P<sub>v</sub>(B,f,T) is interpolated from measured curves (not a fixed "
             "Steinmetz fit), then scaled by F(D) and the core volume V<sub>e</sub>. The full "
@@ -3912,7 +3916,7 @@ def _ch4(story, state, d):
             worst_rows=[w45], ch=4)
         _dc90 = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
         annotation(story, "INSIGHT",
-            f"At 90 V<sub>ac</sub> the peak-point core loss ({Pcore_peak:.3f} W) overestimates the "
+            f"At {vin_min:.0f} V<sub>ac</sub> the peak-point core loss ({Pcore_peak:.3f} W) overestimates the "
             f"cycle-averaged iGSE value ({Pcore_cavg:.3f} W) by {abs(_dc90):.0f}% because the crest "
             "duty cycle sits far from 0.5; the gap narrows toward high line where D approaches 0.5. "
             "Copper loss is identical in both methods, so the cycle-averaged total — which the thermal "
@@ -4543,6 +4547,9 @@ def _loop_dcr_mohm(approved_design, state, s16):
     return float(s16.get("DCR_mOhm", 0) or 0) or 26.7
 
 def _ch6(story, state, s16, approved_design=None):
+    _raw_ap6 = (state or {}).get("intake", {}).get("application", {}) or {}
+    vin_min = float(_raw_ap6.get("vin_rms_min", 90) or 90)
+    vin_max = float(_raw_ap6.get("vin_rms_max", 264) or 264)
     chapter_splash(story, 6, "Control Scheme",
         "How do we close the loops stably across all conditions?",
         ["6.1 Control architecture and loop-equation derivation (inner current + outer voltage)",
@@ -4662,7 +4669,7 @@ def _ch6(story, state, s16, approved_design=None):
                  "Output-filter resonance; sets open-loop roll-off"],
                 ["f<sub>ESR</sub> — capacitor ESR zero", _fhz(res.get("f_esr_Hz")),
                  "Adds +20 dB/dec; recovers phase near f<sub>0</sub>"],
-                ["f_RHPz @ 90 Vac (LL)", _fhz(res.get("f_rhpz_ll_Hz")),
+                [f"f_RHPz @ {vin_min:.0f} Vac (LL)", _fhz(res.get("f_rhpz_ll_Hz")),
                  "Hard ceiling — V-loop BW must stay below f_RHPz/5"],
                 ["f_RHPz @ 180 Vac (HL)", _fhz(res.get("f_rhpz_hl_Hz")),
                  "Less restrictive (lower line current at HL)"],
@@ -4748,7 +4755,7 @@ def _ch6(story, state, s16, approved_design=None):
             "Margins at the two governing corners. Pass criterion: PM ≥ 45°.",
             ["Operating point", "f_c", "Phase margin", "Gain margin", "Verdict"],
             [
-                [f"LL 90 Vac / {res.get('Pout_lo_W',0):.0f} W",
+                [f"LL {vin_min:.0f} Vac / {res.get('Pout_lo_W',0):.0f} W",
                  _fhz(mll.get("fc")), _pm(mll.get("pm")), _gm(mll.get("gm")),
                  "PASS" if _ge(mll.get("pm"), 45) else "VERIFY"],
                 [f"HL 180 Vac / {res.get('Pout_hi_W',0):.0f} W",

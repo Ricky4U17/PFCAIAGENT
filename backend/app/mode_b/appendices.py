@@ -70,6 +70,7 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
         # BOM extras
         "rri": float(p4.get("rri_selected", 11500.0)), "rfb2": float(p5.get("rfb2", 23200.0)),
         "rcs": float(p6.get("rcs_sel", 0.015)),
+        "fsw": float(p.get("inputs", {}).get("fsw", 70000) or 70000),
         # performance (E.3): worst-case dip (HL full step) + per-band ripple / rejection / THD3
         "dip_v": abs(float(d12w.get("dv_hi", -28.9))), "dip_pct": abs(float(d12w.get("pct_hi", -7.3))),
         "vrip_lo": float(e_lo.get("vrip", 2.6)), "vrip_hi": float(e_hi.get("vrip", 5.5)),
@@ -476,7 +477,7 @@ def _appendix_b(story, ctx):
     data_table(story, "B.1", "Control Bill of Materials",
         "External components that set the control behaviour.",
         ["Designator", "Value", "Type / Rating", "Tol.", "Function (step)"],
-        [["R_RI", f"{ctx['rri']/1e3:.1f} kΩ", "Thin film, 1/16 W", "1%", "Oscillator — 70 kHz (Section 6.4)"],
+        [["R_RI", f"{ctx['rri']/1e3:.1f} kΩ", "Thin film, 1/16 W", "1%", f"Oscillator — {ctx['fsw']/1e3:.0f} kHz (Section 6.4)"],
          ["R_FB1", f"{ctx['r1']/1e6:.2f} MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (Section 6.5)"],
          ["R_FB2", f"{ctx['rfb2']/1e3:.1f} kΩ", "Thin film", "1%", "Output sense bottom (Section 6.5)"],
          ["R_CS", f"{ctx['rcs']*1e3:.0f} mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (Section 6.6)"],
