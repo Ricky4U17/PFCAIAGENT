@@ -1570,8 +1570,8 @@ def _ch2(story, state):
             ["Switching frequency",          "f<sub>sw</sub>",        f"{fsw/1e3:.0f}",    "kHz"],
             ["Phase count",                  "N<sub>ph</sub>",        str(n_ph),           "—"],
             ["Crest ripple ratio (designer)","r",                     f"{crest:.2f}",      "—"],
-            ["Peak input voltage (90 Vac)",  "V<sub>in,pk</sub>",     f"{Vin_pk[0]:.4f}",  "V"],
-            ["Duty cycle at 90 Vac crest",   "D<sub>pk,90</sub>",     f"{Dpk[0]:.4f}",     "—"],
+            [f"Peak input voltage ({vin_min:.0f} Vac)",  "V<sub>in,pk</sub>",     f"{Vin_pk[0]:.4f}",  "V"],
+            [f"Duty cycle at {vin_min:.0f} Vac crest",   "D<sub>pk,min</sub>",     f"{Dpk[0]:.4f}",     "—"],
             ["Per-phase LF-envelope peak (excl. HF ripple)",
                                              "I<sub>φ,pk,LF</sub>",   f"{Iin_pk[0]/n_ph:.4f}", "A"],
             ["Per-phase RMS current (LF component)",
@@ -3107,20 +3107,20 @@ def _ch3(story, state, d):
         rf"P_{{cu}}(100^\circ\mathrm{{C}}) = {Iph_rms:.4f}^2 \times {DCR100/1000:.6f} = {Pcu100:.4f}\ \mathrm{{W}}",
     ], heading="Copper loss from per-phase RMS current and DCR", ch=3)
     eq_box(story, [
-        rf"B_{{ac,pk}} = \dfrac{{\Delta B_{{pp}}}}{{2}} = {Bac_val:.6f}\ \mathrm{{T}} \quad (90\ \mathrm{{V_{{ac}}}}\ \mathrm{{crest}})",
+        rf"B_{{ac,pk}} = \dfrac{{\Delta B_{{pp}}}}{{2}} = {Bac_val:.6f}\ \mathrm{{T}} \quad ({vin_min:.0f}\ \mathrm{{V_{{ac}}}}\ \mathrm{{crest}})",
         rf"V_{{e,total}} = {Ve_cm3:.3f}\ \mathrm{{cm^3}}",
-        rf"P_{{core}} = {Pcore_pk:.4f}\ \mathrm{{W}} \quad (\mathrm{{peak\ point\ at\ 90\ V_{{ac}}}})",
-    ], heading="Core-loss estimate at the 90 Vac crest (Steinmetz model)", ch=3)
+        rf"P_{{core}} = {Pcore_pk:.4f}\ \mathrm{{W}} \quad (\mathrm{{peak\ point\ at\ {vin_min:.0f}\ V_{{ac}}}})",
+    ], heading=f"Core-loss estimate at the {vin_min:.0f} Vac crest (Steinmetz model)", ch=3)
 
-    sub_h(story, "3.6.3", "Total loss and thermal check at 90 Vac low line", 3)
+    sub_h(story, "3.6.3", f"Total loss and thermal check at {vin_min:.0f} Vac low line", 3)
     eq_box(story, [
         r"P_{total} = P_{cu} + P_{core}",
         rf"P_{{total}}(25^\circ\mathrm{{C}}) = {Pcu25:.4f} + {Pcore_pk:.4f} = {Ptot25:.4f}\ \mathrm{{W}}",
         rf"P_{{total}}(100^\circ\mathrm{{C}}) = {Pcu100:.4f} + {Pcore_pk:.4f} = {Ptot100:.4f}\ \mathrm{{W}}",
         rf"\Delta T = {dT:.2f}\ ^\circ\mathrm{{C}} \quad (\mathrm{{budget}} = {dT_bgt:.0f}\ ^\circ\mathrm{{C}})",
-    ], heading="Total loss and thermal rise at 90 Vac low line", ch=3)
+    ], heading=f"Total loss and thermal rise at {vin_min:.0f} Vac low line", ch=3)
     dT_pass = dT <= dT_bgt
-    verdict_row(story, "Thermal check (90 Vac worst-case)",
+    verdict_row(story, f"Thermal check ({vin_min:.0f} Vac worst-case)",
                 f"ΔT = {dT:.1f}°C  |  Budget = {dT_bgt:.0f}°C",
                 f"PASS — {(dT_bgt-dT)/dT_bgt*100:.0f}% margin" if dT_pass else "FAIL", 3)
 
@@ -3233,11 +3233,11 @@ def _ch3(story, state, d):
             ["Wire",                   f"{wire}, {n_str} strands × {d_str:.4f} mm, n<sub>par</sub>={n_par}", "—"],
             ["FF<sub>cu</sub>",        f"{FFcu:.4f}  ({FFcu*100:.1f}%)",                                fill_v],
             ["DCR at 25°C / 100°C",    f"{DCR25:.4f} / {DCR100:.4f} mΩ",                               "—"],
-            ["B<sub>ac,pk</sub> @ 90 V<sub>rms</sub>",
+            [f"B<sub>ac,pk</sub> @ {vin_min:.0f} V<sub>rms</sub>",
                                        f"{Bac_val:.6f} T",                                              "—"],
             ["B<sub>max,FL</sub> / B<sub>sat</sub>",
                                        f"{Bmax:.4f} T / {Bsat:.2f} T",                                 sat_v],
-            ["ΔT @ 90 V<sub>rms</sub>",f"{dT:.1f}°C / {dT_bgt:.0f}°C budget",                         dt_v],
+            [f"ΔT @ {vin_min:.0f} V<sub>rms</sub>",f"{dT:.1f}°C / {dT_bgt:.0f}°C budget",                         dt_v],
             ["P<sub>total</sub> (100°C)",f"{Ptot100:.3f} W",                                           "First-pass estimate"],
             ["Assembled OD × height",  f"{wound_OD:.1f} × {wound_HT:.1f} mm",                          "—"],
         ],

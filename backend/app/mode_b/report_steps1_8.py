@@ -164,7 +164,7 @@ def build_steps_1_8(story, data: dict):
     data_table(story, "6.4.1", "R_RI Standard-Value Candidates (computed)",
         "Computed R_RI = %.0f Ω → selected E96 %.1f kΩ (f_SW = %.1f kHz)."
         % (s4["rri_calc"], s4["rri_selected"]/1e3, s4["fsw_at_selected"]/1e3),
-        ["R_RI Value", "Resulting f_SW", "Deviation from 70 kHz", "Recommendation"],
+        ["R_RI Value", "Resulting f_SW", f"Deviation from {data.get('inputs',{}).get('fsw',70000)/1000:.0f} kHz", "Recommendation"],
         s4["rows"], col_widths=[CW*0.18, CW*0.22, CW*0.28, CW*0.32], ch=C6)
     annotation(story, "DECISION",
         "Use R<sub>RI</sub> = 13.7 kΩ (1%). Verify the exact switching frequency on an oscilloscope "
