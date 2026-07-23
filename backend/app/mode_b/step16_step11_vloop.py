@@ -70,6 +70,9 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
     s10 = compute_step10_iloop(prior=prior)
 
     pin, pc = prior["inputs"], prior["const"]
+    # 8-point sweep endpoints track the designer's spec corners (middle band voltages kept)
+    p["vac_ll"] = [int(pin.get("vin_ll_min", p["vac_ll"][0]))] + list(p["vac_ll"][1:])
+    p["vac_hl"] = list(p["vac_hl"][:-1]) + [int(pin.get("vin_hl_max", p["vac_hl"][-1]))]
     vout = pin["vout"]
     lphi = pin["lphi_uH"] * 1e-6
     co = pin["cout_uF"] * 1e-6

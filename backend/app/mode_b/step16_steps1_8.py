@@ -70,6 +70,11 @@ def _f(v, n=4):
 
 def compute_steps_1_8(inp: dict | None = None) -> dict:
     p = {**DEFAULT_INPUTS, **(inp or {})}
+    # Map the designer's low-line / high-line corners onto the LL-band min and HL-band max so the whole
+    # control chapter tracks the intake spec (the 7 middle band voltages 110..230 stay per designer rule).
+    if inp:
+        if inp.get("vin_min") is not None: p["vin_ll_min"] = float(inp["vin_min"])
+        if inp.get("vin_max") is not None: p["vin_hl_max"] = float(inp["vin_max"])
     c = CONST
     out: dict = {"inputs": p, "const": c}
 
@@ -114,8 +119,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         return rows
     out["step3_1"] = {
         "riac_fr": c["riac_fr"], "riac_hv": c["riac_hv"],
-        "rows": iac_rows([90, 110, 120, 132], c["riac_fr"], "Low / FR")
-              + iac_rows([180, 210, 220, 264], c["riac_hv"], "High / HV"),
+        "rows": iac_rows([int(p["vin_ll_min"]), 110, 120, 132], c["riac_fr"], "Low / FR")
+              + iac_rows([180, 210, 220, int(p["vin_hl_max"])], c["riac_hv"], "High / HV"),
     }
 
     # ── Step 3.2 — V_LPK check (FR ×2, HV ×4) ──────────────────────────────────
@@ -123,11 +128,11 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         iac = SQRT2 * vac / riac
         return iac, mult * c["k_rlpk"] * iac * c["r_rlpk"]
     vlpk_rows = []
-    for vac in [90, 110, 120, 132]:
+    for vac in [int(p["vin_ll_min"]), 110, 120, 132]:
         iac, vl = vlpk(vac, c["riac_fr"], 2)
         st = "✓ ≤ 3.7 V" if vl <= c["vlpk_pref"] else ("! 3.7–3.8 V" if vl < c["vlpk_ds"] else "✗ > 3.8 V")
         vlpk_rows.append([f"{vac} Vac / FR", f"{iac*1e6:.3f}", f"{vl:.4f}", st])
-    for vac in [180, 210, 220, 230, 264]:
+    for vac in [180, 210, 220, 230, int(p["vin_hl_max"])]:
         iac, vl = vlpk(vac, c["riac_hv"], 4)
         st = "✓ ≤ 3.7 V" if vl <= c["vlpk_pref"] else ("! 3.7–3.8 V" if vl < c["vlpk_ds"] else "✗ > 3.8 V")
         vlpk_rows.append([f"{vac} Vac / HV", f"{iac*1e6:.3f}", f"{vl:.4f}", st])
@@ -401,8 +406,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     inv_hv = c["k_rm"]*vee_hl/(c["k_rlpk"]*c["r_rlpk"])
     out["step7"]["inv_fr"], out["step7"]["inv_hv"] = inv_fr, inv_hv
     vrm_rows = []
-    for vac, riac, mult, inv in ([(v, c["riac_fr"], 2, inv_fr) for v in [90,110,120,132]]
-                                 + [(v, c["riac_hv"], 4, inv_hv) for v in [180,210,220,230,264]]):
+    for vac, riac, mult, inv in ([(v, c["riac_fr"], 2, inv_fr) for v in [int(p["vin_ll_min"]),110,120,132]]
+                                 + [(v, c["riac_hv"], 4, inv_hv) for v in [180,210,220,230,int(p["vin_hl_max"])]]):
         iac = SQRT2*vac/riac
         vl = mult*c["k_rlpk"]*iac*c["r_rlpk"]
         vrm = inv/vl

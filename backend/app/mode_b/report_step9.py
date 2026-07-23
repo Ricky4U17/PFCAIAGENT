@@ -228,8 +228,8 @@ def build_step9(story, data: dict):
     sub_h(story, "6.9.6", "FR Mode and HV Mode Interaction — Single Network Verification", CH)
     body(story,
         "The V<sub>VIR</sub> resistor switches between FR mode (10 kΩ, V<sub>VIR</sub> &lt; 1.5 V, "
-        "active for low-line 90–264 Vac range) and HV mode (470 kΩ, V<sub>VIR</sub> &gt; 3.5 V, "
-        "active for high-line 180–264 Vac range). This changes the FAN9672 internal comparison "
+        f"active for low-line {_sm:.0f}–{_vmax:.0f} Vac range) and HV mode (470 kΩ, V<sub>VIR</sub> &gt; 3.5 V, "
+        f"active for high-line 180–{_vmax:.0f} Vac range). This changes the FAN9672 internal comparison "
         "threshold but does NOT change the external divider. V<sub>BIBO</sub> scales identically in "
         "both modes.", CH)
     body(story, "The table below confirms V<sub>BIBO</sub> and PFC status across the full AC range in "
@@ -257,7 +257,7 @@ def build_step9(story, data: dict):
     _h7 = ["I/P Voltage", "Duration", "Criteria", "V_BIBO", "BO Fires?", "Reason", "Verdict"]
 
     body(story, "<b>EN61000-4-11:2020 — 100 Vac / 60 Hz  (FR Mode Active)</b>", CH)
-    body(story, "FR brownout threshold = 47.89 Vac. V<sub>BIBO</sub> scaling = V<sub>LINE</sub> × "
+    body(story, f"FR brownout threshold = {_bo_a:.2f} Vac. V<sub>BIBO</sub> scaling = V<sub>LINE</sub> × "
         "0.021923 V/Vac.", CH)
     data_table(story, "6.9.7a", "EN61000-4-11 — 100 Vac / 60 Hz (FR)", "",
         _h7,
@@ -350,7 +350,7 @@ def make_pdf(path: str, inp: dict | None = None):
     data = compute_step9_bibo(inp)
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 9 (BIBO, full detail)",
-        "Brown-in / brown-out design for universal 90–264 Vac input — divider, filter, and full "
+        f"Brown-in / brown-out design for universal {_sm:.0f}–{_vmax:.0f} Vac input — divider, filter, and full "
         "EN61000-4-11:2020 / SEMI F47 compliance verification per FAN9672-D and AN4165-D.",
         ["9.1 pin operation  ·  9.2 requirements & debounce  ·  9.3 divider ratio  ·  9.4 resistor sizing",
          "9.5 filter caps  ·  9.6 FR/HV single-network  ·  9.7 EN61000-4-11 + SEMI F47 compliance",

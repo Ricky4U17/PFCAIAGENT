@@ -82,6 +82,9 @@ def compute_step10_iloop(inp: dict | None = None, prior: dict | None = None) -> 
 
     # ── inputs sourced from prior steps / spec (NOT hard-coded) ───────────────
     pin = prior["inputs"]
+    # 8-point sweep endpoints track the designer's spec corners (middle band voltages kept)
+    p["vac_ll"] = [int(pin.get("vin_ll_min", p["vac_ll"][0]))] + list(p["vac_ll"][1:])
+    p["vac_hl"] = list(p["vac_hl"][:-1]) + [int(pin.get("vin_hl_max", p["vac_hl"][-1]))]
     vout = pin["vout"]                       # Step 5 feedback divider target
     lphi = pin["lphi_uH"] * 1e-6             # Step 1 per-phase inductance
     co = pin["cout_uF"] * 1e-6               # Step 1 total output capacitance

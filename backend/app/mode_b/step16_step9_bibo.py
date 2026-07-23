@@ -97,8 +97,10 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
         if v < bi:
             return "Hysteresis zone"
         return "PFC operating"
-    vlines = [0, 40, 45, 50, 67, 75, 78, 80, 87, 90, 96, 100, 110, 120,
-              132, 134, 156, 160, 168, 180, 192, 220, 240, 264]
+    # regulatory/EN61000 test points stay fixed; the design corners (brown-in target, spec min, HL max)
+    # track the designer's spec.
+    vlines = sorted(set([0, 40, 45, 50, 67, 75, 78, 80, int(round(vline_bi)), int(round(spec_min)),
+              96, 100, 110, 120, 132, 134, 156, 160, 168, 180, 192, 220, 240, int(round(vin_max))]))
     vbibo_rows = []
     for vl in vlines:
         v = vl * scale

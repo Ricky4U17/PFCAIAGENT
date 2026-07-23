@@ -137,10 +137,15 @@ def build_steps_1_8(story, data: dict):
         "V_LPK preferred ≤ 3.7 V; datasheet hard limit < 3.8 V.",
         ["Operating Point", "I_AC,pk (µA)", "V_LPK (V)", "Status vs 3.7 / 3.8 V"],
         data["step3_2"]["rows"], col_widths=[CW*0.26, CW*0.22, CW*0.20, CW*0.32], ch=C6)
+    try:
+        _vlpk_hv = float([r for r in data["step3_2"]["rows"] if "HV" in str(r[0])][-1][2])
+    except Exception:
+        _vlpk_hv = 3.712
+    _vhl_lpk = float(data["inputs"].get("vin_hl_max", 264))
     annotation(story, "INSIGHT",
-        "V<sub>LPK</sub> at 264 Vac = 3.712 V — 12 mV above the preferred 3.7 V target but 88 mV "
-        "below the 3.8 V datasheet hard limit. With 1% tolerance on R<sub>RLPK</sub> the worst case "
-        "is 12.221 kΩ giving 3.747 V — still within 3.8 V. Acceptable.", C6)
+        f"V<sub>LPK</sub> at {_vhl_lpk:.0f} Vac = {_vlpk_hv:.4f} V — {(_vlpk_hv-3.7)*1000:.0f} mV above the preferred 3.7 V target but {(3.8-_vlpk_hv)*1000:.0f} mV "
+        f"below the 3.8 V datasheet hard limit. With 1% tolerance on R<sub>RLPK</sub> the worst case "
+        f"is {_vlpk_hv*1.01:.3f} V — still within 3.8 V. Acceptable.", C6)
 
     # ═══════════════ Step 4 ═══════════════
     s4 = data["step4"]
@@ -207,7 +212,7 @@ def build_steps_1_8(story, data: dict):
         "computed (then snapped to the nearest E96 standard value).", C6)
     sub_h(story, "6.5.2", "PVO Pin — Voltage Headroom Warning", C6)
     body(story, "AN4165-D and FAN9672-D require the bus to stay at least 25 V above the AC input "
-                "peak when PVO is active. Evaluated at the worst-case 264 Vac:", C6)
+                f"peak when PVO is active. Evaluated at the worst-case {float(data['inputs'].get('vin_hl_max', 264)):.0f} Vac:", C6)
     _vin_hl = float(data["inputs"].get("vin_hl_max", 264.0))
     _vpk    = s5["vin_pk_264"]
     _pvomin = s5["pvo_min"]
@@ -257,7 +262,7 @@ def _build_step6(story, data):
          ["R_M", "7.5 kΩ", "Internal multiplier output resistor"],
          ["Margin", "149% (K_max = 1.49)", "AN4165 recommends 120–150%"]],
         col_widths=[CW*0.20, CW*0.26, CW*0.54], ch=C6)
-    body(story, "<b>Low Line Calculation — V<sub>IN,min</sub> = 90 Vac, R<sub>IAC</sub> = 6 MΩ</b>", C6)
+    body(story, f"<b>Low Line Calculation — V<sub>IN,min</sub> = {float(data['inputs'].get('vin_ll_min', 90)):.0f} Vac, R<sub>IAC</sub> = 6 MΩ</b>", C6)
     m1 = s6["m1_ll"]
     _wstep(story, "Step 1 — Per-channel maximum power:",
            r"P_{max,per-ch}=\dfrac{%.0f}{%d}\times%.2f=%.1f\ \mathrm{W}"
@@ -559,9 +564,14 @@ def _build_step7(story, data):
     body(story, "<b>4.</b> V<sub>RM</sub> maximum = 0.316 V (worst case at 180 Vac, high line), "
         "providing a 2.5× margin below the 0.8 V clamp limit. The current command does not approach "
         "saturation at any operating condition across either range.", C6)
-    body(story, "<b>5.</b> V<sub>LPK</sub> at 264 Vac = 3.712 V is 12 mV above the preferred 3.7 V "
-        "design target and 88 mV below the datasheet hard limit of 3.8 V. This is acceptable. With "
-        "1% resistor tolerance on R<sub>RLPK</sub>, the worst-case V<sub>LPK</sub> = 3.747 V — still "
+    try:
+        _vlpk7 = float([r for r in data["step3_2"]["rows"] if "HV" in str(r[0])][-1][2])
+    except Exception:
+        _vlpk7 = 3.712
+    _vhl7 = float(data["inputs"].get("vin_hl_max", 264))
+    body(story, f"<b>5.</b> V<sub>LPK</sub> at {_vhl7:.0f} Vac = {_vlpk7:.4f} V is {(_vlpk7-3.7)*1000:.0f} mV above the preferred 3.7 V "
+        f"design target and {(3.8-_vlpk7)*1000:.0f} mV below the datasheet hard limit of 3.8 V. This is acceptable. With "
+        f"1% resistor tolerance on R<sub>RLPK</sub>, the worst-case V<sub>LPK</sub> = {_vlpk7*1.01:.3f} V — still "
         "within the 3.8 V limit.", C6)
     body(story, "<b>6.</b> Implied V<sub>EA,max</sub> = 4.36 V (LL) and 4.58 V (HL) both fall "
         "squarely inside the AND9925-D preferred 4 V to 5 V operating window, confirming adequate "
@@ -780,8 +790,10 @@ def _build_app_schematic_section(story, inp, prior):
         "(FR: 3×2 MΩ / HV: 6×2 MΩ), the VIR mode threshold, and the per-line operating point in the "
         "title block. Compensator networks (R<sub>IC</sub>, R<sub>VC</sub>, FBPFC divider) are sized "
         "in Section 6.10 and Section 6.11.", C6)
-    for hi, tag, lab in [(False, "a", "Low line — FR mode, 90–132 Vac"),
-                         (True, "b", "High line — HV mode, 180–264 Vac")]:
+    _vlo_s = float((prior or {}).get("inputs", {}).get("vin_ll_min", 90))
+    _vhi_s = float((prior or {}).get("inputs", {}).get("vin_hl_max", 264))
+    for hi, tag, lab in [(False, "a", f"Low line — FR mode, {_vlo_s:.0f}–132 Vac"),
+                         (True, "b", f"High line — HV mode, 180–{_vhi_s:.0f} Vac")]:
         v = dict(base)
         v["crest_A"]   = s8.get("crest_hl" if hi else "crest_ll") or 0
         v["iphi_pk_A"] = s8.get("ilpk_hl" if hi else "ilpk_ll") or 0

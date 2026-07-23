@@ -605,7 +605,7 @@ def make_pdf(path: str, inp: dict | None = None):
         "verification per FAN9672-D and AN4165-D — every value derived from prior steps + spec.",
         ["10.1 architecture  ·  10.2 loop gain  ·  10.3 plant G_id(s)  ·  10.4 CS filter / ramp",
          "10.5 OTA compensator  ·  10.6 spec  ·  10.7 8-point plant  ·  10.8 uncompensated gain",
-         "10.9 full 90 Vac worked calc  ·  10.10 8-point T_i  ·  10.11 compensator (R_IC/C_IC1/C_IC2)",
+         f"10.9 full {float((inp or {}).get('vin_min', 90)):.0f} Vac worked calc  ·  10.10 8-point T_i  ·  10.11 compensator (R_IC/C_IC1/C_IC2)",
          "10.12 Bode plots (open & closed loop)  ·  10.13 final summary + verdict"])
     build_step10(story, data)
     while story and isinstance(story[0], PageBreak):
