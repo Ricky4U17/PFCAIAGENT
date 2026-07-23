@@ -41,9 +41,18 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
     if inp:
         p.update(inp)
     kavg = KAVG
+    # Scale the whole BIBO design by the designer's low-line spec minimum relative to the reference
+    # 90 Vac (designer rule 2026-07-22): the brown-in target and the sensing divider scale by
+    # k = vin_min/90 so every brown-in / brown-out / hysteresis voltage moves by the same ratio the
+    # 90 Vac reference has. vin_min = 90 reproduces the reference exactly.
+    vin_min = float((inp or {}).get("vin_min", 90.0) or 90.0)
+    vin_max = float((inp or {}).get("vin_max", 264.0) or 264.0)
+    k = vin_min / 90.0
+    vline_bi = float(p["vline_bi"]) * k               # brown-in target scales with the spec minimum
+    spec_min = vin_min                                # low-line spec minimum (was hardcoded 90)
 
     # ── 9.3 divider ratio from brown-in startup requirement ──────────────────
-    ratio_target = p["vbi_fr"] / (p["vline_bi"] * kavg)            # 0.024257
+    ratio_target = p["vbi_fr"] / (vline_bi * kavg)                # 0.024257 at vin_min=90
     bo_target = p["vbo"] / (kavg * ratio_target)                   # 48.08 Vac
     hvbi_target = p["vbi_hv"] / (kavg * ratio_target)              # 80.13 Vac
 
@@ -53,7 +62,9 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
     rb12_calc = (rtotal_calc - rb4) / 1.1                         # 1097.05 kΩ (RB3 = 10% of RB12)
     rb1_calc = rb12_calc / 2                                      # 548.52 kΩ → 560 k
     rb3_calc = rb12_calc / 10                                     # 109.70 kΩ → 82 k
-    rb1 = p["rb1_sel"]; rb2 = p["rb2_sel"]; rb3 = p["rb3_sel"]
+    # Selected top resistors scale with k (rb4 bottom fixed) so the sensed ratio — and hence every
+    # brown-in/out threshold — moves by k. At vin_min=90 (k=1) these are the reference E24 values.
+    rb1 = p["rb1_sel"] * k; rb2 = p["rb2_sel"] * k; rb3 = p["rb3_sel"] * k
     rsum = rb1 + rb2 + rb3 + rb4
     ratio_act = rb4 / rsum                                        # 0.024351
     bo_act = p["vbo"] / (kavg * ratio_act)                        # 47.89
@@ -93,13 +104,16 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
         v = vl * scale
         vbibo_rows.append([f"{vl} Vac", f"{_f(v,4)} V", status(v, False), status(v, True)])
 
-    # ── 9.8 startup verification ─────────────────────────────────────────────
-    v87 = 87 * scale; v90 = 90 * scale; v90_wc = 90 * scale_wc; v85 = 85 * scale
+    # ── 9.8 startup verification (display points scale with the spec minimum) ──
+    v_below_line = 85.0 * k                              # a line just below the brown-in target
+    v87 = vline_bi * scale; v90 = spec_min * scale; v90_wc = spec_min * scale_wc; v85 = v_below_line * scale
     startup_rows = [
-        ["Power-on at 87 Vac  (design target)", f"{_f(v87,4)} V", "1.9 V", f"+{_f(v87-1.9,4)} V", "YES  ✓"],
-        ["Power-on at 90 Vac  (spec minimum)", f"{_f(v90,4)} V", "1.9 V", f"+{_f(v90-1.9,4)} V", "YES  ✓"],
-        ["1% worst-case at 90 Vac", f"{_f(v90_wc,4)} V", "1.9 V", f"+{_f(v90_wc-1.9,4)} V", "YES  ✓"],
-        ["Power-on at 85 Vac  (below target)", f"{_f(v85,4)} V", "1.9 V", f"−{_f(1.9-v85,4)} V", "NO  (starts at 86.7V)"],
+        [f"Power-on at {vline_bi:.0f} Vac  (design target)", f"{_f(v87,4)} V", "1.9 V", f"+{_f(v87-1.9,4)} V", "YES  ✓"],
+        [f"Power-on at {spec_min:.0f} Vac  (spec minimum)", f"{_f(v90,4)} V", "1.9 V", f"+{_f(v90-1.9,4)} V", "YES  ✓"],
+        [f"1% worst-case at {spec_min:.0f} Vac", f"{_f(v90_wc,4)} V", "1.9 V", f"+{_f(v90_wc-1.9,4)} V", "YES  ✓"],
+        [f"Power-on at {v_below_line:.0f} Vac  (below target)", f"{_f(v85,4)} V", "1.9 V",
+         (f"+{_f(v85-1.9,4)} V" if v85 >= 1.9 else f"−{_f(1.9-v85,4)} V"),
+         ("YES  ✓" if v85 >= 1.9 else f"NO  (starts at {bifr_act:.1f}V)")],
     ]
 
     out = {
@@ -115,12 +129,14 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
         "fp1_act": fp1_act, "fp2_act": fp2_act,
         "vbibo_rows": vbibo_rows, "startup_rows": startup_rows,
         "v87": v87, "v90": v90,
+        "vin_min": vin_min, "vin_max": vin_max, "k": k, "vline_bi": vline_bi, "spec_min": spec_min,
+        "v_below_line": v_below_line,
     }
 
     # ── 9.4 threshold summary table ──────────────────────────────────────────
     out["thresh_rows"] = [
         ["Brownout  (PFC stops after 450 ms)", "1.05 V", f"{_f(bo_act,2)} Vac", f"{_f(bo_wc,2)} Vac", "< 70 Vac  ✓"],
-        ["Brown-in FR mode  (PFC restarts)", "1.90 V", f"{_f(bifr_act,2)} Vac", f"{_f(bifr_wc,2)} Vac", "≤ 87 Vac  ✓"],
+        ["Brown-in FR mode  (PFC restarts)", "1.90 V", f"{_f(bifr_act,2)} Vac", f"{_f(bifr_wc,2)} Vac", f"≤ {vline_bi:.0f} Vac  ✓"],
         ["Brown-in HV mode  (PFC restarts)", "1.75 V", f"{_f(bihv_act,2)} Vac", "—", "< 180 Vac  ✓"],
         ["SAG  (both modes)", "0.85 V", f"{_f(sag_act,2)} Vac", "—", "Below brownout  ✓"],
     ]
@@ -129,12 +145,12 @@ def compute_step9_bibo(inp: dict | None = None) -> dict:
     out["scorecard"] = [
         ["Brownout nominal", f"{_f(bo_act,2)} Vac", "< 70 Vac", "PASS ✓"],
         ["Brownout 1% worst case", f"{_f(bo_wc,2)} Vac", "< 70 Vac", "PASS ✓"],
-        ["Brown-in FR nominal", f"{_f(bifr_act,2)} Vac", "≤ 87 Vac target", "PASS ✓"],
-        ["Brown-in FR 1% worst case", f"{_f(bifr_wc,2)} Vac", "≤ 90 Vac spec min", "PASS ✓"],
+        ["Brown-in FR nominal", f"{_f(bifr_act,2)} Vac", f"≤ {vline_bi:.0f} Vac target", "PASS ✓"],
+        ["Brown-in FR 1% worst case", f"{_f(bifr_wc,2)} Vac", f"≤ {spec_min:.0f} Vac spec min", "PASS ✓"],
         ["Brown-in HV nominal", f"{_f(bihv_act,2)} Vac", "< 180 Vac HV min", "PASS ✓"],
         ["SAG level", f"{_f(sag_act,2)} Vac", "Below brownout", "PASS ✓"],
-        [f"Startup at 87 Vac  V_BIBO={_f(v87,4)}V", "> 1.9 V  ✓", "PFC enables", "PASS ✓"],
-        [f"Startup at 90 Vac  V_BIBO={_f(v90,4)}V", "> 1.9 V  ✓", "PFC enables", "PASS ✓"],
+        [f"Startup at {vline_bi:.0f} Vac  V_BIBO={_f(v87,4)}V", "> 1.9 V  ✓", "PFC enables", "PASS ✓"],
+        [f"Startup at {spec_min:.0f} Vac  V_BIBO={_f(v90,4)}V", "> 1.9 V  ✓", "PFC enables", "PASS ✓"],
         ["EN61000-4-11 70V/500ms FR Criteria A", f"V_BIBO={_f(70*scale,4)}V > 1.05V", "BO does not fire", "PASS ✓"],
         ["EN61000-4-11 80V/5s   FR Criteria A", f"V_BIBO={_f(80*scale,4)}V > 1.05V", "BO does not fire", "PASS ✓"],
         ["EN61000-4-11 168V/500ms HV Criteria A", f"V_BIBO={_f(168*scale,4)}V >> 1.05V", "BO does not fire", "PASS ✓"],

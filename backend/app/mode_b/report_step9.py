@@ -24,6 +24,17 @@ def _ws(story, label, eq, num=None):
 
 def build_step9(story, data: dict):
     d = data
+    # Live BIBO values (scale with the designer's spec minimum — see step16_step9_bibo). At vin_min=90
+    # these equal the reference document values.
+    _bi   = float(d.get("vline_bi", 87.0));  _sm  = float(d.get("spec_min", 90.0));  _vmax = float(d.get("vin_max", 264.0))
+    _rt   = float(d.get("ratio_target", 0.024257)); _ra = float(d.get("ratio_act", 0.024351)); _rw = float(d.get("ratio_wc", 0.023880))
+    _ka   = float(d.get("kavg", 0.9003))
+    _bo_t = float(d.get("bo_target", 48.08)); _hv_t = float(d.get("hvbi_target", 80.13))
+    _bo_a = float(d.get("bo_act", 47.89)); _bi_a = float(d.get("bifr_act", 86.67)); _hv_a = float(d.get("bihv_act", 79.82)); _sag = float(d.get("sag_act", 38.77))
+    _bi_w = float(d.get("bifr_wc", 88.37)); _bo_w = float(d.get("bo_wc", 48.84))
+    _rtot = float(d.get("rtotal_calc", 1236750.0)); _rb1 = float(d.get("rb1", 560000.0)); _rb2 = float(d.get("rb2", 560000.0)); _rb3 = float(d.get("rb3", 82000.0)); _rb4 = float(d.get("rb4", 30000.0))
+    _vt   = float(d.get("v87", 1.9073)); _vsm = float(d.get("v90", 1.9731))
+    _rsum = _rb1 + _rb2 + _rb3 + _rb4
 
     step_h(story, "6.9", "BIBO Pin — Brown-In / Brown-Out Design", CH)
     annotation(story, "THEORY",
@@ -36,8 +47,8 @@ def build_step9(story, data: dict):
         "through an external resistive voltage divider and two-pole low-pass filter. The FAN9672 "
         "uses this signal to disable the PFC stage when the AC input is too low (brownout) and to "
         "re-enable it when the line recovers to a safe level (brown-in). This step sizes all "
-        "components for the universal input 90–264 Vac design, sets the brown-in threshold to 87 Vac "
-        "to provide a 3 Vac margin below the 90 Vac specification minimum, and verifies full "
+        f"components for the universal input {_sm:.0f}–{_vmax:.0f} Vac design, sets the brown-in threshold to {_bi:.0f} Vac "
+        f"to provide a {_sm-_bi:.0f} Vac margin below the {_sm:.0f} Vac specification minimum, and verifies full "
         "compliance against the product test specification requirements of EN61000-4-11:2020 and "
         "SEMI F47.", CH)
 
@@ -76,8 +87,8 @@ def build_step9(story, data: dict):
     data_table(story, "6.9.2", "BIBO Design Requirements",
         "The binding constraints that drive the divider design.",
         ["Requirement", "Target", "Drives Design?"],
-        [["PFC starts at or before 87 Vac (3 V margin below 90 Vac spec minimum)",
-          "Brown-in FR ≤ 87 Vac  →  Brownout ≤ 48.1 Vac", "YES — determines ratio"],
+        [[f"PFC starts at or before {_bi:.0f} Vac ({_sm-_bi:.0f} V margin below {_sm:.0f} Vac spec minimum)",
+          f"Brown-in FR ≤ {_bi:.0f} Vac  →  Brownout ≤ {_bo_t:.1f} Vac", "YES — determines ratio"],
          ["EN61000-4-11 70V/500ms Criteria A: BO must not fire", "Brownout < 70 Vac",
           "YES — upper limit on BO"],
          ["EN61000-4-11 / SEMI F47 all other Criteria A tests", "See compliance table Section 9.7",
@@ -113,20 +124,20 @@ def build_step9(story, data: dict):
     sub_h(story, "6.9.3", "Voltage Divider Ratio Calculation", CH)
     body(story,
         "The divider ratio is derived from the brown-in startup requirement: V<sub>BIBO</sub> must "
-        "reach the internal threshold of 1.90 V when V<sub>LINE</sub> = 87 Vac.", CH)
+        f"reach the internal threshold of 1.90 V when V<sub>LINE</sub> = {_bi:.0f} Vac.", CH)
     eq_box(story, [r"V_{BIBO,BI}=V_{LINE,BI}\times\dfrac{2\sqrt{2}}{\pi}\times"
                    r"\dfrac{R_{B4}}{R_{total}}=1.90\ \mathrm{V}"], number="6.9.2", ch=CH)
     body(story, "Rearranging for the divider ratio:", CH)
     eq_box(story, [r"\dfrac{R_{B4}}{R_{total}}=\dfrac{V_{BIBO,BI}}{V_{LINE,BI}\times(2\sqrt{2}/\pi)}"], ch=CH)
     _ws(story, "Step 1 — Substitute V<sub>BIBO,BI</sub> = 1.90 V (FR brown-in), "
-        "V<sub>LINE,BI</sub> = 87 Vac:",
-        r"\dfrac{1.90}{87\times0.9003}=\dfrac{1.90}{78.33}=0.024257")
+        f"V<sub>LINE,BI</sub> = {_bi:.0f} Vac:",
+        rf"\dfrac{{1.90}}{{{_bi:.0f}\times{_ka:.4f}}}=\dfrac{{1.90}}{{{_bi*_ka:.2f}}}={_rt:.6f}")
     _ws(story, "Step 2 — Resulting brownout voltage:",
-        r"\dfrac{1.05}{0.9003\times0.024257}=48.08\ \mathrm{Vac}")
-    body(story, "&nbsp;&nbsp;&nbsp;&nbsp;48.08 Vac &lt; 70 Vac EN61000-4-11 limit ✓", CH)
+        rf"\dfrac{{1.05}}{{{_ka:.4f}\times{_rt:.6f}}}={_bo_t:.2f}\ \mathrm{{Vac}}")
+    body(story, f"&nbsp;&nbsp;&nbsp;&nbsp;{_bo_t:.2f} Vac &lt; 70 Vac EN61000-4-11 limit ✓", CH)
     _ws(story, "Step 3 — Resulting HV mode brown-in:",
-        r"\dfrac{1.75}{0.9003\times0.024257}=80.13\ \mathrm{Vac}")
-    body(story, "&nbsp;&nbsp;&nbsp;&nbsp;80.13 Vac &lt; 180 Vac HV minimum ✓", CH)
+        rf"\dfrac{{1.75}}{{{_ka:.4f}\times{_rt:.6f}}}={_hv_t:.2f}\ \mathrm{{Vac}}")
+    body(story, f"&nbsp;&nbsp;&nbsp;&nbsp;{_hv_t:.2f} Vac &lt; 180 Vac HV minimum ✓", CH)
 
     # ── 9.4 ───────────────────────────────────────────────────────────────────
     sub_h(story, "6.9.4", "Resistor Network Sizing", CH)
@@ -135,36 +146,37 @@ def build_step9(story, data: dict):
         "set to approximately 10% of R<sub>B12</sub> (= R<sub>B1</sub> + R<sub>B2</sub>) to form a "
         "convenient filter tap. R<sub>B1</sub> and R<sub>B2</sub> are equal to share voltage stress. "
         "The exact calculation with R<sub>B4</sub> = 30 kΩ selected as the bottom resistor:", CH)
-    eq_box(story, [r"\dfrac{R_{B4}}{R_{B1}+R_{B2}+R_{B3}+R_{B4}}=0.024257"], ch=CH)
-    _ws(story, "Step 1 — Select R<sub>B4</sub> = 30 kΩ  (standard E24)", r"R_{B4}=30\ \mathrm{k\Omega}")
+    _rb12c = float(d.get("rb12_calc", 1097050.0)); _rb1c = float(d.get("rb1_calc", 548520.0)); _rb3c = float(d.get("rb3_calc", 109700.0))
+    eq_box(story, [rf"\dfrac{{R_{{B4}}}}{{R_{{B1}}+R_{{B2}}+R_{{B3}}+R_{{B4}}}}={_rt:.6f}"], ch=CH)
+    _ws(story, f"Step 1 — Select R<sub>B4</sub> = {_rb4/1e3:.0f} kΩ  (standard E24)", rf"R_{{B4}}={_rb4/1e3:.0f}\ \mathrm{{k\Omega}}")
     _ws(story, "Step 2 — R<sub>total</sub> = R<sub>B4</sub> / ratio:",
-        r"R_{total}=\dfrac{30\,000}{0.024257}=1236.75\ \mathrm{k\Omega}")
+        rf"R_{{total}}=\dfrac{{{_rb4:.0f}}}{{{_rt:.6f}}}={_rtot/1e3:.2f}\ \mathrm{{k\Omega}}")
     _ws(story, "Step 3 — R<sub>B12</sub> = (R<sub>total</sub> − R<sub>B4</sub>) / 1.1   "
         "(R<sub>B3</sub> = 10% of R<sub>B12</sub>):",
-        r"\dfrac{1236.75\mathrm{k}-30\mathrm{k}}{1.1}=1097.05\ \mathrm{k\Omega}")
+        rf"\dfrac{{{_rtot/1e3:.2f}\mathrm{{k}}-{_rb4/1e3:.0f}\mathrm{{k}}}}{{1.1}}={_rb12c/1e3:.2f}\ \mathrm{{k\Omega}}")
     _ws(story, "Step 4 — R<sub>B1</sub> = R<sub>B2</sub> = R<sub>B12</sub> / 2:",
-        r"\dfrac{1097.05\mathrm{k}}{2}=548.52\ \mathrm{k\Omega}\ \rightarrow\ 560\ \mathrm{k\Omega}\ (E24)")
+        rf"\dfrac{{{_rb12c/1e3:.2f}\mathrm{{k}}}}{{2}}={_rb1c/1e3:.2f}\ \mathrm{{k\Omega}}\ \rightarrow\ {_rb1/1e3:.0f}\ \mathrm{{k\Omega}}")
     _ws(story, "Step 5 — R<sub>B3</sub> = R<sub>B12</sub> / 10:",
-        r"\dfrac{1097.05\mathrm{k}}{10}=109.70\ \mathrm{k\Omega}\ \rightarrow\ 82\ \mathrm{k\Omega}\ (E24)")
-    body(story, "<b>Standard values selected: R<sub>B1</sub> = R<sub>B2</sub> = 560 kΩ, "
-        "R<sub>B3</sub> = 82 kΩ, R<sub>B4</sub> = 30 kΩ.</b>", CH)
-    body(story, "<b>Verification with standard values:</b>", CH)
+        rf"\dfrac{{{_rb12c/1e3:.2f}\mathrm{{k}}}}{{10}}={_rb3c/1e3:.2f}\ \mathrm{{k\Omega}}\ \rightarrow\ {_rb3/1e3:.0f}\ \mathrm{{k\Omega}}")
+    body(story, f"<b>Selected values: R<sub>B1</sub> = R<sub>B2</sub> = {_rb1/1e3:.0f} kΩ, "
+        f"R<sub>B3</sub> = {_rb3/1e3:.0f} kΩ, R<sub>B4</sub> = {_rb4/1e3:.0f} kΩ.</b>", CH)
+    body(story, "<b>Verification with selected values:</b>", CH)
     _ws(story, "Step 6 — Actual ratio:",
-        r"\dfrac{30\,000}{560\,000+560\,000+82\,000+30\,000}=\dfrac{30\,000}{1\,232\,000}=0.024351")
+        rf"\dfrac{{{_rb4:.0f}}}{{{_rb1:.0f}+{_rb2:.0f}+{_rb3:.0f}+{_rb4:.0f}}}=\dfrac{{{_rb4:.0f}}}{{{_rsum:.0f}}}={_ra:.6f}")
     _ws(story, "Step 7 — Brownout voltage:",
-        r"\dfrac{1.05}{0.9003\times0.024351}=47.89\ \mathrm{Vac}\quad(<70\ \mathrm{Vac\ limit})")
+        rf"\dfrac{{1.05}}{{{_ka:.4f}\times{_ra:.6f}}}={_bo_a:.2f}\ \mathrm{{Vac}}\quad(<70\ \mathrm{{Vac\ limit}})")
     _ws(story, "Step 8 — Brown-in FR mode:",
-        r"\dfrac{1.90}{0.9003\times0.024351}=86.67\ \mathrm{Vac}\quad(\leq87\ \mathrm{Vac\ target,\ margin}=+0.33\,\mathrm{V})")
+        rf"\dfrac{{1.90}}{{{_ka:.4f}\times{_ra:.6f}}}={_bi_a:.2f}\ \mathrm{{Vac}}\quad(\leq{_bi:.0f}\ \mathrm{{Vac\ target,\ margin}}={_bi-_bi_a:+.2f}\,\mathrm{{V}})")
     _ws(story, "Step 9 — Brown-in HV mode:",
-        r"\dfrac{1.75}{0.9003\times0.024351}=79.82\ \mathrm{Vac}\quad(<180\ \mathrm{Vac\ HV\ minimum})")
+        rf"\dfrac{{1.75}}{{{_ka:.4f}\times{_ra:.6f}}}={_hv_a:.2f}\ \mathrm{{Vac}}\quad(<180\ \mathrm{{Vac\ HV\ minimum}})")
     _ws(story, "Step 10 — SAG protection level:",
-        r"\dfrac{0.85}{0.9003\times0.024351}=38.77\ \mathrm{Vac}\quad(\mathrm{below\ brownout})")
+        rf"\dfrac{{0.85}}{{{_ka:.4f}\times{_ra:.6f}}}={_sag:.2f}\ \mathrm{{Vac}}\quad(\mathrm{{below\ brownout}})")
     body(story, "<b>1% resistor tolerance worst-case check (R<sub>B4</sub> 1% low, all others 1% "
         "high):</b>", CH)
     _ws(story, "Step 11 — Worst-case ratio:",
-        r"\dfrac{30\mathrm{k}\times0.99}{560\mathrm{k}\times1.01+560\mathrm{k}\times1.01+82\mathrm{k}\times1.01+30\mathrm{k}\times0.99}=0.023880")
+        rf"\dfrac{{{_rb4/1e3:.0f}\mathrm{{k}}\times0.99}}{{{_rb1/1e3:.0f}\mathrm{{k}}\times1.01+{_rb2/1e3:.0f}\mathrm{{k}}\times1.01+{_rb3/1e3:.0f}\mathrm{{k}}\times1.01+{_rb4/1e3:.0f}\mathrm{{k}}\times0.99}}={_rw:.6f}")
     _ws(story, "Step 12 — Worst-case brown-in FR:",
-        r"\dfrac{1.90}{0.9003\times0.023880}=88.37\ \mathrm{Vac}\quad(\leq90\ \mathrm{Vac\ spec\ minimum})")
+        rf"\dfrac{{1.90}}{{{_ka:.4f}\times{_rw:.6f}}}={_bi_w:.2f}\ \mathrm{{Vac}}\quad(\leq{_sm:.0f}\ \mathrm{{Vac\ spec\ minimum}})")
     eq_box(story, [r"R_{B1}=R_{B2}=560\ \mathrm{k\Omega}\qquad R_{B3}=82\ \mathrm{k\Omega}"
                    r"\qquad R_{B4}=30\ \mathrm{k\Omega}"], ch=CH)
     data_table(story, "6.9.4", "Threshold Summary — Standard Values",
@@ -172,10 +184,10 @@ def build_step9(story, data: dict):
         ["Threshold", "V_BIBO", "Nominal AC Voltage", "1% Worst Case", "Requirement"],
         d["thresh_rows"], col_widths=[CW*0.34, CW*0.12, CW*0.20, CW*0.16, CW*0.18], ch=CH)
     annotation(story, "NOTE",
-        "The FR brown-in at 86.67 Vac is 0.33 Vac below the 87 Vac design target, giving 3.33 Vac of "
-        "margin below the 90 Vac specification minimum. With 1% resistor tolerance the worst-case "
-        "brown-in is 88.37 Vac, still below the 90 Vac specification minimum. The HV brown-in at "
-        "79.82 Vac is well below the 180 Vac minimum HV operating voltage, so normal power-on "
+        f"The FR brown-in at {_bi_a:.2f} Vac is {_bi-_bi_a:.2f} Vac below the {_bi:.0f} Vac design target, giving {_sm-_bi_a:.2f} Vac of "
+        f"margin below the {_sm:.0f} Vac specification minimum. With 1% resistor tolerance the worst-case "
+        f"brown-in is {_bi_w:.2f} Vac, still below the {_sm:.0f} Vac specification minimum. The HV brown-in at "
+        f"{_hv_a:.2f} Vac is well below the 180 Vac minimum HV operating voltage, so normal power-on "
         "startup is unaffected on the high line.", CH)
 
     # ── 9.5 ───────────────────────────────────────────────────────────────────
@@ -227,7 +239,7 @@ def build_step9(story, data: dict):
         ["V_LINE (Vac)", "V_BIBO (V)", "FR Mode Status  (V_VIR < 1.5 V)", "HV Mode Status  (V_VIR > 3.5 V)"],
         d["vbibo_rows"], col_widths=[CW*0.16, CW*0.16, CW*0.34, CW*0.34], ch=CH)
     annotation(story, "NOTE",
-        "The PFC is operating normally at 87 Vac (V<sub>BIBO</sub> = 1.9073 V &gt; 1.9 V brown-in) "
+        f"The PFC is operating normally at {_bi:.0f} Vac (V<sub>BIBO</sub> = {_vt:.4f} V &gt; 1.9 V brown-in) "
         "and all voltages above it in FR mode. The HV brown-in at 79.8 Vac is well below 180 Vac HV "
         "minimum, confirming normal startup on the high line. The only difference between modes is "
         "the brown-in level (86.7 Vac FR vs 79.8 Vac HV), both comfortably within their respective "
@@ -256,7 +268,7 @@ def build_step9(story, data: dict):
         col_widths=_cw7, ch=CH)
 
     body(story, "<b>EN61000-4-11:2020 — 240 Vac / 50 Hz  (HV Mode Active)</b>", CH)
-    body(story, "HV brownout = 47.89 Vac. HV brown-in = 79.82 Vac. Normal HV range 180–264 Vac is "
+    body(story, f"HV brownout = {_bo_a:.2f} Vac. HV brown-in = {_hv_a:.2f} Vac. Normal HV range 180–{_vmax:.0f} Vac is "
         "entirely above the brown-in threshold.", CH)
     data_table(story, "6.9.7b", "EN61000-4-11 — 240 Vac / 50 Hz (HV)", "",
         _h7,
@@ -277,7 +289,7 @@ def build_step9(story, data: dict):
     body(story, "<b>SEMI F47 — 200 Vac / 50 Hz  (HV Mode Active)</b>", CH)
     data_table(story, "6.9.7d", "SEMI F47 — 200 Vac / 50 Hz (HV)", "",
         _h7,
-        [["90 V", "200 ms", "B", "1.9731 V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
+        [[f"{_sm:.0f} V", "200 ms", "B", f"{_vsm:.4f} V", "No  (debounce)", "Duration 200ms < 450ms debounce — BO cannot fire", "PASS ✓"],
          ["134 V", "500 ms", "B", "2.9377 V", "No", "V_BIBO=2.9377V > BI threshold — PFC operating", "PASS ✓"],
          ["156 V", "1000 ms", "A", "3.4200 V", "No", "V_BIBO=3.4200V > BI threshold — PFC operating", "PASS ✓"]],
         col_widths=_cw7, ch=CH)
@@ -285,13 +297,13 @@ def build_step9(story, data: dict):
     # ── 9.8 ───────────────────────────────────────────────────────────────────
     sub_h(story, "6.9.8", "Startup Voltage Verification", CH)
     body(story,
-        "The primary design requirement is that the PFC enables at or before 87 Vac during "
+        f"The primary design requirement is that the PFC enables at or before {_bi:.0f} Vac during "
         "power-on. This is verified by confirming V<sub>BIBO</sub> ≥ 1.90 V (FR brown-in threshold) "
-        "at 87 Vac:", CH)
-    eq_box(story, [r"V_{BIBO}\ \mathrm{at\ 87\ Vac}=87\times0.9003\times0.024351=1.9073\ \mathrm{V}\quad>1.9\ \mathrm{V}",
-                   r"V_{BIBO}\ \mathrm{at\ 90\ Vac}=90\times0.9003\times0.024351=1.9731\ \mathrm{V}\quad>1.9\ \mathrm{V}"], ch=CH)
+        f"at {_bi:.0f} Vac:", CH)
+    eq_box(story, [rf"V_{{BIBO}}\ \mathrm{{at\ {_bi:.0f}\ Vac}}={_bi:.0f}\times{_ka:.4f}\times{_ra:.6f}={_vt:.4f}\ \mathrm{{V}}\quad>1.9\ \mathrm{{V}}",
+                   rf"V_{{BIBO}}\ \mathrm{{at\ {_sm:.0f}\ Vac}}={_sm:.0f}\times{_ka:.4f}\times{_ra:.6f}={_vsm:.4f}\ \mathrm{{V}}\quad>1.9\ \mathrm{{V}}"], ch=CH)
     data_table(story, "6.9.8", "Startup Verification",
-        "PFC enables at or before 87 Vac across nominal and 1% worst-case tolerance.",
+        f"PFC enables at or before {_bi:.0f} Vac across nominal and 1% worst-case tolerance.",
         ["Startup Condition", "V_BIBO", "Threshold", "Margin", "Starts?"],
         d["startup_rows"], col_widths=[CW*0.40, CW*0.13, CW*0.13, CW*0.16, CW*0.18], ch=CH)
 
@@ -308,24 +320,24 @@ def build_step9(story, data: dict):
     body(story,
         "The resistor network R<sub>B1</sub> = R<sub>B2</sub> = 560 kΩ, R<sub>B3</sub> = 82 kΩ, "
         "R<sub>B4</sub> = 30 kΩ with filter capacitors C<sub>B1</sub> = 100 nF, C<sub>B2</sub> = "
-        "560 nF satisfies all three design requirements simultaneously: the PFC enables at 87 Vac "
-        "(3 Vac margin below the 90 Vac specification minimum), all EN61000-4-11:2020 Criteria A "
+        f"560 nF satisfies all three design requirements simultaneously: the PFC enables at {_bi:.0f} Vac "
+        f"({_sm-_bi:.0f} Vac margin below the {_sm:.0f} Vac specification minimum), all EN61000-4-11:2020 Criteria A "
         "test requirements pass for both low-line (FR mode) and high-line (HV mode) operation, and "
         "all SEMI F47 Criteria A tests pass.", CH)
     body(story,
         "The binding EN61000-4-11 constraint — 70 Vac for 500 ms, Criteria A — is met with the "
-        "brownout at 47.9 Vac, giving 22.1 Vac margin below the test level. The 450 ms FAN9672 "
+        f"brownout at {_bo_a:.1f} Vac, giving {70-_bo_a:.1f} Vac margin below the test level. The 450 ms FAN9672 "
         "debounce handles all short-duration dip tests (40 V, 96 V, 45 V, 90 V) automatically "
         "without any contribution from the threshold setting. The 5-second Criteria B tests at 0 V "
         "allow restart, which is inherently satisfied.", CH)
     body(story,
-        "With 1% resistor tolerance the worst-case brown-in FR is 88.37 Vac — still below the "
-        "90 Vac specification minimum, confirming the design is robust across the full component "
+        f"With 1% resistor tolerance the worst-case brown-in FR is {_bi_w:.2f} Vac — still below the "
+        f"{_sm:.0f} Vac specification minimum, confirming the design is robust across the full component "
         "tolerance range.", CH)
     annotation(story, "DECISION",
-        "R<sub>B1</sub> = R<sub>B2</sub> = 560 kΩ   R<sub>B3</sub> = 82 kΩ   R<sub>B4</sub> = 30 kΩ "
-        "  C<sub>B1</sub> = 100 nF   C<sub>B2</sub> = 560 nF.   Brownout = 47.9 Vac  |  Brown-in FR "
-        "= 86.67 Vac  |  Brown-in HV = 79.82 Vac  |  PFC starts at 87 Vac.   EN61000-4-11:2020 + "
+        f"R<sub>B1</sub> = R<sub>B2</sub> = {_rb1/1e3:.0f} kΩ   R<sub>B3</sub> = {_rb3/1e3:.0f} kΩ   R<sub>B4</sub> = {_rb4/1e3:.0f} kΩ "
+        f"  C<sub>B1</sub> = 100 nF   C<sub>B2</sub> = 560 nF.   Brownout = {_bo_a:.1f} Vac  |  Brown-in FR "
+        f"= {_bi_a:.2f} Vac  |  Brown-in HV = {_hv_a:.2f} Vac  |  PFC starts at {_bi:.0f} Vac.   EN61000-4-11:2020 + "
         "SEMI F47 all Criteria A: PASS.", CH)
 
 
