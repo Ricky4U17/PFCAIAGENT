@@ -4897,4 +4897,13 @@ production-logic bugs found — the code was already correct/intended).
    `dc_bias_catalog` ranking curve untouched). All 9 now <1%. No regression in the 60 non-PDF
    test_regression tests (core-loss/Ve/L unaffected).
 
-Suite: 6 failed/166 passed → **0 failed / 172 passed** (2 skipped). Full green. Commit <pending>.
+Suite: 6 failed/166 passed → **0 failed / 172 passed** (2 skipped). Full green. Commit 688a3ac.
+
+
+## C120 — 2026-07-22 — Harden the httpx pin in requirements.txt
+
+Follow-up to C118's env pin. requirements.txt already had `httpx~=0.27.0` (excludes 0.28) but the
+installed env had drifted to 0.28.1, which broke FastAPI TestClient (0.28 dropped the
+`TestClient(app=…)` shortcut starlette 0.27 uses). Tightened to an exact `httpx==0.27.2` with a
+comment explaining why + the upgrade path (bump only alongside starlette). httpx is a TEST-ONLY
+dependency here — the app never imports it, so this has zero runtime effect. Commit <pending>.
