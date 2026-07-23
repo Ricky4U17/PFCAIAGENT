@@ -661,6 +661,8 @@ def run_capacitor_design(state: dict) -> dict:
             "Vout_V":       Vout,      "f_line_Hz":    f_line,
             "Vdc_ripple_V": Vdc_ripple, "Vdc_min_V":   Vdc_min,
             "t_hold_ms":    t_hold_ms,  "Vout_max_V":  Vout_max,
+            "vin_rms_min":  float(ap.get("vin_rms_min", 90) or 90),
+            "vin_rms_max":  float(ap.get("vin_rms_max", 264) or 264),
         },
         "worst_case":           worst,
         "low_line":             low,

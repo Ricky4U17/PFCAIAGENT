@@ -130,6 +130,8 @@ def generate_step15_section(result: dict) -> list:
     inp  = result.get("inputs", {})
     wc   = result.get("worst_case", {})
     ll   = result.get("low_line",   {})
+    # low-line corner label tracks the designer's spec minimum (was hardcoded "90 Vac")
+    _vll = float(inp.get("vin_rms_min", inp.get("vin_min", 90)) or 90)
     ver  = result.get("verified")   or {}
     th   = result.get("thermal")    or {}
     story = []
@@ -161,7 +163,7 @@ def generate_step15_section(result: dict) -> list:
         'C<sub>holdup</sub> = 2 &middot; P<sub>out</sub> &middot; t<sub>hold</sub> / '
         '(V<sub>out</sub><super>2</super> &minus; V<sub>dc,min</sub><super>2</super>)', S['eq']))
     story.append(Spacer(1, 2*mm))
-    for label, op in [('Worst-case (180 Vac)', wc), ('Low-line (90 Vac)', ll)]:
+    for label, op in [('Worst-case (180 Vac)', wc), (f'Low-line ({_vll:.0f} Vac)', ll)]:
         P   = op.get('Pout',0);  eta = op.get('eta',1)
         C_h = op.get('C_holdup_uF',0)
         story.append(Paragraph(f'<b>{label}:</b>', S['body']))
@@ -178,7 +180,7 @@ def generate_step15_section(result: dict) -> list:
         '(2&pi; &middot; f<sub>line</sub> &middot; &eta; &middot; V<sub>out</sub> &middot; V<sub>dc,ripple</sub>)',
         S['eq']))
     story.append(Spacer(1, 2*mm))
-    for label, op in [('Worst-case (180 Vac)', wc), ('Low-line (90 Vac)', ll)]:
+    for label, op in [('Worst-case (180 Vac)', wc), (f'Low-line ({_vll:.0f} Vac)', ll)]:
         P   = op.get('Pout',0);  eta = op.get('eta',1)
         C_r = op.get('C_ripple_uF',0)
         story.append(Paragraph(f'<b>{label}:</b>', S['body']))
@@ -312,7 +314,7 @@ def generate_step15_section(result: dict) -> list:
     t6.setStyle(ts6)
     story.append(t6)
     story.append(Paragraph(
-        'Blue row = worst-case (180 Vac) &nbsp;|&nbsp; Green row = low-line (90 Vac)', S['note']))
+        f'Blue row = worst-case (180 Vac) &nbsp;|&nbsp; Green row = low-line ({_vll:.0f} Vac)', S['note']))
     story.append(Spacer(1, 5*mm))
 
     # ── 15.6b Ripple voltage verification ────────────────────────────────────
@@ -327,7 +329,7 @@ def generate_step15_section(result: dict) -> list:
         wc_v = ver.get('worst_case',{}); ll_v = ver.get('low_line',{})
         for label, v_rip, pout_v, eta_v in [
             ('Worst-case (180 Vac)', wc_v.get('V_ripple_pp_V',0), wc.get('Pout',3600), wc.get('eta',0.965)),
-            ('Low-line (90 Vac)',    ll_v.get('V_ripple_pp_V',0), ll.get('Pout',1700), ll.get('eta',0.945)),
+            (f'Low-line ({_vll:.0f} Vac)',    ll_v.get('V_ripple_pp_V',0), ll.get('Pout',1700), ll.get('eta',0.945)),
         ]:
             spec_v = float(inp.get('Vdc_ripple_V',20))
             ok_v   = v_rip <= spec_v
@@ -401,7 +403,7 @@ def generate_step15_section(result: dict) -> list:
         wc_v = ver.get("worst_case", {})
         ll_v = ver.get("low_line",   {})
         rip_ok = ver.get("ripple_current_pass", True)
-        hdr8 = ['Metric', 'Worst-case (180 Vac)', 'Low-line (90 Vac)']
+        hdr8 = ['Metric', 'Worst-case (180 Vac)', f'Low-line ({_vll:.0f} Vac)']
         rows8 = [[Paragraph(h, S['tbl_hdr']) for h in hdr8]]
         for (k, fw, fl) in [
             ('C<sub>total</sub> (&micro;F)',           f"{ver.get('C_total_uF','')}",         "—"),
@@ -594,7 +596,7 @@ def generate_step15_section(result: dict) -> list:
         wc_v = ver.get("worst_case", {})
         ll_v = ver.get("low_line",   {})
         rows10 = [[Paragraph(h, S['tbl_hdr']) for h in
-                   ['Parameter','Worst-case (180 Vac)','Low-line (90 Vac)']]]
+                   ['Parameter','Worst-case (180 Vac)',f'Low-line ({_vll:.0f} Vac)']]]
         for (k, fw, fl) in [
             ('C<sub>required</sub> (&micro;F)',       f"{result.get('C_required_uF','—')}",      "—"),
             ('C<sub>total</sub> selected (&micro;F)', f"{ver.get('C_total_uF','—')}",            "—"),
