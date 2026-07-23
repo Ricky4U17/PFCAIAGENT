@@ -4505,7 +4505,31 @@ def _ch5(story, state, s15):
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHAPTER 6 — CONTROL SCHEME
 # ═══════════════════════════════════════════════════════════════════════════════
-def _ch6(story, state, s16):
+def _loop_dcr_mohm(approved_design, state, s16):
+    """Per-phase inductor DCR (mΩ) for the control-loop plant — wire-derived, evaluated at the copper
+    OPERATING temperature (ambient + winding ΔT-rise), per the point-29 rule. DCR is linear in
+    temperature, so we interpolate/extrapolate between the two wire-computed points step7 already
+    provides (DCR@25 °C, DCR@100 °C) rather than re-deriving from raw wire params (which risks a
+    per-phase/total mix-up). Falls back to the step16 payload, never a fixed guess, when no approved
+    inductor is present."""
+    ALPHA_CU = 0.00393
+    d = approved_design or {}
+    dcr25  = float(d.get("DCR_25C_mOhm", 0) or 0)
+    dcr100 = float(d.get("DCR_100C_mOhm", 0) or 0)
+    if dcr25 > 0 and dcr100 <= 0:                      # derive the 100 °C point if only 25 °C is present
+        dcr100 = dcr25 * (1 + ALPHA_CU * 80) / (1 + ALPHA_CU * 5)
+    if dcr25 > 0 and dcr100 > 0:
+        try:
+            ambient = float(state.get("intake", {}).get("thermal", {}).get("ambient_temp_c_max", 50) or 50)
+        except Exception:
+            ambient = 50.0
+        dT_wdg = float(d.get("dT_wdg_C", 0) or 0)      # winding node rise above ambient (step7 SA model)
+        T_cu   = ambient + dT_wdg                       # copper operating temperature
+        return dcr25 + (dcr100 - dcr25) * (T_cu - 25.0) / 75.0
+    # No approved-inductor DCR available → honour whatever the step16 payload carried.
+    return float(s16.get("DCR_mOhm", 0) or 0) or 26.7
+
+def _ch6(story, state, s16, approved_design=None):
     chapter_splash(story, 6, "Control Scheme",
         "How do we close the loops stably across all conditions?",
         ["6.1 Control architecture and loop-equation derivation (inner current + outer voltage)",
@@ -4544,7 +4568,7 @@ def _ch6(story, state, s16):
             from app.mode_b.step16_control_design import design_control_loops
             res = design_control_loops(
                 L_uH      = float(s16.get("L_uH", 240)),
-                DCR_mOhm  = float(s16.get("DCR_mOhm", 95)),
+                DCR_mOhm  = _loop_dcr_mohm(approved_design, state, s16),
                 C_uF      = float(s16.get("C_uF", 1410)),
                 ESR_mOhm  = float(s16.get("ESR_mOhm", 12.7)),
                 Vout_V    = float(s16.get("Vout_V", 393)),
@@ -5155,7 +5179,7 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
     # When the full detailed Chapter 6 is merged in separately (combined report),
     # skip the Ch6 splash/placeholder here to avoid a duplicate "Chapter 6" heading.
     if include_ch6:
-        _ch6(story, state, step16_params)
+        _ch6(story, state, step16_params, approved_design)
 
     # multiBuild = two passes so the TOC page numbers resolve correctly.
     doc.multiBuild(story)

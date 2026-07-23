@@ -4922,4 +4922,24 @@ three now byte-identical (md5 c7cb75…). This deploys the whole missed July bat
 application-schematic screen, an R_CS `rcsUser` fix (stop the sticky 15 mΩ placeholder), and bus-ripple
 pk-pk (C+ESR) consistency with the DC-bus cap page. HAZARD flagged: two hand-maintained copies drift —
 src/assets is canonical; a build/copy step (or single source) should be added so this can't recur.
-Commit <pending>.
+Commit 49bc923.
+
+
+## C122 — 2026-07-22 — POINT 29: inductor DCR from selected wire (control loop), not hardcoded
+
+AUDIT: power/loss calcs already wire-derived + temperature-aware (generate_steps13_14 uses DCR@25/@100
+from Cu_len; step7 computes both from the wire) — OK, matches the designer's rule (loss at temperature T
+uses DCR at T). The hardcodes were in the CONTROL-LOOP path:
+- `doc_report_builder._ch6` fed the step16 plant `DCR_mOhm = s16.get("DCR_mOhm", 95)` — a 95 mΩ hardcoded
+  fallback (~3.5× the real ~26.7 mΩ @100 °C) and fixed at 100 °C.
+- `state_space_agent` used `r_L = overrides.get("r_L", 0.02)` (my C118 placeholder).
+FIX (designer rule: control loop uses DCR at the COPPER OPERATING temp = ambient + winding ΔT):
+- New `_loop_dcr_mohm(approved_design, state, s16)` in doc_report_builder: DCR is linear in T, so
+  interpolate step7's two wire-computed points (DCR@25, DCR@100) to T_cu = ambient + dT_wdg_C. `_ch6`
+  now takes `approved_design` and uses this; call site passes it. Verified the corrected DCR (≈22-27 mΩ
+  vs the old 95) leaves the 9-point scorecard crossovers identical (fci 8750, fcv 25 Hz) — a fidelity
+  fix, not a perf change.
+- New `_wire_dcr_ohm_from_state(state)` in state_space_agent: r_L precedence = override → wire-derived
+  from an approved inductor in state (same copper-temp interpolation) → 0.02 Ω representative default
+  (the first-pass workflow magnetic model selects no wire, so nothing to derive from there). State-space
+  stays stable (VOLT fc 6 Hz PM 89 GM 7.6). Commit <pending>.
