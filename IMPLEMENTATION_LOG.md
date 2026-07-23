@@ -4871,4 +4871,30 @@ Downstream test hygiene (needed for the phase-advisory reach-`final` tests, all 
 
 Net suite: 20 failed/147 passed → 6 failed/166 passed (2 skipped). The 6 remaining are the documented
 backlog, unrelated to this work: TestCorrectLFormula ×5 (needs worst-case-governing L-semantics
-redesign) and TestDataLoader DC-bias 9-oppoint ×1. Commit <pending>.
+redesign) and TestDataLoader DC-bias 9-oppoint ×1. Commit 50e2344.
+
+
+## C119 — 2026-07-22 — Clear the last 6 backlog test failures (worst-case L semantics + edge_60 DC-bias recal)
+
+Two documented backlog items, both resolved by aligning tests/data to the authoritative source (no
+production-logic bugs found — the code was already correct/intended).
+
+1. **TestCorrectLFormula ×5** — `_calc_l_py` (app/main.py) sizes L across the full 9-point canonical
+   grid and takes the MAX (worst-case governing, report notes #4). The governing point is high line /
+   low duty (~220 Vac, D~0.208) where interleave ripple cancellation K(D) is weakest — NOT the 90 Vac
+   corner. The old tests asserted the superseded single-point-90 Vac values (238 µH, D 0.676). The
+   passing `test_step4_L_calc` only fed step4_inductance a 2-point grid [90,264] that missed the 220 Vac
+   worst case, hence its 238 µH matched by coincidence. DECISION (designer confirmed): accept the code,
+   update the 5 tests to the worst-case values (L 626 µH / D 0.208 / KD 0.737 / Iin_pk 11.47 at r=0.095;
+   L_sel 625). At the report's design crest r~0.25 the governing L is ~238 µH ≈ the selected 235-240 µH
+   inductor, so no design change — only the test's operating point/label. Re-labelled the class + tests
+   and added a governing_vac==220 assertion so the semantics are locked.
+
+2. **TestDataLoader DC-bias** — `get_k_bias('edge_60',H)` ran 2-4% high vs the Step 13.4 hardware table
+   (6/9 points outside the 2% band). Fit the Magnetics rolloff `%µ = 100/(a + b·H^c)` to the 9 reference
+   points (a=1.0043, b=5.976e-5, c=2.041; all points <1.1%) and recalibrated the digitized
+   `dc_bias_rolloff.mu_pct` grid at H=80..150 Oe in edge_60.json (only the tested band; the separate
+   `dc_bias_catalog` ranking curve untouched). All 9 now <1%. No regression in the 60 non-PDF
+   test_regression tests (core-loss/Ve/L unaffected).
+
+Suite: 6 failed/166 passed → **0 failed / 172 passed** (2 skipped). Full green. Commit <pending>.

@@ -193,38 +193,49 @@ class TestGate3ControllerSelection:
 # ── Gates 4 & 5: Corrected L formula ──────────────────────────────────────
 
 class TestCorrectLFormula:
-    """THE most important regression test — the formula fix from v2."""
+    """THE most important regression test — the worst-case-governing L formula.
 
-    def test_L_calc_at_90vac_r0095_fsw70k(self):
+    _calc_l_py sizes L across the full 9-point canonical operating grid and takes the
+    MAXIMUM required L (report notes #4). The governing point is high line / low duty
+    (~220 Vac, Vin_pk~311, D~0.208) where the interleave ripple-cancellation factor K(D)
+    is weakest — NOT the 90 Vac corner. The superseded single-point-90 Vac formula let the
+    actual crest ripple ratio reach ~25% at 200-230 Vac; these expectations lock the fix.
+    (At r=0.095 the governing L is 626 µH; scaled to the report's design crest r~0.25 this
+    is ~238 µH ≈ the selected 235-240 µH inductor.)"""
+
+    def test_L_calc_governing_point_r0095_fsw70k(self):
         from app.main import _calc_l_py
         r = _calc_l_py(pout_lo=1700, vin_min=90, vout=393,
                        fsw=70e3, crest=0.095)
-        # Derived analytically; verified in session: 238.21 µH
-        assert abs(r["L_uH"] - 238.21) < 0.5, f"L={r['L_uH']:.2f} µH, expected 238.21 µH"
+        # Worst-case governing across the 9-point grid (220 Vac), verified in session.
+        assert abs(r["L_uH"] - 626.03) < 0.5, f"L={r['L_uH']:.2f} µH, expected 626.03 µH"
+        assert abs(r["governing_vac"] - 220.0) < 1.0, \
+            f"governing_vac={r['governing_vac']}, expected 220 (high line, not 90)"
 
-    def test_L_selected_rounds_to_240(self):
+    def test_L_selected_rounds_to_625(self):
         from app.main import _calc_l_py
         r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
         L_sel = round(r["L_uH"] / 5) * 5
-        assert L_sel == 240, f"L_selected={L_sel} µH, expected 240 µH"
+        assert L_sel == 625, f"L_selected={L_sel} µH, expected 625 µH"
 
-    def test_Iin_pk_at_90vac(self):
+    def test_Iin_pk_at_governing_point(self):
         from app.main import _calc_l_py
         r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
-        assert abs(r["Iin_pk"] - 28.30) < 0.05, f"Iin_pk={r['Iin_pk']:.4f} A, expected ~28.30 A"
+        # Iin_pk reported at the governing (220 Vac) point, not the 90 Vac corner.
+        assert abs(r["Iin_pk"] - 11.47) < 0.05, f"Iin_pk={r['Iin_pk']:.4f} A, expected ~11.47 A"
 
-    def test_KD_at_D_0676(self):
+    def test_KD_at_governing_D_0208(self):
         from app.main import _calc_l_py
         r = _calc_l_py(1700, 90, 393, 70e3, 0.095)
-        assert abs(r["D"]  - 0.676) < 0.001, f"D={r['D']:.4f}, expected ~0.676"
-        assert abs(r["KD"] - 0.521) < 0.002, f"KD={r['KD']:.4f}, expected ~0.521"
+        assert abs(r["D"]  - 0.208) < 0.001, f"D={r['D']:.4f}, expected ~0.208"
+        assert abs(r["KD"] - 0.737) < 0.002, f"KD={r['KD']:.4f}, expected ~0.737"
 
     def test_L_is_independent_of_N(self):
         """L must be the same regardless of phase count — key v2 correction."""
         from app.main import _calc_l_py
         L_ref = _calc_l_py(1700, 90, 393, 70e3, 0.095)["L_uH"]
         # L formula has no N term; verify by checking formula directly
-        assert L_ref > 230 and L_ref < 245, "L out of expected range"
+        assert 620 < L_ref < 632, "L out of expected range"
         # If someone adds N into the formula, this will catch a regression
         # (There is no N in _calc_l_py — that's the point)
 
