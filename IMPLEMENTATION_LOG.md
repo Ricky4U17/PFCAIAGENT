@@ -4987,4 +4987,15 @@ KEPT STATIC (genuine reference): canonical formulas, derivation algebra (A.3-A.7
 test plan (App C), and the A.6.9 current-sense RC filter (fixed-practice 2k/470p).
 REMAINING (noted, minor): Appendix E.3 performance summary (load-dip / ripple / rejection / THD) — those
 values are computed inside the step12/13 renderers, not exposed in the compute results, so threading them
-needs those steps to surface the numbers first. Commit <pending>.
+needs those steps to surface the numbers first. Commit 3d15404.
+
+
+## C125 — 2026-07-22 — POINT 26 follow-up: de-hardcode Appendix E.3 (performance summary)
+
+The C124 "remaining" item. On re-check the E.3 values ARE exposed by the compute results after all:
+step12 `worst_hl` carries the worst-case load-step dip (dv_hi / pct_hi), and step13 `lo`/`hi` carry the
+per-band 120 Hz ripple (vrip), rejection (rej_db) and THD3. Threaded s12/s13 into build_appendices →
+`_appendix_ctx(prior, s10, s11, s12, s13)` (build_story now captures s12; still backward-compatible) and
+replaced the four E.3 hardcodes: dip 28.9 V (7.3%), ripple 2.6/5.5 V, rejection 30.1/23.6 dB,
+THD3 1.4/3.0 % — all now live. Appendices A-E are now fully de-hardcoded except the genuine reference
+material. Suite: 172 passed / 2 skipped. Commit <pending>.

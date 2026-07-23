@@ -21,7 +21,7 @@ from app.mode_b.doc_report_builder import (
 CH = 6
 
 
-def _appendix_ctx(prior, s10, s11):
+def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
     """Assemble the live design values the appendices quote, from the Step 1-14 results, so Appendix A
     (Table A.2, §A.7.7-A.7.9), Table B.1 (BOM) and Appendix E stop carrying hardcoded numbers. Genuine
     reference material (canonical formulas, derivation algebra, citations, fixed-practice filter parts)
@@ -48,6 +48,10 @@ def _appendix_ctx(prior, s10, s11):
         c1, c2, c3 = 390e-9, 1.1e-9, 24e-9
     kmax = float(v.get("kmax", 1.4))
     pout_lo = float(v.get("pout_lo", 1700.0)); pout_hi = float(v.get("pout_hi", 3600.0))
+    # Appendix E.3 performance summary (worst-case load-step dip from Step 12; per-band 120 Hz ripple,
+    # rejection and THD3 from Step 13 — lo = low line, hi = high line).
+    d12w = (s12 or {}).get("worst_hl", {}) or {}
+    e_lo = (s13 or {}).get("lo", {}) or {}; e_hi = (s13 or {}).get("hi", {}) or {}
     return {
         "vout": vout, "vfbpfc": vfbpfc, "hv": v.get("hv") or (vfbpfc / vout),
         # inner current loop (Type-II)
@@ -66,11 +70,16 @@ def _appendix_ctx(prior, s10, s11):
         # BOM extras
         "rri": float(p4.get("rri_selected", 11500.0)), "rfb2": float(p5.get("rfb2", 23200.0)),
         "rcs": float(p6.get("rcs_sel", 0.015)),
+        # performance (E.3): worst-case dip (HL full step) + per-band ripple / rejection / THD3
+        "dip_v": abs(float(d12w.get("dv_hi", -28.9))), "dip_pct": abs(float(d12w.get("pct_hi", -7.3))),
+        "vrip_lo": float(e_lo.get("vrip", 2.6)), "vrip_hi": float(e_hi.get("vrip", 5.5)),
+        "rej_lo": float(e_lo.get("rej_db", 30.0)), "rej_hi": float(e_hi.get("rej_db", 23.5)),
+        "thd_lo": float(e_lo.get("thd3", 1.5)), "thd_hi": float(e_hi.get("thd3", 3.0)),
     }
 
 
-def build_appendices(story, prior=None, s10=None, s11=None):
-    ctx = _appendix_ctx(prior, s10, s11)
+def build_appendices(story, prior=None, s10=None, s11=None, s12=None, s13=None):
+    ctx = _appendix_ctx(prior, s10, s11, s12, s13)
     _appendix_a(story, ctx)
     _appendix_b(story, ctx)
     _appendix_c(story)
@@ -570,10 +579,10 @@ def _appendix_e(story, ctx):
     body(story, "<b>Performance (Steps 12–13)</b>", CH)
     data_table(story, "E.3", "Performance — Quick Reference", "",
         ["Quantity", "Expression / result"],
-        [["Load-step dip", "ΔV_OUT(s) = −ΔI · Z_open(s)/(1+T_v(s));  worst case 28.9 V (7.3%)"],
-         ["Bus 120 Hz ripple", "V_ripple,pk = P_OUT/(2 ω_line V_OUT C_O) = 2.6 / 5.5 V"],
-         ["120 Hz rejection", "−20 log10|T_v(j2π·120)| = 30 / 23.5 dB"],
-         ["THD3 (loop contribution)", "≈ 50 · V_EA,120 / V_EA ≈ 1.5 / 3.0 %"]],
+        [["Load-step dip", f"ΔV_OUT(s) = −ΔI · Z_open(s)/(1+T_v(s));  worst case {ctx['dip_v']:.1f} V ({ctx['dip_pct']:.1f}%)"],
+         ["Bus 120 Hz ripple", f"V_ripple,pk = P_OUT/(2 ω_line V_OUT C_O) = {ctx['vrip_lo']:.1f} / {ctx['vrip_hi']:.1f} V"],
+         ["120 Hz rejection", f"−20 log10|T_v(j2π·120)| = {ctx['rej_lo']:.1f} / {ctx['rej_hi']:.1f} dB"],
+         ["THD3 (loop contribution)", f"≈ 50 · V_EA,120 / V_EA ≈ {ctx['thd_lo']:.1f} / {ctx['thd_hi']:.1f} %"]],
         col_widths=[CW*0.30, CW*0.70], ch=CH)
     annotation(story, "DECISION",
         "End of report.  Seventeen steps, both compensators derived and verified, transient and "

@@ -838,12 +838,13 @@ def build_story(inp: dict | None = None):
     _build_asbuilt_L_section(story, inp or {}, prior)   # Section 6.10.14 — current-loop as-built L basis
     s11 = compute_step11_vloop(inp, prior)
     build_step11(story, s11)
-    build_step12(story, compute_step12_transient(inp, prior))
+    s12 = compute_step12_transient(inp, prior)
+    build_step12(story, s12)
     s13 = compute_step13_thd(inp, prior)
     build_step13(story, s13)
     s13["lphi_uH"] = inp.get("lphi_uH"); s13["cout_uF"] = inp.get("cout_uF")  # for the "fixed components" note
     build_step14(story, s13)
-    build_appendices(story, prior=prior, s10=s10, s11=s11)
+    build_appendices(story, prior=prior, s10=s10, s11=s11, s12=s12, s13=s13)
     while story and isinstance(story[0], PageBreak):
         story.pop(0)
     return story
