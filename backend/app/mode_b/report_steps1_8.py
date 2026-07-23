@@ -833,15 +833,17 @@ def build_story(inp: dict | None = None):
     build_steps_1_8(story, prior)
     _build_app_schematic_section(story, inp or {}, prior)   # §6.8.7 — Lo/Hi line application schematics
     build_step9(story, compute_step9_bibo(inp))
-    build_step10(story, compute_step10_iloop(inp, prior))
+    s10 = compute_step10_iloop(inp, prior)
+    build_step10(story, s10)
     _build_asbuilt_L_section(story, inp or {}, prior)   # Section 6.10.14 — current-loop as-built L basis
-    build_step11(story, compute_step11_vloop(inp, prior))
+    s11 = compute_step11_vloop(inp, prior)
+    build_step11(story, s11)
     build_step12(story, compute_step12_transient(inp, prior))
     s13 = compute_step13_thd(inp, prior)
     build_step13(story, s13)
     s13["lphi_uH"] = inp.get("lphi_uH"); s13["cout_uF"] = inp.get("cout_uF")  # for the "fixed components" note
     build_step14(story, s13)
-    build_appendices(story)
+    build_appendices(story, prior=prior, s10=s10, s11=s11)
     while story and isinstance(story[0], PageBreak):
         story.pop(0)
     return story

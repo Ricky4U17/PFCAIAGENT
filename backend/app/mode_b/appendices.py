@@ -13,6 +13,7 @@ equation is rendered as proper mathtext. Stated example constants are reproduced
 the document gives them (the live design values are computed in Steps 1–14).
 """
 from __future__ import annotations
+import math
 from app.mode_b.doc_report_builder import (
     step_h, sub_h, body, eq_box, data_table, annotation, CW,
 )
@@ -20,16 +21,65 @@ from app.mode_b.doc_report_builder import (
 CH = 6
 
 
-def build_appendices(story):
-    _appendix_a(story)
-    _appendix_b(story)
+def _appendix_ctx(prior, s10, s11):
+    """Assemble the live design values the appendices quote, from the Step 1-14 results, so Appendix A
+    (Table A.2, §A.7.7-A.7.9), Table B.1 (BOM) and Appendix E stop carrying hardcoded numbers. Genuine
+    reference material (canonical formulas, derivation algebra, citations, fixed-practice filter parts)
+    stays static. Voltage-comp caps C1/C2/C3 aren't populated by the v-loop compute, so they are
+    DERIVED from the standard Type-III relations using the achieved pole/zero frequencies (this
+    reproduces the selected 390 nF / 1.1 nF / 24 nF and auto-updates with the design)."""
+    p  = prior or {}
+    p4 = p.get("step4", {}); p5 = p.get("step5", {}); p6 = p.get("step6", {})
+    s10 = s10 or {}; s11 = s11 or {}
+    cm  = s11.get("comp", {}); v = s11.get("src", {})
+    vout   = p5.get("vout_spec") or v.get("vout") or 394.0
+    vfbpfc = v.get("vfbpfc", 2.5)
+    r1 = float(p5.get("rfb1", 3.63e6))
+    r2 = float(cm.get("r2s") or cm.get("r2") or 143000.0)
+    r3 = float(cm.get("r3s") or cm.get("r3") or 8.66e6)
+    fz1a = cm.get("fz1a") or cm.get("fz1", 3.0)
+    fz2a = cm.get("fz2a") or cm.get("fz2", 12.0)
+    fp1a = cm.get("fp1a") or cm.get("fp1", 50.0)
+    try:
+        c1 = 1.0 / (2*math.pi * r2 * fz1a)
+        c2 = 1.0 / (2*math.pi * (r1 + r3) * fz2a)
+        c3 = c1 / (fp1a * 2*math.pi * r2 * c1 - 1.0)
+    except Exception:
+        c1, c2, c3 = 390e-9, 1.1e-9, 24e-9
+    kmax = float(v.get("kmax", 1.4))
+    pout_lo = float(v.get("pout_lo", 1700.0)); pout_hi = float(v.get("pout_hi", 3600.0))
+    return {
+        "vout": vout, "vfbpfc": vfbpfc, "hv": v.get("hv") or (vfbpfc / vout),
+        # inner current loop (Type-II)
+        "ric": float(s10.get("ric", 120000.0)), "cic1": float(s10.get("cic1", 1.3e-9)),
+        "cic2": float(s10.get("cic2", 51e-12)), "i_fz": float(s10.get("fz", 1000.0)),
+        "i_fp": float(s10.get("fp", 26000.0)), "fci": float(s10.get("fco_nom", 8124.0)),
+        "i_pm": float(s10.get("pm_nom", 62.8)),
+        # outer voltage loop (Type-III)
+        "r1": r1, "r2": r2, "r3": r3, "c1": c1, "c2": c2, "c3": c3,
+        "v_fz1": float(cm.get("fz1", 3.0)), "v_fz2": float(cm.get("fz2", 12.0)),
+        "v_fp1": float(cm.get("fp1", 50.0)), "v_fp2": float(cm.get("fp2", 17.0)),
+        "fcv": float(v.get("fcv", 17.0)),
+        # gain modulator
+        "kmax": kmax, "pout_lo": pout_lo, "pout_hi": pout_hi,
+        "gmod_lo": kmax * pout_lo / (5.0 * vout), "gmod_hi": kmax * pout_hi / (5.0 * vout),
+        # BOM extras
+        "rri": float(p4.get("rri_selected", 11500.0)), "rfb2": float(p5.get("rfb2", 23200.0)),
+        "rcs": float(p6.get("rcs_sel", 0.015)),
+    }
+
+
+def build_appendices(story, prior=None, s10=None, s11=None):
+    ctx = _appendix_ctx(prior, s10, s11)
+    _appendix_a(story, ctx)
+    _appendix_b(story, ctx)
     _appendix_c(story)
     _appendix_d(story)
-    _appendix_e(story)
+    _appendix_e(story, ctx)
 
 
 # ════════════════════════════ Appendix A ════════════════════════════════════
-def _appendix_a(story):
+def _appendix_a(story, ctx):
     step_h(story, "Appendix A", "Derivations of Key Transfer Functions", CH)
     body(story,
         "This appendix derives, from the averaged converter model, the two transfer functions the "
@@ -84,16 +134,16 @@ def _appendix_a(story):
         "Canonical Type-III singularities and their design values.",
         ["Singularity", "Expression", "Design value"],
         [["Integrator pole", "at origin", "—"],
-         ["Zero f_z1", "1 / (2π R2 C1)", "3 Hz"],
-         ["Zero f_z2", "1 / (2π (R1+R3) C2)", "12 Hz"],
-         ["Pole f_p1", "(C1+C3) / (2π R2 C1 C3)", "50 Hz"],
-         ["Pole f_p2", "1 / (2π R3 C2)", "17 Hz"]],
+         ["Zero f_z1", "1 / (2π R2 C1)", f"{ctx['v_fz1']:.0f} Hz"],
+         ["Zero f_z2", "1 / (2π (R1+R3) C2)", f"{ctx['v_fz2']:.0f} Hz"],
+         ["Pole f_p1", "(C1+C3) / (2π R2 C1 C3)", f"{ctx['v_fp1']:.0f} Hz"],
+         ["Pole f_p2", "1 / (2π R3 C2)", f"{ctx['v_fp2']:.0f} Hz"]],
         col_widths=[CW*0.26, CW*0.44, CW*0.30], ch=CH)
     annotation(story, "CONCEPT",
         "A Type-III compensator places its two zeros below crossover to add up to +90° of phase boost "
         "right where the loop crosses 0 dB, then uses its two poles to restore the roll-off "
-        "afterwards. That phase boost is what lets a 17 Hz loop still achieve >80° phase margin "
-        "despite the integrator's −90° and the plant's lag.", CH)
+        "afterwards. That phase boost is what lets a %.0f Hz loop still achieve >80° phase margin "
+        "despite the integrator's −90° and the plant's lag." % ctx['fcv'], CH)
 
     sub_h(story, "A.3", "Thesis-Level Derivation — Scope and Method", CH)
     body(story,
@@ -133,7 +183,8 @@ def _appendix_a(story):
     body(story, "The loop separation is intentional:", CH)
     eq_box(story, [r"f_{cv}\ll 2f_{line}\ll f_{ci}\ll f_{sw}"], ch=CH)
     body(story, "For this design,", CH)
-    eq_box(story, [r"17\ \mathrm{Hz}\ll 120\ \mathrm{Hz}\ll 8\ \mathrm{kHz}\ll 70\ \mathrm{kHz}"], ch=CH)
+    eq_box(story, [r"%.0f\ \mathrm{Hz}\ll 120\ \mathrm{Hz}\ll %.0f\ \mathrm{kHz}\ll 70\ \mathrm{kHz}"
+                   % (ctx['fcv'], ctx['fci']/1e3)], ch=CH)
     body(story, "<b>A.4.2  Why the current loop is closed first</b>", CH)
     body(story,
         "The current loop must be designed first because the voltage loop commands current. In the "
@@ -271,7 +322,7 @@ def _appendix_a(story):
     body(story, "The PWM ramp gain is", CH)
     eq_box(story, [r"F_m=\dfrac{1}{V_{RAMP}}"], ch=CH)
     body(story, "and the current-sense / ramp normalization is", CH)
-    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{0.015}{5}=0.003"], ch=CH)
+    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{5}=%.3f" % (ctx['rcs'], ctx['rcs']/5.0)], ch=CH)
     body(story, "<b>A.6.10  Type-II current OTA compensator</b>", CH)
     body(story, "The FAN9672 current amplifier is an OTA. The transconductance amplifier converts "
         "error voltage into output current, and the external impedance Z<sub>IEA</sub>(s) converts "
@@ -370,8 +421,8 @@ def _appendix_a(story):
     eq_box(story, [r"H_v=\dfrac{R_{BOT}}{R_{TOP}+R_{BOT}}"], ch=CH)
     body(story, "At regulation,", CH)
     eq_box(story, [r"H_v=\dfrac{V_{FBPFC}}{V_{OUT}}"], ch=CH)
-    body(story, "Using V<sub>FBPFC</sub> = 2.5 V and V<sub>OUT</sub> = 393.7 V,", CH)
-    eq_box(story, [r"H_v=\dfrac{2.5}{393.7}=0.006350"], ch=CH)
+    body(story, "Using V<sub>FBPFC</sub> = %.1f V and V<sub>OUT</sub> = %.0f V," % (ctx['vfbpfc'], ctx['vout']), CH)
+    eq_box(story, [r"H_v=\dfrac{%.1f}{%.0f}=%.6f" % (ctx['vfbpfc'], ctx['vout'], ctx['hv'])], ch=CH)
     body(story, "<b>A.7.8  Gain modulator block</b>", CH)
     body(story, "For voltage-loop stability analysis, the system-level averaged command gain is", CH)
     eq_box(story, [r"G_{MOD}=\dfrac{K_{MAX}I_{OUT}}{5}=\dfrac{K_{MAX}P_{OUT}}{5V_{OUT}}"], ch=CH)
@@ -381,8 +432,10 @@ def _appendix_a(story):
         "scaling and power-command limits; they should not be inserted directly into the loop product "
         "as though they were the averaged closed outer-loop gain at every line angle. For the two "
         "power levels,", CH)
-    eq_box(story, [r"G_{MOD,1700}=\dfrac{1.4\cdot1700/393.7}{5}=1.209\ \mathrm{A/V},\quad"
-                   r"G_{MOD,3600}=\dfrac{1.4\cdot3600/393.7}{5}=2.561\ \mathrm{A/V}"], ch=CH)
+    eq_box(story, [r"G_{MOD,%.0f}=\dfrac{%.2f\cdot%.0f/%.0f}{5}=%.3f\ \mathrm{A/V},\quad"
+                   % (ctx['pout_lo'], ctx['kmax'], ctx['pout_lo'], ctx['vout'], ctx['gmod_lo'])
+                   + r"G_{MOD,%.0f}=\dfrac{%.2f\cdot%.0f/%.0f}{5}=%.3f\ \mathrm{A/V}"
+                   % (ctx['pout_hi'], ctx['kmax'], ctx['pout_hi'], ctx['vout'], ctx['gmod_hi'])], ch=CH)
     body(story, "<b>A.7.9  Voltage OTA compensator</b>", CH)
     body(story, "The voltage OTA produces output current", CH)
     eq_box(story, [r"i_{OTA}=G_{MV}\hat v_{err}"], ch=CH)
@@ -393,8 +446,9 @@ def _appendix_a(story):
     body(story, "For a Type-III target shape,", CH)
     eq_box(story, [r"Z_{comp}(s)=K_v\,\dfrac{(1+s/\omega_{z1})(1+s/\omega_{z2})}"
                    r"{s(1+s/\omega_{p1})(1+s/\omega_{p2})}"], ch=CH)
-    body(story, "The selected target locations are f<sub>z1</sub> = 3 Hz, f<sub>z2</sub> = 12 Hz, "
-        "f<sub>p1</sub> = 17 Hz and f<sub>p2</sub> = 50 Hz.", CH)
+    body(story, "The selected target locations are f<sub>z1</sub> = %.0f Hz, f<sub>z2</sub> = %.0f Hz, "
+        "f<sub>p1</sub> = %.0f Hz and f<sub>p2</sub> = %.0f Hz."
+        % (ctx['v_fz1'], ctx['v_fz2'], ctx['v_fp1'], ctx['v_fp2']), CH)
     body(story, "<b>A.7.10  Final voltage-loop gain</b>", CH)
     body(story, "Substituting the gain modulator, the closed current-loop tracking term, the "
         "power-stage plant, the divider gain and the voltage compensator,", CH)
@@ -404,7 +458,7 @@ def _appendix_a(story):
 
 
 # ════════════════════════════ Appendix B ════════════════════════════════════
-def _appendix_b(story):
+def _appendix_b(story, ctx):
     step_h(story, "Appendix B", "Bill of Materials (Control Components)", CH)
     body(story,
         "External components that set the control behaviour, with the step that derives each. "
@@ -413,20 +467,20 @@ def _appendix_b(story):
     data_table(story, "B.1", "Control Bill of Materials",
         "External components that set the control behaviour.",
         ["Designator", "Value", "Type / Rating", "Tol.", "Function (step)"],
-        [["R_RI", "11.5 kΩ", "Thin film, 1/16 W", "1%", "Oscillator — 70 kHz (Section 6.4)"],
-         ["R_FB1", "3.63 MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (Section 6.5)"],
-         ["R_FB2", "23.2 kΩ", "Thin film", "1%", "Output sense bottom (Section 6.5)"],
-         ["R_CS", "15 mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (Section 6.6)"],
+        [["R_RI", f"{ctx['rri']/1e3:.1f} kΩ", "Thin film, 1/16 W", "1%", "Oscillator — 70 kHz (Section 6.4)"],
+         ["R_FB1", f"{ctx['r1']/1e6:.2f} MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (Section 6.5)"],
+         ["R_FB2", f"{ctx['rfb2']/1e3:.1f} kΩ", "Thin film", "1%", "Output sense bottom (Section 6.5)"],
+         ["R_CS", f"{ctx['rcs']*1e3:.0f} mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (Section 6.6)"],
          ["R_IAC", "6 / 12 MΩ", "HV, ≥ 400 V", "1%", "IAC line sense, FR/HV (Section 6.3)"],
          ["R_RLPK", "12.1 kΩ", "Thin film", "1%", "Peak detector (Section 6.3)"],
-         ["R_IC", "120 kΩ", "Thin film", "1%", "Current comp gain (Section 6.10)"],
-         ["C_IC1", "1.3 nF", "C0G/NP0", "5%", "Current comp zero (Section 6.10)"],
-         ["C_IC2", "51 pF", "C0G/NP0", "5%", "Current comp pole (Section 6.10)"],
-         ["R2", "143 kΩ", "Thin film", "1%", "Voltage comp R2 (Section 6.11)"],
-         ["R3", "8.66 MΩ", "Thin film", "1%", "Voltage comp R3 (Section 6.11)"],
-         ["C1", "390 nF", "Film", "5%", "Voltage comp C1 (Section 6.11)"],
-         ["C2", "1.1 nF", "C0G/NP0", "5%", "Voltage comp C2 (Section 6.11)"],
-         ["C3", "24 nF", "Film/C0G", "5%", "Voltage comp C3 (Section 6.11)"]],
+         ["R_IC", f"{ctx['ric']/1e3:.0f} kΩ", "Thin film", "1%", "Current comp gain (Section 6.10)"],
+         ["C_IC1", f"{ctx['cic1']*1e9:.1f} nF", "C0G/NP0", "5%", "Current comp zero (Section 6.10)"],
+         ["C_IC2", f"{ctx['cic2']*1e12:.0f} pF", "C0G/NP0", "5%", "Current comp pole (Section 6.10)"],
+         ["R2", f"{ctx['r2']/1e3:.0f} kΩ", "Thin film", "1%", "Voltage comp R2 (Section 6.11)"],
+         ["R3", f"{ctx['r3']/1e6:.2f} MΩ", "Thin film", "1%", "Voltage comp R3 (Section 6.11)"],
+         ["C1", f"{ctx['c1']*1e9:.0f} nF", "Film", "5%", "Voltage comp C1 (Section 6.11)"],
+         ["C2", f"{ctx['c2']*1e9:.1f} nF", "C0G/NP0", "5%", "Voltage comp C2 (Section 6.11)"],
+         ["C3", f"{ctx['c3']*1e9:.0f} nF", "Film/C0G", "5%", "Voltage comp C3 (Section 6.11)"]],
         col_widths=[CW*0.14, CW*0.13, CW*0.26, CW*0.09, CW*0.38], ch=CH)
     annotation(story, "PITFALL",
         "Use C0G/NP0 or film dielectrics for every compensator capacitor. Class-II ceramics (X7R and "
@@ -492,7 +546,7 @@ def _appendix_d(story):
 
 
 # ════════════════════════════ Appendix E ════════════════════════════════════
-def _appendix_e(story):
+def _appendix_e(story, ctx):
     step_h(story, "Appendix E", "Equation Quick-Reference Card", CH)
     body(story,
         "The working equations of the report on a single card, with the result each produces. Symbols "
@@ -502,16 +556,16 @@ def _appendix_e(story):
         ["Quantity", "Expression / result"],
         [["RHP zero (per phase)", "f_RHP = R_LOAD · D'² / (2π L)"],
          ["Plant resonance / Q", "f_o = D'/(2π√(L_eq C_O)),  Q set by r_L"],
-         ["Compensator zero / pole", "f_z = 1/(2π R_IC C_IC1) = 1.02 kHz,  f_p = 1/(2π R_IC C_IC2) = 26 kHz"],
-         ["Crossover / margin", "f_ci = 8.12 kHz,  PM = 62.8°"]],
+         ["Compensator zero / pole", f"f_z = 1/(2π R_IC C_IC1) = {ctx['i_fz']/1e3:.2f} kHz,  f_p = 1/(2π R_IC C_IC2) = {ctx['i_fp']/1e3:.0f} kHz"],
+         ["Crossover / margin", f"f_ci = {ctx['fci']/1e3:.2f} kHz,  PM = {ctx['i_pm']:.1f}°"]],
         col_widths=[CW*0.32, CW*0.68], ch=CH)
     body(story, "<b>Voltage loop (Section 6.11)</b>", CH)
     data_table(story, "E.2", "Voltage Loop — Quick Reference", "",
         ["Quantity", "Expression / result"],
         [["Loop gain", "T_v = (K_max·I_OUT/V_RAMP) · G_i,cl · G_vp · H_OTA"],
-         ["Feedback divider", "H_v = V_FBPFC / V_OUT = 0.006350"],
-         ["Comp zeros / poles", "f_z1=3, f_z2=12 Hz;  f_p (origin), f_p1=50, f_p2=17 Hz"],
-         ["Crossover / margin", "f_cv = 17 Hz (HL) / 7.8 Hz (LL),  PM ≈ 82°"]],
+         ["Feedback divider", f"H_v = V_FBPFC / V_OUT = {ctx['hv']:.6f}"],
+         ["Comp zeros / poles", f"f_z1={ctx['v_fz1']:.0f}, f_z2={ctx['v_fz2']:.0f} Hz;  f_p (origin), f_p1={ctx['v_fp1']:.0f}, f_p2={ctx['v_fp2']:.0f} Hz"],
+         ["Crossover / margin", f"f_cv = {ctx['fcv']:.0f} Hz (HL) / 7.8 Hz (LL),  PM ≈ 82°"]],
         col_widths=[CW*0.32, CW*0.68], ch=CH)
     body(story, "<b>Performance (Steps 12–13)</b>", CH)
     data_table(story, "E.3", "Performance — Quick Reference", "",

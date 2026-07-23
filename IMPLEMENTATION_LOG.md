@@ -4963,4 +4963,28 @@ resistor selection lands the actual within ±0.1%, rather than propagating spec 
   from s5 (vout_spec, vin_pk_264, pvo_min); the "393.7 V bus" prose → "regulated bus".
 - Test fixture confirmed_state 393 → 394 (the real spec, so the canonical scenario passes the check).
 - DEFERRED to point 26: the appendix hardcodes incl. "V_OUT = 393.7 V" (build_appendices takes no design
-  data yet — fixed when design is threaded in for point 26). Commit <pending>.
+  data yet — fixed when design is threaded in for point 26). Commit 6940ca2.
+
+
+## C124 — 2026-07-22 — POINT 26: de-hardcode Appendices A-E (thread live design context)
+
+`build_appendices(story)` took NO design data → 527 lines of static content with ~40 hardcoded
+design-specific values. Added `_appendix_ctx(prior, s10, s11)` that assembles the live values from the
+Step 1-14 results, and threaded it through build_appendices → _appendix_a/b/e (signatures gained `ctx`;
+params are optional so old no-arg calls still work). report_steps1_8.build_story now captures s10/s11
+and passes prior/s10/s11.
+De-hardcoded:
+- Table A.2 (Type-III pole/zero design values) ← v_fz1/fz2/fp1/fp2.
+- §A.7.7 H_v eq (V_FBPFC/V_OUT) and §A.7.8 G_MOD examples ← hv, kmax, pout_lo/hi, vout, gmod_lo/hi.
+  (SURFACED two stale hardcodes now corrected: K_MAX 1.4→1.49 → G_MOD 1.209/2.561→1.286/2.723.)
+- §A.7.9 pole/zero statement (also fixed the f_p1/f_p2 swap vs A.2).
+- §A.2 CONCEPT "17 Hz loop" ← fcv; §A.4.1 timescale eq ← fcv, fci; §A.6.9 R_CS/V_RAMP eq ← rcs.
+- Table B.1 (BOM): R_RI (11.5k→13.7k computed), R_FB1/2, R_CS, R_IC, C_IC1/2, R2, R3, C1/C2/C3.
+  Voltage-comp caps C1/C2/C3 DERIVED from the Type-III relations via the achieved freqs (reproduces
+  390n/1.1n/24n exactly). R_IAC/R_RLPK left static (line-sense parts, not in the compensator context).
+- Appendix E.1 (current loop) + E.2 (voltage loop) quick-ref ← current/voltage comp freqs, margins, H_v.
+KEPT STATIC (genuine reference): canonical formulas, derivation algebra (A.3-A.7), citations (App D),
+test plan (App C), and the A.6.9 current-sense RC filter (fixed-practice 2k/470p).
+REMAINING (noted, minor): Appendix E.3 performance summary (load-dip / ripple / rejection / THD) — those
+values are computed inside the step12/13 renderers, not exposed in the compute results, so threading them
+needs those steps to surface the numbers first. Commit <pending>.
