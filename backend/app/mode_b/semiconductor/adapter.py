@@ -223,7 +223,7 @@ def trace_point(design: dict, mosfet: dict, diode: dict, bridge: dict, thermal: 
 # ── reference design + smoke test (run: python -m app.mode_b.semiconductor.adapter) ──
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,
-    "vout": 393.7, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 235,
+    "vout": 394.0, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 235,
 }
 REFERENCE_PARTS = {
     "mosfet": {"tech": "sic", "rdson_25": 0.060, "rdson_tj": [[25, 125], [1.0, 1.4]],

@@ -365,7 +365,7 @@ def _steps7_8(story, state, s):
 
     Pout = float(ap.get("output_power_w_low_line", 1700))
     Vin  = float(ap.get("vin_rms_min", 90))
-    Vout = float(ap.get("output_bus_voltage_v", 393))
+    Vout = float(ap.get("output_bus_voltage_v", 394))
     fsw  = float(tsi.get("recommended_frequency_hz", 70000))
     crest= float(tsi.get("default_crest_ripple_ratio", 0.20))
     n_ph = int(state.get("selected_channels", 2))

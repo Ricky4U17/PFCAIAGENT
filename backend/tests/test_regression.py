@@ -26,7 +26,7 @@ def std_intake():
     return {
         "application": {
             "vin_rms_min": 90, "vin_rms_max": 264,
-            "output_bus_voltage_v": 393,
+            "output_bus_voltage_v": 394,
             "output_power_w_high_line": 3600,
             "output_power_w_low_line": 1700,
             "power_factor_target": 0.99,

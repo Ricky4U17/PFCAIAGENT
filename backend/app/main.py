@@ -194,7 +194,7 @@ def approve_channels(req: FbReq):
     mini = _fsw_defaults(sel_mode)
     intake = state.get("intake",{}); ap = intake.get("application",{})
     lpy = _calc_l_py(float(ap.get("output_power_w_low_line",1700)),float(ap.get("vin_rms_min",90)),
-                     float(ap.get("output_bus_voltage_v",393)),float(mini["recommended_frequency_hz"] or 70000),float(mini["default_crest_ripple_ratio"]),
+                     float(ap.get("output_bus_voltage_v",394)),float(mini["recommended_frequency_hz"] or 70000),float(mini["default_crest_ripple_ratio"]),
                      pout_hi=float(ap.get("output_power_w_high_line",3600)),
                      vin_max=float(ap.get("vin_rms_max",264)), eta_target=_eta_target_frac(ap))
     mini["indicative_L_uH"] = lpy["L_uH"]; mini["indicative_Iin_pk_A"] = lpy["Iin_pk"]
@@ -220,7 +220,7 @@ def submit_mini(req: FbReq):
     intake = state.get("intake",{}); ap = intake.get("application",{})
     fsw = float(tsi.get("recommended_frequency_hz") or 70000)
     lpy = _calc_l_py(float(ap.get("output_power_w_low_line",1700)),float(ap.get("vin_rms_min",90)),
-                     float(ap.get("output_bus_voltage_v",393)),fsw,crest,
+                     float(ap.get("output_bus_voltage_v",394)),fsw,crest,
                      pout_hi=float(ap.get("output_power_w_high_line",3600)),
                      vin_max=float(ap.get("vin_rms_max",264)), eta_target=_eta_target_frac(ap))
     tsi["confirmed_L_uH"]     = lpy["L_uH"]
@@ -244,10 +244,10 @@ def submit_mini(req: FbReq):
             float(ap.get("vin_rms_min", 90)), float(ap.get("vin_rms_max", 264)),
             float(ap.get("output_power_w_low_line", 1700)),
             float(ap.get("output_power_w_high_line", 3600)),
-            float(ap.get("output_bus_voltage_v", 393)), fsw, crest,
+            float(ap.get("output_bus_voltage_v", 394)), fsw, crest,
             _eta_target_frac(ap))
         _vpk90  = float(ap.get("vin_rms_min", 90)) * math.sqrt(2)
-        _d90    = max(0.001, 1 - _vpk90 / float(ap.get("output_bus_voltage_v", 393)))
+        _d90    = max(0.001, 1 - _vpk90 / float(ap.get("output_bus_voltage_v", 394)))
         _iinpk90 = math.sqrt(2) * float(_OPSm[0, 1]) / float(_OPSm[0, 2]) / (
             float(_OPSm[0, 0]) * float(_OPSm[0, 3]))
         _dil90  = _vpk90 * _d90 / (float(lpy["L_uH"]) * 1e-6 * fsw)
@@ -317,7 +317,7 @@ class _PowerPlantReq(BaseModel):
     vin_max: float = 264.0
     pout_lo: float = 1700.0
     pout_hi: float = 3600.0
-    vout:    float = 393.7
+    vout:    float = 394.0
     # designer's intake target efficiency (%) — anchors the η ladder's 264 Vac corner
     eta_target_pct: Optional[float] = None
 
@@ -664,7 +664,7 @@ def step6(req: ReportReq):
         from app.mode_b.magnetic_design import design_inductor, design_to_dict
         state = req.state; intake = state.get("intake",{}); ap = intake.get("application",{}); tsi = state.get("topology_specific_inputs",{})
         pout_lo = float(ap.get("output_power_w_low_line",1700)); vin_min = float(ap.get("vin_rms_min",90))
-        vout = float(ap.get("output_bus_voltage_v",393)); fsw = float(tsi.get("recommended_frequency_hz") or 70000)
+        vout = float(ap.get("output_bus_voltage_v",394)); fsw = float(tsi.get("recommended_frequency_hz") or 70000)
         crest = float(tsi.get("default_crest_ripple_ratio",0.095))
         lpy = _calc_l_py(pout_lo,vin_min,vout,fsw,crest)
         L_sel = round(lpy["L_uH"]/5)*5*1e-6; Iin_pk = lpy["Iin_pk"]; dIL = lpy["dIL"]
@@ -1185,7 +1185,7 @@ def step7_run_sizing(req: _SizingReq):
         # Extract design parameters from confirmed state
         L_uH   = float(tsi.get("confirmed_L_uH_sel", tsi.get("recommended_L_uH", 240)))
         fsw_Hz = float(tsi.get("recommended_frequency_hz", 70000))
-        Vout   = float(intake.get("application",{}).get("output_bus_voltage_v", 393))
+        Vout   = float(intake.get("application",{}).get("output_bus_voltage_v", 394))
         Pout_lo= float(intake.get("application",{}).get("output_power_w_low_line", 1700))
         Pout_hi= float(intake.get("application",{}).get("output_power_w_high_line", 3600))
         Vin_lo = float(intake.get("application",{}).get("vin_rms_min", 90))
@@ -1441,7 +1441,7 @@ def step8_time_domain(req: _Step8Req):
         Le_single_m  = float(d.get("Le_single_mm", 0)) * 1e-3
         loss_25C     = d.get("loss_table_25C", [])
         fsw_Hz       = float(tsi.get("recommended_frequency_hz", 70000))
-        Vbus         = float(application.get("output_bus_voltage_v", 393))
+        Vbus         = float(application.get("output_bus_voltage_v", 394))
 
         # Total zero-bias inductance L0 = AL_nom_total × N² (single-stack AL ×
         # stack count), matching the chain Step 7 uses for _half_cycle_averages.
@@ -2104,7 +2104,7 @@ def _control_corner_currents(ci: Dict[str, Any]) -> Dict[str, Any]:
         nch = int(ci.get("nch") or 2)
         d = {"vin_min": ci.get("vin_min", 90.0), "vin_max": ci.get("vin_max", 264.0),
              "pout_lo": ci["pout_lo"], "pout_hi": ci["pout_hi"],
-             "vout": ci.get("vout") or 393.7, "fsw": ci.get("fsw") or 70000.0,
+             "vout": ci.get("vout") or 394.0, "fsw": ci.get("fsw") or 70000.0,
              "r_input": ci.get("r_input", 0.20),
              "L_phi_uH": ci.get("lphi_uH"), "L_phi_curve": ci.get("l_curve")}
         ops, s2, _Lp, iph, L_pts = build_design_ops(d)

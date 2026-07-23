@@ -139,7 +139,7 @@ def generate_step15_section(result: dict) -> list:
     # ── 15.1 Inputs ──────────────────────────────────────────────────────────
     story.append(Paragraph('Step 15.1) Design Inputs', S['h2']))
     story.append(_kv_tbl([
-        ('V<sub>out</sub>',         f"{inp.get('Vout_V',393.7):.1f} Vdc"),
+        ('V<sub>out</sub>',         f"{inp.get('Vout_V',394.0):.1f} Vdc"),
         ('f<sub>line</sub>',        f"{inp.get('f_line_Hz',60):.0f} Hz"),
         ('V<sub>dc,ripple</sub>',   f"{inp.get('Vdc_ripple_V',20):.0f} V pk-pk"),
         ('V<sub>dc,min</sub> (hold-up floor)', f"{inp.get('Vdc_min_V',290):.0f} V"),

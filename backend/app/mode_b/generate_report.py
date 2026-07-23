@@ -45,7 +45,7 @@ def _extract_params(state: dict) -> dict:
     n_phases = int(state.get("selected_channels") or 2)
     ctrl_mode = state.get("selected_controller_mode") or "digital"
 
-    Vout        = float(app.get("output_bus_voltage_v", 393))
+    Vout        = float(app.get("output_bus_voltage_v", 394))
     Pout_high   = float(app.get("output_power_w_high_line", 3600))
     Pout_low    = float(app.get("output_power_w_low_line",  1700))
     fsw         = float(topo_inputs.get("recommended_frequency_hz") or 70000)

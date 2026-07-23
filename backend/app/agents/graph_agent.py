@@ -11,5 +11,5 @@ def generate_design_graphs(state):
     if topo.get("ranking"):
         artifacts["topology_scores"] = plot_topology_scores(topo["ranking"], out)
     app = state["intake"]["application"]
-    artifacts["duty_vs_line_angle"] = plot_duty_vs_line_angle(app.get("vin_rms_min", 90.0), app.get("output_bus_voltage_v", 390.0), out, app_line_frequency_hz(app))
+    artifacts["duty_vs_line_angle"] = plot_duty_vs_line_angle(app.get("vin_rms_min", 90.0), app.get("output_bus_voltage_v", 394.0), out, app_line_frequency_hz(app))
     return artifacts

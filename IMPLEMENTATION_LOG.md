@@ -4942,4 +4942,25 @@ FIX (designer rule: control loop uses DCR at the COPPER OPERATING temp = ambient
 - New `_wire_dcr_ohm_from_state(state)` in state_space_agent: r_L precedence = override → wire-derived
   from an approved inductor in state (same copper-temp interpolation) → 0.02 Ω representative default
   (the first-pass workflow magnetic model selects no wire, so nothing to derive from there). State-space
-  stays stable (VOLT fc 6 Hz PM 89 GM 7.6). Commit <pending>.
+  stays stable (VOLT fc 6 Hz PM 89 GM 7.6). Commit ad9bebe.
+
+
+## C123 — 2026-07-22 — POINT 27: actual Vout via Option B (tolerance check) + unify the Vout grab-bag
+
+Designer decision (Option B): use ONE Vout (the 394 V spec) everywhere + a CHECK that the feedback-
+resistor selection lands the actual within ±0.1%, rather than propagating spec (394) and resistor-actual
+(393.66) as two values (the 0.086 % difference is negligible and within tol).
+- CHECK added in step16_steps1_8 step5: vout_dev_pct, vout_within_tol (±0.1%), vout_spec; the FBPFC table
+  now shows "Actual V_OUT 393.66 V (−0.085% vs 394 V spec)" + a PASS/FAIL row ("re-select R_FB2" on fail).
+  hv_gain and all downstream already used the spec (p["vout"]) — Option B was half-there.
+- Unified the Vout grab-bag of fallback DEFAULTS to 394 (they never fire in production — real callers read
+  the intake field — but were inconsistent 390/393/393.7): intake/schema, main.py (_calc_l_py callers,
+  control-inputs helper, LResult dataclass), graph_agent, protection_compliance_agent, doc_report_builder
+  (raw_ap + Vout_V reads), generate_report, generate_full_report, generate_step15, report_steps1_8
+  (helper/param defaults), inputfilter/inputprotection/semiconductor adapters. State-space already reads
+  the intake field (no default) — the "390" the user saw was the test fixture.
+- Fixed hardcoded 393.7 in report TEXT: report_steps1_8 §6.5 ratio eq + PVO headroom block now compute
+  from s5 (vout_spec, vin_pk_264, pvo_min); the "393.7 V bus" prose → "regulated bus".
+- Test fixture confirmed_state 393 → 394 (the real spec, so the canonical scenario passes the check).
+- DEFERRED to point 26: the appendix hardcodes incl. "V_OUT = 393.7 V" (build_appendices takes no design
+  data yet — fixed when design is threaded in for point 26). Commit <pending>.

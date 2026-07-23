@@ -10,7 +10,7 @@ class ApplicationRequirements(BaseModel):
     nominal_line_frequency_hz: float = 60.0
     input_frequency_range_hz_min: float = 47.0
     input_frequency_range_hz_max: float = 63.0
-    output_bus_voltage_v: float = 390.0
+    output_bus_voltage_v: float = 394.0
     dc_bus_voltage_ripple_pk_pk_v: float = 20.0
     output_power_w_nom: float = 3600.0
     output_power_w_low_line: float = 1700.0

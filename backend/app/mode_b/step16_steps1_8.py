@@ -40,7 +40,7 @@ def _nearest_e96(v: float) -> float:
 # ── default inputs (from the earlier power-stage / spec steps) ──────────────────
 DEFAULT_INPUTS = dict(
     vin_ll_min=90.0, vin_ll_max=132.0, vin_hl_min=180.0, vin_hl_max=264.0,
-    pout_lo=1700.0, pout_hi=3600.0, vout=393.7, fsw=70000.0,
+    pout_lo=1700.0, pout_hi=3600.0, vout=394.0, fsw=70000.0,
     lphi_uH=235.0, nch=2, cout_uF=2200.0, eta_lo=0.945, eta_hi=0.965,
     iphi_rms_lo=10.12, iphi_rms_hi=10.59, iphi_pk_lo=16.76, iphi_pk_hi=17.51,
     # designer-selected loop crossovers (GUI) — used for descriptions / Steps 13–14
@@ -172,16 +172,29 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     hv_gain = c["vref"] / p["vout"]
     vin_pk_264 = SQRT2 * p["vin_hl_max"]
     pvo_min = vin_pk_264 + 25.0
+    # Point-27 tolerance CHECK: the nearest-standard R_FB2 makes the regulated bus differ slightly from
+    # the designer's spec. Rather than propagate two Vout values, we require the divider to land the
+    # actual within ±0.1% of spec and then use the SPEC value everywhere downstream. If the check ever
+    # fails, the divider must be re-selected (a closer E96/E192 pair) — the report flags it instead of
+    # silently drifting.
+    VOUT_TOL_PCT = 0.1
+    vout_dev_pct = (vout_actual - p["vout"]) / p["vout"] * 100.0
+    vout_within_tol = abs(vout_dev_pct) <= VOUT_TOL_PCT
     out["step5"] = {
         "rfb1": rfb1, "rfb1_unit": p["rfb1_unit"], "rfb1_count": p["rfb1_count"],
         "rfb2": rfb2, "rfb2_calc": rfb2_calc, "ratio": ratio, "ratio_target": ratio_target,
         "vout_actual": vout_actual, "hv_gain": hv_gain, "vin_pk_264": vin_pk_264,
+        "vout_spec": p["vout"], "vout_dev_pct": vout_dev_pct,
+        "vout_tol_pct": VOUT_TOL_PCT, "vout_within_tol": vout_within_tol,
         "pvo_min": pvo_min, "pvo_enabled": p["vout"] >= pvo_min,
         "rows": [
             ["R_FB1 (upper, fixed)", f"{p['rfb1_count']}×{p['rfb1_unit']/1e6:.2f} MΩ = {rfb1/1e6:.2f} MΩ",
              "Fixed series string for HV rating / creepage"],
             ["R_FB2 (lower, adjust)", f"{rfb2/1e3:.1f} kΩ", "Designer adjusts this to set V_OUT"],
-            ["Actual V_OUT", f"{vout_actual:.2f} V", f"{(vout_actual-p['vout'])/p['vout']*100:+.3f}% vs target"],
+            ["Actual V_OUT", f"{vout_actual:.2f} V", f"{vout_dev_pct:+.3f}% vs {p['vout']:.0f} V spec"],
+            ["Within ±%.1f%% tol?" % VOUT_TOL_PCT, "PASS" if vout_within_tol else "FAIL",
+             "Spec V_OUT used in all downstream calcs" if vout_within_tol
+             else "Re-select R_FB2 (closer standard value)"],
             ["Feedback gain H_v", f"{hv_gain:.5f}", "V_FBPFC / V_OUT"],
         ],
     }

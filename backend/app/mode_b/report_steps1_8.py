@@ -177,7 +177,7 @@ def build_steps_1_8(story, data: dict):
         "The output divider does two jobs: it sets the regulation point (the bus voltage at which "
         "the divided feedback equals the 2.5 V reference) and it defines the feedback gain "
         "H<sub>v</sub> = V<sub>FBPFC</sub>/V<sub>OUT</sub> that appears in every voltage-loop "
-        "equation. A high divider impedance minimises standing loss on the 393.7 V bus but must "
+        "equation. A high divider impedance minimises standing loss on the regulated bus but must "
         "stay low enough to swamp the FBPFC pin bias current.", C6)
     sub_h(story, "6.5.1", "FBPFC Voltage Divider Design", C6)
     body(story, "The FAN9672 regulates the FBPFC pin to a 2.500 V reference. The output is sensed "
@@ -190,7 +190,8 @@ def build_steps_1_8(story, data: dict):
     _wstep(story, "Step 1 — Fixed upper resistor (3 × 1.21 MΩ):",
            r"R_{FB1}=3\times1.21\ \mathrm{M\Omega}=3.63\ \mathrm{M\Omega}\ \ (\mathrm{fixed})")
     _wstep(story, "Step 2 — Required ratio for the target V_OUT:",
-           r"\dfrac{R_{FB1}+R_{FB2}}{R_{FB2}}=\dfrac{V_{OUT}}{V_{FBPFC}}=\dfrac{393.7}{2.500}=%.2f" % s5["ratio_target"])
+           r"\dfrac{R_{FB1}+R_{FB2}}{R_{FB2}}=\dfrac{V_{OUT}}{V_{FBPFC}}=\dfrac{%.1f}{2.500}=%.2f"
+           % (s5.get("vout_spec", 394.0), s5["ratio_target"]))
     _wstep(story, "Step 3 — Solve for the lower resistor (the adjustment):",
            r"R_{FB2}=\dfrac{R_{FB1}}{V_{OUT}/V_{FBPFC}-1}=\dfrac{3\,630\,000}{%.2f}=%.0f\ \Omega\ \to\ 23.2\ \mathrm{k\Omega}\ (E96)"
            % (s5["ratio_target"]-1, s5["rfb2_calc"]))
@@ -207,12 +208,18 @@ def build_steps_1_8(story, data: dict):
     sub_h(story, "6.5.2", "PVO Pin — Voltage Headroom Warning", C6)
     body(story, "AN4165-D and FAN9672-D require the bus to stay at least 25 V above the AC input "
                 "peak when PVO is active. Evaluated at the worst-case 264 Vac:", C6)
-    eq_box(story, [r"V_{IN,pk}\ (264\ \mathrm{Vac})=264\times\sqrt{2}=373.4\ \mathrm{V}",
-                   r"V_{OUT,min}\ \mathrm{required}=373.4+25=398.4\ \mathrm{V}"], ch=C6)
+    _vin_hl = float(data["inputs"].get("vin_hl_max", 264.0))
+    _vpk    = s5["vin_pk_264"]
+    _pvomin = s5["pvo_min"]
+    _vspec  = s5.get("vout_spec", 394.0)
+    _head   = _pvomin - _vspec                          # +ve → bus below the PVO minimum
+    eq_box(story, [r"V_{IN,pk}\ (%.0f\ \mathrm{Vac})=%.0f\times\sqrt{2}=%.1f\ \mathrm{V}" % (_vin_hl, _vin_hl, _vpk),
+                   r"V_{OUT,min}\ \mathrm{required}=%.1f+25=%.1f\ \mathrm{V}" % (_vpk, _pvomin)], ch=C6)
     annotation(story, "DECISION",
-        "PVO = 0 V (disabled) throughout this design. The 393.7 V bus is 4.7 V below the 398.4 V "
-        "minimum required for PVO at 264 Vac. Do not reduce the bus at high line; PVO may only be "
-        "enabled where the reduced bus still stays ≥ 25 V above V<sub>IN,pk</sub>.", C6)
+        ("PVO = 0 V (disabled) throughout this design. The %.1f V bus is %.1f V %s the %.1f V "
+         "minimum required for PVO at %.0f Vac. Do not reduce the bus at high line; PVO may only be "
+         "enabled where the reduced bus still stays ≥ 25 V above V<sub>IN,pk</sub>."
+         % (_vspec, abs(_head), "below" if _head > 0 else "above", _pvomin, _vin_hl)), C6)
 
     # ═══════════════ Step 6 ═══════════════
     _build_step6(story, data)
@@ -363,7 +370,7 @@ def _build_step6(story, data):
         _nch = int(p.get("nch") or 2)
         _d = {"vin_min": p.get("vin_min", 90), "vin_max": p.get("vin_max", 264),
               "pout_lo": p.get("pout_lo", 1700), "pout_hi": p.get("pout_hi", 3600),
-              "vout": p.get("vout", 393.7), "fsw": p.get("fsw", 70000),
+              "vout": p.get("vout", 394.0), "fsw": p.get("fsw", 70000),
               "nch": _nch, "r_input": p.get("r_input", 0.20)}
         _ops, _s2, _Lp, _iph, _Lpts = build_design_ops(_d)
         _rows = []
@@ -564,7 +571,7 @@ def _build_step7(story, data):
         "(high line)." % (s7["gC_ll"], s7["gC_hl"]), C6)
 
 
-def _gmod_paths(story, A, B, Cc, rng, bc, hl=False, pout=1700.0, nch=2, vout=393.7, rcs=0.015, kmax=1.49):
+def _gmod_paths(story, A, B, Cc, rng, bc, hl=False, pout=1700.0, nch=2, vout=394.0, rcs=0.015, kmax=1.49):
     body(story, "<b>Path A — Signal Chain</b>", C6)
     _wstep(story, "Step 1 — Numerator (K_RM × R_IAC):", r"6\,000\times%s=%s"
            % ("12\\,000\\,000" if hl else "6\\,000\\,000", _sci(A["num"])))

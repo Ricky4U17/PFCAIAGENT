@@ -115,7 +115,7 @@ def emi_options() -> dict:
 # reference smoke test:  python -m app.mode_b.inputfilter.adapter
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,
-    "vout": 393.7, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 240,
+    "vout": 394.0, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 240,
 }
 if __name__ == "__main__":
     import json

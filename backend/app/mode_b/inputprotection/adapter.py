@@ -64,7 +64,7 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         vac_max=float(design.get("vin_max", 264)),
         vac_nom=float(opts.get("vac_nom", 230)),
         f_line=float(design.get("fline", 60)),
-        vout_bus=float(design.get("vout", 390)),
+        vout_bus=float(design.get("vout", 394)),
         cout=float(cout_f),
         i_inrush_target=float(opts.get("i_inrush_target", 60.0)),
         p_out=0.0,                                        # use the grid's I_rms verbatim
@@ -178,7 +178,7 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
 # ── reference smoke test:  python -m app.mode_b.inputprotection.adapter ──
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,
-    "vout": 393.7, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 235,
+    "vout": 394.0, "fsw": 70000, "fline": 60, "nch": 2, "r_input": 0.20, "L_phi_uH": 235,
 }
 REFERENCE_CAP = {"C_total_uF": 2350, "V_rating": 450}
 REFERENCE_MOSFET = {"vdss": 650}

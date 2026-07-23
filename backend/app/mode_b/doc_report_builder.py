@@ -915,7 +915,7 @@ def _ch1(story, state):
     vin_max  = float(raw_ap.get("vin_rms_max", 264))
     pout_lo  = float(raw_ap.get("output_power_w_low_line", 1700))
     pout_hi  = float(raw_ap.get("output_power_w_high_line", 3600))
-    vout     = float(raw_ap.get("output_bus_voltage_v", 393))
+    vout     = float(raw_ap.get("output_bus_voltage_v", 394))
     vripple  = float(raw_ap.get("bus_voltage_ripple_pk_pk_v", 20))
     f_line   = float(raw_ap.get("nominal_line_frequency_hz", 60))
     t_hold   = float(raw_ap.get("hold_up_time_ms", 20))
@@ -1122,7 +1122,7 @@ def _ch2(story, state):
     reasons= strat.reasoning if strat and strat.reasoning else []
     tsi    = ds.topology_specific_inputs
 
-    vout    = float(raw_ap.get("output_bus_voltage_v", 393))
+    vout    = float(raw_ap.get("output_bus_voltage_v", 394))
     pout_lo = float(raw_ap.get("output_power_w_low_line", 1700))
     pout_hi = float(raw_ap.get("output_power_w_high_line", 3600))
     vin_min = float(raw_ap.get("vin_rms_min", 90))
@@ -1684,7 +1684,7 @@ def _ch3(story, state, d):
     raw_th = state.get("intake",{}).get("thermal",{})
     tsi    = ds.topology_specific_inputs
 
-    vout    = float(raw_ap.get("output_bus_voltage_v", 393))
+    vout    = float(raw_ap.get("output_bus_voltage_v", 394))
     pout_lo = float(raw_ap.get("output_power_w_low_line", 1700))
     pout_hi = float(raw_ap.get("output_power_w_high_line", 3600))
     vin_min = float(raw_ap.get("vin_rms_min", 90))
@@ -4049,7 +4049,7 @@ def _ch5(story, state, s15):
     factor = factor.replace("C_holdup", "hold-up").replace("C_ripple", "ripple")
     t_hold = float(inp.get("t_hold_ms", s15.get("t_hold_ms", 20)) or 20)
     V_min  = float(inp.get("Vdc_min_V", s15.get("V_min_holdup_V", 300)) or 300)
-    Vout   = float(inp.get("Vout_V", s15.get("Vout_V", 393)) or 393)
+    Vout   = float(inp.get("Vout_V", s15.get("Vout_V", 394)) or 394)
     Pout   = float(wc.get("Pout", s15.get("Pout_W", 3600)) or 3600)
     f_line = float(inp.get("f_line_Hz", 60) or 60)
     dV_rip = float(inp.get("Vdc_ripple_V", s15.get("dV_ripple_V", 0)) or 0)
@@ -4571,7 +4571,7 @@ def _ch6(story, state, s16, approved_design=None):
                 DCR_mOhm  = _loop_dcr_mohm(approved_design, state, s16),
                 C_uF      = float(s16.get("C_uF", 1410)),
                 ESR_mOhm  = float(s16.get("ESR_mOhm", 12.7)),
-                Vout_V    = float(s16.get("Vout_V", 393)),
+                Vout_V    = float(s16.get("Vout_V", 394)),
                 fsw_Hz    = float(s16.get("fsw_Hz", 70000)),
                 Pout_lo_W = float(s16.get("Pout_lo_W", 1700)),
                 Pout_hi_W = float(s16.get("Pout_hi_W", 3600)),
@@ -4701,7 +4701,7 @@ def _ch6(story, state, s16, approved_design=None):
                 ["R_CS — current-sense gain", (f"{_rcs:.0f} mΩ" if _rcs else "—"),
                  "sets the peak-current (ILIMIT) clamp"],
                 ["f_sw — switching frequency", _fhz(res.get("fsw_Hz")), "per channel, fixed"],
-                ["V_out — regulation setpoint", f"{res.get('Vout_V',393):.0f} V",
+                ["V_out — regulation setpoint", f"{res.get('Vout_V',394):.0f} V",
                  "set by the VFB divider ratio"],
             ],
             col_widths=[CW*0.34, CW*0.22, CW*0.44], ch=6)
@@ -4872,7 +4872,7 @@ def _ch6_loop_derivation(story, res):
     local reference database. First pass — the algebraic backbone and the final
     equations; numerical compensator design is in Section 6.4–6.6."""
     # ── operating values (from step16, with the design's reference values as fallback) ──
-    Vout = float(res.get("Vout_V", 393));  Co_uF = float(res.get("C_uF", 2200))
+    Vout = float(res.get("Vout_V", 394));  Co_uF = float(res.get("C_uF", 2200))
     rC_m = float(res.get("ESR_mOhm", 10)); rL_m = float(res.get("DCR_mOhm", 10))
     L_uH = float(res.get("L_uH", 235));    fsw  = float(res.get("fsw_Hz", 70000))
     Nch  = int(res.get("nch", 2));         Plo  = float(res.get("Pout_lo_W", 1700))
