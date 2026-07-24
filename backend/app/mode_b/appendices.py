@@ -79,10 +79,10 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
     }
 
 
-def build_appendices(story, prior=None, s10=None, s11=None, s12=None, s13=None):
+def build_appendices(story, prior=None, s10=None, s11=None, s12=None, s13=None, inp=None):
     ctx = _appendix_ctx(prior, s10, s11, s12, s13)
     _appendix_a(story, ctx)
-    _appendix_b(story, ctx)
+    _appendix_b(story, ctx, prior=prior, inp=inp)
     _appendix_c(story)
     _appendix_d(story)
     _appendix_e(story, ctx)
@@ -468,7 +468,7 @@ def _appendix_a(story, ctx):
 
 
 # ════════════════════════════ Appendix B ════════════════════════════════════
-def _appendix_b(story, ctx):
+def _appendix_b(story, ctx, prior=None, inp=None):
     step_h(story, "Appendix B", "Bill of Materials (Control Components)", CH)
     body(story,
         "External components that set the control behaviour, with the step that derives each. "
@@ -496,6 +496,18 @@ def _appendix_b(story, ctx):
         "Use C0G/NP0 or film dielectrics for every compensator capacitor. Class-II ceramics (X7R and "
         "worse) lose 20–80% of their capacitance with DC bias and temperature, which would shift the "
         "carefully placed pole/zero frequencies and erode phase margin in the field.", CH)
+    # B.2 — the full FAN9672 application schematic, placed right after the Table B.1 BOM so the bill of
+    # materials and the control circuit can be read together (one circuit per page).
+    if prior is not None:
+        try:
+            from app.mode_b.report_steps1_8 import _build_app_schematic_section
+            body(story,
+                 "The complete control circuit below realises every Table B.1 designator. Each line-range "
+                 "sheet is on its own page for direct comparison against the bill of materials above.", CH)
+            _build_app_schematic_section(story, inp or {}, prior,
+                                         sec="B.2", fig_prefix="B.2", one_per_page=True, ch=CH)
+        except Exception:
+            pass
 
 
 # ════════════════════════════ Appendix C ════════════════════════════════════

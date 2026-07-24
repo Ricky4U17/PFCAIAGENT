@@ -751,12 +751,17 @@ def _build_asbuilt_L_section(story, inp: dict, prior: dict):
          "basis passed to the control design."), C6)
 
 
-def _build_app_schematic_section(story, inp, prior):
-    """§6.8.7 — the complete FAN9672 application schematic (all pin networks), rendered TWICE:
-    once for the low-line (FR) mode and once for the high-line (HV) mode. Component values are
-    identical between the two; only the mode-set items differ (R_IAC series count, VIR threshold)
-    plus the per-line operating annotations. Design-specific values are threaded from the sized
-    components; fixed-practice filters fall back to datasheet-practice defaults."""
+def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8.7",
+                                 one_per_page=False, ch=None):
+    """The complete FAN9672 application schematic (all pin networks), rendered TWICE: once for the
+    low-line (FR) mode and once for the high-line (HV) mode. Component values are identical between
+    the two; only the mode-set items differ (R_IAC series count, VIR threshold) plus the per-line
+    operating annotations. Design-specific values are threaded from the sized components; fixed-
+    practice filters fall back to datasheet-practice defaults. `sec`/`fig_prefix` set the section and
+    figure labels (default the in-chapter §6.8.7; Appendix B.2 passes "B.2"); `one_per_page` puts each
+    schematic on its own page so it sits beside the Table B.1 BOM for comparison."""
+    from reportlab.platypus import PageBreak
+    _ch = ch if ch is not None else C6   # chapter style (Ch6 in-line; Appendix B passes its own)
     from app.mode_b.schematics import fan9672_application_schematic
     from app.mode_b.step16_step9_bibo import compute_step9_bibo
     from app.mode_b.step16_step10_iloop import compute_step10_iloop
@@ -781,7 +786,7 @@ def _build_app_schematic_section(story, inp, prior):
         i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
     )
-    sub_h(story, "6.8.7", "FAN9672 Application Schematic — Low Line and High Line", C6)
+    sub_h(story, sec, "FAN9672 Application Schematic — Low Line and High Line", _ch)
     body(story,
         "The complete FAN9672 front-end with every external component annotated from the sized "
         "bill of materials — amber values are live design selections; grey \"(typ)\" parts are "
@@ -789,19 +794,27 @@ def _build_app_schematic_section(story, inp, prior):
         "values are <b>identical</b> at both line ranges; only the mode-set items differ — R<sub>IAC</sub> "
         "(FR: 3×2 MΩ / HV: 6×2 MΩ), the VIR mode threshold, and the per-line operating point in the "
         "title block. Compensator networks (R<sub>IC</sub>, R<sub>VC</sub>, FBPFC divider) are sized "
-        "in Section 6.10 and Section 6.11.", C6)
+        "in Section 6.10 and Section 6.11.", _ch)
     _vlo_s = float((prior or {}).get("inputs", {}).get("vin_ll_min", 90))
     _vhi_s = float((prior or {}).get("inputs", {}).get("vin_hl_max", 264))
     for hi, tag, lab in [(False, "a", f"Low line — FR mode, {_vlo_s:.0f}–132 Vac"),
                          (True, "b", f"High line — HV mode, 180–{_vhi_s:.0f} Vac")]:
+        if one_per_page:
+            story.append(PageBreak())
         v = dict(base)
         v["crest_A"]   = s8.get("crest_hl" if hi else "crest_ll") or 0
         v["iphi_pk_A"] = s8.get("ilpk_hl" if hi else "ilpk_ll") or 0
-        body(story, f"<b>Figure 6.8.7{tag} — FAN9672 application schematic ({lab})</b>", C6)
+        body(story, f"<b>Figure {fig_prefix}{tag} — FAN9672 application schematic ({lab})</b>", _ch)
+        body(story,
+             ("High-line (HV) mode: R<sub>IAC</sub> = 6×2 MΩ and the VIR high-range threshold; "
+              "operating point %.0f–%.0f Vac." % (180, _vhi_s)) if hi else
+             ("Low-line (FR) mode: R<sub>IAC</sub> = 3×2 MΩ and the VIR low-range threshold; "
+              "operating point %.0f–132 Vac. Control-network values match the high-line sheet." % _vlo_s),
+             _ch)
         try:
             story.append(fan9672_application_schematic(v, is_high=hi))
         except Exception:
-            body(story, "<i>(schematic unavailable)</i>", C6)
+            body(story, "<i>(schematic unavailable)</i>", _ch)
 
 
 def build_story(inp: dict | None = None):
@@ -843,7 +856,8 @@ def build_story(inp: dict | None = None):
     # Each build_stepN / build_appendices starts with step_h(), which already inserts a
     # PageBreak — so NO explicit PageBreak here (an extra one would create a blank page).
     build_steps_1_8(story, prior)
-    _build_app_schematic_section(story, inp or {}, prior)   # §6.8.7 — Lo/Hi line application schematics
+    # (FAN9672 application schematic moved to Appendix B.2 — rendered after the Table B.1 BOM so the
+    #  bill of materials and the control circuit can be compared side by side.)
     build_step9(story, compute_step9_bibo(inp))
     s10 = compute_step10_iloop(inp, prior)
     build_step10(story, s10)
@@ -856,7 +870,7 @@ def build_story(inp: dict | None = None):
     build_step13(story, s13)
     s13["lphi_uH"] = inp.get("lphi_uH"); s13["cout_uF"] = inp.get("cout_uF")  # for the "fixed components" note
     build_step14(story, s13)
-    build_appendices(story, prior=prior, s10=s10, s11=s11, s12=s12, s13=s13)
+    build_appendices(story, prior=prior, s10=s10, s11=s11, s12=s12, s13=s13, inp=inp or {})
     while story and isinstance(story[0], PageBreak):
         story.pop(0)
     return story

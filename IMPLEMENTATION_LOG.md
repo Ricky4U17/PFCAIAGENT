@@ -5056,4 +5056,22 @@ design calc + GUI selection (no hardcoded reference values).
 VERIFIED: R_CS reference = 15.00 mΩ (computed); both Type-3 and Type-2 Step-11 PDFs build; shared prose
 reflects the selected type ("uses the Type-II compensator reproduced" for Type-2); c factor = 1.0155 =
 √(1+(fz1/fcv)²); Ch6 control report renders R_CS 15.0 mΩ + "Computed best" note. Suite: 172 passed /
-2 skipped (green). Commit <pending>.
+2 skipped (green). Commit ef5fa2c.
+
+## C135 — 2026-07-23 — Correction batch pts 4 & 2: fcv threading + §6.8.7 schematic → Appendix B.2
+
+Two points from the designer's 5-point correction review (order 4→2→5→1→3).
+**Point 4 (fcv 17 vs 18):** the designer's report showing 17 Hz predated C134 (a/b/c/d were hardcoded to
+17). Verified the PRODUCTION path already threads the GUI f_cv correctly: main.py `_control_inputs_from_step16`
+maps `fcv_Hz→out["fcv"]`; `build_story` does `prior=compute_steps_1_8(inp)` then
+`compute_step11_vloop(inp, prior)`, so with f_cv=18 the a/b/c/d use 18/17 and Table 6.12.1 HL fco=18.0.
+Fixed a LATENT standalone bug: `compute_step10_iloop`/`compute_step11_vloop` recomputed
+`compute_steps_1_8()` WITHOUT `inp` when `prior is None`, dropping the designer f_cv on the standalone/test
+path — now pass `compute_steps_1_8(inp)`. No other 17 Hz hardcode found (6.12.1 uses computed fco).
+**Point 2 (schematic placement):** moved the FAN9672 application schematic from mid-Ch6 §6.8.7 to
+Appendix B.2, immediately after the Table B.1 control BOM, so the BOM and control circuit are compared
+together. Parametrized `_build_app_schematic_section(… sec, fig_prefix, one_per_page, ch)`; removed the
+§6.8.7 call from `build_story`; threaded `inp` through `build_appendices`→`_appendix_b`, which now renders
+B.2 (one circuit per page, low-line + high-line, each with a mode description) after the BOM using the
+appendix chapter style. Verified: §6.8.7 gone from Ch6; Table B.1 p82 → Figure B.2a p83 → B.2b p84.
+Suite: 172 passed / 2 skipped (green). Commit <pending>.

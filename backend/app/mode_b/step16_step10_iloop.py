@@ -78,7 +78,7 @@ def compute_step10_iloop(inp: dict | None = None, prior: dict | None = None) -> 
         p.update(inp)
     if prior is None:
         from app.mode_b.step16_steps1_8 import compute_steps_1_8
-        prior = compute_steps_1_8()
+        prior = compute_steps_1_8(inp)   # thread designer specs (fcv, R_CS, …) into the standalone path
 
     # ── inputs sourced from prior steps / spec (NOT hard-coded) ───────────────
     pin = prior["inputs"]

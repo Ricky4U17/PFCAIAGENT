@@ -65,7 +65,7 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
         p.update(inp)
     if prior is None:
         from app.mode_b.step16_steps1_8 import compute_steps_1_8
-        prior = compute_steps_1_8()
+        prior = compute_steps_1_8(inp)   # thread designer specs (fcv, R_CS, …) into the standalone path
     from app.mode_b.step16_step10_iloop import compute_step10_iloop
     s10 = compute_step10_iloop(prior=prior)
 
