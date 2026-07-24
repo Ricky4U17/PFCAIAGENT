@@ -5119,4 +5119,4 @@ compensator is still sized at rows[0] (lowest Vin = highest bias = MINIMUM L), s
 the old `_asb_min_uH` anchor — design point unchanged; only the per-op sweep/Bode now show the true (lower)
 crossover at higher-L points, exactly as the §6.10.14 narrative asserts. Falls back to constant L when no
 l_curve. Verified: per-op L tracks the curve (90→200…264→340 µH), frhp/fco vary per op, no-curve → constant;
-full Ch6 report builds. Suite: 172 passed / 2 skipped (green). Commit <pending>.
+full Ch6 report builds. Suite: 172 passed / 2 skipped (green). Commit a30bd30.
