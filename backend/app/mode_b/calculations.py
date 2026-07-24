@@ -121,15 +121,19 @@ def canonical_ops_table(vin_min: float, vin_max: float,
     table (directly or via build_design_ops_table) so that derived figures such as
     Iph_rms never diverge between Table 3.2.4 and Table 3.4.1.
 
-    Derivation rules (designer-specified 2026-07-22):
+    Derivation rules (designer-specified 2026-07-22, PF revised 2026-07-23):
       • Voltages: the 7 middle points (110..230) are kept; only the endpoints move to
-        the designer's vin_min / vin_max.
-      • eta/PF at the two moved endpoints are EXTRAPOLATED along the internal curve
-        (linear from the two nearest reference points), so 85 Vac ≠ the 90 Vac value.
-      • eta is scaled by a single ratio to hit eta_target at the high-line best corner
-        (last row); PF is scaled by a single ratio to hit pf_target at the low-line best
-        corner (first row). The internal reference values below are NOT changed — they
-        are the ratio/extrapolation basis only."""
+        the designer's vin_min / vin_max (both clamped to the hard [85, 264] V limit).
+      • POWER FACTOR is FIXED by the designer's anchor curve — two bands (low-line
+        85–132 V, high-line 180–264 V) interpolated by slope, never scaled to a target
+        and never extrapolated. Listed anchor voltages keep their exact PF; other
+        voltages are read from the band slope. pf_target no longer affects PF.
+      • EFFICIENCY at the two moved endpoints is EXTRAPOLATED along the internal curve
+        and scaled by a single ratio to hit eta_target at the high-line best corner."""
+    # Hard input limit: the design range is constrained to [85, 264] Vac everywhere (designer
+    # 2026-07-23). Clamp the corners defensively so the grid never leaves the anchor-curve domain.
+    vin_min = max(85.0, min(264.0, float(vin_min)))
+    vin_max = max(85.0, min(264.0, float(vin_max)))
     # Internal reference design curve at the 90..264 corners — DO NOT change these values.
     # (High-line efficiencies are the loss-derived re-estimate from Ch 7.9.)
     _ref = np.array([
@@ -145,7 +149,18 @@ def canonical_ops_table(vin_min: float, vin_max: float,
     ], dtype=float)
     Vref = _ref[:, 0]
 
-    def _extrap(ys, x):   # linear interp, linear extrapolation beyond the reference corners
+    # Fixed power-factor anchor curve (designer-specified — NOT scaled to a target, NOT extrapolated).
+    # Two bands so interpolation never crosses the 132→180 V gap: low-line (85–132 V) and high-line
+    # (180–264 V). The 85 V anchor extends the low band down to the hard [85, 264] V input limit.
+    _PF_LO = [(85.0, 0.9990), (90.0, 0.9987), (110.0, 0.9986), (120.0, 0.9985), (132.0, 0.9980)]
+    _PF_HI = [(180.0, 0.9889), (200.0, 0.9884), (220.0, 0.9790), (230.0, 0.9789), (264.0, 0.9520)]
+
+    def _pf_curve(v):   # PF from the fixed anchor slope; clamped into the band domain (hard [85,264])
+        band = _PF_LO if v < 180 else _PF_HI
+        xs = [p[0] for p in band]; ys = [p[1] for p in band]
+        return float(np.interp(min(max(v, xs[0]), xs[-1]), xs, ys))
+
+    def _extrap(ys, x):   # efficiency only: linear interp, linear extrapolation beyond the corners
         if x <= Vref[0]:
             return ys[0] + (ys[1] - ys[0]) / (Vref[1] - Vref[0]) * (x - Vref[0])
         if x >= Vref[-1]:
@@ -153,13 +168,14 @@ def canonical_ops_table(vin_min: float, vin_max: float,
         return float(np.interp(x, Vref, ys))
 
     m = _ref.copy()
-    # move the endpoints to the designer's corners + extrapolate their eta/PF for the new voltage
-    m[0, 0], m[0, 2], m[0, 3] = vin_min, _extrap(_ref[:, 2], vin_min), _extrap(_ref[:, 3], vin_min)
-    m[-1, 0], m[-1, 2], m[-1, 3] = vin_max, _extrap(_ref[:, 2], vin_max), _extrap(_ref[:, 3], vin_max)
+    # move the endpoints to the designer's corners: efficiency extrapolated along the internal curve,
+    # power factor read from the FIXED anchor curve (interior rows keep their anchor PF unchanged).
+    m[0, 0], m[0, 2], m[0, 3] = vin_min, _extrap(_ref[:, 2], vin_min), _pf_curve(vin_min)
+    m[-1, 0], m[-1, 2], m[-1, 3] = vin_max, _extrap(_ref[:, 2], vin_max), _pf_curve(vin_max)
     if eta_target:   # scale eta ladder → target at the high-line best corner (last row)
         m[:, 2] = np.clip(m[:, 2] * (float(eta_target) / m[-1, 2]), 0.0, 0.999)
-    if pf_target:    # scale PF ladder → target at the low-line best corner (first row)
-        m[:, 3] = np.clip(m[:, 3] * (float(pf_target) / m[0, 3]), 0.0, 1.0)
+    # Power factor is fixed by the anchor curve — pf_target no longer scales it (the parameter is kept
+    # in the signature for backward compatibility with existing callers).
     return m
 
 

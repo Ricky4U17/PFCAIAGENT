@@ -149,12 +149,28 @@ def controller_db_sources(controller: Optional[str] = None):
     except Exception as exc:
         raise HTTPException(500, detail=str(exc))
 
+def _clamp_input_voltage(app_dict) -> None:
+    """Enforce the hard [85, 264] Vac input limit in place (designer 2026-07-23): values outside the
+    range are not permitted, so clamp vin_rms_min / vin_rms_max to the bounds at intake. All downstream
+    consumers read the clamped application spec, keeping the grid, BIBO and prose consistent."""
+    if not isinstance(app_dict, dict):
+        return
+    for _k in ("vin_rms_min", "vin_rms_max"):
+        _v = app_dict.get(_k)
+        if _v is not None:
+            try:
+                app_dict[_k] = max(85.0, min(264.0, float(_v)))
+            except (TypeError, ValueError):
+                pass
+
+
 @app.post("/mode-a/start", tags=["mode-a"])
 def start(req: StartReq):
     try:
         from app.intake.topology_selector import select_topology
         intake = req.intake
         if "vin_rms_min" in intake: intake = {"application": intake}
+        _clamp_input_voltage(intake.get("application"))   # hard [85, 264] Vac limit (designer 2026-07-23)
         res = select_topology(intake)
         state = {"intake": intake, "project_id": req.project_id,
                  "topology_recommendation": {"recommended_topology": res["recommended_topology"], "recommended_mode": res["recommended_mode"]}}

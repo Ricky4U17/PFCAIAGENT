@@ -137,12 +137,12 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
         <SecHead icon="⚡" label="Electrical requirements" />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '0 24px' }}>
           <Field label="Vin min (Vrms)">
-            <Inp value={d.application.vin_rms_min} min={47} max={120}
-              onChange={v => set('application.vin_rms_min', v)} />
+            <Inp value={d.application.vin_rms_min} min={85} max={132}
+              onChange={v => set('application.vin_rms_min', Math.max(85, Math.min(264, Number(v))))} />
           </Field>
           <Field label="Vin max (Vrms)">
-            <Inp value={d.application.vin_rms_max} min={200} max={277}
-              onChange={v => set('application.vin_rms_max', v)} />
+            <Inp value={d.application.vin_rms_max} min={180} max={264}
+              onChange={v => set('application.vin_rms_max', Math.max(85, Math.min(264, Number(v))))} />
           </Field>
           <Field label="Output bus voltage (V)">
             <Inp value={d.application.output_bus_voltage_v} min={200} max={800}

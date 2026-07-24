@@ -5088,4 +5088,19 @@ eight worked blocks: bridge (7.3.1), MOSFET conduction (7.4.1), switching (7.4.2
 symbolic eq_box above the table. Used clean `avg[…]` notation for cycle-averages (no overline-char hack).
 Verified against the reference design: e.g. 7.4.1 renders R_ds(on)=60.0m×1.193(Tj=73°C)=71.6 mΩ →
 I_FET,rms=8.575 A → P_cond=2×71.6m×(8.575)²=10.53 W for low line, alongside the high-line column.
+Suite: 172 passed / 2 skipped (green). Commit 2f5135f.
+
+## C137 — 2026-07-23 — Correction batch pt 1: fixed PF anchor curve + hard [85,264] Vac clamp
+
+Point 1. Power factor is now FIXED by the designer's anchor curve — no longer scaled to a target or
+extrapolated. In `calculations.py canonical_ops_table`: added the 85 V→0.999 anchor and split the PF curve
+into two bands (low-line 85–132 V, high-line 180–264 V) interpolated by slope so it never crosses the
+132→180 gap; the listed anchor voltages keep their exact PF (90→0.9987 … 264→0.9520), other voltages read
+from the band slope. REMOVED the pf_target scaling (kept the param in the signature for callers — it no
+longer affects PF). Efficiency handling unchanged (still extrapolated + eta_target-scaled). Hard input
+limit [85, 264] Vac enforced everywhere: defensive clamp of vin_min/vin_max at the top of
+canonical_ops_table (grid never leaves the anchor domain) + `_clamp_input_voltage` at the /mode-a/start
+intake so the stored spec, grid, BIBO and prose all agree + frontend IntakeForm Vin min/max bounds tightened
+to 85/264 with onChange clamping. Verified: reference PF unchanged and pf_target=0.99 now ignored; 85→0.999;
+95→0.99868 (interp); clamp 70→85 / 280→264. Table 1.2.2 sources PF from this table (doc_report_builder:892).
 Suite: 172 passed / 2 skipped (green). Commit <pending>.
