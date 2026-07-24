@@ -78,6 +78,24 @@ def _W(story, txt):
     body(story, txt, CH)
 
 
+def _worked(story, num, title, step_rows, traces, ch=CH):
+    """Render a step-by-step worked derivation as a table — one column per worst-case corner
+    (low line + high line), each row a step (equation → enter values → result) that shows how the
+    9-point summary Table value is derived. `step_rows` is a list of (label, cell_fn) where
+    cell_fn(tr) returns the substituted-and-solved string for that corner."""
+    if not traces:
+        return
+    def _corner(v):
+        return ("Low line" if v < 180 else "High line") + f" &mdash; {v:.0f} V<sub>AC</sub>"
+    headers = ["Step (equation → substitution → result)"] + [_corner(v) for v, _ in traces]
+    rows = [[lbl] + [fn(tr) for _, tr in traces] for lbl, fn in step_rows]
+    n = max(len(traces), 1)
+    col_widths = [CW * 0.30] + [CW * (0.70 / n)] * n
+    data_table(story, num, title,
+               "Worst-case worked substitution behind the Table values — one column per line corner.",
+               headers, rows, col_widths, ch=ch)
+
+
 def _bridge_section(story, traces, is_sync):
     _W(story,
        "<b>Model.</b> The bridge rectifies the AC line; at every instant two devices in series carry "
@@ -97,22 +115,24 @@ def _bridge_section(story, traces, is_sync):
                    r"P_{bridge}=2\,\overline{\,V_f(i_{in})\,i_{in}\,}\;\approx\;2\,V_f\,I_{in,avg}"
                    + (r"+\,\overline{\,R_{ds,bot}\,i_{in}^2\,}+P_{g,bot}" if is_sync else "")],
            number="7.3", ch=CH)
-    for vac, tr in traces:
-        i_in_pk = (2 ** 0.5) * tr["Iin_rms"]; i_avg = (2.0 / 3.141592653589793) * i_in_pk
-        ntop = max(tr["n_top"], 1)
-        _bd = float(tr.get('P_bridge_bd_share', 0.0) or 0.0)
-        extra = ((f" (top diodes {_f(tr['P_bridge_top'])} W + bottom MOSFETs {_f(tr['P_bridge_bottom'])} W"
-                  + (f" + bottom-diode crest share {_f(_bd)} W — the FET drop exceeds the diode knee "
-                     "near the line crest, so the bridge's bottom diodes conduct part of the current"
-                     if _bd > 0.05 else "") + ")")
-                 if is_sync else "")
-        _W(story,
-           f"<b>At {vac:.0f} V<sub>AC</sub>:</b> I<sub>in,rms</sub> = {_f(tr['Iin_rms'],3)} A, so the "
-           f"<b>average</b> rectified current is I<sub>in,avg</sub> = (2&#8730;2/&#960;)&#183;"
-           f"{_f(tr['Iin_rms'],3)} = {_f(i_avg,3)} A. The forward drop along the curve is V<sub>f</sub> "
-           f"&#8776; {_f(tr['vf_br_pk'],3)} V (T<sub>j</sub> = {_f(tr['Tj_brT'],0)}{_DEG}C); the "
-           f"average-current conduction loss of the conducting pair, V<sub>f</sub>(i)&#183;i integrated "
-           f"over the cycle, is <b>P<sub>bridge</sub> = {_f(tr['P_bridge'])} W</b>{extra}.")
+    def _iavg(tr):
+        return (2.0 / 3.141592653589793) * (2 ** 0.5) * tr["Iin_rms"]
+    steps = [
+        ("I<sub>in,rms</sub> (from &#167;7.1)", lambda tr: f"{_f(tr['Iin_rms'],3)} A"),
+        ("I<sub>in,avg</sub> = (2&#8730;2/&#960;)&#183;I<sub>in,rms</sub>",
+         lambda tr: f"(2&#8730;2/&#960;)&#215;{_f(tr['Iin_rms'],3)} = {_f(_iavg(tr),3)} A"),
+        ("V<sub>f</sub>(i) along the curve",
+         lambda tr: f"&#8776; {_f(tr['vf_br_pk'],3)} V (T<sub>j</sub>={_f(tr['Tj_brT'],0)}{_DEG}C)"),
+        ("P<sub>bridge</sub> = 2&#183;avg[V<sub>f</sub>(i)&#183;i] (pair)",
+         lambda tr: f"<b>{_f(tr['P_bridge'])} W</b>"),
+    ]
+    if is_sync:
+        steps.append(("&nbsp;&nbsp;split: top diodes / bottom MOSFETs"
+                      + ("&nbsp;(+ bottom-diode crest share)" if any(float(t.get('P_bridge_bd_share',0) or 0) > 0.05 for _, t in traces) else ""),
+                      lambda tr: (f"{_f(tr['P_bridge_top'])} W / {_f(tr['P_bridge_bottom'])} W"
+                                  + (f" + {_f(float(tr.get('P_bridge_bd_share',0) or 0))} W"
+                                     if float(tr.get('P_bridge_bd_share',0) or 0) > 0.05 else ""))))
+    _worked(story, "7.3.1", "Bridge Loss — Worked Derivation", steps, traces)
 
 
 def _mosfet_section(story, traces):
@@ -128,13 +148,13 @@ def _mosfet_section(story, traces):
        "temperature — a 25&#176;C value would under-state the loss by 20&#8211;40 %.")
     eq_box(story, [r"I_{FET,rms}=\sqrt{\overline{\,i^2\,d\,}},\qquad R_{ds(on)}(T_j)=R_{ds,25}\,k(T_j)",
                    r"P_{cond}=N_{ch}\,R_{ds(on)}(T_j)\,I_{FET,rms}^2"], number="7.4.1", ch=CH)
-    for vac, tr in traces:
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> R<sub>ds(on)</sub>(T<sub>j</sub>={_f(tr['Tj_fet'],0)}{_DEG}C) = "
-           f"{_f(tr['rds_25']*1e3,1)}&#215;{_f(tr['rds_tj_factor'],3)} = {_f(tr['rds_tj']*1e3,1)} m{_OHM}; "
-           f"I<sub>FET,rms</sub> = {_f(tr['i_fet_rms_ch'],3)} A &#8658; P<sub>cond</sub> = "
-           f"{_f(tr['rds_tj']*1e3,1)}m{_OHM}&#215;({_f(tr['i_fet_rms_ch'],3)})&#178;&#215;{nch} = "
-           f"<b>{_f(tr['P_cond_fet_tot'])} W</b>.")
+    _worked(story, "7.4.1", "Conduction Loss — Worked Derivation", [
+        ("R<sub>ds(on)</sub>(T<sub>j</sub>) = R<sub>ds,25</sub>&#183;k(T<sub>j</sub>)",
+         lambda tr: f"{_f(tr['rds_25']*1e3,1)}m&#215;{_f(tr['rds_tj_factor'],3)} (T<sub>j</sub>={_f(tr['Tj_fet'],0)}{_DEG}C) = {_f(tr['rds_tj']*1e3,1)} m{_OHM}"),
+        ("I<sub>FET,rms</sub> = &#8730;(avg[i&#178;d])", lambda tr: f"{_f(tr['i_fet_rms_ch'],3)} A"),
+        ("P<sub>cond</sub> = N<sub>ch</sub>&#183;R<sub>ds(on)</sub>&#183;I<sub>FET,rms</sub>&#178;",
+         lambda tr: f"{nch}&#215;{_f(tr['rds_tj']*1e3,1)}m&#215;({_f(tr['i_fet_rms_ch'],3)})&#178; = <b>{_f(tr['P_cond_fet_tot'])} W</b>"),
+    ], traces)
 
     sub_h(story, "7.4.2", "Switching loss (turn-on + turn-off)", CH)
     _W(story,
@@ -148,12 +168,14 @@ def _mosfet_section(story, traces):
        "operating current and T<sub>j</sub>. The loss is f<sub>sw</sub> times the cycle-averaged energy.")
     eq_box(story, [r"E_{sw}(i,V_{OUT},T_j)=E_{on}+E_{off},\qquad "
                    r"P_{sw}=N_{ch}\,f_{sw}\,\overline{E_{sw}}"], number="7.4.2", ch=CH)
-    for vac, tr in traces:
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> switching currents (peak of line) i<sub>on</sub>/i<sub>off</sub> = "
-           f"{_f(tr['i_on_pk'],2)}/{_f(tr['i_off_pk'],2)} A; per-event E<sub>sw</sub> peaks at "
-           f"{_uj(tr['Esw_pk'])} and averages {_uj(tr['Esw_avg'])} over the cycle &#8658; P<sub>sw</sub> = "
-           f"{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['Esw_avg'])}&#215;{nch} = <b>{_f(tr['P_sw_fet_tot'])} W</b>.")
+    _worked(story, "7.4.2", "Switching Loss — Worked Derivation", [
+        ("i<sub>on</sub> / i<sub>off</sub> (peak of line)",
+         lambda tr: f"{_f(tr['i_on_pk'],2)} / {_f(tr['i_off_pk'],2)} A"),
+        ("E<sub>sw</sub> = E<sub>on</sub>+E<sub>off</sub> (peak / cycle-avg)",
+         lambda tr: f"{_uj(tr['Esw_pk'])} / {_uj(tr['Esw_avg'])}"),
+        ("P<sub>sw</sub> = N<sub>ch</sub>&#183;f<sub>sw</sub>&#183;avg(E<sub>sw</sub>)",
+         lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['Esw_avg'])} = <b>{_f(tr['P_sw_fet_tot'])} W</b>"),
+    ], traces)
 
     sub_h(story, "7.4.3", "Output-capacitance loss (E<sub>oss</sub>)", CH)
     _W(story,
@@ -163,11 +185,12 @@ def _mosfet_section(story, traces):
        "the strongly non-linear C<sub>oss</sub>, not &#189;C&#183;V&#178; with a fixed C. It depends only "
        "on V<sub>OUT</sub> and f<sub>sw</sub>, so it is essentially line-independent.")
     eq_box(story, [r"P_{oss}=N_{ch}\,f_{sw}\,E_{oss}(V_{OUT})"], number="7.4.3", ch=CH)
-    for vac, tr in traces:
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> E<sub>oss</sub>(V<sub>OUT</sub>={_f(tr['Vo'],1)} V) = "
-           f"{_uj(tr['eoss_vo'])} &#8658; P<sub>oss</sub> = {_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['eoss_vo'])}"
-           f"&#215;{nch} = <b>{_f(tr['P_oss_tot'])} W</b>.")
+    _worked(story, "7.4.3", "Output-Capacitance Loss — Worked Derivation", [
+        ("E<sub>oss</sub>(V<sub>OUT</sub>)",
+         lambda tr: f"E<sub>oss</sub>({_f(tr['Vo'],1)} V) = {_uj(tr['eoss_vo'])}"),
+        ("P<sub>oss</sub> = N<sub>ch</sub>&#183;f<sub>sw</sub>&#183;E<sub>oss</sub>",
+         lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['eoss_vo'])} = <b>{_f(tr['P_oss_tot'])} W</b>"),
+    ], traces)
 
     sub_h(story, "7.4.4", "Diode charge dumped into the FET", CH)
     _W(story,
@@ -181,13 +204,14 @@ def _mosfet_section(story, traces):
     eq_box(story, [r"P_{rr\to FET}=N_{ch}\,f_{sw}\,\frac{1}{2} V_{OUT}\,Q_c\ \mathrm{(SiC)}\quad "
                    r"\mathrm{or}\quad N_{ch}\,f_{sw}\,k\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
            number="7.4.4", ch=CH)
-    for vac, tr in traces:
+    def _qrr_sub(tr):
         if tr["is_sic"]:
-            sub = f"&#189;&#215;{_f(tr['Vo'],1)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
-        else:
-            sub = f"&#8776;0.85&#215;{_nc(tr['qrr_eff'])}&#215;{_f(tr['Vo'],1)}V&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> charge into FET = {sub} = <b>{_f(tr['P_rr_fet_tot'])} W</b>.")
+            return f"&#189;&#215;{_f(tr['Vo'],1)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
+        return f"&#8776;0.85&#215;{_nc(tr['qrr_eff'])}&#215;{_f(tr['Vo'],1)}V&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
+    _worked(story, "7.4.4", "Diode-Charge-into-FET — Worked Derivation", [
+        ("P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;&#189;V<sub>OUT</sub>Q<sub>c</sub> (SiC) / 0.85&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
+         lambda tr: f"{_qrr_sub(tr)} = <b>{_f(tr['P_rr_fet_tot'])} W</b>"),
+    ], traces)
 
     sub_h(story, "7.4.5", "Gate drive + leakage", CH)
     _W(story,
@@ -197,11 +221,10 @@ def _mosfet_section(story, traces):
        "(V<sub>OUT</sub>&#183;I<sub>DSS</sub>) is added when a leakage curve is supplied; it is usually "
        "negligible at these temperatures.")
     eq_box(story, [r"P_{gate}=N_{ch}\,f_{sw}\,Q_g\,V_g"], number="7.4.5", ch=CH)
-    for vac, tr in traces:
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> P<sub>gate</sub>+leak = {_f(tr['fsw']/1e3,0)}kHz&#215;"
-           f"{_nc(tr['qg'])}&#215;{_f(tr['vg_drive'],0)}V&#215;{nch} = "
-           f"<b>{_f(tr['P_gate_tot'] + tr['P_leak_fet_tot'])} W</b>.")
+    _worked(story, "7.4.5", "Gate-Drive + Leakage — Worked Derivation", [
+        ("P<sub>gate</sub>+leak = N<sub>ch</sub>&#183;f<sub>sw</sub>&#183;Q<sub>g</sub>&#183;V<sub>g</sub>",
+         lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_nc(tr['qg'])}&#215;{_f(tr['vg_drive'],0)}V = <b>{_f(tr['P_gate_tot'] + tr['P_leak_fet_tot'])} W</b>"),
+    ], traces)
 
     tot_txt = "; ".join(
         f"{vac:.0f} V &#8594; {_f(tr['P_cond_fet_tot'] + tr['P_sw_fet_tot'] + tr['P_oss_tot'] + tr['P_rr_fet_tot'] + tr['P_gate_tot'] + tr['P_leak_fet_tot'])} W"
@@ -238,14 +261,18 @@ def _diode_section(story, traces):
                    r"P_{sw,D}=N_{ch}\,f_{sw}\,E_{fr}\ \mathrm{(SiC)}\quad\mathrm{or}\quad "
                    r"N_{ch}\,f_{sw}\,(1-k)\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
            number="7.5", ch=CH)
-    for vac, tr in traces:
-        sw = (f"forward-recovery only, {_f(tr['P_sw_dio_tot'])} W (Q<sub>c</sub> booked to the FET)"
-              if tr["is_sic"] else f"{_f(tr['P_sw_dio_tot'])} W (Q<sub>rr</sub> diode share)")
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> average diode current {_f(tr['i_d_avg'],3)} A, V<sub>f</sub> "
-           f"&#8776; {_f(tr['vf_d_pk'],3)} V (T<sub>j</sub> = {_f(tr['Tj_dio'],0)}{_DEG}C) &#8658; conduction "
-           f"{_f(tr['P_cond_dio_tot'])} W, switching {sw}; <b>diode total "
-           f"{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W</b>.")
+    _worked(story, "7.5.1", "Boost-Diode Loss — Worked Derivation", [
+        ("i<sub>D,avg</sub> = avg[i<sub>ch</sub>(1&#8722;d)]", lambda tr: f"{_f(tr['i_d_avg'],3)} A"),
+        ("V<sub>f</sub>(i<sub>D</sub>,T<sub>j</sub>)",
+         lambda tr: f"&#8776; {_f(tr['vf_d_pk'],3)} V (T<sub>j</sub>={_f(tr['Tj_dio'],0)}{_DEG}C)"),
+        ("P<sub>cond</sub> = N<sub>ch</sub>&#183;avg[V<sub>f</sub>&#183;i<sub>D</sub>]",
+         lambda tr: f"{_f(tr['P_cond_dio_tot'])} W"),
+        ("P<sub>sw,D</sub>",
+         lambda tr: (f"{_f(tr['P_sw_dio_tot'])} W (fwd-recovery; Q<sub>c</sub>&#8594;FET)"
+                     if tr["is_sic"] else f"{_f(tr['P_sw_dio_tot'])} W (Q<sub>rr</sub> diode share)")),
+        ("Diode total",
+         lambda tr: f"<b>{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W</b>"),
+    ], traces)
 
 
 def _thermal_section(story, traces, thermal):
@@ -259,12 +286,13 @@ def _thermal_section(story, traces, thermal):
        "— the numbers below are the converged values.")
     eq_box(story, [r"T_{sink}=T_{amb}+P_{\Sigma}\,R_{\theta,sa}",
                    r"T_j=T_{sink}+P_{dev}\,(R_{\theta,jc}+R_{\theta,cs})"], number="7.6", ch=CH)
-    for vac, tr in traces:
-        _W(story,
-           f"<b>{vac:.0f} V<sub>AC</sub>:</b> sink = {_f(tamb,0)}{_DEG}C + "
-           f"{_f(tr['Psemi_main'] + tr['P_bridge'],1)}W&#215;{_f(rsa,2)} = {_f(tr['sink_main'],1)}{_DEG}C; "
-           f"then T<sub>j,FET</sub> = {_f(tr['Tj_fet'],1)}{_DEG}C, T<sub>j,diode</sub> = "
-           f"{_f(tr['Tj_dio'],1)}{_DEG}C, T<sub>j,bridge</sub> = {_f(tr['Tj_brT'],1)}{_DEG}C.")
+    _worked(story, "7.6.1", "Thermal Network — Worked Derivation", [
+        ("T<sub>sink</sub> = T<sub>amb</sub> + P<sub>&#931;</sub>&#183;R<sub>&#952;,sa</sub>",
+         lambda tr: f"{_f(tamb,0)}{_DEG}C + {_f(tr['Psemi_main'] + tr['P_bridge'],1)}W&#215;{_f(rsa,2)} = {_f(tr['sink_main'],1)}{_DEG}C"),
+        ("T<sub>j,FET</sub>", lambda tr: f"{_f(tr['Tj_fet'],1)}{_DEG}C"),
+        ("T<sub>j,diode</sub>", lambda tr: f"{_f(tr['Tj_dio'],1)}{_DEG}C"),
+        ("T<sub>j,bridge</sub>", lambda tr: f"{_f(tr['Tj_brT'],1)}{_DEG}C"),
+    ], traces)
 
 
 def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_limit=None, extra=None):

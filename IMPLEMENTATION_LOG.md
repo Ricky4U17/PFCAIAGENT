@@ -5074,4 +5074,18 @@ together. Parametrized `_build_app_schematic_section(… sec, fig_prefix, one_pe
 §6.8.7 call from `build_story`; threaded `inp` through `build_appendices`→`_appendix_b`, which now renders
 B.2 (one circuit per page, low-line + high-line, each with a mode description) after the BOM using the
 appendix chapter style. Verified: §6.8.7 gone from Ch6; Table B.1 p82 → Figure B.2a p83 → B.2b p84.
+Suite: 172 passed / 2 skipped (green). Commit e6ebd10.
+
+## C136 — 2026-07-23 — Correction batch pt 5: Ch7 semiconductor worked calcs as step-by-step tables
+
+Point 5 of the correction review. The Ch7 per-component worked substitutions were emitted as run-on
+narrative prose (`_W`/`body`) at the two worst-case corners, hard to scan. Added a `_worked(story, num,
+title, step_rows, traces)` helper that renders each derivation as a data_table with columns "Step
+(equation → substitution → result)" | "Low line — {V} V" | "High line — {V} V", one row per step (the
+last row is the result), so the reader sees exactly how each 9-point Table value is derived. Converted all
+eight worked blocks: bridge (7.3.1), MOSFET conduction (7.4.1), switching (7.4.2), Eoss (7.4.3), Qrr→FET
+(7.4.4), gate+leak (7.4.5), boost diode (7.5.1), thermal (7.6.1). Kept each section's Model prose + the
+symbolic eq_box above the table. Used clean `avg[…]` notation for cycle-averages (no overline-char hack).
+Verified against the reference design: e.g. 7.4.1 renders R_ds(on)=60.0m×1.193(Tj=73°C)=71.6 mΩ →
+I_FET,rms=8.575 A → P_cond=2×71.6m×(8.575)²=10.53 W for low line, alongside the high-line column.
 Suite: 172 passed / 2 skipped (green). Commit <pending>.
