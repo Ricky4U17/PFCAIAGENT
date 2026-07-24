@@ -5120,3 +5120,29 @@ the old `_asb_min_uH` anchor — design point unchanged; only the per-op sweep/B
 crossover at higher-L points, exactly as the §6.10.14 narrative asserts. Falls back to constant L when no
 l_curve. Verified: per-op L tracks the curve (90→200…264→340 µH), frhp/fco vary per op, no-curve → constant;
 full Ch6 report builds. Suite: 172 passed / 2 skipped (green). Commit a30bd30.
+
+## C139 — 2026-07-23 — EMI Phase 1a: computed source model + ABCD insertion-loss engine core
+
+First sub-step of the EMI-filter upgrade to the EMI_Input_Filter_Design_Guide (Rev J) methodology
+(agreed plan in memory emi-filter-upgrade-plan; accuracy-core-first). Upgraded the engine
+`inputfilter/emi_filter_design.py` (no hardcoded reference values; App-B discipline):
+- COMPUTED DM source (ref §4.2/§4.4): per-operating-point ΔI = √2·V_in·D/(L_boost·f_sw), interleaving
+  cancellation, trapezoidal-pulse envelope (flat / -20 / -40 dB/dec at f1=1/πD·T, f2=1/π·t_r), current-
+  divided by the bulk cap (ESR + jωESL + 1/jωC) against the LISN DM impedance; worst op governs.
+- COMPUTED CM source (ref §4.2/Table 8): Σ displacement-current generators I=C·dV/dt over coupling nodes
+  (PFC switch-node→chassis always; DC-DC switch-node + transformer C_ps ONLY when dcdc.present — PFC-only
+  drops them, no hidden add), each with charge/edge Q=C·ΔV, envelope 2·Q·f_rep flat to f2=1/π·t_r then
+  -20 dB/dec, into the LISN CM impedance.
+- ABCD two-port INSERTION LOSS with real parasitics (X-cap ESR/ESL, Y-cap ESL, choke self-capacitance Cp)
+  → reveals the HF attenuation floor from choke self-resonance that ideal-slope math hides (ref §8.1/§9).
+  Delivered IL + worst-case DM/CM margins swept over the band; CM shortfall emits a source-reduction
+  warning (achievability-gate seed, App B.3).
+- Input contract extended (all optional → NAMED module-level defaults, provenance-tagged, reported, and
+  overridable — NOT buried literals): PFCResult (l_boost/bulk_c/bulk_esl/dvdt_pfc/didt_pfc/c_node_pfc +
+  per-op `points`), new DCDCResult (present flag + f_sw/dvdt/c_node/c_ps placeholders), FilterParasitics,
+  DesignContext.dcdc/parasitics. Weakest noise-source provenance governs (measured>computed>estimate).
+VALIDATED against the reference worked example: computed CM 115.7 dBµV (ref ~116), DM 82.5 dBµV (ref ~83);
+DM 33 dB below CM (bulk-cap shunt); CM flat 150k–1M (line-independent); ABCD DM IL 48→38 dB (150k→20M,
+HF floor); DC-DC toggle 116→102 dBµV. Engine self-test (12 checks) + full suite 172/2 green; adapter +
+Chapter-10 report still build. NEXT (Phase 1b): wire adapter to feed l_boost/bulk/points/dcdc/parasitics
+from the real grid + add the DC-DC GUI group; then loss/leakage, thesis report + index, verify harness.

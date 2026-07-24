@@ -135,6 +135,91 @@ CONDUCTED_FMAX = 30e6
 
 
 # ============================================================== #
+#  NAMED PARASITIC DEFAULTS  (App-B discipline)                 #
+# ============================================================== #
+# Every value below is a NAMED default, not a literal buried in the physics.
+# Each is reported in the result provenance and, when used instead of a
+# designer/measured value, downgrades the design grade (App B.2). They are
+# generic assumptions — NOT reference-design-specific numbers. Override any of
+# them through the input contract (DesignContext) with a real datasheet/measured
+# value to raise the design grade.
+DEFAULT_DVDT_PFC    = 10e9      # V/s  (10 V/ns)  PFC switch-node slew  (CM source)
+DEFAULT_DIDT_PFC    = 500e9     # A/s  (500 A/us) PFC current slew      (DM HF corner)
+DEFAULT_BULK_ESL    = 20e-9     # H    bulk-cap equivalent series inductance (DM shunt)
+DEFAULT_BULK_ESR    = 5e-3      # ohm  bulk-cap equivalent series resistance
+DEFAULT_C_NODE_PFC  = 47e-12    # F    PFC switch-node -> chassis parasitic (CM source)
+DEFAULT_DVDT_PSFB   = 15e9      # V/s  (15 V/ns)  DC-DC primary switch-node slew
+DEFAULT_C_NODE_PSFB = 33e-12    # F    DC-DC switch-node -> chassis parasitic
+DEFAULT_C_PS        = 15e-12    # F    transformer primary<->secondary inter-winding
+# ABCD real-component parasitics (self-resonance / ESR / ESL) — vendor data when known.
+DEFAULT_XCAP_ESR    = 5e-3      # ohm  X-cap ESR
+DEFAULT_XCAP_ESL    = 15e-9     # H    X-cap ESL  (X-cap SRF)
+DEFAULT_YCAP_ESL    = 8e-9      # H    Y-cap ESL  (limits HF CM attenuation)
+DEFAULT_LDM_CP      = 30e-12    # F    DM-choke self-capacitance (DM choke SRF)
+DEFAULT_LCM_CP      = 15e-12    # F    CM-choke self-capacitance (CM choke SRF; caps HF CM)
+
+
+# ============================================================== #
+#  COMPLEX-IMPEDANCE + ABCD TWO-PORT HELPERS                    #
+# ============================================================== #
+
+def _z_cap(f, c, esr=0.0, esl=0.0):
+    """Series-RLC branch impedance of a real capacitor (ESR + jwESL + 1/jwC)."""
+    if not c or c <= 0:
+        return complex(1e18, 0.0)          # open (no cap)
+    w = TWO_PI * f
+    return complex(esr, w * esl - 1.0 / (w * c))
+
+
+def _z_ind(f, l, dcr=0.0, cp=0.0):
+    """Real inductor impedance: (DCR + jwL) in parallel with its self-capacitance
+    Cp, giving a self-resonant peak then a capacitive HF tail (the physical reason
+    a choke stops attenuating above its SRF)."""
+    if not l or l <= 0:
+        return complex(dcr, 0.0)
+    w = TWO_PI * f
+    zl = complex(dcr, w * l)
+    if cp and cp > 0:
+        zc = complex(0.0, -1.0 / (w * cp))
+        return (zl * zc) / (zl + zc)
+    return zl
+
+
+def _abcd_series(z):
+    """ABCD matrix of a series impedance."""
+    return ((1.0 + 0j, z), (0j, 1.0 + 0j))
+
+
+def _abcd_shunt(y):
+    """ABCD matrix of a shunt admittance."""
+    return ((1.0 + 0j, 0j), (y, 1.0 + 0j))
+
+
+def _abcd_mul(m1, m2):
+    (a1, b1), (c1, d1) = m1
+    (a2, b2), (c2, d2) = m2
+    return ((a1 * a2 + b1 * c2, a1 * b2 + b1 * d2),
+            (c1 * a2 + d1 * c2, c1 * b2 + d1 * d2))
+
+
+def _abcd_cascade(mats):
+    """Cascade a list of ABCD sections (mains -> converter order)."""
+    out = ((1.0 + 0j, 0j), (0j, 1.0 + 0j))
+    for m in mats:
+        out = _abcd_mul(out, m)
+    return out
+
+
+def _insertion_loss_db(abcd, z_src, z_load):
+    """Insertion loss [dB] of a two-port between source Z_src and load Z_load:
+    IL = 20 log10 |(A Z_L + B + C Z_S Z_L + D Z_S) / (Z_L + Z_S)|.  IL > 0 = attenuation."""
+    (a, b), (c, d) = abcd
+    num = a * z_load + b + c * z_src * z_load + d * z_src
+    den = z_load + z_src
+    return 20.0 * log10(abs(num / den))
+
+
+# ============================================================== #
 #  DESIGN CONTEXT  (proposed shared-pipeline schema)            #
 # ============================================================== #
 
@@ -151,9 +236,17 @@ class PFCResult:
     n_phases: int             # interleave count (2)
     i_ripple_pp: float        # A, input current ripple peak-peak
     esr_bulk: Optional[float] = None   # ohm, bulk-cap ESR (DM noise est.)
-    dvdt: Optional[float] = None       # V/s, switch-node slew (CM est.)
-    c_para_earth: Optional[float] = None  # F, node-to-earth parasitic (CM est.)
-    sw_rise_time: Optional[float] = 20e-9  # s, edge time (CM roll-off knee)
+    dvdt: Optional[float] = None       # V/s, switch-node slew (CM est.) [legacy]
+    c_para_earth: Optional[float] = None  # F, node-to-earth parasitic (CM est.) [legacy]
+    sw_rise_time: Optional[float] = 20e-9  # s, edge time (CM roll-off knee) [legacy]
+    # --- computed-source-model inputs (Phase 1; all optional -> named defaults) ---
+    l_boost: Optional[float] = None     # H, per-phase boost inductance (DM ripple ΔI)
+    bulk_c: Optional[float] = None      # F, bulk-cap capacitance (DM shunt path)
+    bulk_esl: Optional[float] = None    # H, bulk-cap ESL (DM shunt) [def DEFAULT_BULK_ESL]
+    dvdt_pfc: Optional[float] = None    # V/s, PFC switch-node slew (CM) [def DEFAULT_DVDT_PFC]
+    didt_pfc: Optional[float] = None    # A/s, PFC current slew (DM HF corner) [def DEFAULT_DIDT_PFC]
+    c_node_pfc: Optional[float] = None  # F, PFC switch-node->chassis (CM) [def DEFAULT_C_NODE_PFC]
+    points: Optional[List["OperatingPoint"]] = None  # per-op grid (V_in, duty, ΔI, I_in)
 
 
 @dataclass
@@ -191,12 +284,51 @@ class EMIInputs:
 
 
 @dataclass
+class OperatingPoint:
+    """One line/load operating point from the shared PFC grid (source-model input)."""
+    v_in: float                       # Vac rms
+    duty: float                       # peak duty D
+    i_in: float                       # A rms input current
+    delta_i: Optional[float] = None   # A, per-phase input ripple pp (else computed from l_boost)
+    f_line: float = 60.0              # Hz
+
+
+@dataclass
+class DCDCResult:
+    """DC-DC stage inputs feeding the common-mode source model. `present=False` →
+    PFC-only design: the DC-DC/transformer CM terms are dropped entirely (no hidden
+    contribution). Designer-supplied placeholders now; wired from the DC-DC script later.
+    All parasitics optional -> named defaults (provenance 'assumed')."""
+    present: bool = False
+    f_sw: Optional[float] = None        # Hz, DC-DC switching frequency
+    topology: str = ""                  # e.g. 'psfb', 'llc'
+    v_node: Optional[float] = None      # V, primary switch-node voltage swing (≈ V_bus)
+    dvdt_psfb: Optional[float] = None   # V/s, primary switch-node slew [def DEFAULT_DVDT_PSFB]
+    c_node_psfb: Optional[float] = None # F, switch-node->chassis [def DEFAULT_C_NODE_PSFB]
+    c_ps: Optional[float] = None        # F, transformer primary<->secondary [def DEFAULT_C_PS]
+    dvdt_sec: Optional[float] = None    # V/s, secondary slew (optional)
+
+
+@dataclass
+class FilterParasitics:
+    """Real-component parasitics for the ABCD insertion-loss model. Vendor SPICE /
+    S-parameter data when known; otherwise named defaults (provenance 'assumed')."""
+    xcap_esr: Optional[float] = None    # ohm  [def DEFAULT_XCAP_ESR]
+    xcap_esl: Optional[float] = None    # H    [def DEFAULT_XCAP_ESL]
+    ycap_esl: Optional[float] = None    # H    [def DEFAULT_YCAP_ESL]
+    ldm_cp: Optional[float] = None      # F    DM-choke self-capacitance [def DEFAULT_LDM_CP]
+    lcm_cp: Optional[float] = None      # F    CM-choke self-capacitance [def DEFAULT_LCM_CP]
+
+
+@dataclass
 class DesignContext:
     pfc: PFCResult
     protection: ProtectionResult
     ntc: NTCResult
     emi_in: EMIInputs
     noise: NoiseSpectrum = field(default_factory=NoiseSpectrum)
+    dcdc: DCDCResult = field(default_factory=DCDCResult)
+    parasitics: FilterParasitics = field(default_factory=FilterParasitics)
     emi: Optional["EMIResult"] = None   # output slot (filled by the stage)
 
 
@@ -236,6 +368,13 @@ class EMIResult:
     stability_z0_dm: float
     stability_rin_conv: float
     stability_ok: bool
+    # delivered insertion loss (ABCD two-port with real parasitics) + worst-case margins
+    dm_il_db: float = 0.0          # delivered DM IL at the worst-margin frequency
+    dm_margin_db: float = 0.0      # min over band of (DM IL - DM required attenuation)
+    dm_margin_f: float = 0.0       # frequency of the worst DM margin
+    cm_il_db: float = 0.0
+    cm_margin_db: float = 0.0
+    cm_margin_f: float = 0.0
     # bookkeeping
     provenance: Dict[str, str] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
@@ -282,37 +421,162 @@ def _interp_dbuv(spectrum, f):
     return pts[-1][1]
 
 
+def _dm_points(ctx):
+    """Operating points for the DM source: the shared PFC grid if supplied, else one
+    point synthesised from the aggregate PFC fields (worst-case low line)."""
+    p = ctx.pfc
+    if p.points:
+        return p.points
+    duty = max(0.0, 1.0 - (sqrt(2.0) * p.vac_min) / p.v_bus)   # peak duty at low line
+    i_in = p.p_out / max(p.eff, 1e-3) / max(p.vac_min, 1e-3)
+    return [OperatingPoint(v_in=p.vac_min, duty=duty, i_in=i_in,
+                           delta_i=None, f_line=p.f_line)]
+
+
+def _dm_delta_i(ctx, op):
+    """Per-phase input-ripple amplitude ΔI at an operating point [A]. Uses the boost
+    inductance when available (ΔI = V_in,pk·D/(L·f_sw)); else the aggregate ripple."""
+    p = ctx.pfc
+    if op.delta_i:
+        return op.delta_i
+    if p.l_boost:
+        return (sqrt(2.0) * op.v_in) * op.duty / (p.l_boost * p.f_sw)
+    return p.i_ripple_pp
+
+
 def dm_noise_dbuv(ctx, f):
-    """DM noise at the LISN [dBuV]."""
+    """Differential-mode emission at the LISN [dBuV] (reference §4.2/§4.4).
+
+    Measured spectrum wins. Otherwise COMPUTED per operating point from the PFC
+    input-ripple current: a trapezoidal-pulse envelope (flat, then -20, then -40
+    dB/dec at f1=1/(πD·T), f2=1/(π·t_r)) with interleaving cancellation, current-
+    divided by the bulk capacitor (ESR + jωESL + 1/jωC) against the LISN DM
+    impedance — the bulk cap shunts most of the ripple, so DM is usually modest.
+    The worst operating point governs."""
     if ctx.noise.dm:
         return _interp_dbuv(ctx.noise.dm, f), "measured"
-    # ESTIMATE: triangular input ripple, harmonics ~1/n^2, develop voltage
-    # across the bulk-cap ESR (HF-dominant shunt) -> seen by the LISN.
     p = ctx.pfc
-    esr = p.esr_bulk if p.esr_bulk else 0.03   # ohm, flagged if defaulted
-    f_first = p.n_phases * p.f_sw
-    i_h1 = (4.0 / pi ** 2) * p.i_ripple_pp      # fundamental zero-to-peak
-    n = max(1.0, round(f / f_first))
-    i_h = i_h1 / (n ** 2)
-    v = i_h * esr
-    return 20.0 * log10(max(v, 1e-12) / 1e-6), "estimate"
+    if not (p.l_boost or p.points):        # not enough data for the computed model
+        esr = p.esr_bulk or DEFAULT_BULK_ESR
+        f_first = p.n_phases * p.f_sw
+        i_h = (4.0 / pi ** 2) * p.i_ripple_pp / max(1.0, round(f / f_first)) ** 2
+        return 20.0 * log10(max(i_h * esr, 1e-12) / 1e-6), "estimate"
+    esr = p.esr_bulk or DEFAULT_BULK_ESR
+    esl = p.bulk_esl or DEFAULT_BULK_ESL
+    c_bulk = p.bulk_c                       # may be None -> ESR/ESL-only shunt
+    didt = p.didt_pfc or DEFAULT_DIDT_PFC
+    z_bulk = _z_cap(f, c_bulk, esr, esl) if c_bulk else complex(esr, TWO_PI * f * esl)
+    frac = abs(z_bulk / (z_bulk + Z_LISN_DM))     # ripple fraction reaching the LISN
+    T = 1.0 / p.f_sw
+    worst = 1e-18
+    for op in _dm_points(ctx):
+        d = min(max(op.duty, 1e-3), 0.999)
+        di = _dm_delta_i(ctx, op)
+        i0 = 2.0 * di * d / max(p.n_phases, 1)      # trapezoid flat-region amplitude, interleaved
+        f1 = 1.0 / (pi * d * T)
+        f2 = 1.0 / (pi * max(di / didt, 1e-12))
+        env = i0
+        if f > f1:
+            env *= f1 / f                            # -20 dB/dec
+        if f > f2:
+            env *= f2 / f                            # further -20 -> -40 dB/dec
+        v = env * frac * Z_LISN_DM
+        worst = max(worst, v)
+    return 20.0 * log10(max(worst, 1e-12) / 1e-6), "computed"
+
+
+def _cm_generators(ctx):
+    """CM displacement-current generators (C, ΔV, f_rep, dV/dt), one per coupling
+    node. Always the PFC switch-node→chassis; plus the DC-DC switch-node and the
+    transformer inter-winding when the DC-DC stage is present (else dropped entirely)."""
+    p, dc = ctx.pfc, ctx.dcdc
+    gens = [(p.c_node_pfc or p.c_para_earth or DEFAULT_C_NODE_PFC,
+             p.v_bus, 2.0 * p.f_sw, p.dvdt_pfc or p.dvdt or DEFAULT_DVDT_PFC)]
+    if dc and dc.present and dc.f_sw:
+        v_node = dc.v_node or p.v_bus
+        gens.append((dc.c_node_psfb or DEFAULT_C_NODE_PSFB, v_node,
+                     2.0 * dc.f_sw, dc.dvdt_psfb or DEFAULT_DVDT_PSFB))
+        gens.append((dc.c_ps or DEFAULT_C_PS, v_node,
+                     2.0 * dc.f_sw, dc.dvdt_psfb or DEFAULT_DVDT_PSFB))
+    return gens
 
 
 def cm_noise_dbuv(ctx, f):
-    """CM noise at the LISN [dBuV]."""
+    """Common-mode emission at the LISN [dBuV] (reference §4.2, Table 8).
+
+    Measured spectrum wins. Otherwise COMPUTED as the sum of displacement-current
+    generators I = C·dV/dt through each coupling node (charge/edge Q=C·ΔV, envelope
+    I_flat=2·Q·f_rep flat to f2=1/(π·t_r) then -20 dB/dec), into the LISN CM
+    impedance. CM is line-independent because V_bus is regulated."""
     if ctx.noise.cm:
         return _interp_dbuv(ctx.noise.cm, f), "measured"
-    # ESTIMATE: I_cm ~ C_para*dv/dt; charge-per-edge Q=C*dV, envelope
-    # I(f) ~ 2*Q*f_sw flat up to knee 1/(pi*t_r), then -20 dB/dec.
-    p = ctx.pfc
-    c_para = p.c_para_earth if p.c_para_earth else 50e-12
-    dv = p.v_bus
-    q = c_para * dv
-    i_flat = 2.0 * q * p.f_sw
-    f_knee = 1.0 / (pi * (p.sw_rise_time or 20e-9))
-    i_cm = i_flat if f <= f_knee else i_flat * (f_knee / f)
+    i_cm = 0.0
+    for c_node, dv, f_rep, dvdt in _cm_generators(ctx):
+        q = c_node * dv
+        i_flat = 2.0 * q * f_rep
+        f2 = 1.0 / (pi * max(dv / dvdt, 1e-12))
+        i_cm += i_flat if f <= f2 else i_flat * (f2 / f)
     v = i_cm * Z_LISN_CM
-    return 20.0 * log10(max(v, 1e-12) / 1e-6), "estimate"
+    return 20.0 * log10(max(v, 1e-12) / 1e-6), "computed"
+
+
+# ============================================================== #
+#  DELIVERED INSERTION LOSS  (ABCD two-port, real parasitics)   #
+# ============================================================== #
+
+def _resolve_parasitics(par: "FilterParasitics") -> Dict[str, float]:
+    """Resolve ABCD parasitics to values, filling named defaults where absent."""
+    return {
+        "xcap_esr": par.xcap_esr or DEFAULT_XCAP_ESR,
+        "xcap_esl": par.xcap_esl or DEFAULT_XCAP_ESL,
+        "ycap_esl": par.ycap_esl or DEFAULT_YCAP_ESL,
+        "ldm_cp":   par.ldm_cp   or DEFAULT_LDM_CP,
+        "lcm_cp":   par.lcm_cp   or DEFAULT_LCM_CP,
+    }
+
+
+def insertion_loss_dm(l_dm, c_x, stages, par, f):
+    """Delivered DM insertion loss [dB] from the cascaded ABCD model with real
+    parasitics (X-cap ESR/ESL, DM-choke self-capacitance). The choke's self-
+    capacitance floors the attenuation above its SRF — the physical reason ideal
+    slope math over-predicts HF performance. Two-stage splits L and C evenly."""
+    n = max(1, int(stages))
+    l_i, c_i = l_dm / n, c_x / n
+    mats = []
+    for _ in range(n):                       # CL section facing the mains (shunt C, series L)
+        mats.append(_abcd_shunt(1.0 / _z_cap(f, c_i, par["xcap_esr"], par["xcap_esl"])))
+        mats.append(_abcd_series(_z_ind(f, l_i, 0.0, par["ldm_cp"])))
+    return _insertion_loss_db(_abcd_cascade(mats), Z_LISN_DM, Z_LISN_DM)
+
+
+def insertion_loss_cm(l_cm, c_y_total, stages, par, f):
+    """Delivered CM insertion loss [dB] from the ABCD model (Y-cap ESL, CM-choke
+    self-capacitance that floors HF CM attenuation). c_y_total is the total line-
+    frequency Y network seen to earth (both L-PE and N-PE pairs in parallel)."""
+    if not l_cm or l_cm == float("inf") or c_y_total <= 0:
+        return 0.0
+    n = max(1, int(stages))
+    l_i, cy_i = l_cm / n, c_y_total / n
+    mats = []
+    for _ in range(n):
+        mats.append(_abcd_shunt(1.0 / _z_cap(f, cy_i, 0.0, par["ycap_esl"])))
+        mats.append(_abcd_series(_z_ind(f, l_i, 0.0, par["lcm_cp"])))
+    return _insertion_loss_db(_abcd_cascade(mats), Z_LISN_CM, Z_LISN_CM)
+
+
+def delivered_margin(noise_fn, il_fn, ctx, klass, detector, margin, f_lo):
+    """Sweep the conducted band: worst-case margin = min over band of (delivered IL −
+    required attenuation). Returns (il_at_worst_f, worst_margin_db, worst_margin_f)."""
+    grid = _freq_grid(max(CONDUCTED_FMIN, f_lo), CONDUCTED_FMAX)
+    worst_m, worst_mf, il_here = 1e9, grid[0], 0.0
+    for f in grid:
+        nz, _ = noise_fn(ctx, f)
+        a_req = max(nz - (conducted_limit_dbuv(f, klass, detector) - margin), 0.0)
+        il = il_fn(f)
+        m = il - a_req
+        if m < worst_m:
+            worst_m, worst_mf, il_here = m, f, il
+    return il_here, worst_m, worst_mf
 
 
 # ============================================================== #
@@ -384,15 +648,22 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         ctx, dm_noise_dbuv, klass, detector, margin)
     cm_att, cm_f, _, cm_src = required_attenuation(
         ctx, cm_noise_dbuv, klass, detector, margin)
-    noise_source = "measured" if (dm_src == "measured" and cm_src == "measured") \
-        else "estimate"
+    _order = {"estimate": 0, "computed": 1, "measured": 2}      # weakest source governs
+    noise_source = dm_src if _order.get(dm_src, 0) <= _order.get(cm_src, 0) else cm_src
     if noise_source == "estimate":
-        warn.append("Noise is a first-order ESTIMATE; replace with measured "
-                    "bare-EUT spectrum for compliance sign-off.")
+        warn.append("Noise is a first-order ESTIMATE (insufficient source-model inputs "
+                    "— provide L_boost / bulk-cap / parasitics); confirm with a bare-EUT LISN sweep.")
+    elif noise_source == "computed":
+        warn.append("Noise is COMPUTED from the converter specs/parasitics (calculated baseline, "
+                    "App-B) — confirm with a bare-EUT LISN sweep before compliance sign-off.")
     if not p.esr_bulk and not ctx.noise.dm:
-        warn.append("pfc.esr_bulk defaulted (0.03 ohm) for DM estimate.")
-    if not p.c_para_earth and not ctx.noise.cm:
-        warn.append("pfc.c_para_earth defaulted (50 pF) for CM estimate.")
+        warn.append(f"bulk-cap ESR defaulted ({DEFAULT_BULK_ESR*1e3:.0f} mΩ) — assumed.")
+    if not p.bulk_esl and not ctx.noise.dm:
+        warn.append(f"bulk-cap ESL defaulted ({DEFAULT_BULK_ESL*1e9:.0f} nH) — assumed (DM shunt sensitive).")
+    if not (p.c_node_pfc or p.c_para_earth) and not ctx.noise.cm:
+        warn.append(f"PFC node→chassis C defaulted ({DEFAULT_C_NODE_PFC*1e12:.0f} pF) — assumed (CM sensitive; measure).")
+    if ctx.dcdc and ctx.dcdc.present and not ctx.dcdc.c_ps and not ctx.noise.cm:
+        warn.append(f"transformer C_ps defaulted ({DEFAULT_C_PS*1e12:.0f} pF) — assumed (CM sensitive; measure).")
     prov["dm_req_att"] = f"DM noise({dm_src}) - (ClassB/A limit - {margin}dB) @ {dm_f/1e3:.0f}kHz"
     prov["cm_req_att"] = f"CM noise({cm_src}) - (limit - {margin}dB) @ {cm_f/1e3:.0f}kHz"
 
@@ -468,6 +739,29 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
     else:
         warn.append("No bleeder_r given; verify X-cap discharge-time safety rule.")
 
+    # ---- delivered insertion loss (ABCD two-port) + worst-case margins ----
+    par = _resolve_parasitics(ctx.parasitics)
+    prov["il_model"] = ("ABCD two-port with parasitics "
+                        f"(X-cap ESR {par['xcap_esr']*1e3:.0f}mΩ/ESL {par['xcap_esl']*1e9:.0f}nH, "
+                        f"DM-choke Cp {par['ldm_cp']*1e12:.0f}pF, Y-cap ESL {par['ycap_esl']*1e9:.0f}nH, "
+                        f"CM-choke Cp {par['lcm_cp']*1e12:.0f}pF)")
+    dm_il_db, dm_margin_db, dm_margin_f = delivered_margin(
+        dm_noise_dbuv, lambda f: insertion_loss_dm(l_dm, c_x, dm_stages, par, f),
+        ctx, klass, detector, margin, f_first)
+    if l_cm != float("inf") and cy_emi > 0:
+        cm_il_db, cm_margin_db, cm_margin_f = delivered_margin(
+            cm_noise_dbuv, lambda f: insertion_loss_cm(l_cm, cy_system, cm_stages, par, f),
+            ctx, klass, detector, margin, f_first)
+    else:
+        cm_il_db = cm_margin_db = cm_margin_f = 0.0
+    if dm_margin_db < 0:
+        warn.append(f"DM delivered IL falls {abs(dm_margin_db):.1f} dB SHORT of the requirement "
+                    f"near {dm_margin_f/1e3:.0f} kHz (ABCD model with parasitics).")
+    if cm_margin_db < 0 and l_cm != float("inf"):
+        warn.append(f"CM delivered IL falls {abs(cm_margin_db):.1f} dB SHORT near "
+                    f"{cm_margin_f/1e3:.0f} kHz — HF CM is floored by choke self-resonance/parasitics; "
+                    f"reduce the CM source (C_ps, node capacitance, dV/dt) rather than adding stages.")
+
     feasible = (len(fb) == 0)
 
     res = EMIResult(
@@ -483,6 +777,8 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         leakage_actual_A=leak_actual, xcap_discharge_s=xcap_disc,
         stability_z0_dm=z0_dm, stability_rin_conv=rin_conv,
         stability_ok=stability_ok,
+        dm_il_db=dm_il_db, dm_margin_db=dm_margin_db, dm_margin_f=dm_margin_f,
+        cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
     )
     ctx.emi = res
@@ -569,11 +865,32 @@ def demo_context() -> DesignContext:
         pfc=PFCResult(
             vac_min=90, vac_max=264, f_line=60, v_bus=390, p_out=1900,
             eff=0.95, f_sw=70e3, n_phases=2, i_ripple_pp=4.0,
-            esr_bulk=0.03, dvdt=20e9, c_para_earth=100e-12, sw_rise_time=20e-9),
+            esr_bulk=0.03, dvdt=20e9, c_para_earth=100e-12, sw_rise_time=20e-9,
+            # computed-source-model inputs (exercise the Phase-1 model)
+            l_boost=250e-6, bulk_c=680e-6, bulk_esl=20e-9,
+            c_node_pfc=47e-12, dvdt_pfc=10e9, didt_pfc=500e9),
         protection=ProtectionResult(committed_y_cap_total=2 * 22e-12),  # GDT-side Y
         ntc=NTCResult(r_ntc_cold=6.8),
         emi_in=EMIInputs(safety_standard="IEC_62368_1", compliance_profile=5,
                          margin_db=6.0, bleeder_r=1e6),
+    )
+
+
+def _reference_context() -> DesignContext:
+    """The document's worked example (PFC + PSFB DC-DC), used to validate the computed
+    source model against Appendix A / Table 8 (CM ~116 dBuV, DM ~83 dBuV at 150 kHz)."""
+    return DesignContext(
+        pfc=PFCResult(
+            vac_min=90, vac_max=264, f_line=60, v_bus=400, p_out=2000,
+            eff=0.94, f_sw=70e3, n_phases=2, i_ripple_pp=5.0,
+            esr_bulk=5e-3, l_boost=250e-6, bulk_c=680e-6, bulk_esl=20e-9,
+            c_node_pfc=47e-12, dvdt_pfc=10e9, didt_pfc=500e9,
+            points=[OperatingPoint(v_in=90, duty=0.68, i_in=23.88, delta_i=5.0, f_line=60)]),
+        protection=ProtectionResult(),
+        ntc=NTCResult(),
+        emi_in=EMIInputs(safety_standard="IEC_62368_1", compliance_profile=5, margin_db=6.0),
+        dcdc=DCDCResult(present=True, f_sw=250e3, topology="psfb", v_node=400,
+                        dvdt_psfb=15e9, c_node_psfb=33e-12, c_ps=15e-12),
     )
 
 
@@ -639,6 +956,36 @@ def self_test():
     assert abs(f_dm - 71.53e3) < 300, f"DM corner {f_dm}"
     assert abs(f_cm - 51.91e3) < 300, f"CM corner {f_cm}"
     print(f"  [ok] verify mode matches PDF (DM {f_dm/1e3:.2f}kHz, CM {f_cm/1e3:.2f}kHz)")
+
+    # 9) Computed source model matches the reference worked example (Table 8 / App A).
+    rc = _reference_context()
+    cm150, cm_src = cm_noise_dbuv(rc, 150e3)
+    dm150, dm_src = dm_noise_dbuv(rc, 150e3)
+    assert cm_src == "computed" and dm_src == "computed", "reference ctx should compute the source"
+    assert abs(cm150 - 116.0) < 3.0, f"CM source {cm150:.1f} dBuV (ref ~116)"
+    assert abs(dm150 - 83.0) < 4.0, f"DM source {dm150:.1f} dBuV (ref ~83)"
+    print(f"  [ok] computed source vs reference: CM {cm150:.1f} dBuV (~116), DM {dm150:.1f} dBuV (~83)")
+
+    # 10) DM << CM (bulk cap shunts the ripple), and CM is line-independent (V_bus regulated).
+    assert dm150 < cm150 - 20, "DM should be far below CM (bulk-cap shunt)"
+    cm_hi = cm_noise_dbuv(_reference_context(), 1e6)[0]
+    assert abs(cm_hi - cm150) < 6, "CM roughly flat 150k-1M (line-independent)"
+    print(f"  [ok] DM << CM by {cm150-dm150:.0f} dB; CM flat ({cm150:.0f}->{cm_hi:.0f} dBuV 150k->1M)")
+
+    # 11) ABCD insertion loss: real DM-choke self-capacitance floors HF attenuation
+    #     (a real filter cannot keep gaining IL forever — the ideal-slope model would).
+    par = _resolve_parasitics(FilterParasitics())
+    il_lo = insertion_loss_dm(47e-6, 4.7e-6, 1, par, 150e3)
+    il_srf = insertion_loss_dm(47e-6, 4.7e-6, 1, par, 20e6)   # above choke SRF
+    assert il_lo > 40, f"DM IL at 150 kHz should be substantial ({il_lo:.1f} dB)"
+    assert il_srf < il_lo, "HF IL must roll off past the choke self-resonance (parasitic floor)"
+    print(f"  [ok] ABCD IL shows HF floor: DM IL {il_lo:.0f} dB @150k -> {il_srf:.0f} dB @20M")
+
+    # 12) DC-DC present adds CM (transformer/switch-node); PFC-only drops those terms.
+    pfc_only = _reference_context(); pfc_only.dcdc = DCDCResult(present=False)
+    cm_pfc_only = cm_noise_dbuv(pfc_only, 150e3)[0]
+    assert cm_pfc_only < cm150 - 3, "PFC-only CM must be lower (DC-DC terms dropped, no hidden add)"
+    print(f"  [ok] DC-DC toggle: CM {cm150:.0f} dBuV (with) -> {cm_pfc_only:.0f} dBuV (PFC-only)")
 
     print("ALL SELF-TESTS PASSED.")
 
