@@ -86,8 +86,18 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
     r4 = prior["step5"]["rfb2"]             # divider bottom (23.2 kΩ)
     fcv = pin["fcv"]                        # Step 4 GUI voltage crossover
     gmv = p["gmv"]
-    leq = lphi / nch                        # combined two-phase plant inductance
+    leq = lphi / nch                        # nominal combined two-phase plant inductance (reporting)
     hv = vfbpfc / vout                      # feedback divider
+
+    # Per-operating-point combined inductance L_phi(vac)/nch from the DC-bias roll-off curve (same
+    # basis as the current loop — driven by the DC/average current at each point). Falls back to leq.
+    from app.mode_b.step16_step10_iloop import l_interp
+    _lc = p.get("l_curve") or []
+    _lc_v = [float(x[0]) for x in _lc]
+    _lc_l = [float(x[1]) * 1e-6 for x in _lc]
+
+    def leq_at(vac):
+        return l_interp(vac, _lc_v, _lc_l, lphi) / nch
 
     # ── inner-loop T_i(s) rebuilt from Step 10 (per-op plant + Type-2 OTA) ─────
     ric = s10["ric"]; rn10 = s10["ramp_norm"]; f_rc = s10["f_rc"]
@@ -107,7 +117,7 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
         iout = pout / vout
         gmod = kmax * iout / vramp
         Dp = SQRT2 * vac / vout
-        wrhp = rload * Dp**2 / leq
+        wrhp = rload * Dp**2 / leq_at(vac)     # per-op inductance (bias roll-off)
         frhp = wrhp / (2*math.pi)
         s = 1j*w
         ti = Ti(idx, w)
@@ -234,7 +244,7 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
 
     def tv_partial(vac, pout, w):
         rload = vout**2 / pout; iout = pout / vout; gmod = kmax * iout / vramp
-        Dp = SQRT2 * vac / vout; wrhp = rload * Dp**2 / leq
+        Dp = SQRT2 * vac / vout; wrhp = rload * Dp**2 / leq_at(vac)   # per-op inductance (bias roll-off)
         s = 1j * w
         gvp = (1 + s*co*r_c) * (1 - s/wrhp) / (co*s + 2/rload)
         return gmod * 1.0 * gvp * kota * hshape(w)      # G_i,cl ≈ 1 at voltage-loop frequencies

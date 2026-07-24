@@ -19,6 +19,24 @@ import math, cmath
 
 SQRT2 = math.sqrt(2.0)
 
+
+def l_interp(vac, xs, ls, l_default):
+    """Per-operating-point inductance from the powder-core DC-bias roll-off curve `l_curve`
+    ([[Vin_rms, L_H], …], ascending Vin). Linear interpolation, flat beyond the ends. Falls back to
+    the constant `l_default` when no curve is supplied. The curve's L at each Vin already reflects the
+    roll-off driven by the DC/average inductor current at that operating point (Step 13.4)."""
+    if not xs:
+        return l_default
+    if vac <= xs[0]:
+        return ls[0]
+    if vac >= xs[-1]:
+        return ls[-1]
+    for i in range(1, len(xs)):
+        if vac <= xs[i]:
+            t = (vac - xs[i - 1]) / (xs[i] - xs[i - 1])
+            return ls[i - 1] + t * (ls[i] - ls[i - 1])
+    return ls[-1]
+
 # Component values that originate HERE (anti-alias filter, datasheet, compensator
 # targets) — everything else is pulled from prior steps in compute_step10_iloop.
 DEFAULT_INPUTS = {
@@ -104,19 +122,29 @@ def compute_step10_iloop(inp: dict | None = None, prior: dict | None = None) -> 
 
     ops = [(v, pout_lo) for v in p["vac_ll"]] + [(v, pout_hi) for v in p["vac_hl"]]
 
+    # Per-operating-point inductance from the DC-bias roll-off curve (driven by the DC/average current
+    # at each point). Threaded from the magnetic design via inp["l_curve"]; falls back to nominal L.
+    _lc = p.get("l_curve") or []
+    _lc_v = [float(x[0]) for x in _lc]
+    _lc_l = [float(x[1]) * 1e-6 for x in _lc]
+
+    def l_at(vac):
+        return l_interp(vac, _lc_v, _lc_l, lphi)
+
     def op_calc(vac, pout):
         rload = vout ** 2 / pout
         vinpk = SQRT2 * vac
         D = 1 - vinpk / vout
         Dp = 1 - D
-        pl = _Plant(vout, lphi, co, r_l, r_c, rload, D)
-        frhp = rload * Dp ** 2 / (2 * math.pi * lphi)
+        l_op = l_at(vac)                       # inductance at THIS operating point (bias roll-off)
+        pl = _Plant(vout, l_op, co, r_l, r_c, rload, D)
+        frhp = rload * Dp ** 2 / (2 * math.pi * l_op)
         gid_ci = pl.gid(wci)
         h = hcs(wci)
         ti_unc = gid_ci * ramp_norm * h
         return dict(vac=vac, pout=pout, rload=rload, vinpk=vinpk, D=D, Dp=Dp,
                     plant=pl, frhp=frhp, gid_ci=gid_ci, h=h, ti_unc=ti_unc,
-                    f0=pl.f0, q=pl.q)
+                    l_op=l_op, f0=pl.f0, q=pl.q)
 
     rows = [op_calc(v, pw) for v, pw in ops]
 

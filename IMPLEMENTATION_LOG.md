@@ -5103,4 +5103,20 @@ canonical_ops_table (grid never leaves the anchor domain) + `_clamp_input_voltag
 intake so the stored spec, grid, BIBO and prose all agree + frontend IntakeForm Vin min/max bounds tightened
 to 85/264 with onChange clamping. Verified: reference PF unchanged and pf_target=0.99 now ignored; 85→0.999;
 95→0.99868 (interp); clamp 70→85 / 280→264. Table 1.2.2 sources PF from this table (doc_report_builder:892).
-Suite: 172 passed / 2 skipped (green). Commit <pending>.
+Suite: 172 passed / 2 skipped (green). Commit 954f49c.
+
+## C138 — 2026-07-23 — Correction batch pt 3: inner-current & voltage loops use per-op inductance
+
+Point 3. The control-loop plants used a single nominal L_φ at every operating point (only R_LOAD varied),
+ignoring the powder-core inductance roll-off with DC bias. Now both loops use L per operating point from the
+bias curve. The magnetic design already computes L per point from the DC/AVERAGE inductor current
+(`_build_L_vs_Vin_table`: Iavg = Ipk_line/2 → H → k_bias → L) and threads it to the control compute as
+`inp["l_curve"]` (main.py:2427). Added `l_interp(vac, xs, ls, default)` in step16_step10_iloop; in
+`op_calc` each op's plant + RHP-zero use `l_at(vac)` instead of the constant `lphi`. In step16_step11_vloop
+added `leq_at(vac)` (= L_φ(vac)/nch) and routed both voltage-plant `wrhp` sites (op_base + tv_partial)
+through it; the inner Ti reuses the step10 per-op plant, so it inherits the fix. INVARIANT preserved: the
+compensator is still sized at rows[0] (lowest Vin = highest bias = MINIMUM L), so `l_at(rows[0].vac)` equals
+the old `_asb_min_uH` anchor — design point unchanged; only the per-op sweep/Bode now show the true (lower)
+crossover at higher-L points, exactly as the §6.10.14 narrative asserts. Falls back to constant L when no
+l_curve. Verified: per-op L tracks the curve (90→200…264→340 µH), frhp/fco vary per op, no-curve → constant;
+full Ch6 report builds. Suite: 172 passed / 2 skipped (green). Commit <pending>.
