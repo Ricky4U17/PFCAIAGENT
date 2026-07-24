@@ -5146,3 +5146,30 @@ DM 33 dB below CM (bulk-cap shunt); CM flat 150k–1M (line-independent); ABCD D
 HF floor); DC-DC toggle 116→102 dBµV. Engine self-test (12 checks) + full suite 172/2 green; adapter +
 Chapter-10 report still build. NEXT (Phase 1b): wire adapter to feed l_boost/bulk/points/dcdc/parasitics
 from the real grid + add the DC-DC GUI group; then loss/leakage, thesis report + index, verify harness.
+
+## C140 — 2026-07-23 — EMI Phase 1b: adapter wiring + DC-DC GUI + series-R-L damping + delivered-margin synthesis
+
+Second EMI sub-step. Made the computed engine (C139) the PRODUCTION path, no hardcoded values:
+- ADAPTER (inputfilter/adapter.py): builds per-operating-point `points` from the SAME 9-point grid
+  (build_design_ops) — V_in/duty/I_in + per-op ΔI using the C138 bias inductance (single source of
+  truth, no re-derived operating points); feeds l_boost, bulk_c (installed bank value×qty), and all
+  parasitics; new DC-DC group (present + f_sw/topology/v_node/dvdt/c_node/c_ps) as designer placeholders.
+  Blank parasitics are OMITTED so the ENGINE is the single source of defaults (no duplicated literals).
+  Noise source now "computed" in production.
+- DAMPING fixed parallel-R-C → SERIES-R-L (ref §10): R_d grid-searched to minimise the computed filter
+  |Z_out| peak (L_d ≈ L_DM, no blocking cap / reactive current). Middlebrook upgraded to FREQUENCY-DOMAIN
+  |Z_out(f)| vs converter |Z_in(f)| (boost-inductor-dominated at the DM resonance) with a dB margin (§11).
+- SYNTHESIS now delivered-margin-driven: BINDING corner = min over band of f/10^(A_req/(20·order)) (not
+  the single worst-att point — the computed source can peak mid/high band via bulk-cap ESL, as the ref
+  notes "37.4 dB higher in the band"); multi-stage L sized correctly (×stages²); AUTO-ESCALATES 1→2 stages
+  when the ABCD delivered margin is short (2 = ref max). Residual CM shortfall emits a SOURCE-REDUCTION
+  target (achievability-gate seed, App B.3) instead of an impossible filter.
+- GUI (InputFilter.tsx): new PFC-parasitics row (C node→chassis, dV/dt, di/dt, bulk ESL) + collapsible
+  DC-DC group (topology/f_sw/ΔV/dV/dt/C_node/C_ps); blank = engine default. Results now show series-R-L
+  damping, delivered DM/CM IL+margins, noise source, and the frequency-domain Middlebrook margin.
+  EmiResult type extended (client.ts); frontend typechecks clean.
+VERIFIED: adapter engages the computed model (l_boost=240µH, bulk=900µF, 9 pts); PFC+DC-DC raises CM
+(62→76 dB req); DM escalates to 2 stages meeting +22 dB, CM short → source-reduction warning (matches the
+reference's "CM is the tight mode"). Engine self-test = 13 checks; suite 172/2; Ch10 report builds.
+NEXT (Phase 1c/2): loss + leakage per-point sweep, then thesis-level report + index with all reference
+detail (steps/figures/tables), then verify_emi_newspecs.py.

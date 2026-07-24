@@ -46,7 +46,9 @@ METHOD (industry-standard required-attenuation flow)
      (80 dB/dec) if one stage needs an impractical corner.
   5. Split corner into L,C under constraints: C_Y from leakage budget
      first then solve L_CM; C_X grown for DM then solve/limit L_DM.
-  6. Damping (parallel R-C) + Middlebrook input-impedance stability.
+  6. Damping (series R-L across the DM choke, R_d grid-searched to minimise the
+     computed output-impedance peak) + frequency-domain Middlebrook stability
+     (|Z_out(f)| vs converter |Z_in(f)| at the DM resonance).
 
 Run:  python3 emi_filter_design.py            (demo report)
       python3 emi_filter_design.py --selftest  (prove the logic)
@@ -368,6 +370,10 @@ class EMIResult:
     stability_z0_dm: float
     stability_rin_conv: float
     stability_ok: bool
+    # damping (series-R-L) + frequency-domain Middlebrook
+    damp_l: float = 0.0            # H, series-R-L damping-branch inductor (≈ L_DM)
+    stability_margin_db: float = 0.0   # 20log10(|Zin|/|Zout,peak|) at the DM resonance
+    dm_res_hz: float = 0.0         # DM LC resonance frequency
     # delivered insertion loss (ABCD two-port with real parasitics) + worst-case margins
     dm_il_db: float = 0.0          # delivered DM IL at the worst-margin frequency
     dm_margin_db: float = 0.0      # min over band of (DM IL - DM required attenuation)
@@ -615,14 +621,29 @@ def corner_for(att_db, f_noise, order):
     return f_noise / (10 ** (att_db / (20.0 * order)))
 
 
-def choose_stages_and_corner(att_db, f_noise, f_floor):
-    """Single LC (order 2) if its corner is practical (>= f_floor), else
-       two LC stages (order 4)."""
-    fc1 = corner_for(att_db, f_noise, 2)
+def binding_corner(ctx, noise_fn, klass, detector, margin, order, f_lo):
+    """The BINDING corner for an `order`-pole filter: the minimum f_c over the band
+    of the per-frequency corner f/10^(A_req(f)/(20·order)). Using the minimum (not the
+    corner at the single worst-attenuation point) guarantees the roll-off clears the
+    requirement at EVERY frequency — important now that the computed source can peak in
+    the mid/high band (bulk-cap ESL), not only at 150 kHz."""
+    grid = _freq_grid(max(CONDUCTED_FMIN, f_lo), CONDUCTED_FMAX)
+    fc_min = 1e18
+    for f in grid:
+        nz, _ = noise_fn(ctx, f)
+        att = nz - (conducted_limit_dbuv(f, klass, detector) - margin)
+        if att > 0:
+            fc_min = min(fc_min, f / (10 ** (att / (20.0 * order))))
+    return fc_min if fc_min < 1e18 else CONDUCTED_FMAX
+
+
+def choose_stages_and_corner(ctx, noise_fn, klass, detector, margin, f_floor, f_lo):
+    """Single LC (order 2) if its binding corner is practical (>= f_floor), else two
+    LC stages (order 4). Returns (stages, binding_corner_hz)."""
+    fc1 = binding_corner(ctx, noise_fn, klass, detector, margin, 2, f_lo)
     if fc1 >= f_floor:
         return 1, fc1
-    fc2 = corner_for(att_db, f_noise, 4)
-    return 2, fc2
+    return 2, binding_corner(ctx, noise_fn, klass, detector, margin, 4, f_lo)
 
 
 # ============================================================== #
@@ -667,13 +688,11 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
     prov["dm_req_att"] = f"DM noise({dm_src}) - (ClassB/A limit - {margin}dB) @ {dm_f/1e3:.0f}kHz"
     prov["cm_req_att"] = f"CM noise({cm_src}) - (limit - {margin}dB) @ {cm_f/1e3:.0f}kHz"
 
-    # ---- stages + corners ----
-    dm_stages, dm_fc = choose_stages_and_corner(dm_att, dm_f, f_floor)
-    cm_stages, cm_fc = choose_stages_and_corner(cm_att, cm_f, f_floor)
-    prov["dm_corner"] = f"{dm_stages} LC stage(s), {20*2*dm_stages} dB/dec to meet {dm_att:.0f} dB"
-    prov["cm_corner"] = f"{cm_stages} LC stage(s) to meet {cm_att:.0f} dB"
+    # ---- resolve ABCD parasitics (delivered-margin-driven sizing + damping need them) ----
+    par = _resolve_parasitics(ctx.parasitics)
 
-    # ---- CM: leakage budget fixes C_Y, then solve L_CM ----
+    # ---- CM: leakage budget fixes C_Y; size L_CM at the binding corner and ESCALATE 1->2
+    #      stages if the DELIVERED (ABCD, real-parasitic) margin is short (2 = reference max) ----
     leak_limit = SAFETY_LEAKAGE_LIMIT[ein.safety_standard]
     v_ln = p.vac_max
     cy_total_max = (ein.leakage_use_fraction * leak_limit) / (TWO_PI * p.f_line * v_ln)
@@ -686,41 +705,94 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
                   f"already exceeds the {ein.safety_standard} leakage ceiling "
                   f"({cy_total_max*1e9:.2f}nF). Revisit protection-stage Y-caps or "
                   f"the safety standard.")
-        cy_emi = 0.0
-        l_cm = float("inf")
+        cy_emi = 0.0; l_cm = float("inf"); cm_stages = 1; cm_fc = 0.0
+        cm_il_db = cm_margin_db = cm_margin_f = 0.0
     else:
         cy_emi = cy_remaining
-        # CM corner: f0 = 1/(2*pi*sqrt(L_cm * 2*C_Y))  (two Y-caps in parallel for CM)
-        c_cm = 2.0 * cy_emi
-        l_cm = 1.0 / ((TWO_PI * cm_fc) ** 2 * c_cm)
-        prov["l_cm"] = f"L_CM = 1/((2*pi*{cm_fc/1e3:.1f}kHz)^2 * 2*C_Y)"
+        cy_system = prot.committed_y_cap_total + cy_emi
+
+        def _size_cm(stages):
+            fc = binding_corner(ctx, cm_noise_dbuv, klass, detector, margin, 2 * stages, f_first)
+            # n cascaded LC sections: L_total = n^2 / ((2*pi*fc)^2 * 2*C_Y)
+            l = (stages ** 2) / ((TWO_PI * fc) ** 2 * (2.0 * cy_emi))
+            il, m, mf = delivered_margin(
+                cm_noise_dbuv, lambda f: insertion_loss_cm(l, cy_system, stages, par, f),
+                ctx, klass, detector, margin, f_first)
+            return fc, l, il, m, mf
+
+        cm_stages = 1
+        cm_fc, l_cm, cm_il_db, cm_margin_db, cm_margin_f = _size_cm(1)
+        if cm_margin_db < 0:                        # 1 stage short with real parasitics -> 2 stages
+            cm_stages = 2
+            cm_fc, l_cm, cm_il_db, cm_margin_db, cm_margin_f = _size_cm(2)
+        prov["l_cm"] = f"L_CM {l_cm*1e3:.2f} mH, {cm_stages} stage(s), binding corner {cm_fc/1e3:.1f} kHz"
 
     cy_system = prot.committed_y_cap_total + cy_emi
 
-    # ---- DM: grow C_X (cheap) then solve/limit L_DM ----
-    c_x = min(ein.cx_max, ein.cx_max)   # start at practical max for headroom
-    l_dm = 1.0 / ((TWO_PI * dm_fc) ** 2 * c_x)
-    if l_dm > ein.ldm_sat_max:
-        # need more C_X than cx_max OR another stage; flag and clamp
-        l_dm = ein.ldm_sat_max
-        c_needed = 1.0 / ((TWO_PI * dm_fc) ** 2 * l_dm)
-        warn.append(f"DM corner needs C_X ~ {c_needed*1e6:.2f}uF (> cx_max "
-                    f"{ein.cx_max*1e6:.2f}uF). Add an X-cap bank or a 2nd DM stage.")
-        c_x = ein.cx_max
-    prov["l_dm"] = f"L_DM from DM corner {dm_fc/1e3:.1f}kHz with C_X {c_x*1e6:.2f}uF (sat-limited {ein.ldm_sat_max*1e6:.0f}uH)"
+    # ---- DM: C_X at the practical max; size L_DM at the binding corner and ESCALATE if short ----
+    c_x = ein.cx_max
 
-    # ---- damping (parallel R-C) + Middlebrook stability ----
-    z0_dm = sqrt(l_dm / c_x)
-    damp_c = 4.0 * c_x
-    damp_r = z0_dm                      # ~characteristic impedance (near-optimal)
-    rin_conv = (p.vac_min ** 2) / (p.p_out / max(p.eff, 1e-3))  # |neg input R|
-    stability_ok = z0_dm < rin_conv
-    prov["damping"] = f"R_d ~ sqrt(L/C)={z0_dm:.1f} ohm, C_d=4*C_X={damp_c*1e6:.2f}uF"
-    prov["stability"] = (f"Middlebrook: Z0_dm {z0_dm:.1f} ohm vs |Rin_conv| "
-                         f"{rin_conv:.1f} ohm")
+    def _size_dm(stages):
+        fc = binding_corner(ctx, dm_noise_dbuv, klass, detector, margin, 2 * stages, f_first)
+        l = (stages ** 2) / ((TWO_PI * fc) ** 2 * c_x)
+        il, m, mf = delivered_margin(
+            dm_noise_dbuv, lambda f: insertion_loss_dm(l, c_x, stages, par, f),
+            ctx, klass, detector, margin, f_first)
+        return fc, l, il, m, mf
+
+    dm_stages = 1
+    dm_fc, l_dm, dm_il_db, dm_margin_db, dm_margin_f = _size_dm(1)
+    if dm_margin_db < 0:
+        dm_stages = 2
+        dm_fc, l_dm, dm_il_db, dm_margin_db, dm_margin_f = _size_dm(2)
+    prov["dm_corner"] = f"{dm_stages} LC stage(s), {20*2*dm_stages} dB/dec; binding corner {dm_fc/1e3:.1f} kHz"
+    prov["l_dm"] = f"L_DM {l_dm*1e6:.1f} uH total, {dm_stages} stage(s), C_X {c_x*1e6:.2f} uF"
+    if (l_dm / max(dm_stages, 1)) > ein.ldm_sat_max:
+        warn.append(f"per-stage DM inductance {l_dm/dm_stages*1e6:.0f} uH exceeds the "
+                    f"saturation-practical {ein.ldm_sat_max*1e6:.0f} uH; split further or raise C_X.")
+
+    # ---- damping (series R-L) + frequency-domain Middlebrook stability ----
+    # Reference §10/§11: a series R_d-L_d branch across the DM choke (L_d ≈ L_DM) damps the
+    # LC resonance WITHOUT the large blocking cap / reactive current of the parallel-R-C method.
+    # R_d is grid-searched to minimise the computed filter output-impedance peak (target Q ≤ 1).
+    z0_dm = sqrt(l_dm / c_x)                          # DM characteristic impedance
+    damp_l = l_dm                                     # series-R-L inductor ≈ L_DM (n ≈ 1)
+    f_res_dm = 1.0 / (TWO_PI * sqrt(l_dm * c_x))      # DM LC resonance
+
+    def _zout_dm_peak(r_d):
+        """Max |Z_out| of the damped DM filter near resonance (converter looks back into
+        L_DM ∥ (R_d+jωL_d), then C_X ∥ LISN)."""
+        peak = 0.0
+        for f in _freq_grid(0.3 * f_res_dm, 3.0 * f_res_dm, 60):
+            w = TWO_PI * f
+            z_ldm = complex(0.0, w * l_dm)
+            z_branch = complex(r_d, w * damp_l)
+            z_series = (z_ldm * z_branch) / (z_ldm + z_branch)     # damping branch ∥ L_DM
+            z_cx = _z_cap(f, c_x, par["xcap_esr"], par["xcap_esl"])
+            z_shunt = (z_cx * Z_LISN_DM) / (z_cx + Z_LISN_DM)
+            peak = max(peak, abs(z_series + z_shunt))
+        return peak
+
+    damp_r, zout_peak = z0_dm, 1e18
+    for _k in (0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0):     # sweep R_d = k·Z0
+        pk = _zout_dm_peak(z0_dm * _k)
+        if pk < zout_peak:
+            zout_peak, damp_r = pk, z0_dm * _k
+    damp_c = 0.0                                      # series-R-L method: no blocking cap
+    # Converter input impedance: negative resistance R_n = V_in²/P_in appears only below the
+    # PFC voltage-loop bandwidth (tens of Hz); around the DM resonance |Z_in| is set by the boost
+    # inductor (ω·L_boost/n_phases). Middlebrook: 20log10(|Z_in|/|Z_out,peak|) ≥ margin.
+    rin_conv = (p.vac_min ** 2) / (p.p_out / max(p.eff, 1e-3))    # |neg input R| (LF)
+    zin_res = (TWO_PI * f_res_dm * (p.l_boost / max(p.n_phases, 1))) if p.l_boost else rin_conv
+    stability_margin_db = 20.0 * log10(max(zin_res, 1e-9) / max(zout_peak, 1e-9))
+    stability_ok = stability_margin_db >= margin
+    prov["damping"] = (f"series-R-L across L_DM: R_d={damp_r:.2f} ohm, L_d={damp_l*1e6:.1f} uH "
+                       f"(grid-searched to min |Z_out| peak {zout_peak:.2f} ohm; Z0={z0_dm:.2f} ohm)")
+    prov["stability"] = (f"Middlebrook @ f_res {f_res_dm/1e3:.1f} kHz: |Z_in| {zin_res:.2f} ohm / "
+                         f"|Z_out| {zout_peak:.2f} ohm = {stability_margin_db:.1f} dB (need {margin:.0f})")
     if not stability_ok:
-        warn.append(f"Filter Z0 {z0_dm:.1f} ohm not << converter input "
-                    f"{rin_conv:.1f} ohm; increase damping / C_X to ensure stability.")
+        warn.append(f"Middlebrook margin {stability_margin_db:.1f} dB < {margin:.0f} dB target at the DM "
+                    f"resonance ({f_res_dm/1e3:.1f} kHz); lower R_d or raise C_X.")
 
     # ---- leakage check (system) ----
     leak_actual = TWO_PI * p.f_line * v_ln * cy_system
@@ -739,28 +811,23 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
     else:
         warn.append("No bleeder_r given; verify X-cap discharge-time safety rule.")
 
-    # ---- delivered insertion loss (ABCD two-port) + worst-case margins ----
-    par = _resolve_parasitics(ctx.parasitics)
+    # ---- delivered insertion loss (ABCD two-port) — margins computed during sizing above ----
     prov["il_model"] = ("ABCD two-port with parasitics "
                         f"(X-cap ESR {par['xcap_esr']*1e3:.0f}mΩ/ESL {par['xcap_esl']*1e9:.0f}nH, "
                         f"DM-choke Cp {par['ldm_cp']*1e12:.0f}pF, Y-cap ESL {par['ycap_esl']*1e9:.0f}nH, "
                         f"CM-choke Cp {par['lcm_cp']*1e12:.0f}pF)")
-    dm_il_db, dm_margin_db, dm_margin_f = delivered_margin(
-        dm_noise_dbuv, lambda f: insertion_loss_dm(l_dm, c_x, dm_stages, par, f),
-        ctx, klass, detector, margin, f_first)
-    if l_cm != float("inf") and cy_emi > 0:
-        cm_il_db, cm_margin_db, cm_margin_f = delivered_margin(
-            cm_noise_dbuv, lambda f: insertion_loss_cm(l_cm, cy_system, cm_stages, par, f),
-            ctx, klass, detector, margin, f_first)
-    else:
-        cm_il_db = cm_margin_db = cm_margin_f = 0.0
+    # After escalation, a residual shortfall means the requirement is not reachable with practical
+    # parts — surface a SOURCE-REDUCTION target (achievability gate seed, App B.3) rather than an
+    # impossible filter.
     if dm_margin_db < 0:
-        warn.append(f"DM delivered IL falls {abs(dm_margin_db):.1f} dB SHORT of the requirement "
-                    f"near {dm_margin_f/1e3:.0f} kHz (ABCD model with parasitics).")
+        warn.append(f"DM delivered IL still falls {abs(dm_margin_db):.1f} dB SHORT near "
+                    f"{dm_margin_f/1e3:.0f} kHz at {dm_stages} stage(s) — raise C_X / add a DM stage, "
+                    f"or reduce the input-ripple source.")
     if cm_margin_db < 0 and l_cm != float("inf"):
-        warn.append(f"CM delivered IL falls {abs(cm_margin_db):.1f} dB SHORT near "
-                    f"{cm_margin_f/1e3:.0f} kHz — HF CM is floored by choke self-resonance/parasitics; "
-                    f"reduce the CM source (C_ps, node capacitance, dV/dt) rather than adding stages.")
+        warn.append(f"CM delivered IL still falls {abs(cm_margin_db):.1f} dB SHORT near "
+                    f"{cm_margin_f/1e3:.0f} kHz at {cm_stages} stage(s) — HF CM is floored by choke self-"
+                    f"resonance/parasitics; REDUCE THE CM SOURCE (C_ps, node capacitance, dV/dt) rather "
+                    f"than adding Y-capacitance/stages.")
 
     feasible = (len(fb) == 0)
 
@@ -777,6 +844,7 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         leakage_actual_A=leak_actual, xcap_discharge_s=xcap_disc,
         stability_z0_dm=z0_dm, stability_rin_conv=rin_conv,
         stability_ok=stability_ok,
+        damp_l=damp_l, stability_margin_db=stability_margin_db, dm_res_hz=f_res_dm,
         dm_il_db=dm_il_db, dm_margin_db=dm_margin_db, dm_margin_f=dm_margin_f,
         cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
@@ -825,14 +893,19 @@ def render_report(r: EMIResult) -> str:
     o(f"    Y-cap (this stg) : {r.c_y_emi_total*1e9:8.3f} nF total "
       f"({r.c_y_emi_total*1e9/2:.3f} nF each L-PE / N-PE)")
     o(f"    Y-cap (system)   : {r.c_y_system_total*1e9:8.3f} nF total (incl. upstream)")
-    o(f"    Damping  R_d/C_d : {r.damp_r:6.1f} ohm + {r.damp_c*1e6:.3f} uF")
+    o(f"    Damping (ser R-L): R_d {r.damp_r:6.2f} ohm + L_d {r.damp_l*1e6:.1f} uH "
+      f"(across L_DM; no blocking cap)")
+
+    o("\n[DELIVERED INSERTION LOSS -- ABCD model]")
+    o(f"    DM : {r.dm_il_db:5.1f} dB, worst margin {r.dm_margin_db:+.1f} dB @ {r.dm_margin_f/1e3:.0f} kHz")
+    o(f"    CM : {r.cm_il_db:5.1f} dB, worst margin {r.cm_margin_db:+.1f} dB @ {r.cm_margin_f/1e3:.0f} kHz")
 
     o("\n[CHECKS]")
     o(f"    Earth leakage    : {r.leakage_actual_A*1e3:.3f} mA "
       f"(limit {r.leakage_limit_A*1e3:.2f} mA) "
       f"-> {'OK' if r.leakage_actual_A <= r.leakage_limit_A else 'OVER'}")
-    o(f"    Stability (MBK)  : Z0_dm {r.stability_z0_dm:.1f} ohm vs |Rin| "
-      f"{r.stability_rin_conv:.1f} ohm -> {'OK' if r.stability_ok else 'CHECK'}")
+    o(f"    Stability (MBK)  : {r.stability_margin_db:+.1f} dB @ f_res {r.dm_res_hz/1e3:.1f} kHz "
+      f"(|Zout| {r.stability_z0_dm:.2f} ohm Z0) -> {'OK' if r.stability_ok else 'CHECK'}")
     if r.xcap_discharge_s is not None:
         o(f"    X-cap discharge  : {r.xcap_discharge_s:.2f} s")
 
@@ -901,22 +974,23 @@ def _reference_context() -> DesignContext:
 def self_test():
     print("Running self-test (EMI synthesis steering)...")
 
-    # 1) Class B demands a lower corner than Class A (stricter -> more atten).
+    # 1) Class B demands >= attenuation than Class A (stricter limit). (Corner comparison is no
+    #    longer a clean invariant once the synthesiser escalates stages, so compare required att.)
     cb = demo_context(); cb.emi_in.compliance_profile = 5   # Class B
     ca = demo_context(); ca.emi_in.compliance_profile = 4   # Class A
     rb, ra = design_emi_filter(cb), design_emi_filter(ca)
-    assert rb.dm_corner_hz <= ra.dm_corner_hz, "Class B should need <= DM corner"
-    assert rb.cm_corner_hz <= ra.cm_corner_hz, "Class B should need <= CM corner"
-    print(f"  [ok] Class B corner <= Class A (DM {rb.dm_corner_hz/1e3:.1f} "
-          f"<= {ra.dm_corner_hz/1e3:.1f} kHz)")
+    assert rb.dm_req_att_db >= ra.dm_req_att_db - 1e-6, "Class B should need >= DM attenuation"
+    assert rb.cm_req_att_db >= ra.cm_req_att_db - 1e-6, "Class B should need >= CM attenuation"
+    print(f"  [ok] Class B needs >= Class A attenuation (DM {rb.dm_req_att_db:.1f} "
+          f">= {ra.dm_req_att_db:.1f} dB)")
 
-    # 2) +margin lowers the corner (needs more attenuation).
+    # 2) +margin raises the required attenuation.
     c0 = demo_context(); c0.emi_in.margin_db = 0
     c6 = demo_context(); c6.emi_in.margin_db = 6
     r0, r6 = design_emi_filter(c0), design_emi_filter(c6)
-    assert r6.cm_corner_hz <= r0.cm_corner_hz, "more margin -> lower corner"
-    print(f"  [ok] +6dB margin lowers CM corner "
-          f"({r6.cm_corner_hz/1e3:.1f} <= {r0.cm_corner_hz/1e3:.1f} kHz)")
+    assert r6.cm_req_att_db >= r0.cm_req_att_db - 1e-6, "more margin -> more required attenuation"
+    print(f"  [ok] +6dB margin raises CM required att "
+          f"({r6.cm_req_att_db:.1f} >= {r0.cm_req_att_db:.1f} dB)")
 
     # 3) Tighter safety standard -> smaller Y-cap ceiling -> larger L_CM.
     c_it = demo_context(); c_it.emi_in.safety_standard = "IEC_62368_1"   # 3.5mA
@@ -986,6 +1060,16 @@ def self_test():
     cm_pfc_only = cm_noise_dbuv(pfc_only, 150e3)[0]
     assert cm_pfc_only < cm150 - 3, "PFC-only CM must be lower (DC-DC terms dropped, no hidden add)"
     print(f"  [ok] DC-DC toggle: CM {cm150:.0f} dBuV (with) -> {cm_pfc_only:.0f} dBuV (PFC-only)")
+
+    # 13) Delivered-margin-driven synthesis: escalates to 2 stages when 1 is short with real
+    #     parasitics, and a residual CM shortfall emits a source-reduction target (App B.3).
+    rr = design_emi_filter(_reference_context())
+    assert rr.dm_stages >= 1 and rr.cm_stages >= 1
+    assert rr.dm_margin_db > -1.0, f"DM should meet (or nearly) after escalation ({rr.dm_margin_db:.1f} dB)"
+    assert any("REDUCE THE CM SOURCE" in w for w in rr.warnings) or rr.cm_margin_db >= 0, \
+        "short CM must emit a source-reduction target"
+    print(f"  [ok] escalation: DM {rr.dm_stages}-stage margin {rr.dm_margin_db:+.1f} dB; "
+          f"CM {rr.cm_stages}-stage margin {rr.cm_margin_db:+.1f} dB (source-reduction if short)")
 
     print("ALL SELF-TESTS PASSED.")
 

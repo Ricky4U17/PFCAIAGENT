@@ -16,18 +16,31 @@ from . import emi_filter_design as emi
 from app.mode_b.semiconductor.adapter import build_design_ops
 
 
-def _grid_ripple_and_eff(design: dict):
-    """Worst-case per-phase peak-to-peak inductor ripple [A] and a representative efficiency,
-    from the same operating grid every chapter shares."""
+def _grid_points(design: dict):
+    """Build the per-operating-point source-model inputs from the SAME 9-point grid every
+    chapter shares (single source of truth — no re-derived / hardcoded operating points).
+    Returns (points, worst_ripple_pp, eff, L_phi) where each point carries V_in, peak duty,
+    input RMS current and the per-point ripple ΔI = √2·V_in·D/(L(op)·f_sw) using the C138
+    per-operating-point bias inductance."""
     ops, s2, L_phi, iph, L_pts = build_design_ops(design)
     fsw = float(design["fsw"])
-    dil_pp = 0.0
+    fline = float(design.get("fline", 60))
+    pts, dil_pp = [], 0.0
     for i in range(len(ops)):
-        v = s2["Vin_pk"][i] * s2["Dpk"][i] / (L_pts[i] * fsw)
-        if v > dil_pp:
-            dil_pp = float(v)
+        d = float(s2["Dpk"][i])
+        di = float(s2["Vin_pk"][i]) * d / (float(L_pts[i]) * fsw)   # per-phase ripple pp @ this op
+        dil_pp = max(dil_pp, di)
+        pts.append(emi.OperatingPoint(v_in=float(s2["Vin_rms"][i]), duty=d,
+                                      i_in=float(s2["Iin_rms"][i]), delta_i=di, f_line=fline))
     eff = float(min(ops[:, 2]))                 # conservative (lowest efficiency point)
-    return dil_pp, eff
+    return pts, dil_pp, eff, float(L_phi)
+
+
+def _opt_scaled(opts: dict, key: str, scale: float):
+    """Designer parasitic override -> SI value, or None (engine then uses its named default).
+    No default is duplicated here: the engine is the single source of defaults."""
+    v = opts.get(key)
+    return (float(v) * scale) if v is not None else None
 
 
 def _native(o):
@@ -59,12 +72,16 @@ def calculate_emi(design: dict, cap: dict | None = None, protection: dict | None
              cx_max_uF, ldm_sat_max_uH
     """
     cap = cap or {}; protection = protection or {}; ntc = ntc or {}; opts = opts or {}
-    dil_pp, eff = _grid_ripple_and_eff(design)
+    points, dil_pp, eff, l_phi = _grid_points(design)
 
     esr = opts.get("esr_bulk_mohm")
     if esr is None:
         esr = cap.get("ESR_parallel_mohm") or cap.get("ESR_mOhm")
     esr_bulk = (float(esr) / 1e3) if esr else None
+    # Bulk (DC-bus) capacitance for the DM shunt path — installed bank (value × qty).
+    _bulk_uf = cap.get("value_uF") or cap.get("C_uF") or cap.get("cap_uF")
+    _bulk_qty = cap.get("qty") or cap.get("count") or 1
+    bulk_c = (float(_bulk_uf) * float(_bulk_qty) * 1e-6) if _bulk_uf else None
 
     pfc = emi.PFCResult(
         vac_min=float(design["vin_min"]), vac_max=float(design["vin_max"]),
@@ -73,8 +90,16 @@ def calculate_emi(design: dict, cap: dict | None = None, protection: dict | None
         eff=eff, f_sw=float(design["fsw"]), n_phases=int(design.get("nch", 2)),
         i_ripple_pp=float(opts.get("i_ripple_pp_A") or dil_pp),
         esr_bulk=esr_bulk,
+        # --- computed-source-model inputs (Phase 1b: fed from the real grid / cap / designer) ---
+        l_boost=l_phi, bulk_c=bulk_c,
+        bulk_esl=_opt_scaled(opts, "bulk_esl_nh", 1e-9),
+        dvdt_pfc=_opt_scaled(opts, "dvdt_pfc_vns", 1e9),
+        didt_pfc=_opt_scaled(opts, "didt_pfc_ans", 1e9),
+        c_node_pfc=_opt_scaled(opts, "c_node_pfc_pf", 1e-12) or _opt_scaled(opts, "c_para_earth_pf", 1e-12),
+        points=points,
+        # legacy fallbacks (only used if the explicit fields above are absent)
         c_para_earth=(float(opts["c_para_earth_pf"]) * 1e-12) if opts.get("c_para_earth_pf") else None,
-        sw_rise_time=(float(opts["sw_rise_time_ns"]) * 1e-9) if opts.get("sw_rise_time_ns") else 20e-9,
+        dvdt=_opt_scaled(opts, "dvdt_pfc_vns", 1e9),
     )
     y_committed = float(protection.get("committed_y_cap_nf") or 0.0) * 1e-9
     prot = emi.ProtectionResult(committed_y_cap_total=y_committed)
@@ -91,14 +116,38 @@ def calculate_emi(design: dict, cap: dict | None = None, protection: dict | None
         bleeder_r=(float(opts["bleeder_r_ohm"])) if opts.get("bleeder_r_ohm") else None,
     )
 
-    ctx = emi.DesignContext(pfc=pfc, protection=prot, ntc=ntc_r, emi_in=ein)
+    # DC-DC stage (CM source) — designer placeholders now; wired from the DC-DC script later.
+    dc = opts.get("dcdc") or {}
+    dcdc = emi.DCDCResult(
+        present=bool(dc.get("present", False)),
+        f_sw=(float(dc["f_sw_dc_hz"]) if dc.get("f_sw_dc_hz") else None),
+        topology=str(dc.get("topology", "")),
+        v_node=(float(dc["v_node_v"]) if dc.get("v_node_v") else None),
+        dvdt_psfb=(float(dc["dvdt_psfb_vns"]) * 1e9) if dc.get("dvdt_psfb_vns") else None,
+        c_node_psfb=(float(dc["c_node_psfb_pf"]) * 1e-12) if dc.get("c_node_psfb_pf") else None,
+        c_ps=(float(dc["c_ps_pf"]) * 1e-12) if dc.get("c_ps_pf") else None,
+    )
+    par = emi.FilterParasitics(
+        xcap_esr=_opt_scaled(opts, "xcap_esr_mohm", 1e-3),
+        xcap_esl=_opt_scaled(opts, "xcap_esl_nh", 1e-9),
+        ycap_esl=_opt_scaled(opts, "ycap_esl_nh", 1e-9),
+        ldm_cp=_opt_scaled(opts, "ldm_cp_pf", 1e-12),
+        lcm_cp=_opt_scaled(opts, "lcm_cp_pf", 1e-12),
+    )
+
+    ctx = emi.DesignContext(pfc=pfc, protection=prot, ntc=ntc_r, emi_in=ein, dcdc=dcdc, parasitics=par)
     res = emi.design_emi_filter(ctx)
     return _native({
         "result": res,
         "basis": {
-            "i_ripple_pp_A": pfc.i_ripple_pp, "eff": eff, "esr_bulk_mohm": (esr_bulk * 1e3) if esr_bulk else None,
+            "i_ripple_pp_A": pfc.i_ripple_pp, "eff": eff,
+            "esr_bulk_mohm": (esr_bulk * 1e3) if esr_bulk else None,
+            "bulk_c_uF": (bulk_c * 1e6) if bulk_c else None, "l_boost_uH": l_phi * 1e6,
             "v_bus": pfc.v_bus, "f_sw": pfc.f_sw, "n_phases": pfc.n_phases,
-            "vac_max": pfc.vac_max, "f_line": pfc.f_line,
+            "vac_max": pfc.vac_max, "f_line": pfc.f_line, "n_points": len(points),
+            "dcdc_present": dcdc.present, "noise_source": res.noise_source,
+            "dm_margin_db": res.dm_margin_db, "cm_margin_db": res.cm_margin_db,
+            "stability_margin_db": res.stability_margin_db,
         },
     })
 

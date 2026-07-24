@@ -56,7 +56,12 @@ export const InputFilter: React.FC<Props> = ({
 
   const [opts, setOpts] = useState<Record<string, string>>({
     safety_standard: 'IEC_62368_1', compliance_profile: '5', margin_db: '6', detector: '',
-    c_para_earth_pf: '100', sw_rise_time_ns: '20', committed_y_cap_nf: '0', bleeder_r_ohm: '1000000',
+    committed_y_cap_nf: '0', bleeder_r_ohm: '1000000',
+    // PFC-side parasitics (designer-supplied; blank => engine named default, shown in the report)
+    c_node_pfc_pf: '', dvdt_pfc_vns: '', didt_pfc_ans: '', bulk_esl_nh: '',
+    // DC-DC stage (CM source) — placeholders now; wired from the DC-DC script later
+    dcdc_present: '0', f_sw_dc_hz: '250000', dcdc_topology: 'psfb', v_node_v: '',
+    dvdt_psfb_vns: '', c_node_psfb_pf: '', c_ps_pf: '',
   })
   const [opt, setOpt] = useState<{ safety_standards: string[]; leakage_mA: Record<string, number>
     compliance_profiles: Record<string, string> } | null>(null)
@@ -67,17 +72,31 @@ export const InputFilter: React.FC<Props> = ({
 
   useEffect(() => { inputFilterOptions().then(setOpt).catch(() => {}) }, [])
 
+  // Build the opts payload from designer choices. Blank parasitic fields are OMITTED so the engine
+  // uses its named default (single source of defaults — no hardcoded value duplicated in the GUI).
+  const buildOpts = (): Record<string, unknown> => {
+    const o: Record<string, unknown> = {
+      safety_standard: opts.safety_standard, compliance_profile: Number(opts.compliance_profile),
+      margin_db: Number(opts.margin_db), bleeder_r_ohm: Number(opts.bleeder_r_ohm),
+    }
+    if (opts.detector) o.detector = opts.detector
+    const put = (k: string) => { if (opts[k] !== '' && opts[k] != null) o[k] = Number(opts[k]) }
+    ;['c_node_pfc_pf', 'dvdt_pfc_vns', 'didt_pfc_ans', 'bulk_esl_nh'].forEach(put)
+    if (opts.dcdc_present === '1') {
+      const dc: Record<string, unknown> = { present: true, topology: opts.dcdc_topology }
+      const dput = (src: string, dst: string) => { if (opts[src] !== '' && opts[src] != null) dc[dst] = Number(opts[src]) }
+      dput('f_sw_dc_hz', 'f_sw_dc_hz'); dput('v_node_v', 'v_node_v'); dput('dvdt_psfb_vns', 'dvdt_psfb_vns')
+      dput('c_node_psfb_pf', 'c_node_psfb_pf'); dput('c_ps_pf', 'c_ps_pf')
+      o.dcdc = dc
+    }
+    return o
+  }
+
   const run = async () => {
     setBusy(true); setErr(null)
     try {
-      const o: Record<string, unknown> = {
-        safety_standard: opts.safety_standard, compliance_profile: Number(opts.compliance_profile),
-        margin_db: Number(opts.margin_db), c_para_earth_pf: Number(opts.c_para_earth_pf),
-        sw_rise_time_ns: Number(opts.sw_rise_time_ns), bleeder_r_ohm: Number(opts.bleeder_r_ohm),
-      }
-      if (opts.detector) o.detector = opts.detector
       setRes(await inputFilterDesign({ design, cap,
-        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: o }))
+        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: buildOpts() }))
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   useEffect(() => { run() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,14 +105,8 @@ export const InputFilter: React.FC<Props> = ({
   const downloadReport = async () => {
     setRptBusy(true); setErr(null)
     try {
-      const o: Record<string, unknown> = {
-        safety_standard: opts.safety_standard, compliance_profile: Number(opts.compliance_profile),
-        margin_db: Number(opts.margin_db), c_para_earth_pf: Number(opts.c_para_earth_pf),
-        sw_rise_time_ns: Number(opts.sw_rise_time_ns), bleeder_r_ohm: Number(opts.bleeder_r_ohm),
-      }
-      if (opts.detector) o.detector = opts.detector
       const blob = await inputFilterReport({ design, cap,
-        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: o })
+        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: buildOpts() })
       const url = URL.createObjectURL(blob); const a = document.createElement('a')
       a.href = url; a.download = 'PFC_Input_EMI_Filter_Ch10.pdf'
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
@@ -112,8 +125,9 @@ export const InputFilter: React.FC<Props> = ({
           <b style={{ color: C.teal }}>Synthesis.</b> The PFC draws a switching-frequency ripple current; this
           DM (X-cap + DM choke) and CM (CM choke + Y-caps) filter attenuates it to meet the chosen
           conducted-emission profile over 150 kHz–30 MHz, within the safety earth-leakage limit. With
-          2-channel interleaving the first in-band harmonic sits at 2·f_sw. Noise is a first-order
-          <i> estimate</i> here — replace with a measured bare-EUT spectrum for sign-off.
+          2-channel interleaving the first in-band harmonic sits at 2·f_sw. The noise source is
+          <i> computed</i> from the converter specs + parasitics and the delivered attenuation from a
+          real-parasitic ABCD model — a calculated baseline to confirm against a bare-EUT LISN sweep.
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -140,12 +154,50 @@ export const InputFilter: React.FC<Props> = ({
           <label style={{ fontSize: 10.5, color: C.muted, width: 90 }}>Detector<br />
             <select style={selStyle} value={opts.detector} onChange={e => setO('detector', e.target.value)}>
               <option value="">profile</option><option value="AV">AV</option><option value="QP">QP</option></select></label>
-          <label style={{ fontSize: 10.5, color: C.muted, width: 110 }}>C_para earth (pF)<br />
-            <input style={inStyle} value={opts.c_para_earth_pf} onChange={e => setO('c_para_earth_pf', e.target.value)} /></label>
           <label style={{ fontSize: 10.5, color: C.muted, width: 110 }}>Upstream C_Y (nF)<br />
             <input style={inStyle} value={opts.committed_y_cap_nf} onChange={e => setO('committed_y_cap_nf', e.target.value)} /></label>
           <Btn variant="primary" disabled={busy} onClick={run}>{busy ? '⏳ Synthesizing…' : '🔧 Synthesize filter'}</Btn>
         </div>
+
+        {/* PFC-side parasitics (sensitive; blank => engine named default, reported + design-grade). */}
+        <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+          PFC parasitics <span style={{ color: C.muted, textTransform: 'none' }}>— blank uses the engine default (shown in report)</span></div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+          <label style={{ fontSize: 10.5, color: C.muted, width: 130 }}>C node→chassis (pF)<br />
+            <input style={inStyle} placeholder="47 (def)" value={opts.c_node_pfc_pf} onChange={e => setO('c_node_pfc_pf', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>dV/dt PFC (V/ns)<br />
+            <input style={inStyle} placeholder="10 (def)" value={opts.dvdt_pfc_vns} onChange={e => setO('dvdt_pfc_vns', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>di/dt PFC (A/µs)<br />
+            <input style={inStyle} placeholder="500 (def)" value={opts.didt_pfc_ans} onChange={e => setO('didt_pfc_ans', e.target.value)} /></label>
+          <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>Bulk-cap ESL (nH)<br />
+            <input style={inStyle} placeholder="20 (def)" value={opts.bulk_esl_nh} onChange={e => setO('bulk_esl_nh', e.target.value)} /></label>
+        </div>
+
+        {/* DC-DC stage (CM source). Placeholders now; wired from the DC-DC script later. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <label style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={opts.dcdc_present === '1'}
+              onChange={e => setO('dcdc_present', e.target.checked ? '1' : '0')} />
+            Downstream DC-DC stage (adds common-mode source)</label>
+          <span style={{ fontSize: 10, color: C.muted }}>designer placeholders — fed from the DC-DC script when available</span>
+        </div>
+        {opts.dcdc_present === '1' && (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>Topology<br />
+              <select style={selStyle} value={opts.dcdc_topology} onChange={e => setO('dcdc_topology', e.target.value)}>
+                <option value="psfb">PSFB</option><option value="llc">LLC</option><option value="other">other</option></select></label>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>f_sw DC-DC (Hz)<br />
+              <input style={inStyle} value={opts.f_sw_dc_hz} onChange={e => setO('f_sw_dc_hz', e.target.value)} /></label>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 130 }}>Node swing ΔV (V)<br />
+              <input style={inStyle} placeholder="V_bus (def)" value={opts.v_node_v} onChange={e => setO('v_node_v', e.target.value)} /></label>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 120 }}>dV/dt (V/ns)<br />
+              <input style={inStyle} placeholder="15 (def)" value={opts.dvdt_psfb_vns} onChange={e => setO('dvdt_psfb_vns', e.target.value)} /></label>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 140 }}>C node→chassis (pF)<br />
+              <input style={inStyle} placeholder="33 (def)" value={opts.c_node_psfb_pf} onChange={e => setO('c_node_psfb_pf', e.target.value)} /></label>
+            <label style={{ fontSize: 10.5, color: C.muted, width: 150 }}>C pri↔sec C_ps (pF)<br />
+              <input style={inStyle} placeholder="15 (def)" value={opts.c_ps_pf} onChange={e => setO('c_ps_pf', e.target.value)} /></label>
+          </div>
+        )}
 
         {err && <div style={{ background: C.redL, border: `1px solid ${C.red}55`, borderRadius: 8,
           padding: '9px 12px', marginBottom: 12, fontSize: 12, color: '#fca5a5' }}>⚠ {err}</div>}
@@ -172,14 +224,22 @@ export const InputFilter: React.FC<Props> = ({
             <Stat k="CM choke L_CM" v={isFinite(r.l_cm) ? `${num(r.l_cm * 1e3, 2)} mH` : '∞'} />
             <Stat k="Y-cap C_Y (total)" v={`${num(r.c_y_emi_total * 1e9, 2)} nF`} />
             <Stat k="Y-cap each (L/N-PE)" v={`${num(r.c_y_emi_total * 1e9 / 2, 2)} nF`} />
-            <Stat k="Damping R_d / C_d" v={`${num(r.damp_r, 0)} Ω · ${num(r.damp_c * 1e6, 2)} µF`} />
+            <Stat k="Damping (series R-L)" v={`${num(r.damp_r, 2)} Ω · ${num(r.damp_l * 1e6, 1)} µH`} />
+          </div>
+
+          <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+            Delivered insertion loss <span style={{ color: C.muted, textTransform: 'none' }}>— ABCD model with real parasitics</span></div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            <Stat k="DM IL / margin" v={`${num(r.dm_il_db, 0)} dB · ${num(r.dm_margin_db, 1)} dB`} ok={r.dm_margin_db >= 0} />
+            <Stat k="CM IL / margin" v={`${num(r.cm_il_db, 0)} dB · ${num(r.cm_margin_db, 1)} dB`} ok={r.cm_margin_db >= 0} />
+            <Stat k="Noise source" v={String(r.noise_source)} />
           </div>
 
           <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>Safety & stability checks</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             <Stat k="Earth leakage" v={`${num(r.leakage_actual_A * 1e3, 2)} / ${num(r.leakage_limit_A * 1e3, 2)} mA`}
               ok={r.leakage_actual_A <= r.leakage_limit_A} />
-            <Stat k="Middlebrook (Z₀ vs |R_in|)" v={`${num(r.stability_z0_dm, 0)} / ${num(r.stability_rin_conv, 0)} Ω`}
+            <Stat k="Middlebrook margin" v={`${num(r.stability_margin_db, 1)} dB @ ${num(r.dm_res_hz / 1e3, 1)} kHz`}
               ok={r.stability_ok} />
             {r.xcap_discharge_s != null && <Stat k="X-cap discharge" v={`${num(r.xcap_discharge_s, 2)} s`} />}
           </div>

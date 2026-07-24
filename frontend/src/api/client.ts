@@ -474,6 +474,9 @@ export interface EmiResult {
   c_x: number; l_dm: number; c_y_emi_total: number; c_y_system_total: number; l_cm: number
   damp_r: number; damp_c: number; leakage_actual_A: number; xcap_discharge_s: number | null
   stability_z0_dm: number; stability_rin_conv: number; stability_ok: boolean
+  damp_l: number; stability_margin_db: number; dm_res_hz: number
+  dm_il_db: number; dm_margin_db: number; dm_margin_f: number
+  cm_il_db: number; cm_margin_db: number; cm_margin_f: number
   warnings: string[]; feedback: string[]; provenance: Record<string, string>
 }
 export interface EmiDesign { result: EmiResult; basis: Record<string, number | null> }
