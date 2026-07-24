@@ -138,13 +138,14 @@ def build_step11(story, data: dict):
     fcv = s["fcv"]
     _fcv = "%g" % fcv                                   # designer voltage-loop crossover, Hz
     _plo = "%g" % s["pout_lo"]; _phi = "%g" % s["pout_hi"]   # low/high-line output power, W
+    _tlabel = "Type-III" if cm.get("type", "type3") == "type3" else "Type-II"   # designer-selected V-loop comp
 
     step_h(story, "6.11", "Outer Voltage Loop Design", CH)
     annotation(story, "THEORY",
         "The outer loop sets the amplitude of the current command to regulate the bus. It must be "
         "slow — crossover near %s Hz — so it does not respond to the 120 Hz ripple inherent on a " % _fcv +
         "single-phase-fed bus; responding to that ripple would distort the current reference and "
-        "wreck the power factor. A Type-III OTA compensator provides the phase boost needed for "
+        "wreck the power factor. A %s OTA compensator provides the phase boost needed for " % _tlabel +
         "adequate margin at such a low crossover.", CH)
     annotation(story, "CONCEPT",
         "Method B (SLVA662) folds the feedback divider into the OTA compensator network, so the loop "
@@ -153,14 +154,14 @@ def build_step11(story, data: dict):
     annotation(story, "NOTE",
         "The inner current loop is always a Type-2 compensator (Section 6.10). For the voltage loop the "
         "designer selects the compensator type — Type-2 or Type-3 — and all crossover and pole/zero "
-        "frequencies through the GUI. This design uses the Type-III compensator reproduced below.", CH)
+        "frequencies through the GUI. This design uses the %s compensator reproduced below." % _tlabel, CH)
 
     # ── 11.1 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.11.1", "Voltage Loop Architecture — Method B", CH)
     body(story,
         "With the inner current loop closed (Section 6.10), the outer voltage loop regulates the DC bus by "
         "commanding the current reference. The voltage-loop gain is the product of the gain-modulator "
-        "term, the closed current loop, and the voltage plant. Following the OTA Type-III approach of "
+        "term, the closed current loop, and the voltage plant. Following the OTA %s approach of " % _tlabel +
         "SLVA662 (Method B), the feedback divider H<sub>v</sub> = V<sub>FBPFC</sub> / V<sub>OUT</sub> "
         "is moved out of the plant and absorbed into the compensator transfer function from "
         "V<sub>O</sub> to V<sub>EA</sub>, so the loop gain evaluated here excludes both the divider "
@@ -172,7 +173,7 @@ def build_step11(story, data: dict):
     eq_box(story, [r"GMOD=K_{MAX}\times\dfrac{I_{OUT}}{V_{RAMP}}\qquad"
                    r"G_{i,cl}(s)=\dfrac{T_i(s)/N_{CH}}{1+T_i(s)/N_{CH}}"], ch=CH)
     eq_box(story, [r"G_{vp}(s)=\dfrac{(1+sC_O r_C)(1-s/\omega_{RHP})}{C_O\,s+2/R_{LOAD}}"], ch=CH)
-    body(story, "The feedback divider, moved into the OTA Type-III compensator (Method B), is:", CH)
+    body(story, "The feedback divider, moved into the OTA %s compensator (Method B), is:" % _tlabel, CH)
     eq_box(story, [r"H_v=\dfrac{V_{FBPFC}}{V_{OUT}}=\dfrac{%.1f}{%.1f}=%.6f"
                    % (s["vfbpfc"], vout, s["hv"])], ch=CH)
     data_table(story, "6.11.1", "Voltage-Loop Parameters",
@@ -268,9 +269,9 @@ def build_step11(story, data: dict):
     # ── 11.5 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.11.5", "Required Compensator Gain", CH)
     body(story,
-        "To force the loop to cross 0 dB at f<sub>cv</sub> = %.0f Hz, the OTA Type-III compensator "
+        "To force the loop to cross 0 dB at f<sub>cv</sub> = %.0f Hz, the OTA %s compensator "
         "(which now contains the divider H<sub>v</sub>) must supply a magnitude equal to the inverse "
-        "of the uncompensated base gain:" % s["fcv"], CH)
+        "of the uncompensated base gain:" % (s["fcv"], _tlabel), CH)
     eq_box(story, [r"H_{OTA}(%.0f\ \mathrm{Hz})=\dfrac{1}{T_{v,base}}" % s["fcv"]], ch=CH)
     body(story, "Sizing at the high-line %s W design point:" % _phi, CH)
     eq_box(story, [r"H_{OTA}=\dfrac{1}{%.4f}=%.6f\quad(%.2f\ \mathrm{dB})"
@@ -303,17 +304,18 @@ def build_step11(story, data: dict):
          ["Pole 1 / Pole 2", f"{cm['fp1']:.0f} Hz / {cm['fp2']:.0f} Hz", "f_p1 / f_p2", "HF roll-off"]],
         col_widths=[CW*0.30, CW*0.20, CW*0.22, CW*0.28], ch=CH)
     body(story, "<b>Intermediate SLVA662 factors</b>", CH)
-    eq_box(story, [r"a=\sqrt{1+(f_c/f_{p2})^2}=\sqrt{1+(17/17)^2}=%.4f" % cm["a"],
-                   r"b=\sqrt{1+(17/50)^2}=%.4f" % cm["b"],
-                   r"c=\sqrt{1+(3/17)^2}=%.4f" % cm["c"],
-                   r"d=\sqrt{1+(17/12)^2}=%.4f" % cm["d"],
+    eq_box(story, [r"a=\sqrt{1+(f_c/f_{p2})^2}=\sqrt{1+(%g/%g)^2}=%.4f" % (fcv, cm["fp2"], cm["a"]),
+                   r"b=\sqrt{1+(f_c/f_{p1})^2}=\sqrt{1+(%g/%g)^2}=%.4f" % (fcv, cm["fp1"], cm["b"]),
+                   r"c=\sqrt{1+(f_{z1}/f_c)^2}=\sqrt{1+(%g/%g)^2}=%.4f" % (cm["fz1"], fcv, cm["c"]),
+                   r"d=\sqrt{1+(f_c/f_{z2})^2}=\sqrt{1+(%g/%g)^2}=%.4f" % (fcv, cm["fz2"], cm["d"]),
                    r"aa=\dfrac{a\times b}{c\times d}=\dfrac{%.4f\times%.4f}{%.4f\times%.4f}=%.4f"
                    % (cm["a"], cm["b"], cm["c"], cm["d"], cm["aa"])], ch=CH)
     body(story, "<b>Component values (design point)</b>", CH)
     _ws(story, "Step 1 — Gain factor bb and R<sub>2</sub>:",
         [r"bb=\dfrac{G\times f_{p2}\,(R_1+R_4)}{R_4\times g_m\,(f_{p2}-f_{z1})}"
-         r"=\dfrac{%.6f\times17\times%.4f\,\mathrm{M\Omega}}{23.2\mathrm{k}\times100\mu S\times14}=%.2f\ \mathrm{k\Omega}"
-         % (d["G"], (s["r1"]+s["r4"])/1e6, cm["bb"]/1e3),
+         r"=\dfrac{%.6f\times%g\times%.4f\,\mathrm{M\Omega}}{%.1f\mathrm{k}\times%.0f\mu S\times%g}=%.2f\ \mathrm{k\Omega}"
+         % (d["G"], cm["fp2"], (s["r1"]+s["r4"])/1e6, s["r4"]/1e3, s["gmv"]*1e6,
+            cm["fp2"] - cm["fz1"], cm["bb"]/1e3),
          r"R_2=aa\times bb=%.4f\times%.2f\mathrm{k}=%.2f\ \mathrm{k\Omega}"
          % (cm["aa"], cm["bb"]/1e3, cm["r2"]/1e3)])
     body(story, "<b>Step 2 — R<sub>3</sub> and C<sub>2</sub> (second branch — sets f<sub>z2</sub> "
@@ -325,8 +327,8 @@ def build_step11(story, data: dict):
     eq_box(story, [r"R_3=%.4f\ \mathrm{M\Omega}\qquad C_2=%.4f\ \mathrm{nF}"
                    % (cm["r3"]/1e6, cm["c2"]*1e9)], ch=CH)
     _ws(story, "Step 3 — C<sub>1</sub> (sets f<sub>z1</sub>):",
-        r"C_1=\dfrac{1}{2\pi\times f_{z1}\times R_2}=\dfrac{1}{2\pi\times3\times%.2f\mathrm{k}}=%.2f\ \mathrm{nF}"
-        % (cm["r2"]/1e3, cm["c1"]*1e9))
+        r"C_1=\dfrac{1}{2\pi\times f_{z1}\times R_2}=\dfrac{1}{2\pi\times%g\times%.2f\mathrm{k}}=%.2f\ \mathrm{nF}"
+        % (cm["fz1"], cm["r2"]/1e3, cm["c1"]*1e9))
     _ws(story, "Step 4 — C<sub>3</sub> (sets f<sub>p1</sub> with R<sub>2</sub>, C<sub>1</sub>):",
         r"C_3=\dfrac{C_1}{2\pi\times C_1\times R_2\times f_{p1}-1}=%.2f\ \mathrm{nF}" % (cm["c3"]*1e9))
 
@@ -568,13 +570,16 @@ def make_pdf(path: str, inp: dict | None = None):
     from reportlab.lib.units import mm
     from app.mode_b.doc_report_builder import chapter_splash
     data = compute_step11_vloop(inp)
+    _tl = "Type-III" if data["comp"].get("type", "type3") == "type3" else "Type-II"
+    _tl_design = ("11.6 Type-III design (R2/R3/C1/C2/C3)" if _tl == "Type-III"
+                  else "11.6 Type-II design (R2/C1/C3)")
     story = []
     chapter_splash(story, 6, "Control Scheme — Step 11 (Outer Voltage Loop, full detail)",
-        "Method-B OTA Type-III voltage-loop compensator and full 8-point stability verification "
+        "Method-B OTA %s voltage-loop compensator and full 8-point stability verification " % _tl +
         "per FAN9672-D, AN4165-D and SLVA662 — every value from prior steps + designer-set f_cv / "
         "pole-zero frequencies.",
         ["11.1 architecture (Method B)  ·  11.2 plant RHP zero  ·  11.3 full 180 Vac worked calc",
-         "11.4 8-point base gain  ·  11.5 required gain  ·  11.6 Type-III design (R2/R3/C1/C2/C3)",
+         "11.4 8-point base gain  ·  11.5 required gain  ·  " + _tl_design,
          "11.7 components  ·  11.8 pole-zero verify  ·  11.9 8-point crossover/PM + Bode + schematic"])
     build_step11(story, data)
     while story and isinstance(story[0], PageBreak):

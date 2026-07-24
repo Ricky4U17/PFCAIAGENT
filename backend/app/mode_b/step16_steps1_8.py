@@ -18,6 +18,10 @@ import math
 
 SQRT2 = math.sqrt(2.0)
 
+# E24 standard-value mantissas (for snapping computed R_CS to a real shunt value).
+_E24 = [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0,
+        3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1]
+
 # E96 1% series for standard-value snapping
 _E96 = [1.00,1.02,1.05,1.07,1.10,1.13,1.15,1.18,1.21,1.24,1.27,1.30,1.33,1.37,1.40,
         1.43,1.47,1.50,1.54,1.58,1.62,1.65,1.69,1.74,1.78,1.82,1.87,1.91,1.96,2.00,
@@ -49,7 +53,7 @@ DEFAULT_INPUTS = dict(
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
     c_gc=430e-12, c_ls=240e-12,
-    rcs=None,                       # designer R_CS override (Ω); None → 15 mΩ default
+    rcs=None,                       # designer R_CS override (Ω); None → computed best-of-both-methods default
 )
 
 # ── controller constants (Step 2 base; FAN9672-D / AND9925-D) ───────────────────
@@ -224,9 +228,29 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         m2_rows.append([f"{vmax:.1f} V", f"{vee:.1f} V",
                         f"{num_ll:.4e}", f"{rcs_m2(c['riac_fr'], vee, pmax_nch_lo)*1e3:.3f} mΩ",
                         f"{num_hl:.4e}", f"{rcs_m2(c['riac_hv'], vee, pmax_nch_hi)*1e3:.3f} mΩ"])
-    # Designer-selected R_CS (Screen 2) overrides the 15 mΩ default when provided.
-    rcs_sel = float(p["rcs"]) if p.get("rcs") else 0.015
-    # 6.4 back-calculated V_EA,eff for selected R_CS = 15 mΩ
+    # Numeric Method-2 band (V_EA within the preferred 4.0–5.0 V window, both lines):
+    # V_EA,eff rises with R_CS, so the lower bound is @4.0 V and the upper @5.0 V.
+    m2_lo = max(rcs_m2(c["riac_fr"], 4.0 - c["vea_min"], pmax_nch_lo),
+                rcs_m2(c["riac_hv"], 4.0 - c["vea_min"], pmax_nch_hi))
+    m2_hi = min(rcs_m2(c["riac_fr"], 5.0 - c["vea_min"], pmax_nch_lo),
+                rcs_m2(c["riac_hv"], 5.0 - c["vea_min"], pmax_nch_hi))
+    # R_CS default = best-of-both-methods (no hardcoded 15 mΩ). The Method-1 (AN4165 power-stage)
+    # recommendation is the midpoint of its low-/high-line values; snap it DOWN to the nearest E24
+    # standard shunt value (lower R_CS ⇒ lower loss) while keeping it inside the Method-2 (AND9925
+    # V_EA-window) valid band [m2_lo, m2_hi]. The designer's Screen-2 selection overrides this.
+    def _e24_floor(x):
+        if x <= 0:
+            return x
+        dd = math.floor(math.log10(x))
+        mm = x / 10 ** dd
+        cc = [v for v in _E24 if v <= mm * 1.0001]
+        return (cc[-1] if cc else _E24[0]) * 10 ** dd
+    _rcs_m1_mid = 0.5 * (rcs1_ll + rcs1_hl)
+    _rcs_best = _e24_floor(min(max(_rcs_m1_mid, m2_lo), m2_hi))
+    if _rcs_best < m2_lo:                      # E24-floor dropped below the band → keep clamped target
+        _rcs_best = min(max(_rcs_m1_mid, m2_lo), m2_hi)
+    rcs_sel = float(p["rcs"]) if p.get("rcs") else _rcs_best
+    # 6.4 back-calculated V_EA,eff for the selected R_CS
     def vea_eff_from_rcs(riac, pmaxn):
         return rcs_sel * den_common * pmaxn / (c["k_rm"] * riac)
     vee_ll = vea_eff_from_rcs(c["riac_fr"], pmax_nch_lo)
@@ -234,12 +258,6 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     # 6.5 power dissipation
     pdiss_lo1 = p["iphi_rms_lo"]**2 * rcs_sel
     pdiss_hi1 = p["iphi_rms_hi"]**2 * rcs_sel
-    # Numeric Method-2 band (V_EA within the preferred 4.0–5.0 V window, both lines):
-    # V_EA,eff rises with R_CS, so the lower bound is @4.0 V and the upper @5.0 V.
-    m2_lo = max(rcs_m2(c["riac_fr"], 4.0 - c["vea_min"], pmax_nch_lo),
-                rcs_m2(c["riac_hv"], 4.0 - c["vea_min"], pmax_nch_hi))
-    m2_hi = min(rcs_m2(c["riac_fr"], 5.0 - c["vea_min"], pmax_nch_lo),
-                rcs_m2(c["riac_hv"], 5.0 - c["vea_min"], pmax_nch_hi))
     out["step6"] = {
         "pmax_nch_lo": pmax_nch_lo, "pmax_nch_hi": pmax_nch_hi,
         "rcs1_ll": rcs1_ll, "rcs1_hl": rcs1_hl, "den_common": den_common,
@@ -256,7 +274,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
             ["AND9925 Eq. 11 @ V_EA=5.0 V", f"{rcs_m2(c['riac_fr'],4.4,pmax_nch_lo)*1e3:.2f} mΩ",
              f"{rcs_m2(c['riac_hv'],4.4,pmax_nch_hi)*1e3:.2f} mΩ", "Upper V_EA bound"],
             [f"Selected: R_CS = {rcs_sel*1e3:.1f} mΩ", "✓ inside overlap", "✓ inside overlap",
-             "Designer selection" if p.get("rcs") else "Lowest std value in zone"],
+             "Designer selection" if p.get("rcs") else "Computed best (M1 rec., E24, within M2 band)"],
         ],
         "verify_rows": [
             ["Low line", f"{vee_ll:.4f} V", f"{vee_ll+c['vea_min']:.4f} V",

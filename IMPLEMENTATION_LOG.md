@@ -5020,3 +5020,40 @@ FIXED (fallback consistency):
 NOTED (minor, not changed): eff 0.95 (thermal round default) vs 0.945 (design eta_lo); L fallback 235 vs
 240 mix (design-derived, flows in production); one standalone `fline:50` example. No BROKEN continuity.
 Suite: 172 passed / 2 skipped (green). Commit <pending>.
+
+## C127–C133 — 2026-07-23 — Differential-spec de-hardcode sweep (logged in memory)
+
+Full detail lives in memory `session_c118_c125_findings.md` + `project_changelog.md` (git C127…C133 =
+66758f8…d23d678). Summary: ran the report flow with a NON-reference spec set to surface spec-tracking
+hardcodes, then made the whole report track arbitrary designer specs — derived operating grid from
+vin_min/vin_max (C127), Ch1-5 labels+narrative inject live vin/fsw (C128/C129), BIBO chapter scales with
+vin_min (C130), Ch6 sweeps thread vin_min/vin_max (C131), compliance PF uses live target (C132), Ch5 cap
+labels track vin_min (C133). Suite green throughout; combined report 183 pp.
+
+## C134 — 2026-07-23 — R_CS best-of-both-methods default + voltage-loop compensator type-awareness
+
+Closed the last three hardcodes from the R_CS / compensator-type audit; everything now derives from the
+design calc + GUI selection (no hardcoded reference values).
+1. **R_CS default (step16_steps1_8.py)** — was `rcs_sel = … else 0.015` (hardcoded 15 mΩ). Now computed
+   best-of-both-methods: Method-1 (AN4165 power-stage) recommendation = midpoint of its LL/HL values,
+   snapped DOWN to the nearest E24 shunt value (added `_E24` table + `_e24_floor`) while kept inside the
+   Method-2 (AND9925 V_EA-window) band [m2_lo, m2_hi]. Moved the m2 band computation above rcs_sel so it
+   can constrain the default. Reference design → 15.00 mΩ (identical to before, now DERIVED). Designer's
+   Screen-2 selection still overrides. Fixed the stale line-56 + line-229 "= 15 mΩ" comments and the
+   combined_rows note ("Lowest std value in zone" → "Computed best (M1 rec., E24, within M2 band)").
+2. **Voltage-loop type prose (report_step11.py)** — current loop is always Type-2 (correct); the voltage
+   loop is designer-selected (default Type-3, Type-2 if chosen). The compute/branch already honoured the
+   selection, but the SHARED pre-branch prose hardcoded "Type-III" (renders for BOTH types). Added
+   `_tlabel` from cm["type"] and threaded it through §6.11 THEORY/NOTE annotations, the architecture body,
+   the divider note, and the §6.11.5 required-gain text. Also made the standalone make_pdf chapter splash
+   type-aware. The Type-2 branch (_build_step11_type2) already had correct Type-II prose; the Type-III-only
+   sections after the early return are unchanged (correct).
+3. **a/b/c/d correction-factor equations (report_step11.py §6.11.6)** — left-side fractions were hardcoded
+   to the reference (17/17, 17/50, 3/17, 17/12). Parametrized from fcv + cm["fp1/fp2/fz1/fz2"]. NOTE: the
+   actual formula for c is √(1+(f_z1/f_c)²), not f_z1/f_p2 — the reference fcv==fp2==17 had masked it;
+   added the correct symbolic labels for b/c/d too. Also de-hardcoded the same-class numbers in the bb
+   equation (17, 23.2k, 100µS, 14 → fp2, R4, gm, fp2−fz1) and the C1 equation (3 → fz1).
+VERIFIED: R_CS reference = 15.00 mΩ (computed); both Type-3 and Type-2 Step-11 PDFs build; shared prose
+reflects the selected type ("uses the Type-II compensator reproduced" for Type-2); c factor = 1.0155 =
+√(1+(fz1/fcv)²); Ch6 control report renders R_CS 15.0 mΩ + "Computed best" note. Suite: 172 passed /
+2 skipped (green). Commit <pending>.
