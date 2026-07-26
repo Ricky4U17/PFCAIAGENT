@@ -5215,3 +5215,23 @@ following the EMI_Input_Filter_Design_Guide (Rev J) structure, no hardcoded valu
 VERIFIED: 16-page Ch10 PDF, 19 embedded images (eq_box + 4 figures), all 10.1–10.14/10.A present, both
 DC-DC-present and PFC-only variants build; Figure 10.1 shows CM ~116 / DM ~84 dBµV vs the limit. Suite
 172/2. NEXT (Phase 1e): reusable verify_emi_newspecs.py differential-spec harness.
+
+## C143 — 2026-07-26 — EMI Phase 1e: reusable differential-spec harness (verify_emi_newspecs.py) — Phase 1 COMPLETE
+
+Final EMI Phase-1 sub-step. Added `backend/verify_emi_newspecs.py` (committed, reusable — replaces the old
+ephemeral scratchpad harness) that runs the EMI synthesis + Chapter-10 report with a NON-reference spec set
+(100/250 Vac, 1200/2500 W, 450 V bus, 85 kHz, f_line 50, medical leakage IEC 60601-1, Class A, DC-DC
+present) and checks the no-hardcode guarantee three ways:
+- CANARIES (must be ABSENT): reference specs (70 kHz, 90 V, 264, 394, 400 V) + the doc's specific
+  synthesized components (6.8/1.5 mH, 27 µH, 23.2 nF, 82 k). Digit-boundary regex `_count()` so a numeric
+  needle never matches inside a larger number (caught + fixed a "70 kHz" false-positive inside "170 kHz").
+- NEW-SPEC values (must be PRESENT): 250 / 85 kHz / 170 kHz / 450.
+- INVARIANTS: first harmonic = N_ch·f_sw; noise source computed; components finite; 9-pt sweep + spectra
+  present; medical→smaller C_Y than Class I; DC-DC→higher CM req than PFC-only; higher V_bus→higher CM
+  source; f_sw change→first harmonic tracks. Exit 0 = all pass; edit the SPEC/CAP/OPTS block to re-target.
+RESULT: ALL checks pass — no reference value leaks with non-reference specs. Standalone script (not pytest-
+collected; 174 tests still collect cleanly). No production code changed since C142 (suite green there).
+**EMI Phase 1 COMPLETE** (C139 source+ABCD · C140 wiring+damping+Middlebrook+synthesis · C141 loss/leakage
+sweep · C142 thesis report+figures+index · C143 verify harness). Later phases (designer's word): 9-point
+per-line IL verification table + E-series snapping; Monte-Carlo tolerance (§16); radiated screening (§17);
+credit CM-choke leakage as DM inductance.
