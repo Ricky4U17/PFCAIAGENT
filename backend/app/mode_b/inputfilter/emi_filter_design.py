@@ -159,6 +159,15 @@ DEFAULT_XCAP_ESL    = 15e-9     # H    X-cap ESL  (X-cap SRF)
 DEFAULT_YCAP_ESL    = 8e-9      # H    Y-cap ESL  (limits HF CM attenuation)
 DEFAULT_LDM_CP      = 30e-12    # F    DM-choke self-capacitance (DM choke SRF)
 DEFAULT_LCM_CP      = 15e-12    # F    CM-choke self-capacitance (CM choke SRF; caps HF CM)
+# Choke DC resistances (copper loss, §15) and loss-estimate fractions.
+DEFAULT_CMC1_DCR    = 15e-3     # ohm  CM choke 1 DCR (both conductors)
+DEFAULT_CMC2_DCR    = 7e-3      # ohm  CM choke 2 DCR
+DEFAULT_LDM_DCR     = 7e-3      # ohm  DM choke DCR
+# Core and X-cap-ESR losses depend on core/vendor data not known pre-selection; default to a
+# fraction of copper (the reference ratio ≈ 13% core, ≈ 1.2% ESR) — a named, reported ESTIMATE,
+# overridable with a real figure. NOT an absolute hardcoded watt value.
+DEFAULT_CORE_LOSS_FRAC = 0.13   # core loss ≈ 13% of total copper (estimate)
+DEFAULT_XCAP_ESR_LOSS_FRAC = 0.012  # X-cap ESR loss ≈ 1.2% of total copper (estimate)
 
 
 # ============================================================== #
@@ -320,6 +329,12 @@ class FilterParasitics:
     ycap_esl: Optional[float] = None    # H    [def DEFAULT_YCAP_ESL]
     ldm_cp: Optional[float] = None      # F    DM-choke self-capacitance [def DEFAULT_LDM_CP]
     lcm_cp: Optional[float] = None      # F    CM-choke self-capacitance [def DEFAULT_LCM_CP]
+    # choke DC resistances (§15 copper loss) + optional explicit core / X-cap-ESR loss (W)
+    cmc1_dcr: Optional[float] = None    # ohm  [def DEFAULT_CMC1_DCR]
+    cmc2_dcr: Optional[float] = None    # ohm  [def DEFAULT_CMC2_DCR]
+    ldm_dcr: Optional[float] = None     # ohm  [def DEFAULT_LDM_DCR]
+    core_loss_w: Optional[float] = None      # W  measured/est; else fraction-of-copper estimate
+    xcap_esr_loss_w: Optional[float] = None  # W  measured/est; else fraction-of-copper estimate
 
 
 @dataclass
@@ -381,6 +396,12 @@ class EMIResult:
     cm_il_db: float = 0.0
     cm_margin_db: float = 0.0
     cm_margin_f: float = 0.0
+    # per-operating-point verification (§2.5/Table 6) + loss budget (§15) + single-fault leakage (§13)
+    per_point: List[Dict[str, float]] = field(default_factory=list)  # [{vac,i_in,cu_loss_w,i_cx_a,i_leak_a,worst_mode}]
+    loss_rows: List[Tuple[str, float]] = field(default_factory=list)  # [(label, watts)] at the worst point
+    loss_total_w: float = 0.0
+    loss_worst_vac: float = 0.0
+    leak_fault_A: float = 0.0       # single-fault (open-neutral) worst-branch leakage
     # bookkeeping
     provenance: Dict[str, str] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
@@ -538,6 +559,9 @@ def _resolve_parasitics(par: "FilterParasitics") -> Dict[str, float]:
         "ycap_esl": par.ycap_esl or DEFAULT_YCAP_ESL,
         "ldm_cp":   par.ldm_cp   or DEFAULT_LDM_CP,
         "lcm_cp":   par.lcm_cp   or DEFAULT_LCM_CP,
+        "cmc1_dcr": par.cmc1_dcr or DEFAULT_CMC1_DCR,
+        "cmc2_dcr": par.cmc2_dcr or DEFAULT_CMC2_DCR,
+        "ldm_dcr":  par.ldm_dcr  or DEFAULT_LDM_DCR,
     }
 
 
@@ -794,11 +818,17 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         warn.append(f"Middlebrook margin {stability_margin_db:.1f} dB < {margin:.0f} dB target at the DM "
                     f"resonance ({f_res_dm/1e3:.1f} kHz); lower R_d or raise C_X.")
 
-    # ---- leakage check (system) ----
+    # ---- leakage check (system, normal + single-fault open-neutral) ----
     leak_actual = TWO_PI * p.f_line * v_ln * cy_system
     if leak_actual > leak_limit:
         fb.append(f"Leakage {leak_actual*1e3:.2f}mA exceeds {ein.safety_standard} "
                   f"limit {leak_limit*1e3:.2f}mA.")
+    # Single fault (open neutral): the line-PE Y-caps see the full line; worst branch ≈ half the
+    # network at full line voltage (§13). Reported and checked against the same limit.
+    leak_fault_A = TWO_PI * p.f_line * v_ln * (cy_system / 2.0)
+    if leak_fault_A > leak_limit:
+        warn.append(f"Single-fault (open-neutral) leakage {leak_fault_A*1e3:.2f} mA exceeds the "
+                    f"{leak_limit*1e3:.2f} mA limit.")
 
     # ---- X-cap discharge ----
     xcap_disc = None
@@ -810,6 +840,43 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
                         f"lower bleeder R.")
     else:
         warn.append("No bleeder_r given; verify X-cap discharge-time safety rule.")
+
+    # ---- per-operating-point verification (§2.5/Table 6) + loss budget (§15) ----
+    # Choke copper loss = I_in²·ΣDCR (one CM-choke DCR per CM stage + one DM-choke DCR per DM stage).
+    cm_dcrs = [par["cmc1_dcr"], par["cmc2_dcr"]][:max(cm_stages, 1)]
+    ldm_dcr_total = dm_stages * par["ldm_dcr"]
+    total_dcr = sum(cm_dcrs) + ldm_dcr_total
+    per_point = []
+    for op in _dm_points(ctx):
+        cu = op.i_in ** 2 * total_dcr
+        per_point.append({
+            "vac": op.v_in, "i_in": op.i_in, "cu_loss_w": cu,
+            "i_cx_a": TWO_PI * op.f_line * op.v_in * c_x,          # X-cap reactive current
+            "i_leak_a": TWO_PI * op.f_line * op.v_in * cy_system,  # Y-cap earth leakage
+            "worst_mode": "DM" if op.v_in < 180 else "CM",
+        })
+    # Loss breakdown at the worst (highest-current) operating point.
+    worst = max(per_point, key=lambda d: d["cu_loss_w"]) if per_point else \
+        {"vac": p.vac_min, "i_in": 0.0, "cu_loss_w": 0.0}
+    i_w = worst["i_in"]
+    loss_rows = [(f"CMC{i+1} copper", i_w ** 2 * dcr) for i, dcr in enumerate(cm_dcrs)]
+    loss_rows.append(("L_DM copper", i_w ** 2 * ldm_dcr_total))
+    cu_total = sum(w for _, w in loss_rows)
+    core_w = ctx.parasitics.core_loss_w if ctx.parasitics.core_loss_w is not None \
+        else DEFAULT_CORE_LOSS_FRAC * cu_total
+    esr_w = ctx.parasitics.xcap_esr_loss_w if ctx.parasitics.xcap_esr_loss_w is not None \
+        else DEFAULT_XCAP_ESR_LOSS_FRAC * cu_total
+    loss_rows.append(("Core (est.)", core_w))
+    loss_rows.append(("X-cap ESR (est.)", esr_w))
+    if ein.bleeder_r:
+        loss_rows.append(("Bleeder", (v_ln ** 2) / ein.bleeder_r))
+    loss_total_w = sum(w for _, w in loss_rows)
+    loss_worst_vac = worst["vac"]
+    prov["loss"] = (f"copper {cu_total:.2f} W (ΣDCR {total_dcr*1e3:.0f} mΩ × I²) worst @ "
+                    f"{loss_worst_vac:.0f} V; core/ESR estimated as {DEFAULT_CORE_LOSS_FRAC*100:.0f}%/"
+                    f"{DEFAULT_XCAP_ESR_LOSS_FRAC*100:.1f}% of copper; total {loss_total_w:.2f} W")
+    prov["leakage"] = (f"normal {leak_actual*1e3:.2f} mA, single-fault {leak_fault_A*1e3:.2f} mA "
+                       f"(limit {leak_limit*1e3:.2f} mA) at {v_ln:.0f} V / {p.f_line:.0f} Hz")
 
     # ---- delivered insertion loss (ABCD two-port) — margins computed during sizing above ----
     prov["il_model"] = ("ABCD two-port with parasitics "
@@ -847,6 +914,8 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         damp_l=damp_l, stability_margin_db=stability_margin_db, dm_res_hz=f_res_dm,
         dm_il_db=dm_il_db, dm_margin_db=dm_margin_db, dm_margin_f=dm_margin_f,
         cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
+        per_point=per_point, loss_rows=loss_rows, loss_total_w=loss_total_w,
+        loss_worst_vac=loss_worst_vac, leak_fault_A=leak_fault_A,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
     )
     ctx.emi = res
@@ -901,13 +970,26 @@ def render_report(r: EMIResult) -> str:
     o(f"    CM : {r.cm_il_db:5.1f} dB, worst margin {r.cm_margin_db:+.1f} dB @ {r.cm_margin_f/1e3:.0f} kHz")
 
     o("\n[CHECKS]")
-    o(f"    Earth leakage    : {r.leakage_actual_A*1e3:.3f} mA "
-      f"(limit {r.leakage_limit_A*1e3:.2f} mA) "
-      f"-> {'OK' if r.leakage_actual_A <= r.leakage_limit_A else 'OVER'}")
+    o(f"    Earth leakage    : {r.leakage_actual_A*1e3:.3f} mA normal / {r.leak_fault_A*1e3:.3f} mA "
+      f"single-fault (limit {r.leakage_limit_A*1e3:.2f} mA) "
+      f"-> {'OK' if max(r.leakage_actual_A, r.leak_fault_A) <= r.leakage_limit_A else 'OVER'}")
     o(f"    Stability (MBK)  : {r.stability_margin_db:+.1f} dB @ f_res {r.dm_res_hz/1e3:.1f} kHz "
       f"(|Zout| {r.stability_z0_dm:.2f} ohm Z0) -> {'OK' if r.stability_ok else 'CHECK'}")
     if r.xcap_discharge_s is not None:
         o(f"    X-cap discharge  : {r.xcap_discharge_s:.2f} s")
+
+    if r.loss_rows:
+        o(f"\n[LOSS BUDGET -- worst case @ {r.loss_worst_vac:.0f} V]")
+        for lbl, w in r.loss_rows:
+            o(f"    {lbl:18}: {w:6.2f} W")
+        o(f"    {'TOTAL':18}: {r.loss_total_w:6.2f} W")
+
+    if r.per_point:
+        o("\n[PER-OPERATING-POINT SWEEP]")
+        o(f"    {'V_ac':>6} {'I_in(A)':>8} {'Cu loss(W)':>11} {'I_Cx(mA)':>9} {'I_leak(uA)':>11} {'mode':>5}")
+        for d in r.per_point:
+            o(f"    {d['vac']:6.0f} {d['i_in']:8.2f} {d['cu_loss_w']:11.2f} "
+              f"{d['i_cx_a']*1e3:9.0f} {d['i_leak_a']*1e6:11.0f} {d['worst_mode']:>5}")
 
     o("\n[PROVENANCE]  (every output traces to an input)")
     for k, v in r.provenance.items():
@@ -958,7 +1040,11 @@ def _reference_context() -> DesignContext:
             eff=0.94, f_sw=70e3, n_phases=2, i_ripple_pp=5.0,
             esr_bulk=5e-3, l_boost=250e-6, bulk_c=680e-6, bulk_esl=20e-9,
             c_node_pfc=47e-12, dvdt_pfc=10e9, didt_pfc=500e9,
-            points=[OperatingPoint(v_in=90, duty=0.68, i_in=23.88, delta_i=5.0, f_line=60)]),
+            # reference Table 3/4 nine-point grid (V_in, duty, I_in, ΔI)
+            points=[OperatingPoint(v, d, i, di, 60 if v <= 132 else 50) for v, d, i, di in [
+                (90, 0.68, 23.88, 5.0), (110, 0.61, 19.54, 5.4), (120, 0.58, 17.91, 5.6),
+                (132, 0.53, 16.28, 5.7), (180, 0.36, 21.49, 5.3), (200, 0.29, 19.34, 4.7),
+                (220, 0.22, 17.58, 4.0), (230, 0.19, 16.82, 3.5), (264, 0.07, 14.65, 1.4)]]),
         protection=ProtectionResult(),
         ntc=NTCResult(),
         emi_in=EMIInputs(safety_standard="IEC_62368_1", compliance_profile=5, margin_db=6.0),
@@ -1070,6 +1156,19 @@ def self_test():
         "short CM must emit a source-reduction target"
     print(f"  [ok] escalation: DM {rr.dm_stages}-stage margin {rr.dm_margin_db:+.1f} dB; "
           f"CM {rr.cm_stages}-stage margin {rr.cm_margin_db:+.1f} dB (source-reduction if short)")
+
+    # 14) Per-point loss + leakage sweep (§2.5/§15/§13): 9 points, copper worst at low line,
+    #     total = copper + core + ESR (+bleeder), leakage rises with line voltage.
+    assert len(rr.per_point) == 9, f"expected 9 operating points ({len(rr.per_point)})"
+    cu = [d["cu_loss_w"] for d in rr.per_point]
+    assert cu[0] == max(cu), "copper loss worst at the low-line (highest-current) point"
+    assert rr.loss_total_w > sum(w for lbl, w in rr.loss_rows if "copper" in lbl), \
+        "total loss includes core/ESR/bleeder on top of copper"
+    assert rr.per_point[-1]["i_leak_a"] > rr.per_point[0]["i_leak_a"], "leakage rises with line voltage"
+    assert rr.leak_fault_A < rr.leakage_actual_A, "single-fault leakage below the normal (summed) value"
+    print(f"  [ok] loss/leakage sweep: 9 pts, total {rr.loss_total_w:.1f} W worst @ "
+          f"{rr.loss_worst_vac:.0f} V; leak {rr.leakage_actual_A*1e3:.2f} mA / fault "
+          f"{rr.leak_fault_A*1e3:.2f} mA")
 
     print("ALL SELF-TESTS PASSED.")
 

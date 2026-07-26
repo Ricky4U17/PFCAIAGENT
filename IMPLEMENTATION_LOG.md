@@ -5173,3 +5173,24 @@ VERIFIED: adapter engages the computed model (l_boost=240µH, bulk=900µF, 9 pts
 reference's "CM is the tight mode"). Engine self-test = 13 checks; suite 172/2; Ch10 report builds.
 NEXT (Phase 1c/2): loss + leakage per-point sweep, then thesis-level report + index with all reference
 detail (steps/figures/tables), then verify_emi_newspecs.py.
+
+## C141 — 2026-07-26 — EMI Phase 1c: per-operating-point loss + leakage sweep (§2.5 / §15 / §13)
+
+Third EMI sub-step, engine only (inputfilter/emi_filter_design.py), no hardcoded values:
+- PER-OPERATING-POINT SWEEP (ref §2.5 / Table 6): for every point on the shared grid — choke copper
+  loss (I_in²·ΣDCR), X-cap reactive current I_Cx = 2π·f·V·C_X, Y-cap earth leakage I_leak =
+  2π·f·V·C_Y,sys, and the dominant mode (DM at low line / CM at high line). Exposed as res.per_point.
+- LOSS BUDGET (ref §15): component-by-component at the worst (highest-current) point — copper per choke
+  (one CM-choke DCR per CM stage + one DM-choke DCR per DM stage), plus core and X-cap-ESR as named
+  fraction-of-copper ESTIMATES (13% / 1.2% — overridable, provenance-tagged, NOT absolute hardcodes) and
+  the bleeder V²/R. res.loss_rows / loss_total_w / loss_worst_vac.
+- LEAKAGE (ref §13): added the single-fault (open-neutral) worst-branch current (≈ half the Y network at
+  full line) checked against the same limit; res.leak_fault_A. Normal-condition check unchanged.
+- Inputs: choke DCRs (cmc1/cmc2/ldm) + optional explicit core/ESR loss added to FilterParasitics with
+  named defaults (15/7/7 mΩ); resolved via _resolve_parasitics.
+- render_report shows the loss budget + 9-point sweep table; EMIResult extended; self_test now 14 checks
+  (9-point sweep, copper worst at low line, total>copper, leakage rises with V, fault<normal).
+VERIFIED vs reference: CMC1 8.55 W / CMC2 3.99 W copper match §A.9 exactly; per-point sweep reproduces the
+Table-6 structure (DM<180 V, CM≥180 V; worst-current point data-driven). Adapter + Ch10 report carry the
+new fields (per_point n=9). Suite 172/2. NEXT (Phase 1d): thesis-level Ch10 report + index in our format
+with ALL reference detail (steps/figures/tables/descriptions), then verify_emi_newspecs.py.
