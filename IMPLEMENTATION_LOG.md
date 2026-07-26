@@ -5194,3 +5194,24 @@ VERIFIED vs reference: CMC1 8.55 W / CMC2 3.99 W copper match §A.9 exactly; per
 Table-6 structure (DM<180 V, CM≥180 V; worst-current point data-driven). Adapter + Ch10 report carry the
 new fields (per_point n=9). Suite 172/2. NEXT (Phase 1d): thesis-level Ch10 report + index in our format
 with ALL reference detail (steps/figures/tables/descriptions), then verify_emi_newspecs.py.
+
+## C142 — 2026-07-26 — EMI Phase 1d: thesis-level Chapter-10 report + figures + index
+
+Fourth EMI sub-step. Rebuilt report_inputfilter.py (Chapter 10) to thesis level in OUR document format,
+following the EMI_Input_Filter_Design_Guide (Rev J) structure, no hardcoded values:
+- SECTIONS 10.1–10.14 + worked Appendix 10.A: compliance basis & method; noise mechanisms + computed
+  DM/CM source; required attenuation (binding corner); topology & staging; DM stage; CM stage (+ source-
+  reduction annotation when short); damping (series-R-L) & frequency-domain Middlebrook; protection/surge/
+  inrush + X-cap discharge; leakage (normal + single-fault table); component schedule; loss budget; per-
+  operating-point sweep table; governing equations; verification checklist; verdict/design-grade table.
+- ENGINE (emi_filter_design.py): added `sample_spectra()` → res.spectra (render-ready arrays: DM/CM source,
+  limit, delivered DM/CM IL, Middlebrook |Zout|/|Zin|) so the report NEVER re-computes (App-B results-object
+  discipline). self_test unchanged (14) still green.
+- FIGURES (matplotlib): Fig 10.1 unfiltered DM/CM vs limit, Fig 10.2 delivered DM/CM IL vs required,
+  Fig 10.3 Middlebrook |Zout| vs |Zin|, Fig 10.4 copper loss + leakage per operating point. LaTeX kept to
+  the mathtext-safe subset (\geq/\leq/\dfrac; no \ge/\!/\tfrac/\text).
+- INDEX: the combined-report post-merge TOC scan (main.py:2271 regex on "N.N — Title") auto-captures all 15
+  Ch10 headings (verified); the chapter splash lists every section. No manual TOC edit needed.
+VERIFIED: 16-page Ch10 PDF, 19 embedded images (eq_box + 4 figures), all 10.1–10.14/10.A present, both
+DC-DC-present and PFC-only variants build; Figure 10.1 shows CM ~116 / DM ~84 dBµV vs the limit. Suite
+172/2. NEXT (Phase 1e): reusable verify_emi_newspecs.py differential-spec harness.

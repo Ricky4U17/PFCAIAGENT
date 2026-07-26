@@ -402,6 +402,8 @@ class EMIResult:
     loss_total_w: float = 0.0
     loss_worst_vac: float = 0.0
     leak_fault_A: float = 0.0       # single-fault (open-neutral) worst-branch leakage
+    # render-ready sampled curves (results object carries plot data; renderer never re-computes)
+    spectra: Dict[str, List[float]] = field(default_factory=dict)
     # bookkeeping
     provenance: Dict[str, str] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
@@ -607,6 +609,36 @@ def delivered_margin(noise_fn, il_fn, ctx, klass, detector, margin, f_lo):
         if m < worst_m:
             worst_m, worst_mf, il_here = m, f, il
     return il_here, worst_m, worst_mf
+
+
+def sample_spectra(ctx, klass, detector, l_dm, c_x, dm_stages, l_cm, cy_system, cm_stages,
+                   par, damp_r, damp_l, f_lo, n=140):
+    """Sample the render-ready curves ONCE (results object carries them; the report never
+    re-computes): unfiltered DM/CM source, the limit line, delivered DM/CM insertion loss,
+    and the Middlebrook |Z_out| / |Z_in| pair near the DM resonance."""
+    grid = _freq_grid(max(CONDUCTED_FMIN, f_lo), CONDUCTED_FMAX, n)
+    f, dm_src, cm_src, lim, dm_il, cm_il = [], [], [], [], [], []
+    for fr in grid:
+        f.append(fr)
+        dm_src.append(dm_noise_dbuv(ctx, fr)[0])
+        cm_src.append(cm_noise_dbuv(ctx, fr)[0])
+        lim.append(conducted_limit_dbuv(fr, klass, detector))
+        dm_il.append(insertion_loss_dm(l_dm, c_x, dm_stages, par, fr))
+        cm_il.append(insertion_loss_cm(l_cm, cy_system, cm_stages, par, fr) if l_cm != float("inf") else 0.0)
+    p = ctx.pfc
+    f_res = 1.0 / (TWO_PI * sqrt(l_dm * c_x))
+    mf, zo, zi = [], [], []
+    for fr in _freq_grid(0.05 * f_res, 20.0 * f_res, 90):
+        w = TWO_PI * fr
+        z_ldm = complex(0.0, w * l_dm)
+        z_br = complex(damp_r, w * damp_l)
+        z_series = (z_ldm * z_br) / (z_ldm + z_br)
+        z_cx = _z_cap(fr, c_x, par["xcap_esr"], par["xcap_esl"])
+        z_shunt = (z_cx * Z_LISN_DM) / (z_cx + Z_LISN_DM)
+        mf.append(fr); zo.append(abs(z_series + z_shunt))
+        zi.append(w * (p.l_boost / max(p.n_phases, 1)) if p.l_boost else 1e9)
+    return {"f": f, "dm_src": dm_src, "cm_src": cm_src, "limit": lim, "dm_il": dm_il, "cm_il": cm_il,
+            "mbk_f": mf, "mbk_zout": zo, "mbk_zin": zi}
 
 
 # ============================================================== #
@@ -896,6 +928,9 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
                     f"resonance/parasitics; REDUCE THE CM SOURCE (C_ps, node capacitance, dV/dt) rather "
                     f"than adding Y-capacitance/stages.")
 
+    spectra = sample_spectra(ctx, klass, detector, l_dm, c_x, dm_stages, l_cm, cy_system,
+                             cm_stages, par, damp_r, damp_l, f_first)
+
     feasible = (len(fb) == 0)
 
     res = EMIResult(
@@ -915,7 +950,7 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         dm_il_db=dm_il_db, dm_margin_db=dm_margin_db, dm_margin_f=dm_margin_f,
         cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
         per_point=per_point, loss_rows=loss_rows, loss_total_w=loss_total_w,
-        loss_worst_vac=loss_worst_vac, leak_fault_A=leak_fault_A,
+        loss_worst_vac=loss_worst_vac, leak_fault_A=leak_fault_A, spectra=spectra,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
     )
     ctx.emi = res
