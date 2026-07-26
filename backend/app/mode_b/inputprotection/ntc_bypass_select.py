@@ -79,6 +79,15 @@ class Spec:
     relay_v_margin: float = 1.25   # contact voltage rating margin over Vbus
     ambient_c: float = 45.0        # deg C, worst-case ambient
 
+    # --- worst-case / coordination inputs (review upgrade; named defaults, override per datasheet) ---
+    r25_tol_default: float = 0.20  # R25 tolerance fraction used if the part's own value is blank
+    rsource_min: float = 0.0       # ohm, min documented source R (conservative 0 -> highest inrush)
+    fuse_i2t_rating: float = 0.0   # A^2s, fuse pre-arcing I2t (0 -> open item, compare skipped)
+    relay_make_rating_a: float = 0.0   # A, relay contact make-current rating (0 -> open item)
+    relay_path_ohm: float = 0.0    # ohm, relay-path impedance for make-current (0 -> open item)
+    off_time_min_ms: float = 0.0   # ms, minimum enforced off-time before restart (0 -> not guaranteed)
+    restart_protection: str = ""   # "hardware" | "firmware" | "procedure" | "" (unstated)
+
 
 # ============================================================== #
 #  CORE CALCULATIONS                                             #
@@ -162,6 +171,103 @@ def compute(s: Spec) -> NtcResult:
         sweep=sweep,
         loss_rows=loss_rows,
     )
+
+
+def _parse_tol(raw, default: float) -> float:
+    """Tolerance fraction from a datasheet cell ('±20%', '20%', '0.2', 20) -> 0.20; else default."""
+    if raw is None:
+        return default
+    try:
+        import re
+        m = re.search(r"[-+]?\d*\.?\d+", str(raw))
+        if not m:
+            return default
+        v = float(m.group())
+        if v > 1.0:              # a percentage like 20 or 20%
+            v /= 100.0
+        return v if 0.0 < v < 1.0 else default
+    except Exception:
+        return default
+
+
+def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
+    """Review-upgrade worst-case + coordination proof for the SELECTED NTC part `rec`
+    (keys: r25, tolerance, r_hot_mohm, imax, energy_est_J, ...). Every value derives from the
+    design (Vin_pk / Cout / tau) or the part's datasheet fields; datasheet/layout-dependent items
+    that have no input are returned as None (open items), never guessed.
+
+    Returns a JSON-safe dict covering: R25 tolerance -> worst-case cold inrush (pt1), precharge
+    voltage / residual relay make (pt3, pt4), warm/hot restart (pt5), fuse I2t (pt7) and the AC
+    phase-angle sweep (pt10)."""
+    from math import exp, sin, pi
+    r25 = rec.get("r25")
+    if r25 is None:
+        return {}
+    r25 = float(r25); rsrc = s.rsource_min
+    vpk = r.vin_pk_max
+
+    def _inrush(res):                      # cold peak into a given series resistance
+        return vpk / max(res + rsrc, 1e-9)
+
+    # ---- pt1: R25 tolerance -> minimum R25 -> worst-case cold inrush ----
+    tol = _parse_tol(rec.get("tolerance"), s.r25_tol_default)
+    tol_from_part = rec.get("tolerance") is not None and _parse_tol(rec.get("tolerance"), -1) >= 0
+    r25_min = r25 * (1.0 - tol)
+    i_nom = _inrush(r25); i_min = _inrush(r25_min)
+
+    # ---- pt3/pt4: precharge voltage at bypass close + residual relay make ----
+    n_tau = s.tau_multiple
+    tau = r25 * s.cout
+    vcap_close = vpk * (1.0 - exp(-n_tau))         # Vcap at N*tau (fraction of rectified peak)
+    v_residual = vpk - vcap_close
+    i_relay_make = (v_residual / s.relay_path_ohm) if s.relay_path_ohm > 0 else None
+
+    # ---- pt5: warm / hot restart (DB r_hot if present; else off-time requirement) ----
+    r_hot = (float(rec["r_hot_mohm"]) / 1000.0) if rec.get("r_hot_mohm") else None
+    i_warm = _inrush(r_hot) if r_hot else None
+    i_bypassed = None if s.relay_path_ohm <= 0 else _inrush(s.relay_path_ohm)  # relay stuck closed
+    restart_rows = [
+        {"case": "Cold 25C nominal", "r_ohm": round(r25, 3), "i_A": round(i_nom, 1)},
+        {"case": "Cold 25C minimum R25", "r_ohm": round(r25_min, 3), "i_A": round(i_min, 1)},
+        {"case": "Warm/hot restart",
+         "r_ohm": (round(r_hot, 3) if r_hot else None), "i_A": (round(i_warm, 1) if i_warm else None)},
+    ]
+
+    # ---- pt7: startup I2t (first-order exp) at cold / min-R25 / warm ----
+    def _i2t(res):                          # integral of (Vpk/R e^-t/tau)^2 = Vpk^2 tau / (2 R^2)
+        rt = res + rsrc
+        return (vpk ** 2 * (rt * s.cout)) / (2.0 * rt ** 2) if rt > 0 else None
+    i2t_cold = _i2t(r25); i2t_min = _i2t(r25_min); i2t_warm = _i2t(r_hot) if r_hot else None
+    i2t_worst = max(v for v in (i2t_cold, i2t_min, i2t_warm) if v is not None)
+    fuse_ok = (s.fuse_i2t_rating > i2t_worst) if s.fuse_i2t_rating > 0 else None
+
+    # ---- pt10: AC phase-angle startup sweep (nominal + min-R25) ----
+    phase = []
+    for deg in (0, 30, 45, 60, 90):
+        vth = vpk * sin(deg * pi / 180.0)
+        phase.append({"deg": deg, "vin_V": round(vth, 1),
+                      "i_nom_A": round(vth / max(r25 + rsrc, 1e-9), 1),
+                      "i_min_A": round(vth / max(r25_min + rsrc, 1e-9), 1)})
+
+    return {
+        "r25_ohm": r25, "r25_tol": tol, "tol_from_datasheet": bool(tol_from_part),
+        "r25_min_ohm": round(r25_min, 3),
+        "i_inrush_nom_A": round(i_nom, 1), "i_inrush_max_A": round(i_min, 1),
+        "inrush_target_A": s.i_inrush_target,
+        "vcap_close_V": round(vcap_close, 1), "vcap_close_pct": round(100.0 * vcap_close / vpk, 1),
+        "v_residual_V": round(v_residual, 1),
+        "i_relay_make_A": (round(i_relay_make, 2) if i_relay_make is not None else None),
+        "relay_make_rating_A": (s.relay_make_rating_a or None),
+        "r_hot_ohm": (round(r_hot, 3) if r_hot else None),
+        "i_warm_A": (round(i_warm, 1) if i_warm else None),
+        "i_bypassed_A": (round(i_bypassed, 1) if i_bypassed else None),
+        "restart_rows": restart_rows,
+        "off_time_min_ms": (s.off_time_min_ms or None), "restart_protection": (s.restart_protection or None),
+        "i2t_cold": round(i2t_cold, 2), "i2t_min_r25": round(i2t_min, 2),
+        "i2t_warm": (round(i2t_warm, 2) if i2t_warm else None), "i2t_worst": round(i2t_worst, 2),
+        "fuse_i2t_rating": (s.fuse_i2t_rating or None), "fuse_ok": fuse_ok,
+        "phase_sweep": phase,
+    }
 
 
 # ============================================================== #

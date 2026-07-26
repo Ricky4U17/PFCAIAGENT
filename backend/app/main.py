@@ -673,6 +673,18 @@ def input_protection_report(req: _IpReportReq):
     except Exception as e:
         log.exception("input protection report"); raise HTTPException(500, str(e))
 
+@app.get("/mode-b/input-protection/inrush-schematic", tags=["mode-b"])
+def inrush_schematic_svg():
+    """The NTC + relay-bypass inrush-limiter schematic as inline SVG (for the GUI + document)."""
+    try:
+        from fastapi.responses import Response
+        from app.mode_b.inputprotection.inrush_schematic import build_svg
+        svg = build_svg(show_pin_numbers=True, show_notes=True, show_title_block=False,
+                        show_header=True, show_legend=True)
+        return Response(content=svg, media_type="image/svg+xml")
+    except Exception as e:
+        log.exception("inrush schematic"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/step6-magnetic-design", tags=["mode-b"])
 def step6(req: ReportReq):
     try:

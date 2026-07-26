@@ -463,6 +463,8 @@ export interface MovResult {
 }
 export const inputProtectionNtc = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<NtcResult>('/mode-b/input-protection/ntc/calculate', body)
+// Inline SVG of the NTC + relay-bypass inrush schematic (served by the backend generator).
+export const inrushSchematicUrl = (): string => `${BASE}/mode-b/input-protection/inrush-schematic`
 export const inputProtectionMov = (body: { design: Record<string, number>; mosfet?: Record<string, unknown>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<MovResult>('/mode-b/input-protection/mov/calculate', body)
 // ── input EMI filter (DM + CM conducted-emissions synthesis) ─────────────────

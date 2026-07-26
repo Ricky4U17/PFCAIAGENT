@@ -77,6 +77,14 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         tau_multiple=float(opts.get("tau_multiple", 4.0)),
         relay_v_margin=float(opts.get("relay_v_margin", 1.25)),
         ambient_c=float(opts.get("ambient_c", 45.0)),
+        # worst-case / coordination inputs (review upgrade) — datasheet/layout values; 0 = open item
+        r25_tol_default=float(opts.get("r25_tol_default", 0.20)),
+        rsource_min=float(opts.get("rsource_min", 0.0)),
+        fuse_i2t_rating=float(opts.get("fuse_i2t_rating", 0.0) or 0.0),
+        relay_make_rating_a=float(opts.get("relay_make_rating_a", 0.0) or 0.0),
+        relay_path_ohm=float(opts.get("relay_path_ohm", 0.0) or 0.0),
+        off_time_min_ms=float(opts.get("off_time_min_ms", 0.0) or 0.0),
+        restart_protection=str(opts.get("restart_protection", "")),
     )
 
 
@@ -100,8 +108,14 @@ def calculate_ntc(design: dict, cap: dict | None = None, opts: dict | None = Non
             rec = db.find_part(sel_pn)
             if rec:
                 out["selected"] = db.selected_metrics(s, r, rec)
+                out["worst_case"] = ntc.worst_case_startup(s, r, rec)   # review-upgrade proof
     except Exception:
         pass                                          # DB unavailable → sizing + built-in screen only
+    if "worst_case" not in out:
+        # No specific part selected yet — prove the worst case around the generic R25 pick so the
+        # report's tolerance / restart / fuse / phase-angle sections always render (default tolerance,
+        # no datasheet r_hot → warm restart falls back to the off-time requirement).
+        out["worst_case"] = ntc.worst_case_startup(s, r, {"r25": r.r25_pick})
     return _native(out)
 
 

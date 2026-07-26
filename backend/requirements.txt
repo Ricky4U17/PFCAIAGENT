@@ -18,3 +18,4 @@ httpx==0.27.2
 anthropic>=0.34.0
 pdfplumber>=0.11.0
 python-multipart>=0.0.9
+svglib==2.0.2

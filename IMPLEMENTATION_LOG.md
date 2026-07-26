@@ -5276,3 +5276,27 @@ Suite 172/2; self_test 15 checks; Ch10 report builds with the per-line table.
 6. Ch8/9 (report_inputprotection): subtopics 8.2-8.7 / 9.2-9.7 changed step_h→sub_h so they flow instead of
    each forcing a PageBreak. Page count 8 (was ~14+); all headings still present + TOC-scannable.
 Suite 172/2; Ch7/8/9/10 reports build; FET total = column sum verified.
+
+## C146 — 2026-07-26 — Chapter 8 NTC review upgrade (worst-case proof + bypass-relay schematic)
+
+Implemented the agreed NTC review (specs/NTC/NTC_Calculation_Review_Agreed_Points.pdf) — nominal calc →
+worst-case design proof — plus the designer's bypass-relay schematic in GUI + document. No hardcoding;
+every value from design (Vin_pk/R25/Cout/τ) or the selected-part datasheet (tolerance, r_hot), defaults named.
+- ENGINE (ntc_bypass_select.py): Spec gains r25_tol_default/rsource_min/fuse_i2t_rating/relay_make_rating_a/
+  relay_path_ohm/off_time_min_ms/restart_protection. New `worst_case_startup(s,r,rec)` computes: pt1 R25
+  tolerance→min R25→worst-case cold inrush (tolerance parsed from the part's datasheet field); pt3/pt4
+  precharge Vcap(Nτ) + residual Vresidual + relay make; pt5 warm/hot restart from DB r_hot (restart table);
+  pt7 startup I²t cold/min-R25/warm + fuse compare; pt10 AC phase-angle sweep. Validated vs the review's
+  worked example (46.7/58.3 A, Vcap 366.5, residual 6.8, I²t 16.4; hot-restart 747 A surfaced).
+- ADAPTER: build_ntc_spec pulls the new opts; calculate_ntc adds out["worst_case"] (selected part, else
+  the generic R25 pick so the sections always render).
+- REPORT Ch8 (report_inputprotection.py): sub_h sections 8.2.1 (worst-case cold), 8.5.1 (precharge +
+  residual relay), 8.8 (warm/hot restart + policy), 8.9 (fuse I²t), 8.10 (startup-path stress, REFERENCES
+  Ch7 §7.3.1 for bridge IFSM), 8.11 (phase-angle, light), 8.12 (Table A margin summary + Table B open
+  items). Computed-vs-open clearly marked. Replaced the § I introduced with "Sec.".
+- SCHEMATIC (pt: GUI + doc): ported designer's inrush_schematic.py (pure-stdlib SVG) to
+  inputprotection/inrush_schematic.py; report embeds it as Figure 8.1 via svglib (added to requirements)
+  with a design-annotated caption (R25/Cout/τ/bypass); GUI: GET /mode-b/input-protection/inrush-schematic
+  returns the SVG, InputProtection.tsx shows it (collapsible) + adds the datasheet/layout inputs
+  (fuse I²t, relay make/path, off-time, restart-protection) which thread through ntc_opts.
+Suite 172/2; frontend typechecks; Ch8/9 report builds (13 pp) with the schematic + all sections.

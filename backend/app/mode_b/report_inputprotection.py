@@ -28,6 +28,26 @@ def _f(x, n=2):
         return "&#8212;"
 
 
+def _inrush_schematic_flowable():
+    """The NTC + relay-bypass schematic (designer's parametric SVG) as a ReportLab flowable,
+    scaled to the page width. Returns None if svglib is unavailable so the chapter still builds."""
+    try:
+        from svglib.svglib import svg2rlg
+        from app.mode_b.inputprotection.inrush_schematic import build_svg
+        svg = build_svg(show_pin_numbers=True, show_notes=False, show_title_block=False,
+                        show_header=True, show_legend=True)
+        d = svg2rlg(io.StringIO(svg))
+        if d is None or not d.width:
+            return None
+        sf = CW / d.width
+        d.scale(sf, sf)
+        d.width *= sf; d.height *= sf
+        d.hAlign = "CENTER"
+        return d
+    except Exception:
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Chapter 8 — NTC inrush limiter + bypass relay
 # ══════════════════════════════════════════════════════════════════════════════
@@ -35,16 +55,18 @@ def build_ntc_story(story, design, cap=None, opts=None):
     CH = 8
     out = calculate_ntc(design, cap or {}, opts or {})
     s = out["spec"]; r = out["result"]; cat = out["catalog"]
+    wc = out.get("worst_case") or {}          # review-upgrade worst-case / coordination proof
 
     chapter_splash(story, CH, "Inrush Limiting — NTC Thermistor + Bypass Relay",
-        "What series element holds the cold-start inrush below target while surviving the "
-        "bulk-capacitor charge energy, and why must it be bypassed for continuous operation?",
-        ["8.1 Basis — line range, bus voltage, bulk capacitance and worst-case input current",
-         "8.2 Cold series resistance for the inrush target",
-         "8.3 Pulse-energy survival — the real datasheet filter",
-         "8.4 Continuous self-heat → why a bypass relay is mandatory",
-         "8.5 Bypass relay + precharge timing",
-         "8.6 Candidate screen and selection"])
+        "What series element holds the cold-start inrush below target — across R25 tolerance and warm "
+        "restart — while the whole startup-current path (NTC, bridge, fuse, relay, bulk cap) survives?",
+        ["8.1 Basis — line range, bus voltage, bulk capacitance, worst-case input current",
+         "8.2 Cold series resistance  ·  8.2.1 Worst-case cold inrush (R25 tolerance)",
+         "8.3 Pulse-energy survival  ·  8.4 Continuous self-heat → bypass relay",
+         "8.5 Bypass relay + precharge  ·  8.5.1 Precharge voltage & residual relay make",
+         "8.6 Candidate screen  ·  8.7 Selected NTC",
+         "8.8 Warm / hot restart  ·  8.9 Fuse I²t coordination  ·  8.10 Startup-path stress",
+         "8.11 AC phase-angle sweep  ·  8.12 Final margin summary & open items"])
 
     # ── 8.1 basis ──
     step_h(story, "8.1", "Design Basis (carried in)", CH)
@@ -61,6 +83,19 @@ def build_ntc_story(story, design, cap=None, opts=None):
          ["Bulk capacitance (Step 15)", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F"],
          ["Worst-case input RMS (grid)", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A"]],
         col_widths=[CW*0.46, CW*0.30, CW*0.24], ch=CH)
+
+    # ── Figure 8.1 — inrush-limiter topology (NTC + relay bypass) ──
+    _fig = _inrush_schematic_flowable()
+    if _fig is not None:
+        body(story, "<b>Figure 8.1 — Inrush-Limiter Topology (NTC + Relay Bypass)</b>", CH)
+        story.append(_fig)
+        body(story,
+            f"The NTC <b>RT</b> limits the cold-start current into the bulk capacitor <b>C</b> "
+            f"(C<sub>out</sub> = {_f(s['cout']*1e6,0)} {_MU}F); once the bus has precharged, the relay "
+            f"contact <b>K</b> shorts RT out so it carries current only during the startup pulse. This "
+            f"design: R<sub>25</sub> &#8776; {_f(r['r25_pick'],2)} {_OHM} (pick), &#964; = "
+            f"{_f(r['tau']*1e3,1)} ms, bypass after {_f(r['t_bypass']*1e3,0)} ms. Power path in black, "
+            "relay-coil drive in blue; the diode <b>D</b> clamps the coil flyback.", CH)
 
     # ── 8.2 cold resistance ──
     sub_h(story, "8.2", "Cold Series Resistance for the Inrush Target", CH)
@@ -83,6 +118,36 @@ def build_ntc_story(story, design, cap=None, opts=None):
         ["Target I (A)", "R<sub>min,total</sub> (" + _OHM + ")"],
         [[f"{_f(t,0)}", f"{_f(rr,3)}"] for t, rr in r["sweep"]],
         col_widths=[CW*0.5, CW*0.5], ch=CH)
+
+    # ── 8.2.1 worst-case cold inrush (R25 tolerance) — review point 1 ──
+    if wc:
+        sub_h(story, "8.2.1", "Worst-Case Cold Inrush — R25 Tolerance", CH)
+        body(story,
+            "Nominal R25 is not the release case: a <b>negative</b> resistance tolerance lowers the cold "
+            "resistance and raises the inrush. The worst-case cold inrush uses the minimum R25:", CH)
+        eq_box(story, [r"R_{25,min}=R_{25}\,(1-\mathrm{Tol}_{R25})",
+                       r"I_{inrush,max}=\dfrac{V_{in,pk}}{R_{25,min}+R_{source,min}}"], number="8.2.1", ch=CH)
+        _tol_src = "selected-part datasheet" if wc.get("tol_from_datasheet") else "placeholder (confirm from datasheet)"
+        body(story,
+            f"<b>Worked.</b> With R<sub>25</sub> = {_f(wc['r25_ohm'],1)} {_OHM} and a tolerance of "
+            f"{_f(wc['r25_tol']*100,0)}% ({_tol_src}), R<sub>25,min</sub> = {_f(wc['r25_ohm'],1)}&#215;"
+            f"(1&#8722;{_f(wc['r25_tol'],2)}) = <b>{_f(wc['r25_min_ohm'],2)} {_OHM}</b>, so I<sub>inrush,max</sub> "
+            f"= {_f(r['vin_pk_max'],1)} V / {_f(wc['r25_min_ohm'],2)} {_OHM} = <b>{_f(wc['i_inrush_max_A'],1)} A</b> "
+            f"(nominal {_f(wc['i_inrush_nom_A'],1)} A).", CH)
+        _cold_ok = wc['i_inrush_nom_A'] <= wc['inrush_target_A']
+        _wc_ok = wc['i_inrush_max_A'] <= wc['inrush_target_A']
+        data_table(story, "8.2.1", "Cold Inrush — Nominal vs Worst-Case Tolerance",
+            f"Both cases against the {_f(wc['inrush_target_A'],0)} A target at {_f(r['vin_pk_max'],1)} V peak.",
+            ["Case", "R25 used (" + _OHM + ")", "Inrush (A)", "Verdict"],
+            [["Nominal cold start", _f(wc['r25_ohm'],1), _f(wc['i_inrush_nom_A'],1),
+              "PASS" if _cold_ok else "OVER"],
+             [f"Minimum R25 ({_f(wc['r25_tol']*100,0)}% tol)", _f(wc['r25_min_ohm'],2), _f(wc['i_inrush_max_A'],1),
+              "PASS" if _wc_ok else "OVER"]],
+            col_widths=[CW*0.40, CW*0.22, CW*0.18, CW*0.20], ch=CH)
+        if not wc.get("tol_from_datasheet"):
+            annotation(story, "NOTE",
+                "The tolerance above is a placeholder; use the selected part's datasheet tolerance for the "
+                "release calculation, and include source resistance only if it is documented.", CH)
 
     # ── 8.3 pulse energy ──
     sub_h(story, "8.3", "Pulse-Energy Survival", CH)
@@ -130,8 +195,41 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
     annotation(story, "NOTE",
         "Hot-restart caution: a quick OFF/ON leaves the NTC warm (lower R) → higher inrush than the cold "
-        "calculation. Add a minimum re-enable cool-down, or verify warm-NTC inrush against the fuse and "
-        "capacitor I&#178;t.", CH)
+        "calculation. This is quantified in Section 8.8.", CH)
+
+    # ── 8.5.1 precharge voltage + residual relay make — review points 3 & 4 ──
+    if wc:
+        sub_h(story, "8.5.1", "Precharge Voltage & Residual Relay-Make Current", CH)
+        body(story,
+            "The passive NTC path charges the bulk capacitor toward the <b>rectified line peak</b>, not the "
+            "regulated PFC bus — the PFC boost stage lifts the bus to V<sub>bus</sub> only after startup. The "
+            "capacitor voltage at the bypass instant, and the residual the relay closes into, are:", CH)
+        eq_box(story, [r"V_{cap}(t)=V_{in,pk}\,(1-e^{-t/\tau}),\qquad V_{residual}=V_{in,pk}-V_{cap}(N_\tau\tau)",
+                       r"I_{relay,make}=\dfrac{V_{residual}}{R_{relay\,path}}"], number="8.5.1", ch=CH)
+        _imk = wc.get("i_relay_make_A")
+        body(story,
+            f"<b>Worked.</b> At {_f(s['tau_multiple'],0)}&#183;&#964; the capacitor reaches "
+            f"{_f(wc['vcap_close_V'],1)} V &#8776; <b>{_f(wc['vcap_close_pct'],1)}%</b> of the "
+            f"{_f(r['vin_pk_max'],1)} V rectified peak, leaving V<sub>residual</sub> = "
+            f"<b>{_f(wc['v_residual_V'],1)} V</b>. The relay therefore makes into a small differential "
+            + (f"; with a relay-path impedance of {_f(s['relay_path_ohm'],3)} {_OHM} the make current is "
+               f"<b>{_f(_imk,2)} A</b>"
+               if _imk is not None else
+               ", but the make <i>current</i> = V<sub>residual</sub>/R<sub>path</sub> needs the relay-path "
+               "impedance (contact + wiring + bridge + cap ESR + PCB) — an open item until layout is fixed")
+            + ".", CH)
+        _mk_rating = wc.get("relay_make_rating_A")
+        data_table(story, "8.5.1", "Relay-Make Assessment",
+            "Residual is computed; make current and rating close on the datasheet/layout.",
+            ["Item", "Value / Action", "Status"],
+            [["Residual voltage at bypass", f"{_f(wc['v_residual_V'],1)} V", "Calculated"],
+             ["Relay-path impedance", (f"{_f(s['relay_path_ohm'],3)} {_OHM}" if s.get('relay_path_ohm') else "TBD (contact + wiring + bridge + ESR + PCB)"),
+              "Input" if s.get('relay_path_ohm') else "Open"],
+             ["Relay make current", (f"{_f(_imk,2)} A" if _imk is not None else "TBD = V_residual / R_path"),
+              "Calculated" if _imk is not None else "Open"],
+             ["Contact make rating", (f"{_f(_mk_rating,1)} A" if _mk_rating else "TBD from relay datasheet"),
+              (("PASS" if (_imk is not None and _mk_rating and _imk <= _mk_rating) else "CHECK") if _mk_rating else "Required")]],
+            col_widths=[CW*0.34, CW*0.42, CW*0.24], ch=CH)
 
     # ── 8.6 candidates ──
     sub_h(story, "8.6", "Candidate Screen" + (" and Selection" if out.get("selected") else ""), CH)
@@ -181,6 +279,129 @@ def build_ntc_story(story, design, cap=None, opts=None):
             "The pulse-energy figure is estimated from the disc diameter; confirm the Joule (or "
             "max-switchable-capacitance) rating and the R25 tolerance on the live datasheet before "
             "release.", CH)
+
+    # ── 8.8 warm / hot restart — review point 5 ──
+    if wc:
+        sub_h(story, "8.8", "Warm / Hot Restart", CH)
+        body(story,
+            "After operation the NTC is hot and its resistance is far below R25, so a short-off-time restart "
+            "can draw <b>much higher</b> inrush than the cold case. Restart is therefore a design condition, "
+            "not just a warning.", CH)
+        eq_box(story, [r"I_{restart}=\dfrac{V_{in,pk}}{R_{NTC,warm}+R_{source}}"], number="8.8", ch=CH)
+        _rows = wc.get("restart_rows") or []
+        data_table(story, "8.8", "Restart Inrush vs Resistance State",
+            "Cold, worst-case-tolerance and warm/hot cases at the high-line peak.",
+            ["Case", "R<sub>NTC</sub> (" + _OHM + ")", "Inrush (A)"],
+            [[d["case"], (_f(d["r_ohm"],3) if d.get("r_ohm") is not None else "TBD (R(T) data)"),
+              (_f(d["i_A"],1) if d.get("i_A") is not None else "TBD")] for d in _rows]
+            + [["Relay stuck closed", "bypassed",
+                (_f(wc['i_bypassed_A'],1) if wc.get('i_bypassed_A') else "n/a")]],
+            col_widths=[CW*0.44, CW*0.28, CW*0.28], ch=CH)
+        _ot = wc.get("off_time_min_ms"); _rp = wc.get("restart_protection")
+        if wc.get("i_warm_A"):
+            annotation(story, "PITFALL",
+                f"Hot restart draws ~{_f(wc['i_warm_A'],0)} A at R<sub>hot</sub> = {_f(wc['r_hot_ohm'],2)} "
+                f"{_OHM} — far above the {_f(wc['inrush_target_A'],0)} A target. Enforce a minimum off-time so "
+                "the NTC cools, or add active precharge / relay sequencing / a restart interlock.", CH)
+        body(story,
+            "<b>Restart policy:</b> "
+            + (f"minimum off-time = {_f(_ot,0)} ms" if _ot else "minimum off-time NOT yet defined")
+            + "; protection handled by "
+            + (f"<b>{_rp}</b>" if _rp else "<b>(unstated — hardware / firmware / procedure to be declared)</b>")
+            + ". Add the selected part's R(T) data to replace the warm/hot estimate.", CH)
+
+    # ── 8.9 fuse I²t startup coordination — review point 7 ──
+    if wc:
+        sub_h(story, "8.9", "Fuse I²t Startup Coordination", CH)
+        body(story,
+            "The fuse must survive the startup pulse. For a first-order exponential charge current, the "
+            "startup I&#178;t is:", CH)
+        eq_box(story, [r"i(t)=\dfrac{V_{in,pk}}{R_{total}}\,e^{-t/\tau},\qquad "
+                       r"I^2t_{start}=\dfrac{V_{in,pk}^2\,\tau}{2\,R_{total}^2}"], number="8.9", ch=CH)
+        _fr = wc.get("fuse_i2t_rating"); _fok = wc.get("fuse_ok")
+        data_table(story, "8.9", "Startup I²t vs Fuse Pre-Arcing I²t",
+            "Compare the worst startup I&#178;t against the selected fuse's pre-arcing I&#178;t.",
+            ["Case", "I²t (A²s)", "vs fuse rating"],
+            [["Cold nominal", _f(wc['i2t_cold'],1), "&#8212;"],
+             ["Minimum R25", _f(wc['i2t_min_r25'],1), "&#8212;"],
+             ["Warm/hot restart", (_f(wc['i2t_warm'],1) if wc.get('i2t_warm') else "TBD"), "&#8212;"],
+             ["<b>Worst case</b>", f"<b>{_f(wc['i2t_worst'],1)}</b>",
+              (("PASS" if _fok else "OVER") + f" (fuse {_f(_fr,0)} A²s)") if _fr else "fuse I²t TBD"]],
+            col_widths=[CW*0.40, CW*0.30, CW*0.30], ch=CH)
+        if not _fr:
+            annotation(story, "NOTE",
+                "Enter the selected fuse's pre-arcing I&#178;t (datasheet) to close this check; the worst "
+                "case is the warm-restart pulse, not the cold start.", CH)
+
+    # ── 8.10 startup-path component stress (references Ch7 bridge surge) — review point 8 ──
+    if wc:
+        sub_h(story, "8.10", "Startup-Path Component Stress", CH)
+        body(story,
+            "The NTC limits the current, but the whole startup path carries it. This table closes the loop; "
+            "the bridge/diode surge is proven against I<sub>FSM</sub> in <b>Chapter 7 (Section 7.3.1)</b> and "
+            "is referenced here.", CH)
+        data_table(story, "8.10", "Startup-Path Stress Summary",
+            "Each element vs its datasheet limit; the peak stress is the worst-case cold/warm inrush.",
+            ["Component / path", "Stress to compare", "Limit / source", "Status"],
+            [["Bridge rectifier / diode", f"inrush peak {_f(wc['i_inrush_max_A'],0)} A",
+              "I<sub>FSM</sub> — see Ch 7 Sec. 7.3.1", "Ref Ch 7"],
+             ["Input fuse", f"I²t {_f(wc['i2t_worst'],0)} A²s", "pre-arcing I²t (Sec. 8.9)",
+              "PASS" if wc.get("fuse_ok") else "Open"],
+             ["NTC device", f"E<sub>cap</sub> {_f(r['e_cap'],0)} J", f"pulse rating (Sec. 8.3)", "See 8.3/8.7"],
+             ["Bypass relay contacts", (f"make {_f(wc['i_relay_make_A'],1)} A" if wc.get('i_relay_make_A') else "make current"),
+              "contact rating (Sec. 8.5.1)", "PASS" if (wc.get("i_relay_make_A") and wc.get("relay_make_rating_A") and wc["i_relay_make_A"] <= wc["relay_make_rating_A"]) else "Open"],
+             ["Bulk cap / PCB copper", "charging-path peak current", "surge / pulse capability", "Recommended"]],
+            col_widths=[CW*0.26, CW*0.26, CW*0.30, CW*0.18], ch=CH)
+
+    # ── 8.11 AC phase-angle startup sweep — review point 10 (light) ──
+    if wc and wc.get("phase_sweep"):
+        sub_h(story, "8.11", "AC Phase-Angle Startup Sweep", CH)
+        body(story,
+            "Turn-on can occur at any line phase; the inrush scales with the instantaneous voltage, worst at "
+            "the 90&#176; peak (the case sized above). The sweep gives the expected validation waveform:", CH)
+        eq_box(story, [r"V_{in}(\theta)=V_{in,pk}\sin\theta,\qquad "
+                       r"I_{inrush}(\theta)=\dfrac{V_{in}(\theta)}{R_{25}+R_{source}}"], number="8.11", ch=CH)
+        data_table(story, "8.11", "Inrush vs Turn-On Angle",
+            "Nominal R25 and worst-case minimum R25.",
+            ["Turn-on angle", "V<sub>in</sub>(&#952;) (V)", "Inrush nominal (A)", "Inrush min-R25 (A)"],
+            [[f"{d['deg']}&#176;", _f(d['vin_V'],0), _f(d['i_nom_A'],1), _f(d['i_min_A'],1)]
+             for d in wc["phase_sweep"]],
+            col_widths=[CW*0.22, CW*0.24, CW*0.27, CW*0.27], ch=CH)
+
+    # ── 8.12 final margin summary + open items — Tables A & B ──
+    if wc:
+        sub_h(story, "8.12", "Final NTC Design Margin Summary & Open Items", CH)
+        _tgt = wc['inrush_target_A']
+        def _mrg(val):
+            return f"{100.0*(_tgt-val)/_tgt:+.1f}%" if val else "&#8212;"
+        data_table(story, "8.12a", "Table A — Final NTC Design Margin Summary",
+            "The startup-path proof at a glance; datasheet/layout items marked Open until confirmed.",
+            ["Check", "Requirement", "Value", "Status"],
+            [["Nominal cold inrush", f"&#8804; {_f(_tgt,0)} A", f"{_f(wc['i_inrush_nom_A'],1)} A ({_mrg(wc['i_inrush_nom_A'])})",
+              "PASS" if wc['i_inrush_nom_A'] <= _tgt else "OVER"],
+             ["Minimum-R25 cold inrush", f"&#8804; {_f(_tgt,0)} A", f"{_f(wc['i_inrush_max_A'],1)} A ({_mrg(wc['i_inrush_max_A'])})",
+              "PASS" if wc['i_inrush_max_A'] <= _tgt else "OVER"],
+             ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J", "part rating", "Confirm datasheet"],
+             ["Precharge timing", f"&#8805; {_f(s['tau_multiple'],0)}&#183;&#964;", f"{_f(r['t_bypass']*1e3,0)} ms", "PASS"],
+             ["Warm/hot restart", f"&#8804; path rating", (f"{_f(wc['i_warm_A'],0)} A" if wc.get('i_warm_A') else "TBD (R(T))"),
+              ("CHECK" if wc.get('i_warm_A') and wc['i_warm_A'] > _tgt else "Open")],
+             ["Relay make current", "&#8804; contact rating", (f"{_f(wc['i_relay_make_A'],2)} A" if wc.get('i_relay_make_A') else "TBD"),
+              "Open" if not wc.get('i_relay_make_A') else "Check"],
+             ["Fuse I²t", "&#8804; pre-arcing I²t", f"{_f(wc['i2t_worst'],1)} A²s worst",
+              "PASS" if wc.get('fuse_ok') else "Open"],
+             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", "see Ch 7 Sec. 7.3.1", "Ref Ch 7"]],
+            col_widths=[CW*0.28, CW*0.24, CW*0.28, CW*0.20], ch=CH)
+        data_table(story, "8.12b", "Table B — Open Electrical Items",
+            "What must be confirmed for release, and why.",
+            ["Open item", "Source needed", "Why"],
+            [["R25 tolerance", "NTC datasheet", "worst-case cold inrush"],
+             ["R(T) / hot resistance", "NTC datasheet", "warm/hot restart current"],
+             ["Pulse energy / max-C", "NTC datasheet", "NTC survival"],
+             ["Fuse I²t rating", "fuse datasheet", "no nuisance/unsafe fuse"],
+             ["Bridge I<sub>FSM</sub>", "bridge datasheet (Ch 7)", "rectifier survival"],
+             ["Relay make rating", "relay datasheet", "safe bypass timing"],
+             ["Relay-path impedance", "schematic / layout", "true make current & inrush"]],
+            col_widths=[CW*0.30, CW*0.30, CW*0.40], ch=CH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

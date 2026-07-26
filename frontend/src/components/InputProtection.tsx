@@ -15,7 +15,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov, docGenerateReport,
+import { inputProtectionNtc, inputProtectionMov, docGenerateReport, inrushSchematicUrl,
          type NtcResult, type MovResult, type CatalogRow, type NtcCandidate } from '../api/client'
 import type { CapacitorResult } from './Step15Capacitor'
 
@@ -104,7 +104,10 @@ export const InputProtection: React.FC<Props> = ({
   // ── NTC ──
   const [ntcOpts, setNtcOpts] = useState<Record<string, string>>({
     i_inrush_target: '60', energy_margin: '1.5', r25_margin: '1.10', vref_pulse: '345',
-    tau_multiple: '4', ambient_c: '45', r_line: '0', r_emi: '0', r_esr: '0', r_bridge: '0' })
+    tau_multiple: '4', ambient_c: '45', r_line: '0', r_emi: '0', r_esr: '0', r_bridge: '0',
+    // worst-case / coordination inputs (datasheet / layout; blank = open item in the report)
+    fuse_i2t_rating: '', relay_make_rating_a: '', relay_path_ohm: '', off_time_min_ms: '',
+    restart_protection: '' })
   const [ntcRes, setNtcRes] = useState<NtcResult | null>(null)
   const [ntcBusy, setNtcBusy] = useState(false)
   const setN = (k: string, v: string) => setNtcOpts(s => ({ ...s, [k]: v }))
@@ -208,6 +211,29 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Loop R (line+EMI+ESR)" unit="Ω" value={ntcOpts.r_emi} onChange={v => setN('r_emi', v)} />
               <Btn variant="primary" disabled={ntcBusy} onClick={calcNtc}>{ntcBusy ? '⏳ Sizing…' : '↻ Re-size NTC'}</Btn>
             </div>
+            {/* Worst-case / coordination inputs (datasheet + layout). Blank ⇒ shown as an open item. */}
+            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+              Worst-case & coordination <span style={{ color: C.muted, textTransform: 'none' }}>— datasheet / layout; blank = open item in the report</span></div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+              <Knob label="Fuse I²t rating" unit="A²s" value={ntcOpts.fuse_i2t_rating} onChange={v => setN('fuse_i2t_rating', v)} />
+              <Knob label="Relay make rating" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
+              <Knob label="Relay-path R" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
+              <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
+              <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
+                <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
+                  value={ntcOpts.restart_protection} onChange={e => setN('restart_protection', e.target.value)}>
+                  <option value="">— unstated —</option><option value="hardware">hardware</option>
+                  <option value="firmware">firmware</option><option value="procedure">procedure</option></select></label>
+            </div>
+            {/* Inrush-limiter topology schematic (same drawing embedded in the Ch 8 report). */}
+            <details style={{ marginBottom: 14 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11.5, color: C.teal, fontWeight: 600 }}>
+                🔧 Inrush-limiter schematic (NTC + relay bypass)</summary>
+              <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, marginTop: 8 }}>
+                <img src={inrushSchematicUrl()} alt="NTC + relay-bypass inrush-limiter schematic"
+                  style={{ width: '100%', height: 'auto', display: 'block' }} />
+              </div>
+            </details>
 
             {ntcRes && (<>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 14 }}>
