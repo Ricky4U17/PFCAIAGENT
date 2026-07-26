@@ -83,10 +83,14 @@ def calculate_emi(design: dict, cap: dict | None = None, protection: dict | None
     _bulk_qty = cap.get("qty") or cap.get("count") or 1
     bulk_c = (float(_bulk_uf) * float(_bulk_qty) * 1e-6) if _bulk_uf else None
 
+    # Output power from the designer spec — required, NOT defaulted (no hardcoded Pout).
+    _pout = design.get("pout_hi") or design.get("pout_lo")
+    if _pout is None:
+        raise emi.EMIContractError("EMI design requires output power (pout_hi/pout_lo) from the PFC spec")
     pfc = emi.PFCResult(
         vac_min=float(design["vin_min"]), vac_max=float(design["vin_max"]),
         f_line=float(design.get("fline", 60)), v_bus=float(design["vout"]),
-        p_out=float(design.get("pout_hi") or design.get("pout_lo") or 1700),
+        p_out=float(_pout),
         eff=eff, f_sw=float(design["fsw"]), n_phases=int(design.get("nch", 2)),
         i_ripple_pp=float(opts.get("i_ripple_pp_A") or dil_pp),
         esr_bulk=esr_bulk,

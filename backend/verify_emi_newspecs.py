@@ -107,6 +107,9 @@ def main() -> int:
     check("components finite & positive",
           r["c_x"] > 0 and r["l_dm"] > 0 and r["c_y_emi_total"] > 0)
     check("9-point sweep present", len(r["per_point"]) == 9)
+    check("9-line IL verification present", len(r["per_line"]) == 9)
+    check("per-line DM margin tightest at low line",
+          r["per_line"][0]["dm_margin_db"] <= r["per_line"][-1]["dm_margin_db"] + 1e-6)
     check("spectra render arrays present",
           bool(r["spectra"].get("f")) and len(r["spectra"]["f"]) > 10)
 

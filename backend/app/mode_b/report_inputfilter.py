@@ -377,6 +377,24 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
             [[_f(d["vac"], 0), _f(d["i_in"], 2), _f(d["cu_loss_w"], 2),
               _f(d["i_cx_a"] * 1e3, 0), _f(d["i_leak_a"] * 1e6, 0), d["worst_mode"]] for d in r["per_point"]],
             col_widths=[CW*0.13, CW*0.17, CW*0.20, CW*0.18, CW*0.20, CW*0.12], ch=CH)
+    # Per-line IL verification (§19): worst-case delivered margin at each line condition. The DM source
+    # scales with the per-line ripple; the CM source is line-independent (V_bus regulated), so its margin
+    # is common. Post-filter emission below the limit ⇔ margin ≥ 0.
+    if r.get("per_line"):
+        body(story,
+            "<b>Per-line verification.</b> The final check layers each line's emission against the delivered "
+            "insertion loss: the worst-case margin over the band (delivered IL &#8722; required attenuation "
+            "from that line's source). DM is worst at low line (highest ripple); CM is common across lines "
+            "because the bus is regulated. A margin &#8805; 0 dB means the post-filter emission clears the "
+            "limit at that line condition.", CH)
+        _all_ok = all(d["ok"] for d in r["per_line"])
+        data_table(story, "10.12b", "Per-Line IL Verification (post-filter vs limit)",
+            ("All line conditions clear the limit." if _all_ok else
+             "Some lines are short of the design margin — see the CM source-reduction note (Section 10.6)."),
+            ["V_ac", "Dominant", "DM margin (dB)", "CM margin (dB)", "Verdict"],
+            [[_f(d["vac"], 0), d["mode"], _f(d["dm_margin_db"], 1), _f(d["cm_margin_db"], 1),
+              ("PASS" if d["ok"] else "SHORT")] for d in r["per_line"]],
+            col_widths=[CW*0.15, CW*0.18, CW*0.24, CW*0.24, CW*0.19], ch=CH)
 
     # ── 10.13 governing equations ──
     step_h(story, "10.13", "Governing Equations", CH)

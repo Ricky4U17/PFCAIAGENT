@@ -5235,3 +5235,21 @@ collected; 174 tests still collect cleanly). No production code changed since C1
 sweep · C142 thesis report+figures+index · C143 verify harness). Later phases (designer's word): 9-point
 per-line IL verification table + E-series snapping; Monte-Carlo tolerance (§16); radiated screening (§17);
 credit CM-choke leakage as DM inductance.
+
+## C144 — 2026-07-26 — EMI: 9-point per-line IL verification table + Pout hardcode removed
+
+Two designer requests on the EMI filter:
+- PER-LINE IL VERIFICATION (ref §19): new `per_line_verification()` + res.per_line — at EACH of the 9
+  operating points, the worst-case delivered margin = min over band of (delivered IL − required
+  attenuation from THAT line's source). DM source is now factored into a per-op helper `_dm_source_v()` /
+  `dm_noise_op_dbuv()` so each line's ripple drives its own DM requirement; CM is line-independent (V_bus
+  regulated) so its margin is common. Rendered as report Table 10.12b "Per-Line IL Verification
+  (post-filter vs limit)" with per-line DM/CM margin + PASS/SHORT verdict. self_test #15 added (DM margin
+  tightest at low line; CM common). Verified: DM 22.9→40.5 dB across 90→264 V, CM −9.4 dB common.
+- NO-HARDCODE AUDIT (Fsw/Pin/Pout/Vout): confirmed the production path derives all EMI component values
+  from designer specs — f_sw = design["fsw"] (required), V_bus = design["vout"] (required), Pin = Pout/eff
+  (derived), operating grid from build_design_ops. Removed the ONLY residual hardcode: the adapter's
+  `p_out = … or 1700` fallback → now raises EMIContractError if Pout is absent (no silent default). Other
+  "1700/3600/70k/394" occurrences are test-only fixtures (REFERENCE_DESIGN / demo_context / self_test).
+- Harness: verify_emi_newspecs.py gains per-line checks; all differential-spec checks still pass.
+Suite 172/2; self_test 15 checks; Ch10 report builds with the per-line table.

@@ -398,6 +398,7 @@ class EMIResult:
     cm_margin_f: float = 0.0
     # per-operating-point verification (§2.5/Table 6) + loss budget (§15) + single-fault leakage (§13)
     per_point: List[Dict[str, float]] = field(default_factory=list)  # [{vac,i_in,cu_loss_w,i_cx_a,i_leak_a,worst_mode}]
+    per_line: List[Dict[str, float]] = field(default_factory=list)   # §19 [{vac,mode,dm_margin_db,cm_margin_db,ok}]
     loss_rows: List[Tuple[str, float]] = field(default_factory=list)  # [(label, watts)] at the worst point
     loss_total_w: float = 0.0
     loss_worst_vac: float = 0.0
@@ -473,15 +474,34 @@ def _dm_delta_i(ctx, op):
     return p.i_ripple_pp
 
 
-def dm_noise_dbuv(ctx, f):
-    """Differential-mode emission at the LISN [dBuV] (reference §4.2/§4.4).
+def _dm_source_v(ctx, op, f):
+    """Differential-mode source voltage at the LISN [V] for a SINGLE operating point:
+    trapezoidal-pulse ripple envelope (flat, then -20, then -40 dB/dec at f1=1/(πD·T),
+    f2=1/(π·t_r)) with interleaving cancellation, current-divided by the bulk capacitor
+    (ESR + jωESL + 1/jωC) against the LISN DM impedance."""
+    p = ctx.pfc
+    esr = p.esr_bulk or DEFAULT_BULK_ESR
+    esl = p.bulk_esl or DEFAULT_BULK_ESL
+    c_bulk = p.bulk_c                       # may be None -> ESR/ESL-only shunt
+    didt = p.didt_pfc or DEFAULT_DIDT_PFC
+    z_bulk = _z_cap(f, c_bulk, esr, esl) if c_bulk else complex(esr, TWO_PI * f * esl)
+    frac = abs(z_bulk / (z_bulk + Z_LISN_DM))     # ripple fraction reaching the LISN
+    d = min(max(op.duty, 1e-3), 0.999)
+    di = _dm_delta_i(ctx, op)
+    i0 = 2.0 * di * d / max(p.n_phases, 1)         # trapezoid flat-region amplitude, interleaved
+    f1 = 1.0 / (pi * d * (1.0 / p.f_sw))
+    f2 = 1.0 / (pi * max(di / didt, 1e-12))
+    env = i0
+    if f > f1:
+        env *= f1 / f                              # -20 dB/dec
+    if f > f2:
+        env *= f2 / f                              # further -20 -> -40 dB/dec
+    return env * frac * Z_LISN_DM
 
-    Measured spectrum wins. Otherwise COMPUTED per operating point from the PFC
-    input-ripple current: a trapezoidal-pulse envelope (flat, then -20, then -40
-    dB/dec at f1=1/(πD·T), f2=1/(π·t_r)) with interleaving cancellation, current-
-    divided by the bulk capacitor (ESR + jωESL + 1/jωC) against the LISN DM
-    impedance — the bulk cap shunts most of the ripple, so DM is usually modest.
-    The worst operating point governs."""
+
+def dm_noise_dbuv(ctx, f):
+    """Differential-mode emission at the LISN [dBuV] (reference §4.2/§4.4): the WORST
+    operating point governs. Measured spectrum wins; else the computed per-op source."""
     if ctx.noise.dm:
         return _interp_dbuv(ctx.noise.dm, f), "measured"
     p = ctx.pfc
@@ -490,28 +510,15 @@ def dm_noise_dbuv(ctx, f):
         f_first = p.n_phases * p.f_sw
         i_h = (4.0 / pi ** 2) * p.i_ripple_pp / max(1.0, round(f / f_first)) ** 2
         return 20.0 * log10(max(i_h * esr, 1e-12) / 1e-6), "estimate"
-    esr = p.esr_bulk or DEFAULT_BULK_ESR
-    esl = p.bulk_esl or DEFAULT_BULK_ESL
-    c_bulk = p.bulk_c                       # may be None -> ESR/ESL-only shunt
-    didt = p.didt_pfc or DEFAULT_DIDT_PFC
-    z_bulk = _z_cap(f, c_bulk, esr, esl) if c_bulk else complex(esr, TWO_PI * f * esl)
-    frac = abs(z_bulk / (z_bulk + Z_LISN_DM))     # ripple fraction reaching the LISN
-    T = 1.0 / p.f_sw
-    worst = 1e-18
-    for op in _dm_points(ctx):
-        d = min(max(op.duty, 1e-3), 0.999)
-        di = _dm_delta_i(ctx, op)
-        i0 = 2.0 * di * d / max(p.n_phases, 1)      # trapezoid flat-region amplitude, interleaved
-        f1 = 1.0 / (pi * d * T)
-        f2 = 1.0 / (pi * max(di / didt, 1e-12))
-        env = i0
-        if f > f1:
-            env *= f1 / f                            # -20 dB/dec
-        if f > f2:
-            env *= f2 / f                            # further -20 -> -40 dB/dec
-        v = env * frac * Z_LISN_DM
-        worst = max(worst, v)
+    worst = max(_dm_source_v(ctx, op, f) for op in _dm_points(ctx))
     return 20.0 * log10(max(worst, 1e-12) / 1e-6), "computed"
+
+
+def dm_noise_op_dbuv(ctx, op, f):
+    """Per-operating-point DM emission [dBuV] (for the per-line verification, §19)."""
+    if ctx.noise.dm:
+        return _interp_dbuv(ctx.noise.dm, f)
+    return 20.0 * log10(max(_dm_source_v(ctx, op, f), 1e-12) / 1e-6)
 
 
 def _cm_generators(ctx):
@@ -639,6 +646,29 @@ def sample_spectra(ctx, klass, detector, l_dm, c_x, dm_stages, l_cm, cy_system, 
         zi.append(w * (p.l_boost / max(p.n_phases, 1)) if p.l_boost else 1e9)
     return {"f": f, "dm_src": dm_src, "cm_src": cm_src, "limit": lim, "dm_il": dm_il, "cm_il": cm_il,
             "mbk_f": mf, "mbk_zout": zo, "mbk_zin": zi}
+
+
+def per_line_verification(ctx, klass, detector, margin, l_dm, c_x, dm_stages,
+                          l_cm, cy_system, cm_stages, par, f_lo):
+    """Reference §19 — per-line verification: at EACH operating point, the worst-case margin =
+    min over band of (delivered IL − required attenuation from THAT line's source). DM scales with
+    the per-line ripple; CM is line-independent (V_bus regulated), so its margin is common. Returns
+    [{vac, mode, dm_margin_db, cm_margin_db, ok}] — post-filter emission below the limit ⇔ margin ≥ 0."""
+    grid = _freq_grid(max(CONDUCTED_FMIN, f_lo), CONDUCTED_FMAX, 100)
+    lim = [conducted_limit_dbuv(fr, klass, detector) for fr in grid]
+    dm_il = [insertion_loss_dm(l_dm, c_x, dm_stages, par, fr) for fr in grid]
+    cm_il = [insertion_loss_cm(l_cm, cy_system, cm_stages, par, fr) if l_cm != float("inf") else 0.0
+             for fr in grid]
+    # CM margin is line-independent — compute once.
+    cm_m = min((cm_il[i] - max(cm_noise_dbuv(ctx, fr)[0] - (lim[i] - margin), 0.0))
+               for i, fr in enumerate(grid)) if l_cm != float("inf") else 0.0
+    rows = []
+    for op in _dm_points(ctx):
+        dm_m = min(dm_il[i] - max(dm_noise_op_dbuv(ctx, op, fr) - (lim[i] - margin), 0.0)
+                   for i, fr in enumerate(grid))
+        rows.append({"vac": op.v_in, "mode": "DM" if op.v_in < 180 else "CM",
+                     "dm_margin_db": dm_m, "cm_margin_db": cm_m, "ok": min(dm_m, cm_m) >= 0.0})
+    return rows
 
 
 # ============================================================== #
@@ -930,6 +960,8 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
 
     spectra = sample_spectra(ctx, klass, detector, l_dm, c_x, dm_stages, l_cm, cy_system,
                              cm_stages, par, damp_r, damp_l, f_first)
+    per_line = per_line_verification(ctx, klass, detector, margin, l_dm, c_x, dm_stages,
+                                     l_cm, cy_system, cm_stages, par, f_first)
 
     feasible = (len(fb) == 0)
 
@@ -949,7 +981,7 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         damp_l=damp_l, stability_margin_db=stability_margin_db, dm_res_hz=f_res_dm,
         dm_il_db=dm_il_db, dm_margin_db=dm_margin_db, dm_margin_f=dm_margin_f,
         cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
-        per_point=per_point, loss_rows=loss_rows, loss_total_w=loss_total_w,
+        per_point=per_point, per_line=per_line, loss_rows=loss_rows, loss_total_w=loss_total_w,
         loss_worst_vac=loss_worst_vac, leak_fault_A=leak_fault_A, spectra=spectra,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
     )
@@ -1204,6 +1236,15 @@ def self_test():
     print(f"  [ok] loss/leakage sweep: 9 pts, total {rr.loss_total_w:.1f} W worst @ "
           f"{rr.loss_worst_vac:.0f} V; leak {rr.leakage_actual_A*1e3:.2f} mA / fault "
           f"{rr.leak_fault_A*1e3:.2f} mA")
+
+    # 15) Per-line IL verification (§19): 9 lines; DM margin worsens toward low line; CM margin common.
+    assert len(rr.per_line) == 9, f"expected 9 per-line rows ({len(rr.per_line)})"
+    dm_m = [d["dm_margin_db"] for d in rr.per_line]
+    cm_m = [d["cm_margin_db"] for d in rr.per_line]
+    assert dm_m[0] <= dm_m[-1] + 1e-6, "DM margin should be tightest at the low-line point"
+    assert max(cm_m) - min(cm_m) < 0.5, "CM margin is line-independent (V_bus regulated)"
+    print(f"  [ok] per-line verification: 9 lines; DM margin {dm_m[0]:.1f}..{dm_m[-1]:.1f} dB, "
+          f"CM {cm_m[0]:.1f} dB (common)")
 
     print("ALL SELF-TESTS PASSED.")
 
