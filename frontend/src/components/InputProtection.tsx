@@ -29,7 +29,7 @@ interface Props {
   approvedSemiconductor?:  Record<string, unknown> | null
   selectedMosfet?:         Record<string, unknown> | null
   onBack:    () => void
-  onNext?:   () => void
+  onNext?:   (ip: Record<string, unknown>) => void
   onRestart: () => void
 }
 
@@ -141,6 +141,13 @@ export const InputProtection: React.FC<Props> = ({
   const [rptBusy, setRptBusy] = useState(false)
   // FULL report: all previous chapters (design basis, magnetics, DC-bus capacitor) + the
   // input-protection chapters — not only Ch 8–9.
+  // The input-protection payload for the report (Ch 8 NTC + Ch 9 MOV). Shared by this page's own
+  // report button AND handed up via onNext so the EMI page can include Ch 8/9 in its combined report.
+  const ipReportPayload = (): Record<string, unknown> => ({
+    design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
+    ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM },
+  })
+
   const downloadReport = async () => {
     setRptBusy(true); setErr(null)
     try {
@@ -152,8 +159,7 @@ export const InputProtection: React.FC<Props> = ({
         // (designer's control config, R_CS) and Ch 7 (semiconductor selection).
         ...(approvedControlParams ? { step16_params: approvedControlParams } : {}),
         ...(approvedSemiconductor ? { semiconductor: approvedSemiconductor } : {}),
-        input_protection: { design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
-          ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM } },
+        input_protection: ipReportPayload(),
       })
       const url = URL.createObjectURL(blob); const a = document.createElement('a')
       a.href = url; a.download = `PFC_Report_${(confirmedState as any)?.project_id ?? 'design'}_incl_InputProtection.pdf`
@@ -372,7 +378,7 @@ export const InputProtection: React.FC<Props> = ({
           <Btn variant="success" disabled={rptBusy} onClick={downloadReport}>
             {rptBusy ? '⏳ Generating…' : '📥 Download full report (incl. previous steps)'}
           </Btn>
-          {onNext && <Btn variant="primary" onClick={onNext}>Input filter →</Btn>}
+          {onNext && <Btn variant="primary" onClick={() => onNext(ipReportPayload())}>Input filter →</Btn>}
           <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
         </div>
       </div>

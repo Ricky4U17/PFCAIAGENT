@@ -5253,3 +5253,26 @@ Two designer requests on the EMI filter:
   "1700/3600/70k/394" occurrences are test-only fixtures (REFERENCE_DESIGN / demo_context / self_test).
 - Harness: verify_emi_newspecs.py gains per-line checks; all differential-spec checks still pass.
 Suite 172/2; self_test 15 checks; Ch10 report builds with the per-line table.
+
+## C145 — 2026-07-26 — Ch7-10 report improvements (6-point designer review)
+
+1. Bridge Table 7.3.1 (7.3.1 worked): the low-line "+ bottom-diode crest share" (~0.18 W) exists only where
+   the crest current pushes the sync-MOSFET channel drop above the bridge-diode knee; at high line the drop
+   stays below the knee so it is genuinely 0. Fixed so EVERY column shows the term when any point has it
+   ("+ 0.00 W" at high line) — reads as an intentional zero, not a gap. (Sync-bottom bridge only.)
+2. Table 7.4 FET total was cond+sw+Coss+rr+leak but EXCLUDED gate drive (tracked separately, only in the
+   system total) — disagreed with the §7.4 narrative. Fixed: report total = P_FET_total + P_gate_driver
+   (= sum of the five shown columns). Verified 17.66 W vs old 17.56 W (missing 0.10 W gate).
+3. Replaced "§"/&#167; with "Sec." across Ch7 (9) and Ch10 (3); Ch8/9 had none.
+4. Table 7.8b now itemises TOTAL inductor loss (copper I²·DCR + core, Ch4 Pcore_W) and TOTAL capacitor
+   loss (Ch5 worst-case I_cap²·ESR), threaded via main.py _extra (core_loss_w from approved_design.Pcore_W;
+   cap_loss_w from step15_result.worst_case.I_total_A² × ESR_parallel). Balance is now just control/aux.
+5. EMI page "Download report" now generates the FULL combined report (Ch1-10) via docGenerateReport (like
+   every prior step) instead of the Ch10-only inputFilterReport. Wiring: InputProtection.onNext hands its
+   {design,cap,mosfet,ntc_opts,mov_opts} up → App stores approvedInputProtection → passes it +
+   approvedControlParams + approvedSemiconductor to InputFilter, which posts state/approved_design/
+   step15_result/step16_params/semiconductor/input_protection/input_filter. `_DocReportReq.input_filter`
+   already wired to Ch10. Frontend typechecks clean.
+6. Ch8/9 (report_inputprotection): subtopics 8.2-8.7 / 9.2-9.7 changed step_h→sub_h so they flow instead of
+   each forcing a PageBreak. Page count 8 (was ~14+); all headings still present + TOC-scannable.
+Suite 172/2; Ch7/8/9/10 reports build; FET total = column sum verified.

@@ -118,7 +118,7 @@ def _bridge_section(story, traces, is_sync):
     def _iavg(tr):
         return (2.0 / 3.141592653589793) * (2 ** 0.5) * tr["Iin_rms"]
     steps = [
-        ("I<sub>in,rms</sub> (from &#167;7.1)", lambda tr: f"{_f(tr['Iin_rms'],3)} A"),
+        ("I<sub>in,rms</sub> (from Sec. 7.1)", lambda tr: f"{_f(tr['Iin_rms'],3)} A"),
         ("I<sub>in,avg</sub> = (2&#8730;2/&#960;)&#183;I<sub>in,rms</sub>",
          lambda tr: f"(2&#8730;2/&#960;)&#215;{_f(tr['Iin_rms'],3)} = {_f(_iavg(tr),3)} A"),
         ("V<sub>f</sub>(i) along the curve",
@@ -127,11 +127,14 @@ def _bridge_section(story, traces, is_sync):
          lambda tr: f"<b>{_f(tr['P_bridge'])} W</b>"),
     ]
     if is_sync:
+        # The bottom-diode crest share exists only where the crest current pushes the sync-MOSFET
+        # channel drop above the bridge-diode knee (low line). Show it on EVERY column when any point
+        # has it, so a high-line "+ 0.00 W" reads as an intentional zero, not a missing term.
+        _show_bd = any(float(t.get('P_bridge_bd_share', 0) or 0) > 0.05 for _, t in traces)
         steps.append(("&nbsp;&nbsp;split: top diodes / bottom MOSFETs"
-                      + ("&nbsp;(+ bottom-diode crest share)" if any(float(t.get('P_bridge_bd_share',0) or 0) > 0.05 for _, t in traces) else ""),
+                      + ("&nbsp;(+ bottom-diode crest share)" if _show_bd else ""),
                       lambda tr: (f"{_f(tr['P_bridge_top'])} W / {_f(tr['P_bridge_bottom'])} W"
-                                  + (f" + {_f(float(tr.get('P_bridge_bd_share',0) or 0))} W"
-                                     if float(tr.get('P_bridge_bd_share',0) or 0) > 0.05 else ""))))
+                                  + (f" + {_f(float(tr.get('P_bridge_bd_share', 0) or 0))} W" if _show_bd else ""))))
     _worked(story, "7.3.1", "Bridge Loss — Worked Derivation", steps, traces)
 
 
@@ -246,11 +249,11 @@ def _diode_section(story, traces):
          ("For the selected <b>SiC Schottky</b> diode there is no minority-carrier reverse recovery "
           "(Q<sub>rr</sub> = 0): it is a majority-carrier device. The only stored charge is the "
           "junction-capacitance Q<sub>c</sub>, which is swept through the MOSFET channel at turn-on, so it "
-          "is booked to the MOSFET (&#167; 7.4.4). The diode's own reverse-recovery loss is therefore "
+          "is booked to the MOSFET (Sec. 7.4.4). The diode's own reverse-recovery loss is therefore "
           "0 W — this is a key reason SiC is chosen for the boost diode."
           if is_sic else
           "For the selected <b>Si</b> diode the recovery energy Q<sub>rr</sub>&#183;V<sub>OUT</sub> is split "
-          "between the two devices: &#8776; 85 % is dissipated in the MOSFET at its hard turn-on (&#167; 7.4.4) "
+          "between the two devices: &#8776; 85 % is dissipated in the MOSFET at its hard turn-on (Sec. 7.4.4) "
           "and &#8776; 15 % in the diode itself; both shares scale with f<sub>sw</sub>, the recovered "
           "charge Q<sub>rr</sub>(I<sub>F</sub>, di/dt, T<sub>j</sub>) and V<sub>OUT</sub>.")), CH)
     _W(story,
@@ -297,7 +300,7 @@ def _thermal_section(story, traces, thermal):
 
 def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_limit=None, extra=None):
     """Append the full Chapter-7 content to `story`. `extra` may carry the other-chapter loss
-    parameters (dcr_mohm, rcs_mohm, esr_mohm, …) for the §7.8 system loss budget."""
+    parameters (dcr_mohm, rcs_mohm, esr_mohm, …) for the Sec. 7.8 system loss budget."""
     extra = extra or {}
     tj_limit = tj_limit or {"fet": 150, "diode": 150, "bridge": 130}
     res = calculate_semiconductor_losses(design, mosfet, diode, bridge, thermal, tj_limit)
@@ -345,7 +348,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 " L&#966; is bias-adjusted per operating point (see the L<sub>&#966;</sub> column)."
                 if L_varies else " (L&#966; = %s &#181;H everywhere.)" % _f(L_phi * 1e6, 0)), CH)
     annotation(story, "METHOD",
-        "<b>How the losses are computed — time domain.</b> Every loss in &#167; 7.3&#8211;7.6 is obtained by "
+        "<b>How the losses are computed — time domain.</b> Every loss in Sec. 7.3&#8211;7.6 is obtained by "
         "integrating over the LINE cycle, not from a single peak or RMS figure. The half-line current "
         "envelope is sampled at several hundred angles &#952;; at each angle the per-switching-cycle "
         "waveforms — channel current, diode current, the turn-on/turn-off instants and the inductor "
@@ -440,7 +443,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
          "package-level (per-package thermal)"],
     ] + ([[ "Surge ratings I<sub>FSM</sub> / I&#178;t",
             f"{_f(bridge.get('ifsm_A'),0)} A / {_f(bridge.get('i2t_A2s'),0)} A&#178;s",
-            "verified vs Ch-8 inrush in &#167;7.3.1"]]
+            "verified vs Ch-8 inrush in Sec. 7.3.1"]]
          if bridge.get("ifsm_A") and bridge.get("i2t_A2s") else []) + [
         ["<b>Thermal / application</b>", "", ""],
         [f"Ambient T<sub>a</sub>", f"{_th.t_ambient:.0f} {_DEG}C", "worst-case"],
@@ -448,7 +451,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     ]
     data_table(story, "7.2b", "Selected-Component Datasheet & Application Parameters",
         "The actual values fed to the loss engine (datasheet parameters as confirmed, engine defaults "
-        "shown where a field was left blank). These drive every calculation in &#167; 7.3&#8211;7.6.",
+        "shown where a field was left blank). These drive every calculation in Sec. 7.3&#8211;7.6.",
         ["Parameter", "Value", "Note"], prows,
         col_widths=[CW*0.36, CW*0.30, CW*0.34], ch=CH)
     annotation(story, "NOTE",
@@ -471,8 +474,8 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             + ". Replace them with the part's real datasheet curves (incl. the hot V<sub>f</sub> "
             "curve) on the manual form before sign-off.", CH)
     data_table(story, "7.2c", "Loss-Model Summary — what is computed and how",
-        "Every loss mechanism in &#167; 7.3&#8211;7.6, the model used, and the current basis. All are "
-        "evaluated by time-domain integration over the line cycle (&#167; 7.1).",
+        "Every loss mechanism in Sec. 7.3&#8211;7.6, the model used, and the current basis. All are "
+        "evaluated by time-domain integration over the line cycle (Sec. 7.1).",
         ["Mechanism", "Model / method", "Current basis"],
         [["Bridge conduction", "V<sub>f</sub>(i)&#183;i integrated; datasheet V-I curve", "average current"],
          ["MOSFET conduction", "R<sub>ds(on)</sub>(T<sub>j</sub>)&#183;I&#178;, duty-weighted; hot R<sub>ds</sub>", "on-state RMS"],
@@ -548,7 +551,8 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "Per-mechanism MOSFET loss (all channels), at every input voltage.",
         ["V_AC", "Cond", "Switch", "Coss", "RR", "Gate+leak", "FET total"],
         [[f"{r['Vac']:.0f} V", _f(r['P_FET_cond']), _f(r['P_FET_sw']), _f(r['P_FET_coss']),
-          _f(r['P_FET_rr']), _f(r['P_gate_driver'] + r['P_FET_leak']), f"{_f(r['P_FET_total'])} W"] for r in rows],
+          _f(r['P_FET_rr']), _f(r['P_gate_driver'] + r['P_FET_leak']),
+          f"{_f(r['P_FET_total'] + r['P_gate_driver'])} W"] for r in rows],
         col_widths=[CW*0.13, CW*0.13, CW*0.14, CW*0.13, CW*0.12, CW*0.17, CW*0.18], ch=CH)
 
     # ── 7.5 Boost diode ──────────────────────────────────────────────────────
@@ -628,42 +632,49 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     dcr = (float(extra["dcr_mohm"]) / 1e3) if extra.get("dcr_mohm") else None
     rcs = (float(extra["rcs_mohm"]) / 1e3) if extra.get("rcs_mohm") else None
     nch = int(design.get("nch", 1))
+    core_w = float(extra["core_loss_w"]) if extra.get("core_loss_w") is not None else 0.0   # Ch4 inductor core
+    cap_w = float(extra["cap_loss_w"]) if extra.get("cap_loss_w") is not None else 0.0       # Ch5 capacitor
     if dcr or rcs:
         srcs = (f"R<sub>CS</sub> = {_f(extra['rcs_mohm'],2)} m{_OHM}, " if rcs else "")
         annotation(story, "NOTE",
-            f"Loss-budget inputs carried in: inductor DCR = {_f(extra.get('dcr_mohm', 0),1)} m{_OHM}/phase, "
-            f"{srcs}across the per-phase RMS current I<sub>&#966;,rms</sub> from Chapter 5. The remainder "
-            f"(&#8220;Other&#8221;) is the inductor core loss (Ch 4), capacitor ESR loss (Ch 5) and "
-            f"control / auxiliary (Ch 6).", CH)
+            f"Loss-budget inputs carried in: inductor DCR = {_f(extra.get('dcr_mohm', 0),1)} m{_OHM}/phase "
+            f"(copper), inductor core loss = {_f(core_w,2)} W (Chapter 4), capacitor loss = {_f(cap_w,2)} W "
+            f"(Chapter 5), {srcs}across the per-phase RMS current I<sub>&#966;,rms</sub> from Chapter 5. The "
+            f"<b>Inductor</b> column is copper + core; the <b>Capacitor</b> column is the bank ESR loss; the "
+            f"remaining <b>Balance</b> is control / auxiliary (Ch 6).", CH)
         brows = []
         for i, r in enumerate(rows):
             iphi = float(iph[i]); p_sys = float(r["P_SYSTEM_total"]); p_semi = float(r["P_SEMI_total"])
             p_lcu = nch * iphi * iphi * dcr if dcr else 0.0
+            p_ind = p_lcu + core_w                       # inductor TOTAL = copper + core
             p_rcs = nch * iphi * iphi * rcs if rcs else 0.0
-            p_other = p_sys - p_semi - p_lcu - p_rcs
-            brows.append([f"{r['Vac']:.0f} V", f"{_f(p_semi,1)}", f"{_f(p_lcu,1)}", f"{_f(p_rcs,1)}",
-                          f"{_f(p_other,1)}", f"{_f(p_sys,1)} W"])
+            p_other = p_sys - p_semi - p_ind - p_rcs - cap_w
+            brows.append([f"{r['Vac']:.0f} V", f"{_f(p_semi,1)}", f"{_f(p_ind,1)}", f"{_f(cap_w,1)}",
+                          f"{_f(p_rcs,1)}", f"{_f(p_other,1)}", f"{_f(p_sys,1)} W"])
         data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W)",
-            "Every system loss reconciled against P<sub>system</sub> from the efficiency. Semiconductor "
-            "and the two resistive terms are computed here; the <b>Balance</b> = P<sub>system</sub> "
-            "&#8722; (those three) is the inductor core + capacitor ESR + control / auxiliary.",
-            ["V_AC", "Semicond.", "Ind. Cu (I&#178;&#183;DCR)", "R_CS (I&#178;&#183;R)", "Balance", "System total"],
-            brows, col_widths=[CW*0.13, CW*0.16, CW*0.21, CW*0.18, CW*0.14, CW*0.18], ch=CH)
+            "Every system loss reconciled against P<sub>system</sub> from the efficiency. The <b>Inductor</b> "
+            "column is total (copper I&#178;&#183;DCR + core, Ch 4); the <b>Capacitor</b> column is the bank "
+            "ESR loss (Ch 5); the <b>Balance</b> = P<sub>system</sub> &#8722; (all the above) is the control / "
+            "auxiliary remainder.",
+            ["V_AC", "Semicond.", "Inductor (Cu+core)", "Capacitor", "R_CS", "Balance (ctrl)", "System total"],
+            brows, col_widths=[CW*0.12, CW*0.15, CW*0.19, CW*0.14, CW*0.12, CW*0.15, CW*0.13], ch=CH)
         annotation(story, "NOTE",
-            "<b>Reading the Balance.</b> A positive Balance is the remaining core + capacitor + control "
-            "loss (cross-check it against Chapters 4&#8211;6). A <i>negative</i> Balance &#8212; seen at "
-            "high line, where the assumed efficiency is highest and the implied system loss smallest "
-            "&#8212; means the computed component losses already exceed that implied system loss: the "
-            "assumed efficiency is <b>optimistic</b> at that corner and should be revisited. Surfacing "
-            "exactly this kind of inconsistency is the purpose of the cross-check.", CH)
+            "<b>Reading the Balance.</b> With inductor (copper + core) and capacitor loss now itemised, the "
+            "Balance is just the control / auxiliary remainder. A <i>negative</i> Balance &#8212; seen at "
+            "high line, where the assumed efficiency is highest and the implied system loss smallest &#8212; "
+            "means the computed component losses already exceed that implied system loss: the assumed "
+            "efficiency is <b>optimistic</b> at that corner and should be revisited. Surfacing exactly this "
+            "kind of inconsistency is the purpose of the cross-check.", CH)
         wi = rows.index(wr); iw = float(iph[wi])
         plcu_w = nch * iw * iw * dcr if dcr else 0.0; prcs_w = nch * iw * iw * rcs if rcs else 0.0
+        p_ind_w = plcu_w + core_w
         _W(story,
            f"<b>At the worst-case point ({wr['Vac']:.0f} V<sub>AC</sub>):</b> of the "
            f"{_f(wr['P_SYSTEM_total'],1)} W system loss, the semiconductors take "
            f"{_f(wr['P_SEMI_total'],1)} W ({100*wr['P_SEMI_total']/max(wr['P_SYSTEM_total'],1e-9):.0f}%), "
-           f"the inductor copper {_f(plcu_w,1)} W, the current-sense resistors {_f(prcs_w,1)} W, leaving "
-           f"{_f(wr['P_SYSTEM_total']-wr['P_SEMI_total']-plcu_w-prcs_w,1)} W for core + capacitor + control.")
+           f"the inductor {_f(p_ind_w,1)} W (copper {_f(plcu_w,1)} + core {_f(core_w,1)}), the capacitor "
+           f"{_f(cap_w,1)} W, the current-sense resistors {_f(prcs_w,1)} W, leaving "
+           f"{_f(wr['P_SYSTEM_total']-wr['P_SEMI_total']-p_ind_w-cap_w-prcs_w,1)} W for control / auxiliary.")
         # ── realistic efficiency derived from the computed losses ──
         step_h(story, "7.9", "Efficiency Re-Estimate from Computed Losses", CH)
         body(story,

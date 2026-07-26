@@ -143,7 +143,7 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
     annotation(story, "CONCEPT",
         "Two <b>orthogonal</b> designer inputs drive the filter. The SAFETY standard sets the earth-leakage "
         "ceiling — a hard cap on total Y-capacitance. The COMPLIANCE profile sets the conducted-emission "
-        "envelope (CISPR 11/EN 55011, CISPR 32/EN 55032, FCC &#167;15.107; Class A/B). They pull in opposite "
+        "envelope (CISPR 11/EN 55011, CISPR 32/EN 55032, FCC Sec. 15.107; Class A/B). They pull in opposite "
         "directions: compliance wants more Y-cap for common-mode attenuation, safety caps it. The synthesis "
         "finds the smallest filter that meets the limit WITHIN the leakage ceiling, or reports infeasibility "
         "back to the design rather than silently violating either.", CH)
@@ -341,7 +341,7 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
          ["R_d + L_d", f"{_f(r['damp_r'],2)} {_OHM} + {_f(r['damp_l']*1e6,1)} {_MU}H", "series-R-L damping across L_DM"],
          ["L_CM", ("&#8734;" if _linf else f"{_f(r['l_cm']*1e3,2)} mH ({r['cm_stages']} stage)"), "CM choke"],
          ["C_Y (Y2)", f"{_f(r['c_y_emi_total']*1e9,2)} nF total ({_f(_cy_each,2)} nF each)", "CM, line/neutral-to-PE"],
-         ["R_bleed", (f"{_f(r['xcap_discharge_s'],2)} s discharge" if r.get('xcap_discharge_s') is not None else "set per §10.8"), "X-cap bleeder"]],
+         ["R_bleed", (f"{_f(r['xcap_discharge_s'],2)} s discharge" if r.get('xcap_discharge_s') is not None else "set per Sec. 10.8"), "X-cap bleeder"]],
         col_widths=[CW*0.24, CW*0.36, CW*0.40], ch=CH)
 
     # ── 10.11 loss ──
@@ -377,7 +377,7 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
             [[_f(d["vac"], 0), _f(d["i_in"], 2), _f(d["cu_loss_w"], 2),
               _f(d["i_cx_a"] * 1e3, 0), _f(d["i_leak_a"] * 1e6, 0), d["worst_mode"]] for d in r["per_point"]],
             col_widths=[CW*0.13, CW*0.17, CW*0.20, CW*0.18, CW*0.20, CW*0.12], ch=CH)
-    # Per-line IL verification (§19): worst-case delivered margin at each line condition. The DM source
+    # Per-line IL verification (Sec. 19): worst-case delivered margin at each line condition. The DM source
     # scales with the per-line ripple; the CM source is line-independent (V_bus regulated), so its margin
     # is common. Post-filter emission below the limit ⇔ margin ≥ 0.
     if r.get("per_line"):

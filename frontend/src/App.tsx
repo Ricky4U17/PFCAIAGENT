@@ -43,6 +43,9 @@ interface AppState {
   // full semiconductor config (design/mosfet/diode/bridge/thermal) persisted when the
   // designer moves past the Semiconductor page — Input-Protection report keeps Ch 7.
   approvedSemiconductor:   Record<string,unknown>|null
+  // input-protection config (design/cap/mosfet/ntc_opts/mov_opts) persisted when the designer
+  // moves past the Input-Protection page — the EMI page forwards it so its combined report keeps Ch 8/9.
+  approvedInputProtection: Record<string,unknown>|null
   // documentation agent
   docStatus: DocReportStatus|null; docStatusLoading: boolean
 }
@@ -54,7 +57,7 @@ const INIT: AppState = {
   isInterleaved:false,selectedChannels:1,miniDefaults:null,miniErrors:[],summary:null,
   reportLoading:false,reportReady:false,reportBytes:null,intakeData:null,
   approvedInductorDesign:null, approvedCapacitorDesign:null, approvedControlParams:null,
-  approvedSemiconductor:null,
+  approvedSemiconductor:null, approvedInputProtection:null,
   docStatus:null, docStatusLoading:false,
 }
 
@@ -332,12 +335,15 @@ export default function App() {
           approvedControlParams={s.approvedControlParams}
           approvedSemiconductor={s.approvedSemiconductor}
           onBack={() => setS(p=>({...p, step:'semiconductors'}))}
-          onNext={() => setS(p=>({...p, step:'inputfilter'}))}
+          onNext={(ip) => setS(p=>({...p, step:'inputfilter', approvedInputProtection: ip ?? p.approvedInputProtection}))}
           onRestart={restart} />}
         {s.step==='inputfilter' && s.graphState && s.approvedInductorDesign && <InputFilter
           confirmedState={s.graphState as Record<string,unknown>}
           approvedInductorDesign={s.approvedInductorDesign}
           approvedCapacitorDesign={s.approvedCapacitorDesign}
+          approvedControlParams={s.approvedControlParams}
+          approvedSemiconductor={s.approvedSemiconductor}
+          approvedInputProtection={s.approvedInputProtection}
           onBack={() => setS(p=>({...p, step:'inputprotection'}))}
           onRestart={restart} />}
 

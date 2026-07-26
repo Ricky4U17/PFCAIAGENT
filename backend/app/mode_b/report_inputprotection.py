@@ -14,7 +14,7 @@ from __future__ import annotations
 import io
 
 from app.mode_b.doc_report_builder import (
-    chapter_splash, step_h, body, eq_box, data_table, annotation, CW,
+    chapter_splash, step_h, sub_h, body, eq_box, data_table, annotation, CW,
 )
 from app.mode_b.inputprotection.adapter import calculate_ntc, calculate_mov
 
@@ -63,7 +63,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         col_widths=[CW*0.46, CW*0.30, CW*0.24], ch=CH)
 
     # ── 8.2 cold resistance ──
-    step_h(story, "8.2", "Cold Series Resistance for the Inrush Target", CH)
+    sub_h(story, "8.2", "Cold Series Resistance for the Inrush Target", CH)
     body(story,
         "Cold, the whole line peak appears across the series resistance at switch-on, so the minimum "
         "total cold resistance to hold the peak inrush below target is V<sub>in,pk</sub>/I<sub>target</sub>. "
@@ -85,7 +85,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         col_widths=[CW*0.5, CW*0.5], ch=CH)
 
     # ── 8.3 pulse energy ──
-    step_h(story, "8.3", "Pulse-Energy Survival", CH)
+    sub_h(story, "8.3", "Pulse-Energy Survival", CH)
     body(story,
         "On every cold start the series element absorbs the bulk-capacitor charge energy. This pulse "
         "rating — not the steady current — is the governing datasheet filter. Vendors quote it either in "
@@ -103,7 +103,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"Accept a part that meets <i>either</i> figure.", CH)
 
     # ── 8.4 self-heat / bypass ──
-    step_h(story, "8.4", "Continuous Self-Heat → Why a Bypass Relay", CH)
+    sub_h(story, "8.4", "Continuous Self-Heat → Why a Bypass Relay", CH)
     body(story,
         "Left in circuit, the warm NTC dissipates I<sub>in,rms</sub><sup>2</sup>&#183;R<sub>hot</sub> "
         "continuously — tens of watts at kW class, with body temperatures that can approach 250&#176;C. "
@@ -116,7 +116,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         col_widths=[CW*0.5, CW*0.5], ch=CH)
 
     # ── 8.5 relay/timing ──
-    step_h(story, "8.5", "Bypass Relay + Precharge Timing", CH)
+    sub_h(story, "8.5", "Bypass Relay + Precharge Timing", CH)
     body(story,
         "<b>Model.</b> After the bulk capacitor has precharged through the NTC, a relay shorts the NTC out so "
         "it carries current only during the startup pulse. The bus settles with the RC time constant "
@@ -134,7 +134,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "capacitor I&#178;t.", CH)
 
     # ── 8.6 candidates ──
-    step_h(story, "8.6", "Candidate Screen" + (" and Selection" if out.get("selected") else ""), CH)
+    sub_h(story, "8.6", "Candidate Screen" + (" and Selection" if out.get("selected") else ""), CH)
     data_table(story, "8.6", "Catalog Screen",
         f"Accept if R25 &#8805; {_f(r['r25_pick'],2)} {_OHM} and pulse rating &#8805; {_f(r['e_pulse_required'],0)} J "
         "(or the equivalent max-C). Screened against the vendor ICL database; R25 is the datasheet "
@@ -146,7 +146,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
     # ── 8.7 designer-selected NTC — design recalculated around the actual part ──
     sel = out.get("selected")
     if sel:
-        step_h(story, "8.7", "Selected NTC — Design Recalculated for the Actual Part", CH)
+        sub_h(story, "8.7", "Selected NTC — Design Recalculated for the Actual Part", CH)
         body(story,
             f"The designer selected <b>{sel.get('mfr','')} {sel.get('part_number','')}</b> "
             f"(R<sub>25</sub> = {_f(sel['r25_ohm'],1)} {_OHM}, &#216;{_f(sel.get('diameter_mm'),0)} mm disc). "
@@ -223,7 +223,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         col_widths=[CW*0.34, CW*0.40, CW*0.26], ch=CH)
 
     # ── 9.2 stress ──
-    step_h(story, "9.2", "Surge Stress per Coupling Mode", CH)
+    sub_h(story, "9.2", "Surge Stress per Coupling Mode", CH)
     body(story,
         "Each protection path is driven by its open-circuit test voltage through its own source "
         "impedance; the MOV-absent short-circuit current is I<sub>sc</sub> = V<sub>oc</sub>/Z. The "
@@ -238,7 +238,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         col_widths=[CW*0.34, CW*0.20, CW*0.14, CW*0.16, CW*0.16], ch=CH)
 
     # ── 9.3 mcov ──
-    step_h(story, "9.3", "Continuous Voltage (MCOV)", CH)
+    sub_h(story, "9.3", "Continuous Voltage (MCOV)", CH)
     body(story,
         "<b>Model.</b> The maximum continuous operating voltage is set ONLY by the continuous worst-case "
         "line, independent of the surge test level and the performance criterion — a varistor that "
@@ -251,7 +251,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         f"surge level must not move this number.", CH)
 
     # ── 9.4 clamp ──
-    step_h(story, "9.4", "Clamp / Coordination (Load-Line Let-Through)", CH)
+    sub_h(story, "9.4", "Clamp / Coordination (Load-Line Let-Through)", CH)
     body(story,
         "<b>Model.</b> The let-through (clamp) voltage is the operating point where the varistor's highly "
         "non-linear V-I curve V = V<sub>1mA</sub>(I/1mA)<sup>1/&#945;</sup> meets the surge source load "
@@ -279,7 +279,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         col_widths=[CW*0.26, CW*0.13, CW*0.11, CW*0.14, CW*0.14, CW*0.11, CW*0.11], ch=CH)
 
     # ── 9.5 criterion ──
-    step_h(story, "9.5", "Performance Criterion — What It Changes", CH)
+    sub_h(story, "9.5", "Performance Criterion — What It Changes", CH)
     annotation(story, "THEORY",
         f"Criterion {crit}: ride-through = {cr['ride_through']}; the device gate is "
         + ("the transient abs-max (survival)." if cr["gate_uses_absmax"]
@@ -289,7 +289,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
           "changes the gate and verdict wording, not the surge currents or energies.", CH)
 
     # ── 9.6 candidates ──
-    step_h(story, "9.6", "Candidate Screen, Placement & Coordination", CH)
+    sub_h(story, "9.6", "Candidate Screen, Placement & Coordination", CH)
     data_table(story, "9.6", "Catalog Screen (governing path)",
         f"Criterion {crit}. Representative values — verify the V<sub>c</sub>-vs-I curve and the 10-pulse "
         "repetitive derating on the live datasheet.",
@@ -302,7 +302,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         "1.2 &#181;s edge). Pair with an upstream fuse + thermal protection (or a TMOV).", CH)
 
     # ── 9.7 compliance summary ──
-    step_h(story, "9.7", "Compliance Summary (Certification Record)", CH)
+    sub_h(story, "9.7", "Compliance Summary (Certification Record)", CH)
     worst = min(tg, key=lambda t: t["device_gate"] - t["vc"]) if tg else None
     verdict = "PASS" if all(t["coord"] != "FAIL" for t in tg) and tg else "REVIEW"
     data_table(story, "9.7", "Surge-Immunity Compliance Record",

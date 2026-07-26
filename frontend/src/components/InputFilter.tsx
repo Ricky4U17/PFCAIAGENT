@@ -10,12 +10,15 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { inputFilterOptions, inputFilterDesign, inputFilterReport, type EmiDesign } from '../api/client'
+import { inputFilterOptions, inputFilterDesign, docGenerateReport, type EmiDesign } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
   approvedInductorDesign:  Record<string, unknown>
   approvedCapacitorDesign?: CapacitorResult | null
+  approvedControlParams?:  Record<string, unknown> | null
+  approvedSemiconductor?:  Record<string, unknown> | null
+  approvedInputProtection?: Record<string, unknown> | null
   onBack:    () => void
   onRestart: () => void
 }
@@ -39,7 +42,8 @@ const Stat: React.FC<{ k: string; v: string; ok?: boolean }> = ({ k, v, ok }) =>
 )
 
 export const InputFilter: React.FC<Props> = ({
-  confirmedState, approvedInductorDesign, approvedCapacitorDesign, onBack, onRestart,
+  confirmedState, approvedInductorDesign, approvedCapacitorDesign,
+  approvedControlParams, approvedSemiconductor, approvedInputProtection, onBack, onRestart,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -102,13 +106,23 @@ export const InputFilter: React.FC<Props> = ({
   useEffect(() => { run() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [rptBusy, setRptBusy] = useState(false)
+  // EMI is the last step, so its "Download report" generates the FULL combined report (Ch 1–10),
+  // like every prior step — forwarding all persisted upstream approvals plus this page's EMI config.
   const downloadReport = async () => {
     setRptBusy(true); setErr(null)
     try {
-      const blob = await inputFilterReport({ design, cap,
-        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: buildOpts() })
+      const blob = await docGenerateReport({
+        state:           confirmedState as Record<string, unknown>,
+        approved_design: approvedInductorDesign as Record<string, unknown>,
+        step15_result:   approvedCapacitorDesign ? ({ ...approvedCapacitorDesign } as Record<string, unknown>) : {},
+        ...(approvedControlParams ? { step16_params: approvedControlParams } : {}),
+        ...(approvedSemiconductor ? { semiconductor: approvedSemiconductor } : {}),
+        ...(approvedInputProtection ? { input_protection: approvedInputProtection } : {}),
+        input_filter: { design, cap, protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) },
+          opts: buildOpts() },
+      })
       const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = 'PFC_Input_EMI_Filter_Ch10.pdf'
+      a.href = url; a.download = `PFC_Report_${(confirmedState as any)?.project_id ?? 'design'}_incl_EMI.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 150)
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
@@ -257,7 +271,7 @@ export const InputFilter: React.FC<Props> = ({
         <Btn variant="ghost" onClick={onBack}>← Back to input protection</Btn>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="success" disabled={rptBusy || !r} onClick={downloadReport}>
-            {rptBusy ? '⏳ Generating…' : '📥 Download report (Ch 10)'}
+            {rptBusy ? '⏳ Generating…' : '📥 Download full report (Ch 1–10)'}
           </Btn>
           <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
         </div>

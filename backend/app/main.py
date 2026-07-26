@@ -2476,6 +2476,12 @@ def doc_generate_report(req: _DocReportReq):
                                 else (_sp.get("rcs_mOhm") or 15.0),
                     "esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
                 }
+                # Total inductor loss = copper (per-line, computed in Ch7) + CORE loss (Ch4), and
+                # total CAPACITOR loss (Ch5) so Table 7.8b accounts for every loss, not just resistive.
+                _extra["core_loss_w"] = _ad.get("Pcore_W")
+                _wc15 = _s15.get("worst_case") or {}
+                if _wc15.get("I_total_A") and _extra.get("esr_mohm"):
+                    _extra["cap_loss_w"] = float(_wc15["I_total_A"]) ** 2 * float(_extra["esr_mohm"]) / 1e3
                 if req.input_protection:            # Ch-8 inrush → §7.3.1 bridge surge verification
                     try:
                         from app.mode_b.inputprotection.adapter import calculate_ntc
