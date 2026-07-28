@@ -15,8 +15,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov, docGenerateReport, inrushSchematicUrl,
-         type NtcResult, type MovResult, type CatalogRow, type NtcCandidate } from '../api/client'
+import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, docGenerateReport, inrushSchematicUrl,
+         type NtcResult, type MovResult, type GdtResult, type CatalogRow, type NtcCandidate } from '../api/client'
 import type { CapacitorResult } from './Step15Capacitor'
 
 interface Props {
@@ -123,21 +123,38 @@ export const InputProtection: React.FC<Props> = ({
     setNtcOpts(opts); calcNtc(opts)
   }
 
-  // ── MOV ──
+  // ── MOV + GDT (surge) ──
   const [movOpts, setMovOpts] = useState<Record<string, string>>({
     level: '3', criterion: 'A', vac_nom: '230', device_vds: String(mosfetVds), device_absmax: String(mosfetVds),
-    imax_margin: '3', repetitive_derate: '0.70', varistor_alpha: '30', v1ma_ratio: '1.60' })
+    imax_margin: '3', repetitive_derate: '0.70', varistor_alpha: '30', v1ma_ratio: '1.60',
+    // Phase-2/3/4 coordination + GDT inputs (blank → engine named defaults / DATA-MISSING gate)
+    environment: 'commercial', mains_fault_current_A: '', fuse_i2t_rating_A2s: '', lead_inductance_nH: '20',
+    follow_current_extinguish_A: '', insulation_withstand_V: '' })
   const [movCM, setMovCM] = useState(true)
   const [movRes, setMovRes] = useState<MovResult | null>(null)
   const [movBusy, setMovBusy] = useState(false)
+  // Architecture choice: 'auto' follows the recommendation; else force MOV-only / MOV+GDT.
+  const [movArch, setMovArch] = useState<'auto' | 'mov' | 'movgdt'>('auto')
+  const [gdtRes, setGdtRes] = useState<GdtResult | null>(null)
   const setM = (k: string, v: string) => setMovOpts(s => ({ ...s, [k]: v }))
+  const movOptsPayload = (): Record<string, unknown> => {
+    const o: Record<string, unknown> = { common_mode_protection: movCM }
+    Object.entries(movOpts).forEach(([k, v]) => { if (v !== '' && v != null) o[k] = v })
+    return o
+  }
   const calcMov = async () => {
     setMovBusy(true); setErr(null)
     try {
-      const opts: Record<string, unknown> = { ...movOpts, common_mode_protection: movCM }
-      setMovRes(await inputProtectionMov({ design, cap, mosfet: { vdss: Number(movOpts.device_vds) }, opts }))
+      const opts = movOptsPayload()
+      const [m, g] = await Promise.all([
+        inputProtectionMov({ design, cap, mosfet: { vdss: Number(movOpts.device_vds) }, opts }),
+        inputProtectionGdt({ design, opts }),
+      ])
+      setMovRes(m); setGdtRes(g)
     } catch (e) { setErr((e as Error).message) } finally { setMovBusy(false) }
   }
+  // Effective architecture = recommendation unless the designer overrode it.
+  const useGdt = movArch === 'movgdt' || (movArch === 'auto' && !!gdtRes?.required.required)
 
   useEffect(() => { calcNtc(); calcMov() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -148,7 +165,8 @@ export const InputProtection: React.FC<Props> = ({
   // report button AND handed up via onNext so the EMI page can include Ch 8/9 in its combined report.
   const ipReportPayload = (): Record<string, unknown> => ({
     design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
-    ntc_opts: ntcOpts, mov_opts: { ...movOpts, common_mode_protection: movCM },
+    ntc_opts: ntcOpts,
+    mov_opts: { ...movOptsPayload(), surge_architecture: useGdt ? 'MOV+GDT' : 'MOV-only' },
   })
 
   const downloadReport = async () => {
@@ -179,7 +197,7 @@ export const InputProtection: React.FC<Props> = ({
         <SecHead icon="🛡️" label="Input Protection — MOV surge + NTC inrush"
           sub={`${design.vin_min}–${design.vin_max} Vac · bus ${num(design.vout, 0)} V`} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {([['ntc', '🌡️ NTC inrush limiter'], ['mov', '⚡ MOV surge (compliance)']] as [typeof tab, string][])
+          {([['ntc', '🌡️ NTC inrush limiter'], ['mov', '⚡ Surge (MOV + GDT)']] as [typeof tab, string][])
             .map(([t, lbl]) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -352,10 +370,22 @@ export const InputProtection: React.FC<Props> = ({
               <label style={{ fontSize: 10.5, color: C.muted }}>Common-mode MOVs<br />
                 <select style={selStyle} value={movCM ? 'yes' : 'no'} onChange={e => setMovCM(e.target.value === 'yes')}>
                   <option value="yes">L-PE + N-PE</option><option value="no">L-N only</option></select></label>
+              <label style={{ fontSize: 10.5, color: C.muted }}>Install environment<br />
+                <select style={selStyle} value={movOpts.environment} onChange={e => setM('environment', e.target.value)}>
+                  {[['residential', 'residential'], ['commercial', 'commercial'], ['industrial', 'industrial'],
+                    ['lightning', 'lightning-exposed'], ['telecom', 'telecom']].map(([v, l]) =>
+                    <option key={v} value={v}>{l}</option>)}</select></label>
               <Knob label="Device V_ds" unit="V" value={movOpts.device_vds} onChange={v => setM('device_vds', v)} />
               <Knob label="Device abs-max" unit="V" value={movOpts.device_absmax} onChange={v => setM('device_absmax', v)} />
               <Knob label="I_max margin" unit="×" value={movOpts.imax_margin} onChange={v => setM('imax_margin', v)} />
-              <Btn variant="primary" disabled={movBusy} onClick={calcMov}>{movBusy ? '⏳ Sizing…' : '↻ Re-size MOV'}</Btn>
+              <Btn variant="primary" disabled={movBusy} onClick={calcMov}>{movBusy ? '⏳ Sizing…' : '↻ Re-size surge'}</Btn>
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+              <Knob label="Lead inductance" unit="nH" value={movOpts.lead_inductance_nH} onChange={v => setM('lead_inductance_nH', v)} />
+              <Knob label="Mains fault I" unit="A" value={movOpts.mains_fault_current_A} onChange={v => setM('mains_fault_current_A', v)} />
+              <Knob label="Fuse I²t" unit="A²s" value={movOpts.fuse_i2t_rating_A2s} onChange={v => setM('fuse_i2t_rating_A2s', v)} />
+              <Knob label="GDT follow-I extinguish" unit="A" value={movOpts.follow_current_extinguish_A} onChange={v => setM('follow_current_extinguish_A', v)} />
+              <Knob label="Insulation withstand" unit="V" value={movOpts.insulation_withstand_V} onChange={v => setM('insulation_withstand_V', v)} />
             </div>
 
             {movRes && (<>
@@ -390,9 +420,71 @@ export const InputProtection: React.FC<Props> = ({
               </div>
               <CatalogTable rows={movRes.catalog} emptyNote="No catalog parts loaded." />
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Representative catalog (verify the Vc-vs-I curve and the 10-pulse repetitive derating on the live
-                datasheet). Your vendor MOV database attaches here later. The MCOV is invariant to level/criterion.
+                Screened against the vendor MOV database (1140 parts). Clamp reads DATA MISSING where the
+                datasheet max-clamping voltage (Vc@In) is absent — never a silent pass. MCOV is invariant to level/criterion.
               </div>
+
+              {/* ── GDT recommendation + common-mode diversion ── */}
+              {gdtRes && (<div style={{ marginTop: 18, borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+                <div style={{ background: gdtRes.required.required ? C.redL : C.tealL,
+                  border: `1px solid ${(gdtRes.required.required ? C.red : C.teal)}55`, borderRadius: 8,
+                  padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: C.text }}>
+                  <b style={{ color: gdtRes.required.required ? C.red : C.teal }}>
+                    Recommendation — {gdtRes.required.recommend} ({gdtRes.required.required ? 'REQUIRED' : 'OPTIONAL'}).</b>{' '}
+                  {gdtRes.required.reason}
+                </div>
+                <label style={{ fontSize: 10.5, color: C.muted, marginBottom: 10, display: 'inline-block' }}>
+                  Surge architecture&nbsp;
+                  <select style={selStyle} value={movArch} onChange={e => setMovArch(e.target.value as typeof movArch)}>
+                    <option value="auto">Follow recommendation ({gdtRes.required.required ? 'MOV+GDT' : 'MOV-only'})</option>
+                    <option value="mov">MOV-only</option><option value="movgdt">MOV + GDT</option>
+                  </select>
+                  <span style={{ marginLeft: 8, color: useGdt ? C.teal : C.muted, fontWeight: 600 }}>
+                    → {useGdt ? 'MOV + GDT' : 'MOV-only'}</span>
+                </label>
+
+                {useGdt && (<>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 10 }}>
+                    <Chip k="CM surge V_LE" v={`${num(gdtRes.stress.v_le, 0)} V`} />
+                    <Chip k="I_GDT required" v={`${num(gdtRes.stress.i_required, 0)} A`} />
+                    <Chip k="Prefer class" v={`${num(gdtRes.stress.preferred_class_A, 0)} A`} />
+                    <Chip k="No-fire need" v={`${num(gdtRes.stress.no_fire_need_V, 0)} V`} />
+                  </div>
+                  <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                    GDT candidate screen — common-mode (L/N-PE)
+                  </div>
+                  <div style={{ overflowX: 'auto', marginBottom: 8 }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <thead><tr>{['Part', 'V_spark nom/min', 'I_8/20', 'Poles', 'No-fire', 'Surge', 'Dyn.spark', 'Verdict'].map(h =>
+                        <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                      <tbody>{gdtRes.candidates.slice(0, 8).map((c, i) => (
+                        <tr key={i}>
+                          <td style={cell}>{c.part_number ?? c.label}</td>
+                          <td style={cell}>{num(c.v_spark_nom, 0)}/{num(c.v_spark_min, 0)}</td>
+                          <td style={cell}>{num(c.imax_impulse, 0)}</td>
+                          <td style={cell}>{num(c.poles, 0)}</td>
+                          <td style={cell}><Badge color={c.no_fire_ok ? 'green' : 'red'}>{c.no_fire_ok ? 'ok' : 'no'}</Badge></td>
+                          <td style={cell}><Badge color={c.surge_ok ? 'green' : 'red'}>{c.surge_ok ? 'ok' : 'no'}</Badge></td>
+                          <td style={{ ...cell, fontSize: 9, color: C.amber }}>{c.dynamic_status}</td>
+                          <td style={cell}><Badge color={c.ok ? 'green' : 'red'}>{c.ok ? 'PASS' : 'FAIL'}</Badge></td>
+                        </tr>))}</tbody>
+                    </table>
+                  </div>
+                  <div style={{ fontSize: 10, color: C.text, marginBottom: 4 }}>
+                    <Badge color={gdtRes.follow_current.ok ? 'green' : 'red'}>follow-current</Badge>{' '}
+                    {gdtRes.follow_current.note}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.text }}>
+                    <Badge color={gdtRes.fail_short.ok ? 'green' : 'red'}>fail-short</Badge>{' '}
+                    {gdtRes.fail_short.note}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
+                    GDT screened against the vendor database (172 parts). Dynamic (impulse) sparkover is DATA
+                    MISSING in the export — flagged, never assumed. Follow-current / fail-short require the
+                    fault-current + fuse-I²t inputs to pass.
+                  </div>
+                </>)}
+              </div>)}
             </>)}
           </div>
         )}

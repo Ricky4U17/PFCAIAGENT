@@ -5438,3 +5438,25 @@ Verified: GDT + MOV self-tests pass; calculate_gdt screens 172 parts (600 V/480 
 dynamic sparkover DATA MISSING; L4/industrial→MOV+GDT required); Ch8/9 report builds (218 KB) with §9.8.
 Suite 172/2. Next: Phase 4 (level+environment recommendation UI, combined MOV-only vs MOV+GDT + GUI on the
 Input-Protection page). Plan [[mov-gdt-review-plan]].
+
+## C152 — 2026-07-28 — Chapter 9 MOV+GDT review, Phase 4 (GUI + MOV-vs-MOV+GDT recommendation + release matrix)
+
+Final phase: surface the whole surge path in the Input-Protection GUI with the safety-level/environment-driven
+MOV-vs-MOV+GDT recommendation (designer accept/override), add the combined release-readiness matrix to the
+report, and wire the GDT endpoint. No hardcoding; missing datasheet fields stay DATA MISSING.
+- API (main.py): POST /mode-b/input-protection/gdt/calculate → calculate_gdt (recommendation + candidate
+  screen + follow-current/fail-short).
+- REPORT (report_inputprotection.py): §9.9 MOV-only vs MOV+GDT release-readiness matrix (continuous voltage /
+  clamp-let-through / energy-current / fail-short / layout / final status, tri-state PASS/FAIL/DATA MISSING) +
+  SIGN-OFF note; §9.8 recommendation now prints the designer's decision (surge_architecture). TOC updated.
+- CLIENT (client.ts): GdtResult/GdtCandidate types + inputProtectionGdt().
+- GUI (InputProtection.tsx): the MOV tab is now "Surge (MOV + GDT)". Added install-environment dropdown and
+  coordination inputs (lead inductance, mains fault current, fuse I²t, GDT follow-current extinguish,
+  insulation withstand). calcMov now runs MOV + GDT in parallel. New GDT panel: recommendation banner
+  (REQUIRED/OPTIONAL + reason), a surge-architecture selector (Follow recommendation / MOV-only / MOV+GDT)
+  with the effective choice shown, and — when MOV+GDT is active — the CM stress chips, the vendor GDT
+  candidate table (no-fire/surge/dynamic-DATA-MISSING/verdict), and the follow-current + fail-short badges.
+  ipReportPayload carries the full mov_opts + surge_architecture so the report matches the GUI.
+Verified: GDT endpoint 200 (L4/industrial → MOV+GDT required, 12 candidates); Ch8/9 report builds (220 KB)
+with §9.9 + the designer decision; frontend typechecks clean. Suite 172/2. MOV+GDT review COMPLETE (P1-P4).
+Plan [[mov-gdt-review-plan]]. Next designer review area = NTC (then Fuse).

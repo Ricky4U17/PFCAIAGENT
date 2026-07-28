@@ -467,6 +467,23 @@ export const inputProtectionNtc = (body: { design: Record<string, number>; cap?:
 export const inrushSchematicUrl = (): string => `${BASE}/mode-b/input-protection/inrush-schematic`
 export const inputProtectionMov = (body: { design: Record<string, number>; mosfet?: Record<string, unknown>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<MovResult>('/mode-b/input-protection/mov/calculate', body)
+
+export interface GdtCandidate {
+  label: string; part_number: string | null; mfr: string | null
+  v_spark_nom: number | null; v_spark_min: number | null; v_spark_max: number | null
+  imax_impulse: number | null; poles: number | null; fail_short: string | null
+  no_fire_ok: boolean | null; surge_ok: boolean | null; dynamic_status: string; ok: boolean; reasons: string[]
+}
+export interface GdtResult {
+  required: { required: boolean; recommend: string; reason: string }
+  stress: { v_le: number | null; i_sc: number | null; i_required: number | null
+            preferred_class_A: number | null; no_fire_need_V: number | null }
+  follow_current: { ok: boolean | null; note: string }
+  fail_short: { ok: boolean | null; note: string }
+  candidates: GdtCandidate[]
+}
+export const inputProtectionGdt = (body: { design: Record<string, number>; opts?: Record<string, unknown> }) =>
+  post<GdtResult>('/mode-b/input-protection/gdt/calculate', body)
 // ── input EMI filter (DM + CM conducted-emissions synthesis) ─────────────────
 export interface EmiResult {
   feasible: boolean; conducted_class: string; detector: string; margin_db: number

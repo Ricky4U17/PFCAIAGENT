@@ -432,7 +432,8 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
          "9.6 Candidate datasheet screen (governing path)",
          "9.6.1 Fuse / thermal coordination (fail-short safety)",
          "9.7 Compliance summary (certification record)",
-         "9.8 Common-mode surge diversion (GDT) — recommendation, no-fire, follow-current, fail-short"])
+         "9.8 Common-mode surge diversion (GDT) — recommendation, no-fire, follow-current, fail-short",
+         "9.9 MOV-only vs MOV+GDT — release-readiness matrix"])
 
     # ── 9.1 ──
     step_h(story, "9.1", "Compliance Basis", CH)
@@ -666,11 +667,11 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
          ["Coordination verdict", verdict]],
         col_widths=[CW*0.42, CW*0.58], ch=CH)
 
-    # ── 9.8 GDT (common-mode surge diverter) ──
-    _build_gdt_section(story, design, opts, CH)
+    # ── 9.8 GDT (common-mode surge diverter) + 9.9 combined release matrix ──
+    _build_gdt_section(story, design, opts, CH, mov_out=out, mov_verdict=verdict)
 
 
-def _build_gdt_section(story, design, opts, CH):
+def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIEW"):
     """§9.8 — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
     class, candidate screen, and the follow-current / fail-short safety checks (with DATA-MISSING gates)."""
     g = calculate_gdt(design, opts or {}, environment=(opts or {}).get("environment"))
@@ -685,8 +686,11 @@ def _build_gdt_section(story, design, opts, CH):
         "large line/neutral-to-earth surge current. Whether a GDT is needed follows from the common-mode "
         "surge level and the install environment.", CH)
     _rq = "REQUIRED" if rec.get("required") else "OPTIONAL"
+    _chosen = (opts or {}).get("surge_architecture")
+    _dec = (f" Designer decision: <b>{_chosen}</b>." if _chosen else
+            " The designer may accept this or force MOV-only / MOV+GDT.")
     annotation(story, f"RECOMMENDATION — {rec.get('recommend','MOV-only')} ({_rq})",
-        rec.get("reason", "") + " The designer may accept this or force MOV-only / MOV+GDT.", CH)
+        rec.get("reason", "") + _dec, CH)
 
     # 9.8.1 stress + no-fire
     sub_h(story, "9.8.1", "No-Fire & Surge-Current Sizing", CH)
@@ -731,6 +735,43 @@ def _build_gdt_section(story, design, opts, CH):
         "common-mode current once it fires. Verify MOV MCOV vs continuous L-N voltage, GDT minimum "
         "sparkover vs continuous L/N-PE voltage, MOV clamp vs downstream device limits, GDT impulse "
         "sparkover vs insulation withstand, and the follow-current / fail-short fuse clearing above.", CH)
+
+    # ── 9.9 combined MOV-only vs MOV+GDT release-readiness matrix ──
+    mo = mov_out or {}
+    en = mo.get("energy") or {}; fz = mo.get("fuse_coord") or {}; mc = mo.get("mcov") or {}
+    step_h(story, "9.9", "MOV-only vs MOV+GDT — Release-Readiness Matrix", CH)
+    body(story,
+        "The certification sign-off view. MOV-only is release-ready when clamp, energy, lifetime and fuse "
+        "coordination pass; MOV+GDT additionally requires the GDT no-fire tolerance, dynamic sparkover, "
+        "follow-current and fail-short fuse clearing to pass. The recommended architecture for this design "
+        f"is <b>{rec.get('recommend','MOV-only')}</b>.", CH)
+
+    def _mark(v):   # tri-state cell
+        return "PASS" if v is True else ("DATA MISSING" if v is None else "FAIL")
+    _clamp_ok = None
+    if mo.get("targets"):
+        _coords = [t.get("coord") for t in mo["targets"]]
+        _clamp_ok = (all(c != "FAIL" for c in _coords)) if all(c not in (None, "") for c in _coords) else None
+    _energy_ok = en.get("ok"); _fz_ok = fz.get("ok")
+    _gdt_nofire = None
+    if gc:
+        _gdt_nofire = any(c.get("no_fire_ok") and c.get("surge_ok") for c in gc)
+    _dyn = "DATA MISSING"   # impulse sparkover absent in the export for every GDT part
+    data_table(story, "9.9", "Release-Readiness Matrix",
+        f"Recommended: {rec.get('recommend','MOV-only')}. Final status is PASS only when the required column "
+        "clears end-to-end.",
+        ["Check", "MOV-only", "MOV + GDT"],
+        [["Continuous voltage", f"MCOV {_f(mc.get('class'),0)} Vac", f"MCOV + GDT no-fire {_mark(_gdt_nofire)}"],
+         ["Clamp / let-through", _mark(_clamp_ok), f"MOV clamp {_mark(_clamp_ok)} + GDT dyn.spark {_dyn}"],
+         ["Energy / current", _mark(_energy_ok), f"{_mark(_energy_ok)} + GDT surge {_mark(_gdt_nofire)}"],
+         ["Fail-short safety", _mark(_fz_ok), f"MOV {_mark(_fz_ok)} + GDT follow/fail-short {_mark(fs.get('ok'))}"],
+         ["Layout", "low-inductance L-N loop", "low-inductance + safety-spaced PE path"],
+         ["Final status", mov_verdict, ("REQUIRED" if rec.get("required") else "OPTIONAL") + " — see checks"]],
+        col_widths=[CW*0.26, CW*0.34, CW*0.40], ch=CH)
+    annotation(story, "SIGN-OFF",
+        "Chapter 9 is RELEASE-READY only when every cell in the required column is PASS. DATA MISSING cells "
+        "(e.g. GDT dynamic sparkover, MOV clamp Vc@In) must be filled from the datasheet before "
+        "certification — they are not passes.", CH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

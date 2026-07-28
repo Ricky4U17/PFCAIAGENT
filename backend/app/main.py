@@ -615,6 +615,15 @@ def input_protection_mov(req: _MovReq):
     except Exception as e:
         log.exception("mov calculate"); raise HTTPException(500, str(e))
 
+@app.post("/mode-b/input-protection/gdt/calculate", tags=["mode-b"])
+def input_protection_gdt(req: _MovReq):
+    """Screen GDTs for the common-mode paths + the safety-level/environment MOV-vs-MOV+GDT recommendation."""
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_gdt
+        return calculate_gdt(req.design, req.opts or {}, environment=(req.opts or {}).get("environment"))
+    except Exception as e:
+        log.exception("gdt calculate"); raise HTTPException(500, str(e))
+
 class _IpReportReq(BaseModel):
     design:   Dict[str, Any]
     cap:      Dict[str, Any] = {}
