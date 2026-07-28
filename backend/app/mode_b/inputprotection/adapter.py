@@ -69,8 +69,8 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         i_inrush_target=float(opts.get("i_inrush_target", 60.0)),
         p_out=0.0,                                        # use the grid's I_rms verbatim
         i_rms_worst=float(iin_worst or 0.0),
-        r_line=float(opts.get("r_line", 0.0)), r_emi=float(opts.get("r_emi", 0.0)),
-        r_esr=float(opts.get("r_esr", 0.0)), r_bridge=float(opts.get("r_bridge", 0.0)),
+        r_line=float(opts.get("r_line") or 0.0), r_emi=float(opts.get("r_emi") or 0.0),
+        r_esr=float(opts.get("r_esr") or 0.0), r_bridge=float(opts.get("r_bridge") or 0.0),
         energy_margin=float(opts.get("energy_margin", 1.5)),
         r25_margin=float(opts.get("r25_margin", 1.10)),
         vref_pulse=float(opts.get("vref_pulse", 345.0)),
@@ -85,6 +85,12 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         relay_path_ohm=float(opts.get("relay_path_ohm", 0.0) or 0.0),
         off_time_min_ms=float(opts.get("off_time_min_ms", 0.0) or 0.0),
         restart_protection=str(opts.get("restart_protection", "")),
+        # round-2 review: startup-path resistances + bridge IFSM + relay timing (0/blank -> OPEN)
+        r_wiring_ohm=float(opts.get("r_wiring_ohm", 0.0) or 0.0),
+        r_pcb_ohm=float(opts.get("r_pcb_ohm", 0.0) or 0.0),
+        bridge_ifsm_a=float(opts.get("bridge_ifsm_a", 0.0) or 0.0),
+        relay_operate_ms=float(opts.get("relay_operate_ms", 0.0) or 0.0),
+        relay_delay_tol_ms=float(opts.get("relay_delay_tol_ms", 0.0) or 0.0),
     )
 
 

@@ -87,6 +87,12 @@ class Spec:
     relay_path_ohm: float = 0.0    # ohm, relay-path impedance for make-current (0 -> open item)
     off_time_min_ms: float = 0.0   # ms, minimum enforced off-time before restart (0 -> not guaranteed)
     restart_protection: str = ""   # "hardware" | "firmware" | "procedure" | "" (unstated)
+    # --- round-2 review: startup-path resistances for the bypassed/stuck-relay inrush (0 -> OPEN) ---
+    r_wiring_ohm: float = 0.0      # ohm, mains + internal wiring
+    r_pcb_ohm: float = 0.0        # ohm, PCB copper in the startup path
+    bridge_ifsm_a: float = 0.0    # A, rectifier single-cycle surge (IFSM) rating (0 -> OPEN)
+    relay_operate_ms: float = 0.0 # ms, relay operate/settle time added to the precharge delay
+    relay_delay_tol_ms: float = 0.0  # ms, control-timing tolerance added to the precharge delay
 
 
 # ============================================================== #
@@ -225,12 +231,19 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     # ---- pt5: warm / hot restart (DB r_hot if present; else off-time requirement) ----
     r_hot = (float(rec["r_hot_mohm"]) / 1000.0) if rec.get("r_hot_mohm") else None
     i_warm = _inrush(r_hot) if r_hot else None
-    i_bypassed = None if s.relay_path_ohm <= 0 else _inrush(s.relay_path_ohm)  # relay stuck closed
+    # restart-permission resistance: the NTC must recover above this before restart is allowed.
+    r_required = vpk / max(s.i_inrush_target, 1e-9)
+    # relay stuck-closed / NTC-bypassed inrush from the SUMMED startup path (review §3.2); None -> OPEN.
+    r_path_total = s.rsource_min + s.r_bridge + s.r_esr + s.r_wiring_ohm + s.r_pcb_ohm
+    i_bypassed = (vpk / r_path_total) if r_path_total > 0 else None
     restart_rows = [
         {"case": "Cold 25C nominal", "r_ohm": round(r25, 3), "i_A": round(i_nom, 1)},
         {"case": "Cold 25C minimum R25", "r_ohm": round(r25_min, 3), "i_A": round(i_min, 1)},
         {"case": "Warm/hot restart",
          "r_ohm": (round(r_hot, 3) if r_hot else None), "i_A": (round(i_warm, 1) if i_warm else None)},
+        {"case": "Bypass / stuck relay",
+         "r_ohm": (round(r_path_total, 3) if r_path_total > 0 else None),
+         "i_A": (round(i_bypassed, 1) if i_bypassed else None)},
     ]
 
     # ---- pt7: startup I2t (first-order exp) at cold / min-R25 / warm ----
@@ -238,8 +251,47 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
         rt = res + rsrc
         return (vpk ** 2 * (rt * s.cout)) / (2.0 * rt ** 2) if rt > 0 else None
     i2t_cold = _i2t(r25); i2t_min = _i2t(r25_min); i2t_warm = _i2t(r_hot) if r_hot else None
+    i2t_bypass = ((vpk ** 2 * (r_path_total * s.cout)) / (2.0 * r_path_total ** 2)) if r_path_total > 0 else None
     i2t_worst = max(v for v in (i2t_cold, i2t_min, i2t_warm) if v is not None)
     fuse_ok = (s.fuse_i2t_rating > i2t_worst) if s.fuse_i2t_rating > 0 else None
+
+    # ---- review §5: startup-path stress separated into the three electrical cases ----
+    def _ifsm_ok(i):
+        return (s.bridge_ifsm_a > i) if (s.bridge_ifsm_a > 0 and i is not None) else None
+    stress_cases = [
+        {"case": "Normal cold-start", "i_A": round(i_min, 1), "i2t": round(i2t_min, 2),
+         "ifsm_ok": _ifsm_ok(i_min)},
+        {"case": "Hot restart (if allowed)", "i_A": (round(i_warm, 1) if i_warm else None),
+         "i2t": (round(i2t_warm, 2) if i2t_warm else None), "ifsm_ok": _ifsm_ok(i_warm)},
+        {"case": "Bypass / stuck relay", "i_A": (round(i_bypassed, 1) if i_bypassed else None),
+         "i2t": (round(i2t_bypass, 2) if i2t_bypass else None), "ifsm_ok": _ifsm_ok(i_bypassed)},
+    ]
+
+    # ---- review §8/§3.4: release-status taxonomy (PASS / OPEN / CHECK / BLOCKED) + rollup ----
+    hard_ok = i_min <= s.i_inrush_target
+    design_margin_ok = r25_min >= r_required * s.r25_margin
+    st = {}
+    st["nominal_cold"] = "PASS" if i_nom <= s.i_inrush_target else "BLOCKED"
+    st["min_r25_cold"] = ("BLOCKED" if not hard_ok else ("PASS" if design_margin_ok else "CHECK"))
+    st["pulse_energy"] = "OPEN"                 # DB energy is an estimate → datasheet confirmation required
+    st["precharge_timing"] = "PASS"
+    st["relay_make"] = ("OPEN" if (s.relay_path_ohm <= 0 or s.relay_make_rating_a <= 0)
+                        else ("PASS" if (i_relay_make is not None and i_relay_make <= s.relay_make_rating_a) else "CHECK"))
+    st["hot_restart"] = "CHECK"                 # decision: always CHECK with R_required shown
+    st["fuse_i2t"] = ("OPEN" if s.fuse_i2t_rating <= 0 else ("PASS" if fuse_ok else "CHECK"))
+    # bridge IFSM vs the NORMAL cases (cold-start, and hot restart if allowed); the stuck-relay fault
+    # IFSM is carried by the bypass_stuck item (it is cleared by the fuse, not ridden through).
+    _bridge_normal = [stress_cases[0]["ifsm_ok"], stress_cases[1]["ifsm_ok"]]
+    st["bridge_surge"] = ("OPEN" if s.bridge_ifsm_a <= 0
+                          else ("PASS" if all(v for v in _bridge_normal if v is not None) else "CHECK"))
+    st["bypass_stuck"] = ("OPEN" if r_path_total <= 0 else "CHECK")
+    st["phase_angle"] = "PASS"
+    if any(v == "BLOCKED" for v in st.values()):
+        overall = "BLOCKED"
+    elif any(v in ("OPEN", "CHECK") for v in st.values()):
+        overall = "CONDITIONAL"
+    else:
+        overall = "READY"
 
     # ---- pt10: AC phase-angle startup sweep (nominal + min-R25) ----
     phase = []
@@ -261,12 +313,20 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
         "r_hot_ohm": (round(r_hot, 3) if r_hot else None),
         "i_warm_A": (round(i_warm, 1) if i_warm else None),
         "i_bypassed_A": (round(i_bypassed, 1) if i_bypassed else None),
-        "restart_rows": restart_rows,
+        "r_path_total_ohm": (round(r_path_total, 3) if r_path_total > 0 else None),
+        "r_required_ohm": round(r_required, 3),
+        "hard_limit_ok": bool(hard_ok), "design_margin_ok": bool(design_margin_ok),
+        "r25_design_margin_ohm": round(r_required * s.r25_margin, 3),
+        "restart_rows": restart_rows, "stress_cases": stress_cases,
         "off_time_min_ms": (s.off_time_min_ms or None), "restart_protection": (s.restart_protection or None),
+        "relay_operate_ms": (s.relay_operate_ms or None), "relay_delay_tol_ms": (s.relay_delay_tol_ms or None),
+        "bridge_ifsm_a": (s.bridge_ifsm_a or None),
         "i2t_cold": round(i2t_cold, 2), "i2t_min_r25": round(i2t_min, 2),
-        "i2t_warm": (round(i2t_warm, 2) if i2t_warm else None), "i2t_worst": round(i2t_worst, 2),
+        "i2t_warm": (round(i2t_warm, 2) if i2t_warm else None),
+        "i2t_bypass": (round(i2t_bypass, 2) if i2t_bypass else None), "i2t_worst": round(i2t_worst, 2),
         "fuse_i2t_rating": (s.fuse_i2t_rating or None), "fuse_ok": fuse_ok,
         "phase_sweep": phase,
+        "status": st, "overall_status": overall,
     }
 
 

@@ -75,14 +75,18 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "worst-case stress, the approved bulk capacitance (Step 15) sets the charge energy, and the "
         "worst-case input RMS current (from the shared operating grid) sets the continuous self-heat "
         "that forces a bypass. Nothing here is re-entered.", CH)
-    data_table(story, "8.1", "Carried-in Operating Basis", "Sourced from the design grid and the approved capacitor.",
-        ["Quantity", "Symbol", "Value"],
-        [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V"],
-         ["High-line peak", "V<sub>in,pk</sub> = &#8730;2&#183;V<sub>ac,max</sub>", f"{_f(r['vin_pk_max'],1)} V"],
-         ["Regulated bus", "V<sub>bus</sub>", f"{_f(s['vout_bus'],1)} V"],
-         ["Bulk capacitance (Step 15)", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F"],
-         ["Worst-case input RMS (grid)", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A"]],
-        col_widths=[CW*0.46, CW*0.30, CW*0.24], ch=CH)
+    data_table(story, "8.1", "Carried-in Operating Basis", "Each input with its source and status.",
+        ["Quantity", "Symbol", "Value", "Source / status"],
+        [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V", "design grid"],
+         ["High-line peak", "V<sub>in,pk</sub>", f"{_f(r['vin_pk_max'],1)} V", "computed = &#8730;2&#183;V<sub>ac,max</sub>"],
+         ["Regulated bus", "V<sub>bus</sub>", f"{_f(s['vout_bus'],1)} V", "design"],
+         ["Bulk capacitance", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F", "Step 15 (approved)"],
+         ["Worst-case input RMS", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A", "operating grid"],
+         ["Selected NTC R<sub>25</sub>", "R<sub>25</sub>", (f"{_f((out.get('selected') or {}).get('r25_ohm'),1)} {_OHM}" if out.get("selected") else f"{_f(r['r25_pick'],2)} {_OHM} (pick)"),
+          "datasheet" if out.get("selected") else "sizing pick"],
+         ["R25 tolerance", "Tol<sub>R25</sub>", (f"{_f((wc.get('r25_tol') or 0)*100,0)}%" if wc else "&#8212;"),
+          ("datasheet" if wc.get("tol_from_datasheet") else "placeholder — confirm") if wc else "&#8212;"]],
+        col_widths=[CW*0.30, CW*0.14, CW*0.24, CW*0.32], ch=CH)
 
     # ── Figure 8.1 — inrush-limiter topology (NTC + relay bypass) ──
     _fig = _inrush_schematic_flowable()
@@ -135,15 +139,26 @@ def build_ntc_story(story, design, cap=None, opts=None):
             f"= {_f(r['vin_pk_max'],1)} V / {_f(wc['r25_min_ohm'],2)} {_OHM} = <b>{_f(wc['i_inrush_max_A'],1)} A</b> "
             f"(nominal {_f(wc['i_inrush_nom_A'],1)} A).", CH)
         _cold_ok = wc['i_inrush_nom_A'] <= wc['inrush_target_A']
-        _wc_ok = wc['i_inrush_max_A'] <= wc['inrush_target_A']
+        _min_status = (wc.get("status") or {}).get("min_r25_cold", "")
+        _min_verdict = {"PASS": "PASS", "CHECK": "Pass hard limit, reduced margin",
+                        "BLOCKED": "OVER (hard limit)"}.get(_min_status, "&#8212;")
         data_table(story, "8.2.1", "Cold Inrush — Nominal vs Worst-Case Tolerance",
-            f"Both cases against the {_f(wc['inrush_target_A'],0)} A target at {_f(r['vin_pk_max'],1)} V peak.",
+            f"Both cases against the {_f(wc['inrush_target_A'],0)} A hard target at {_f(r['vin_pk_max'],1)} V peak.",
             ["Case", "R25 used (" + _OHM + ")", "Inrush (A)", "Verdict"],
             [["Nominal cold start", _f(wc['r25_ohm'],1), _f(wc['i_inrush_nom_A'],1),
               "PASS" if _cold_ok else "OVER"],
              [f"Minimum R25 ({_f(wc['r25_tol']*100,0)}% tol)", _f(wc['r25_min_ohm'],2), _f(wc['i_inrush_max_A'],1),
-              "PASS" if _wc_ok else "OVER"]],
-            col_widths=[CW*0.40, CW*0.22, CW*0.18, CW*0.20], ch=CH)
+              _min_verdict]],
+            col_widths=[CW*0.36, CW*0.20, CW*0.16, CW*0.28], ch=CH)
+        body(story,
+            f"<b>Hard limit vs design margin.</b> The hard 60&#8209;A gate needs R<sub>25,min</sub> &#8805; "
+            f"R<sub>required</sub> = V<sub>in,pk</sub>/I<sub>target</sub> = {_f(wc['r_required_ohm'],3)} {_OHM}; "
+            f"the original 10% design margin needs R<sub>25,min</sub> &#8805; "
+            f"{_f(wc['r25_design_margin_ohm'],3)} {_OHM}. Here R<sub>25,min</sub> = {_f(wc['r25_min_ohm'],2)} "
+            f"{_OHM} &#8658; hard limit {'MET' if wc.get('hard_limit_ok') else 'NOT met'}, 10% design margin "
+            f"{'MET' if wc.get('design_margin_ok') else 'NOT met'}. "
+            + ("" if wc.get("design_margin_ok") else "Acceptance requires accepting the reduced margin, a "
+               "higher nominal R25, or a tighter tolerance."), CH)
         if not wc.get("tol_from_datasheet"):
             annotation(story, "NOTE",
                 "The tolerance above is a placeholder; use the selected part's datasheet tolerance for the "
@@ -193,6 +208,21 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"<b>{_f(r['t_bypass']*1e3,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
         f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],1)} V bus) and carry the "
         f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
+    if wc:
+        _rr = wc.get("r_required_ohm"); _op = wc.get("relay_operate_ms"); _tolm = wc.get("relay_delay_tol_ms")
+        _sel_ms = (out.get("selected") or {}).get("t_bypass_ms")
+        _min_ms = (_rr * s['cout'] * s['tau_multiple'] * 1e3) if _rr else None
+        _final_ms = (_sel_ms or r['t_bypass'] * 1e3) + (_op or 0) + (_tolm or 0)
+        body(story,
+            "<b>Release timing (selected-part basis).</b> "
+            + (f"Minimum design timing = {_f(_min_ms,0)} ms ({_f(s['tau_multiple'],0)}&#183;&#964; from the "
+               f"required resistance {_f(_rr,2)} {_OHM}); " if _min_ms else "")
+            + f"selected-part timing = {_f(_sel_ms or r['t_bypass']*1e3,0)} ms (from the actual R<sub>25</sub>). "
+            f"The final relay-command delay must be &#8805; the selected-part value plus the relay operate-time "
+            + (f"({_f(_op,0)} ms) " if _op else "(TBD) ")
+            + "and control-timing tolerance"
+            + (f" ({_f(_tolm,0)} ms)" if _tolm else " (TBD)")
+            + f" &#8658; <b>&#8805; {_f(_final_ms,0)} ms</b>.", CH)
     annotation(story, "NOTE",
         "Hot-restart caution: a quick OFF/ON leaves the NTC warm (lower R) → higher inrush than the cold "
         "calculation. This is quantified in Section 8.8.", CH)
@@ -233,13 +263,22 @@ def build_ntc_story(story, design, cap=None, opts=None):
 
     # ── 8.6 candidates ──
     sub_h(story, "8.6", "Candidate Screen" + (" and Selection" if out.get("selected") else ""), CH)
-    data_table(story, "8.6", "Catalog Screen",
-        f"Accept if R25 &#8805; {_f(r['r25_pick'],2)} {_OHM} and pulse rating &#8805; {_f(r['e_pulse_required'],0)} J "
-        "(or the equivalent max-C). Screened against the vendor ICL database; R25 is the datasheet "
-        "value, pulse energy is estimated from disc diameter — confirm energy / max-C on the datasheet.",
-        ["Verdict", "Candidate part", "Notes"],
-        [["PASS" if c["ok"] else "FAIL", c["name"], "; ".join(c["reasons"])[:120]] for c in cat] or [["—", "no catalog", "—"]],
-        col_widths=[CW*0.12, CW*0.40, CW*0.48], ch=CH)
+    data_table(story, "8.6", "Preliminary Catalog Screen",
+        f"PRELIMINARY screen (not final selection): accept if R25 &#8805; {_f(r['r25_pick'],2)} {_OHM} and pulse "
+        f"rating &#8805; {_f(r['e_pulse_required'],0)} J (or equivalent max-C). R25 is the datasheet value, but "
+        "the pulse energy is ESTIMATED from disc diameter — so every pass is conditional on datasheet pulse "
+        "confirmation.",
+        ["Rank", "Preliminary result", "Candidate part", "Notes"],
+        [[str(i + 1), "Prelim PASS" if c["ok"] else "Prelim FAIL", c["name"], "; ".join(c["reasons"])[:110]]
+         for i, c in enumerate(cat)] or [["—", "—", "no catalog", "—"]],
+        col_widths=[CW*0.08, CW*0.18, CW*0.36, CW*0.38], ch=CH)
+    if out.get("selected"):
+        _selp = out["selected"]
+        body(story,
+            f"<b>Selection.</b> {_selp.get('mfr','')} {_selp.get('part_number','')} was chosen for its "
+            f"R<sub>25</sub> = {_f(_selp.get('r25_ohm'),1)} {_OHM} (headroom over the required minimum while "
+            "keeping precharge time reasonable) over lower/higher-R25 alternatives; final proof is conditional "
+            "on the datasheet pulse rating and R25 tolerance.", CH)
 
     # ── 8.7 designer-selected NTC — design recalculated around the actual part ──
     sel = out.get("selected")
@@ -287,16 +326,29 @@ def build_ntc_story(story, design, cap=None, opts=None):
             "After operation the NTC is hot and its resistance is far below R25, so a short-off-time restart "
             "can draw <b>much higher</b> inrush than the cold case. Restart is therefore a design condition, "
             "not just a warning.", CH)
-        eq_box(story, [r"I_{restart}=\dfrac{V_{in,pk}}{R_{NTC,warm}+R_{source}}"], number="8.8", ch=CH)
+        eq_box(story, [r"I_{restart}=\dfrac{V_{in,pk}}{R_{NTC,warm}+R_{source}},\qquad "
+                       r"R_{required}=\dfrac{V_{in,pk}}{I_{target}}",
+                       r"I_{bypass}=\dfrac{V_{in,pk}}{R_{src}+R_{bridge}+R_{ESR}+R_{wire}+R_{PCB}}"],
+               number="8.8", ch=CH)
         _rows = wc.get("restart_rows") or []
-        data_table(story, "8.8", "Restart Inrush vs Resistance State",
-            "Cold, worst-case-tolerance and warm/hot cases at the high-line peak.",
-            ["Case", "R<sub>NTC</sub> (" + _OHM + ")", "Inrush (A)"],
-            [[d["case"], (_f(d["r_ohm"],3) if d.get("r_ohm") is not None else "TBD (R(T) data)"),
-              (_f(d["i_A"],1) if d.get("i_A") is not None else "TBD")] for d in _rows]
-            + [["Relay stuck closed", "bypassed",
-                (_f(wc['i_bypassed_A'],1) if wc.get('i_bypassed_A') else "n/a")]],
-            col_widths=[CW*0.44, CW*0.28, CW*0.28], ch=CH)
+        def _rrow(d):
+            _tbd = ("TBD, limited by source/path impedance" if "Bypass" in d.get("case", "")
+                    else "TBD (R(T) data)")
+            return [d["case"], (_f(d["r_ohm"], 3) if d.get("r_ohm") is not None else _tbd),
+                    (_f(d["i_A"], 1) if d.get("i_A") is not None else "OPEN")]
+        data_table(story, "8.8", "Restart / Bypass Inrush vs Resistance State",
+            "Cold, worst-case-tolerance, warm/hot and stuck-relay-bypass cases at the high-line peak.",
+            ["Case", "R (" + _OHM + ")", "Inrush (A)"],
+            [_rrow(d) for d in _rows],
+            col_widths=[CW*0.44, CW*0.30, CW*0.26], ch=CH)
+        body(story,
+            f"<b>Restart-permission resistance.</b> Restart is only safe once the NTC has recovered above "
+            f"R<sub>required</sub> = V<sub>in,pk</sub>/I<sub>target</sub> = {_f(wc['r_required_ohm'],2)} {_OHM} "
+            "(or another active current-limit is enabled). The stuck-relay / NTC-bypassed case is limited only "
+            "by the summed startup-path impedance"
+            + (f" ({_f(wc['r_path_total_ohm'],3)} {_OHM} &#8658; {_f(wc['i_bypassed_A'],0)} A)"
+               if wc.get("r_path_total_ohm") else " — OPEN until R_source/R_bridge/R_ESR/R_wiring/R_PCB are entered")
+            + ".", CH)
         _ot = wc.get("off_time_min_ms"); _rp = wc.get("restart_protection")
         if wc.get("i_warm_A"):
             annotation(story, "PITFALL",
@@ -340,18 +392,27 @@ def build_ntc_story(story, design, cap=None, opts=None):
             "The NTC limits the current, but the whole startup path carries it. This table closes the loop; "
             "the bridge/diode surge is proven against I<sub>FSM</sub> in <b>Chapter 7 (Section 7.3.1)</b> and "
             "is referenced here.", CH)
-        data_table(story, "8.10", "Startup-Path Stress Summary",
-            "Each element vs its datasheet limit; the peak stress is the worst-case cold/warm inrush.",
-            ["Component / path", "Stress to compare", "Limit / source", "Status"],
-            [["Bridge rectifier / diode", f"inrush peak {_f(wc['i_inrush_max_A'],0)} A",
-              "I<sub>FSM</sub> — see Ch 7 Sec. 7.3.1", "Ref Ch 7"],
-             ["Input fuse", f"I²t {_f(wc['i2t_worst'],0)} A²s", "pre-arcing I²t (Sec. 8.9)",
-              "PASS" if wc.get("fuse_ok") else "Open"],
-             ["NTC device", f"E<sub>cap</sub> {_f(r['e_cap'],0)} J", f"pulse rating (Sec. 8.3)", "See 8.3/8.7"],
-             ["Bypass relay contacts", (f"make {_f(wc['i_relay_make_A'],1)} A" if wc.get('i_relay_make_A') else "make current"),
-              "contact rating (Sec. 8.5.1)", "PASS" if (wc.get("i_relay_make_A") and wc.get("relay_make_rating_A") and wc["i_relay_make_A"] <= wc["relay_make_rating_A"]) else "Open"],
-             ["Bulk cap / PCB copper", "charging-path peak current", "surge / pulse capability", "Recommended"]],
-            col_widths=[CW*0.26, CW*0.26, CW*0.30, CW*0.18], ch=CH)
+        body(story,
+            "The startup-path stress must be separated into three distinct electrical cases — a normal cold "
+            "start, a hot restart (only if allowed), and a stuck/bypassed relay fault — because their currents "
+            "differ by orders of magnitude. The bridge/diode surge is proven against I<sub>FSM</sub> in "
+            "<b>Chapter 7 (Section 7.3.1)</b>.", CH)
+        _sc = wc.get("stress_cases") or []
+        def _ifsm_cell(c):
+            v = c.get("ifsm_ok")
+            return ("&#10003;" if v else ("&#10007;" if v is False else "IFSM TBD"))
+        data_table(story, "8.10", "Startup-Path Stress — Cold / Hot-Restart / Bypass",
+            f"Peak current and I²t per case; bridge IFSM = "
+            + (f"{_f(wc['bridge_ifsm_a'],0)} A" if wc.get("bridge_ifsm_a") else "OPEN (enter bridge datasheet IFSM)") + ".",
+            ["Case", "Inrush (A)", "I²t (A²s)", "vs bridge I<sub>FSM</sub>"],
+            [[c["case"], (_f(c["i_A"],0) if c.get("i_A") is not None else "OPEN"),
+              (_f(c["i2t"],1) if c.get("i2t") is not None else "OPEN"), _ifsm_cell(c)] for c in _sc]
+              or [["&#8212;", "", "", ""]],
+            col_widths=[CW*0.34, CW*0.22, CW*0.22, CW*0.22], ch=CH)
+        annotation(story, "NOTE",
+            "Hot restart must be prevented (see the restart policy in Section 8.8) or every path component must "
+            "be rated for the hot-restart current. The stuck-relay bypass is a fault case cleared by the "
+            "upstream fuse — it is not a ride-through condition.", CH)
 
     # ── 8.11 AC phase-angle startup sweep — review point 10 (light) ──
     if wc and wc.get("phase_sweep"):
@@ -368,29 +429,41 @@ def build_ntc_story(story, design, cap=None, opts=None):
              for d in wc["phase_sweep"]],
             col_widths=[CW*0.22, CW*0.24, CW*0.27, CW*0.27], ch=CH)
 
-    # ── 8.12 final margin summary + open items — Tables A & B ──
+    # ── 8.12 final margin summary + open items — Tables A & B + release taxonomy ──
     if wc:
         sub_h(story, "8.12", "Final NTC Design Margin Summary & Open Items", CH)
         _tgt = wc['inrush_target_A']
+        _stat = wc.get("status") or {}
+        _overall = wc.get("overall_status", "CONDITIONAL")
         def _mrg(val):
             return f"{100.0*(_tgt-val)/_tgt:+.1f}%" if val else "&#8212;"
+        annotation(story, "STATUS LEGEND",
+            "<b>PASS</b> — closed calculation against a confirmed limit. <b>CHECK</b> — known risk needing "
+            "design judgment. <b>OPEN</b> — missing datasheet/layout value. <b>BLOCKED</b> — prevents release. "
+            f"Overall NTC status: <b>{_overall}</b>.", CH)
         data_table(story, "8.12a", "Table A — Final NTC Design Margin Summary",
-            "The startup-path proof at a glance; datasheet/layout items marked Open until confirmed.",
+            "Each check with its release status (PASS / CHECK / OPEN / BLOCKED).",
             ["Check", "Requirement", "Value", "Status"],
             [["Nominal cold inrush", f"&#8804; {_f(_tgt,0)} A", f"{_f(wc['i_inrush_nom_A'],1)} A ({_mrg(wc['i_inrush_nom_A'])})",
-              "PASS" if wc['i_inrush_nom_A'] <= _tgt else "OVER"],
-             ["Minimum-R25 cold inrush", f"&#8804; {_f(_tgt,0)} A", f"{_f(wc['i_inrush_max_A'],1)} A ({_mrg(wc['i_inrush_max_A'])})",
-              "PASS" if wc['i_inrush_max_A'] <= _tgt else "OVER"],
-             ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J", "part rating", "Confirm datasheet"],
-             ["Precharge timing", f"&#8805; {_f(s['tau_multiple'],0)}&#183;&#964;", f"{_f(r['t_bypass']*1e3,0)} ms", "PASS"],
-             ["Warm/hot restart", f"&#8804; path rating", (f"{_f(wc['i_warm_A'],0)} A" if wc.get('i_warm_A') else "TBD (R(T))"),
-              ("CHECK" if wc.get('i_warm_A') and wc['i_warm_A'] > _tgt else "Open")],
+              _stat.get("nominal_cold", "&#8212;")],
+             ["Minimum-R25 cold inrush", f"&#8804; {_f(_tgt,0)} A hard", f"{_f(wc['i_inrush_max_A'],1)} A ({_mrg(wc['i_inrush_max_A'])})",
+              _stat.get("min_r25_cold", "&#8212;")],
+             ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J", "estimated (datasheet needed)",
+              _stat.get("pulse_energy", "OPEN")],
+             ["Precharge timing", f"&#8805; {_f(s['tau_multiple'],0)}&#183;&#964; + relay tol", f"{_f(r['t_bypass']*1e3,0)} ms",
+              _stat.get("precharge_timing", "PASS")],
+             ["Warm/hot restart", "policy required", (f"{_f(wc['i_warm_A'],0)} A" if wc.get('i_warm_A') else "TBD (R(T))"),
+              _stat.get("hot_restart", "CHECK")],
              ["Relay make current", "&#8804; contact rating", (f"{_f(wc['i_relay_make_A'],2)} A" if wc.get('i_relay_make_A') else "TBD"),
-              "Open" if not wc.get('i_relay_make_A') else "Check"],
+              _stat.get("relay_make", "OPEN")],
              ["Fuse I²t", "&#8804; pre-arcing I²t", f"{_f(wc['i2t_worst'],1)} A²s worst",
-              "PASS" if wc.get('fuse_ok') else "Open"],
-             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", "see Ch 7 Sec. 7.3.1", "Ref Ch 7"]],
-            col_widths=[CW*0.28, CW*0.24, CW*0.28, CW*0.20], ch=CH)
+              _stat.get("fuse_i2t", "OPEN")],
+             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Sec. 7.3.1"),
+              _stat.get("bridge_surge", "OPEN")],
+             ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "OPEN (path R)"),
+              _stat.get("bypass_stuck", "OPEN")],
+             ["Phase-angle sweep", "worst at 90&#176;", "included", _stat.get("phase_angle", "PASS")]],
+            col_widths=[CW*0.26, CW*0.24, CW*0.30, CW*0.20], ch=CH)
         data_table(story, "8.12b", "Table B — Open Electrical Items",
             "What must be confirmed for release, and why.",
             ["Open item", "Source needed", "Why"],
@@ -400,8 +473,34 @@ def build_ntc_story(story, design, cap=None, opts=None):
              ["Fuse I²t rating", "fuse datasheet", "no nuisance/unsafe fuse"],
              ["Bridge I<sub>FSM</sub>", "bridge datasheet (Ch 7)", "rectifier survival"],
              ["Relay make rating", "relay datasheet", "safe bypass timing"],
-             ["Relay-path impedance", "schematic / layout", "true make current & inrush"]],
+             ["Relay-path impedance", "schematic / layout", "true make current & inrush"],
+             ["Startup-path resistances", "schematic / layout", "bypassed / stuck-relay inrush"]],
             col_widths=[CW*0.30, CW*0.30, CW*0.40], ch=CH)
+
+        # ── 8.12c release classification (Ready / Conditional / Open / Blocked) ──
+        def _cls(item, ready, cond):
+            v = _stat.get(item, "")
+            return {"PASS": ready, "CHECK": cond, "OPEN": "Open",
+                    "BLOCKED": "Blocked"}.get(v, "Open")
+        data_table(story, "8.12c", "Table C — Release Classification",
+            f"Overall NTC release status: <b>{_overall}</b>.",
+            ["Item", "Release classification"],
+            [["Nominal cold-start NTC sizing", _cls("nominal_cold", "Ready", "Conditional")],
+             ["Minimum-R25 cold-start check", _cls("min_r25_cold", "Ready", "Conditional — hard-limit pass, margin to acknowledge")],
+             ["Precharge target clarification", "Ready"],
+             ["Relay precharge delay", "Conditional — selected-part timing + relay tolerance"],
+             ["Relay make-current verification", _cls("relay_make", "Ready", "Conditional")],
+             ["Warm / hot restart", _cls("hot_restart", "Ready", "Conditional — define restart policy")],
+             ["Fuse I²t coordination", _cls("fuse_i2t", "Ready", "Conditional")],
+             ["Bridge / diode surge verification", _cls("bridge_surge", "Ready", "Conditional")],
+             ["Pulse-energy confirmation", _cls("pulse_energy", "Ready", "Conditional")],
+             ["Phase-angle startup sweep", "Ready"]],
+            col_widths=[CW*0.46, CW*0.54], ch=CH)
+        annotation(story, "RELEASE STATEMENT",
+            "The selected NTC passes the nominal cold-start inrush calculation and the minimum-R25 hard "
+            "current limit based on the current assumptions. Final electrical release remains CONDITIONAL "
+            "until selected-part pulse-energy data, R25 tolerance, hot-restart policy, fuse I²t rating, relay "
+            "make-current rating, relay-path impedance, and bridge I<sub>FSM</sub> margin are confirmed.", CH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

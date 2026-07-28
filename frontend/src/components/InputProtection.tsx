@@ -107,7 +107,9 @@ export const InputProtection: React.FC<Props> = ({
     tau_multiple: '4', ambient_c: '45', r_line: '0', r_emi: '0', r_esr: '0', r_bridge: '0',
     // worst-case / coordination inputs (datasheet / layout; blank = open item in the report)
     fuse_i2t_rating: '', relay_make_rating_a: '', relay_path_ohm: '', off_time_min_ms: '',
-    restart_protection: '' })
+    restart_protection: '',
+    // round-2 review: startup-path resistances (bypassed/stuck-relay inrush), bridge IFSM, relay timing
+    r_wiring_ohm: '', r_pcb_ohm: '', bridge_ifsm_a: '', relay_operate_ms: '', relay_delay_tol_ms: '' })
   const [ntcRes, setNtcRes] = useState<NtcResult | null>(null)
   const [ntcBusy, setNtcBusy] = useState(false)
   const setN = (k: string, v: string) => setNtcOpts(s => ({ ...s, [k]: v }))
@@ -242,6 +244,18 @@ export const InputProtection: React.FC<Props> = ({
                   value={ntcOpts.restart_protection} onChange={e => setN('restart_protection', e.target.value)}>
                   <option value="">— unstated —</option><option value="hardware">hardware</option>
                   <option value="firmware">firmware</option><option value="procedure">procedure</option></select></label>
+            </div>
+            {/* Startup-path resistances → bypassed/stuck-relay inrush + 3-column stress (review round 2). */}
+            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+              Startup path & stress <span style={{ color: C.muted, textTransform: 'none' }}>— for bypassed/stuck-relay inrush &amp; bridge IFSM; blank = OPEN</span></div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+              <Knob label="R_bridge" unit="Ω" value={ntcOpts.r_bridge} onChange={v => setN('r_bridge', v)} />
+              <Knob label="R_ESR" unit="Ω" value={ntcOpts.r_esr} onChange={v => setN('r_esr', v)} />
+              <Knob label="R_wiring" unit="Ω" value={ntcOpts.r_wiring_ohm} onChange={v => setN('r_wiring_ohm', v)} />
+              <Knob label="R_PCB" unit="Ω" value={ntcOpts.r_pcb_ohm} onChange={v => setN('r_pcb_ohm', v)} />
+              <Knob label="Bridge IFSM" unit="A" value={ntcOpts.bridge_ifsm_a} onChange={v => setN('bridge_ifsm_a', v)} />
+              <Knob label="Relay operate" unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
+              <Knob label="Delay tolerance" unit="ms" value={ntcOpts.relay_delay_tol_ms} onChange={v => setN('relay_delay_tol_ms', v)} />
             </div>
             {/* Inrush-limiter topology schematic (same drawing embedded in the Ch 8 report). */}
             <details style={{ marginBottom: 14 }}>

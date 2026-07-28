@@ -5460,3 +5460,34 @@ report, and wire the GDT endpoint. No hardcoding; missing datasheet fields stay 
 Verified: GDT endpoint 200 (L4/industrial → MOV+GDT required, 12 candidates); Ch8/9 report builds (220 KB)
 with §9.9 + the designer decision; frontend typechecks clean. Suite 172/2. MOV+GDT review COMPLETE (P1-P4).
 Plan [[mov-gdt-review-plan]]. Next designer review area = NTC (then Fuse).
+
+## C153 — 2026-07-28 — Chapter 8 NTC review round 2 (release-status taxonomy + closure equations)
+
+Re-review of the C146-updated NTC report (specs/Improvements/NTC/NTC_2_Updated_Report_Review_Comments 2.pdf,
+8 pp). Mostly release-STATUS clarity, not missing physics. Single tested commit. No hardcoding; missing
+datasheet/layout values stay OPEN.
+- ENGINE (ntc_bypass_select.py): Spec += r_wiring_ohm/r_pcb_ohm/bridge_ifsm_a/relay_operate_ms/
+  relay_delay_tol_ms. worst_case_startup adds: R_required = V_pk/I_target (restart-permission resistance);
+  bypassed/stuck-relay inrush from the SUMMED startup path (R_src+R_bridge+R_ESR+R_wiring+R_PCB), OPEN if
+  none given; separate hard-limit vs 10%-design-margin for min-R25; 3-column startup stress (cold / hot-
+  restart / bypass) each with i + I²t + bridge-IFSM check; per-item status taxonomy PASS/OPEN/CHECK/BLOCKED
+  + overall rollup (BLOCKED>any-BLOCKED, else CONDITIONAL if any OPEN/CHECK, else READY). Hot restart =
+  CHECK (per decision, never hard-BLOCK) with R_required shown; pulse-energy/relay-make/fuse-I²t/bridge-IFSM/
+  bypass = OPEN when data absent.
+- ADAPTER: build_ntc_spec threads the new opts; hardened r_line/r_emi/r_esr/r_bridge casts against blank
+  strings (`or 0.0`).
+- REPORT Ch8 (build_ntc_story): §8.1 +Source/status column (incl. R25 + tolerance provenance); §8.2.1 min-R25
+  verdict "Pass hard limit, reduced margin" + hard-vs-design-margin paragraph; §8.5 release timing (min-design
+  vs selected-part + final delay ≥ selected + relay operate + tolerance); §8.6 "Preliminary" screen + rank +
+  selection reason; §8.8 R_required + bypassed-inrush equation + stuck-relay row "TBD, limited by source/path
+  impedance"; §8.10 3-column cold/hot/bypass stress table; §8.12 STATUS LEGEND + taxonomy-driven Table A +
+  Table C release-classification + RELEASE STATEMENT sentence. Fixed a \text{} mathtext crash in the §8.8 eq.
+- GUI (InputProtection.tsx): NTC tab adds a "Startup path & stress" input row (R_bridge/R_ESR/R_wiring/R_PCB/
+  bridge-IFSM/relay-operate/delay-tolerance); blank = OPEN. (Schematic already exists from C146 — no change;
+  the review's NTC Schematic.pdf is the same topology.)
+- DOCUMENT AGENT: all changes are in build_ntc_story → build_inputprotection_report, so the combined Ch1-10
+  PDF reflects them automatically.
+Verified: adapter handles blank GUI opts; Ch8/9 builds (238 KB) with every new section (reduced-margin, release
+timing, Preliminary, restart-permission, 3-col stress, status legend, release-classification, release
+statement); frontend typechecks. Suite 172/2. NTC round-2 review COMPLETE. Next designer review = Fuse.
+Plan [[ntc-review2-plan]].
