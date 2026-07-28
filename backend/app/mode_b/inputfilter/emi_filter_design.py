@@ -58,7 +58,7 @@ Run:  python3 emi_filter_design.py            (demo report)
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from math import pi, sqrt, log10
+from math import pi, sqrt, log10, log
 from typing import Optional, List, Tuple, Dict
 import sys
 
@@ -159,6 +159,14 @@ DEFAULT_XCAP_ESL    = 15e-9     # H    X-cap ESL  (X-cap SRF)
 DEFAULT_YCAP_ESL    = 8e-9      # H    Y-cap ESL  (limits HF CM attenuation)
 DEFAULT_LDM_CP      = 30e-12    # F    DM-choke self-capacitance (DM choke SRF)
 DEFAULT_LCM_CP      = 15e-12    # F    CM-choke self-capacitance (CM choke SRF; caps HF CM)
+DEFAULT_LCM_MAX     = 10e-3     # H    practical CM-choke inductance per stage (above this, source
+                                #      reduction is the better lever than a bigger choke)
+# Safety-margin defaults for the leakage / X-cap-discharge PROOFS (worst-case, not nominal). Named,
+# reported and overridable — never a silent hardcode.
+DEFAULT_YCAP_TOL    = 0.10      # +10% Y-cap tolerance for the worst-case earth-leakage check
+DEFAULT_FLINE_TOL   = 0.05      # +5% grid-frequency tolerance (e.g. 60 Hz -> 63 Hz) for leakage worst case
+DEFAULT_LEAK_RISK   = 0.90      # within 10% of the limit -> FAIL-RISK, not a clean pass
+DEFAULT_XCAP_VSAFE  = 60.0      # V    safe residual X-cap voltage (IEC touch limit) for discharge sizing
 # Choke DC resistances (copper loss, §15) and loss-estimate fractions.
 DEFAULT_CMC1_DCR    = 15e-3     # ohm  CM choke 1 DCR (both conductors)
 DEFAULT_CMC2_DCR    = 7e-3      # ohm  CM choke 2 DCR
@@ -291,7 +299,11 @@ class EMIInputs:
     cx_max: float = 4.7e-6             # F, practical max single X-cap
     ldm_sat_max: float = 100e-6        # H, saturation-practical DM choke
     leakage_use_fraction: float = 0.90 # design to 90% of the leakage limit
-    bleeder_r: Optional[float] = None  # ohm, X-cap discharge resistor (if known)
+    bleeder_r: Optional[float] = None  # ohm, X-cap discharge resistor (if known; else sized to limit)
+    # worst-case proof tolerances (None -> named module defaults; overridable, never a silent hardcode)
+    ycap_tol: Optional[float] = None   # Y-cap +tolerance for leakage proof [def DEFAULT_YCAP_TOL]
+    fline_tol: Optional[float] = None  # grid-frequency +tolerance for leakage proof [def DEFAULT_FLINE_TOL]
+    xcap_vsafe: Optional[float] = None # V, safe residual X-cap voltage for discharge [def DEFAULT_XCAP_VSAFE]
 
 
 @dataclass
@@ -403,6 +415,13 @@ class EMIResult:
     loss_total_w: float = 0.0
     loss_worst_vac: float = 0.0
     leak_fault_A: float = 0.0       # single-fault (open-neutral) worst-branch leakage
+    # bleeder + leakage worst-case-proof provenance
+    r_bleed_ohm: float = 0.0        # sized (or designer) X-cap bleeder resistor
+    r_bleed_sized: bool = False     # True if sized to the discharge limit (else designer-given)
+    xcap_vpeak: float = 0.0         # rectified line peak the X-cap can be left charged to
+    xcap_vsafe: float = 0.0         # safe residual voltage used for the discharge time
+    leak_ycap_tol: float = 0.0      # Y-cap +tolerance used in the leakage proof
+    leak_fline_hz: float = 0.0      # worst line frequency used in the leakage proof
     # render-ready sampled curves (results object carries plot data; renderer never re-computes)
     spectra: Dict[str, List[float]] = field(default_factory=dict)
     # bookkeeping
@@ -781,7 +800,13 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
     #      stages if the DELIVERED (ABCD, real-parasitic) margin is short (2 = reference max) ----
     leak_limit = SAFETY_LEAKAGE_LIMIT[ein.safety_standard]
     v_ln = p.vac_max
-    cy_total_max = (ein.leakage_use_fraction * leak_limit) / (TWO_PI * p.f_line * v_ln)
+    # Size the Y-cap budget to the WORST-CASE leakage corner (Cy +tol, worst line freq), so the leakage
+    # PROOF below and this sizing agree — otherwise a nominally-90% design overshoots its own worst case.
+    ycap_tol = ein.ycap_tol if ein.ycap_tol is not None else DEFAULT_YCAP_TOL
+    fline_tol = ein.fline_tol if ein.fline_tol is not None else DEFAULT_FLINE_TOL
+    f_line_worst = p.f_line * (1.0 + fline_tol)
+    cy_total_max = (ein.leakage_use_fraction * leak_limit) / (
+        TWO_PI * f_line_worst * v_ln * (1.0 + ycap_tol))
     cy_remaining = cy_total_max - prot.committed_y_cap_total
     prov["c_y"] = (f"C_Y ceiling from {ein.safety_standard} leakage "
                    f"{leak_limit*1e3:.2f}mA -> {cy_total_max*1e9:.2f}nF total; "
@@ -798,20 +823,31 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         cy_system = prot.committed_y_cap_total + cy_emi
 
         def _size_cm(stages):
+            # Start at the ideal binding corner (L_total = n^2/((2*pi*fc)^2*2*C_Y)), then GROW L until
+            # the real-parasitic ABCD delivered margin clears 0 or the choke hits its practical per-stage
+            # cap. Y-capacitance is already fixed by the leakage ceiling, so L is the only lever here.
             fc = binding_corner(ctx, cm_noise_dbuv, klass, detector, margin, 2 * stages, f_first)
-            # n cascaded LC sections: L_total = n^2 / ((2*pi*fc)^2 * 2*C_Y)
             l = (stages ** 2) / ((TWO_PI * fc) ** 2 * (2.0 * cy_emi))
-            il, m, mf = delivered_margin(
-                cm_noise_dbuv, lambda f: insertion_loss_cm(l, cy_system, stages, par, f),
-                ctx, klass, detector, margin, f_first)
-            return fc, l, il, m, mf
+            best = None
+            for _ in range(24):
+                il, m, mf = delivered_margin(
+                    cm_noise_dbuv, lambda f: insertion_loss_cm(l, cy_system, stages, par, f),
+                    ctx, klass, detector, margin, f_first)
+                if best is None or m > best[2]:
+                    best = (l, il, m, mf)
+                if m >= 0 or (l / stages) >= DEFAULT_LCM_MAX:
+                    break
+                l *= 1.3
+            return (fc, *best)
 
         cm_stages = 1
         cm_fc, l_cm, cm_il_db, cm_margin_db, cm_margin_f = _size_cm(1)
-        if cm_margin_db < 0:                        # 1 stage short with real parasitics -> 2 stages
-            cm_stages = 2
-            cm_fc, l_cm, cm_il_db, cm_margin_db, cm_margin_f = _size_cm(2)
-        prov["l_cm"] = f"L_CM {l_cm*1e3:.2f} mH, {cm_stages} stage(s), binding corner {cm_fc/1e3:.1f} kHz"
+        if cm_margin_db < 0:                        # 1 stage short -> try 2 stages, keep the better margin
+            _r2 = _size_cm(2)
+            if _r2[3] > cm_margin_db:
+                cm_stages, (cm_fc, l_cm, cm_il_db, cm_margin_db, cm_margin_f) = 2, _r2
+        prov["l_cm"] = (f"L_CM {l_cm*1e3:.2f} mH, {cm_stages} stage(s), binding corner {cm_fc/1e3:.1f} kHz "
+                        f"(grown to meet the delivered ABCD margin)")
 
     cy_system = prot.committed_y_cap_total + cy_emi
 
@@ -821,16 +857,24 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
     def _size_dm(stages):
         fc = binding_corner(ctx, dm_noise_dbuv, klass, detector, margin, 2 * stages, f_first)
         l = (stages ** 2) / ((TWO_PI * fc) ** 2 * c_x)
-        il, m, mf = delivered_margin(
-            dm_noise_dbuv, lambda f: insertion_loss_dm(l, c_x, stages, par, f),
-            ctx, klass, detector, margin, f_first)
-        return fc, l, il, m, mf
+        best = None
+        for _ in range(24):                        # grow L_DM until the ABCD margin clears / choke sat
+            il, m, mf = delivered_margin(
+                dm_noise_dbuv, lambda f: insertion_loss_dm(l, c_x, stages, par, f),
+                ctx, klass, detector, margin, f_first)
+            if best is None or m > best[2]:
+                best = (l, il, m, mf)
+            if m >= 0 or (l / stages) >= ein.ldm_sat_max:
+                break
+            l *= 1.3
+        return (fc, *best)
 
     dm_stages = 1
     dm_fc, l_dm, dm_il_db, dm_margin_db, dm_margin_f = _size_dm(1)
     if dm_margin_db < 0:
-        dm_stages = 2
-        dm_fc, l_dm, dm_il_db, dm_margin_db, dm_margin_f = _size_dm(2)
+        _rd2 = _size_dm(2)
+        if _rd2[3] > dm_margin_db:
+            dm_stages, (dm_fc, l_dm, dm_il_db, dm_margin_db, dm_margin_f) = 2, _rd2
     prov["dm_corner"] = f"{dm_stages} LC stage(s), {20*2*dm_stages} dB/dec; binding corner {dm_fc/1e3:.1f} kHz"
     prov["l_dm"] = f"L_DM {l_dm*1e6:.1f} uH total, {dm_stages} stage(s), C_X {c_x*1e6:.2f} uF"
     if (l_dm / max(dm_stages, 1)) > ein.ldm_sat_max:
@@ -880,28 +924,52 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         warn.append(f"Middlebrook margin {stability_margin_db:.1f} dB < {margin:.0f} dB target at the DM "
                     f"resonance ({f_res_dm/1e3:.1f} kHz); lower R_d or raise C_X.")
 
-    # ---- leakage check (system, normal + single-fault open-neutral) ----
-    leak_actual = TWO_PI * p.f_line * v_ln * cy_system
+    # ---- leakage check (system, normal + single-fault open-neutral) — WORST CASE ----
+    # Proof (not nominal): evaluate at +Y-cap tolerance AND the worst (highest) line frequency; a value
+    # within DEFAULT_LEAK_RISK of the limit is a FAIL-RISK, not a clean pass. ycap_tol/fline_tol/f_line_worst
+    # were resolved above (they also drive the Y-cap sizing so proof and sizing agree).
+    cy_worst = cy_system * (1.0 + ycap_tol)
+    leak_actual = TWO_PI * f_line_worst * v_ln * cy_worst
     if leak_actual > leak_limit:
-        fb.append(f"Leakage {leak_actual*1e3:.2f}mA exceeds {ein.safety_standard} "
-                  f"limit {leak_limit*1e3:.2f}mA.")
+        fb.append(f"Worst-case leakage {leak_actual*1e3:.2f} mA (Cy +{ycap_tol*100:.0f}%, "
+                  f"{f_line_worst:.0f} Hz, {v_ln:.0f} V) exceeds {ein.safety_standard} limit "
+                  f"{leak_limit*1e3:.2f} mA.")
+    elif leak_actual > DEFAULT_LEAK_RISK * leak_limit and \
+            leak_actual > ein.leakage_use_fraction * leak_limit * 1.001:
+        # Worst-case overshot the design target (e.g. upstream committed Y-caps) yet is still under the
+        # ceiling — flag as FAIL-RISK (no headroom) rather than a clean pass.
+        warn.append(f"Worst-case leakage {leak_actual*1e3:.2f} mA is within "
+                    f"{(1-DEFAULT_LEAK_RISK)*100:.0f}% of the {leak_limit*1e3:.2f} mA limit and above the "
+                    f"{ein.leakage_use_fraction*100:.0f}% design target — FAIL-RISK; tighten the Y-cap budget.")
     # Single fault (open neutral): the line-PE Y-caps see the full line; worst branch ≈ half the
-    # network at full line voltage (§13). Reported and checked against the same limit.
-    leak_fault_A = TWO_PI * p.f_line * v_ln * (cy_system / 2.0)
+    # network at full line voltage (§13). Same worst-case corner, checked against the same limit.
+    leak_fault_A = TWO_PI * f_line_worst * v_ln * (cy_worst / 2.0)
     if leak_fault_A > leak_limit:
-        warn.append(f"Single-fault (open-neutral) leakage {leak_fault_A*1e3:.2f} mA exceeds the "
-                    f"{leak_limit*1e3:.2f} mA limit.")
+        warn.append(f"Single-fault (open-neutral) worst-case leakage {leak_fault_A*1e3:.2f} mA exceeds "
+                    f"the {leak_limit*1e3:.2f} mA limit.")
 
-    # ---- X-cap discharge ----
-    xcap_disc = None
+    # ---- X-cap bleeder: SIZE R_bleed to the discharge limit and report the TRUE safe-discharge time ----
+    # t = R·C·ln(V_peak/V_safe) — NOT the time constant τ=R·C. V_peak is the rectified line peak the X-cap
+    # can be left charged to; V_safe is the IEC touch-safe residual. If the designer fixed a bleeder, use it
+    # and report its actual t; otherwise size R_bleed to the largest value that still meets the limit.
+    v_safe = ein.xcap_vsafe if ein.xcap_vsafe is not None else DEFAULT_XCAP_VSAFE
+    v_peak_xcap = sqrt(2.0) * p.vac_max
+    t_lim = SAFETY_XCAP_DISCHARGE_S[ein.safety_standard]
+    ln_ratio = log(max(v_peak_xcap / v_safe, 1.0001))
+    r_bleed_max = t_lim / (c_x * ln_ratio)            # largest R meeting t <= t_lim
     if ein.bleeder_r:
-        xcap_disc = ein.bleeder_r * c_x
-        lim = SAFETY_XCAP_DISCHARGE_S[ein.safety_standard]
-        if xcap_disc > lim:
-            warn.append(f"X-cap discharge {xcap_disc:.2f}s > {lim:.1f}s limit; "
-                        f"lower bleeder R.")
+        r_bleed = ein.bleeder_r                        # designer-specified
+        r_bleed_sized = False
     else:
-        warn.append("No bleeder_r given; verify X-cap discharge-time safety rule.")
+        r_bleed = r_bleed_max                          # size it to the limit
+        r_bleed_sized = True
+    xcap_disc = r_bleed * c_x * ln_ratio              # TRUE time from V_peak down to V_safe
+    if xcap_disc > t_lim + 1e-9:
+        warn.append(f"X-cap discharge {xcap_disc:.2f}s ({v_peak_xcap:.0f}->{v_safe:.0f} V) > {t_lim:.1f}s "
+                    f"limit — lower R_bleed to <= {r_bleed_max/1e3:.0f} kohm.")
+    prov["bleeder"] = (f"R_bleed {r_bleed/1e3:.0f} kohm ({'sized to limit' if r_bleed_sized else 'designer'}"
+                       f"); discharge {v_peak_xcap:.0f}->{v_safe:.0f} V in t=R·C·ln(Vpk/Vsafe)="
+                       f"{xcap_disc:.2f}s (limit {t_lim:.0f}s)")
 
     # ---- per-operating-point verification (§2.5/Table 6) + loss budget (§15) ----
     # Choke copper loss = I_in²·ΣDCR (one CM-choke DCR per CM stage + one DM-choke DCR per DM stage).
@@ -930,33 +998,35 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         else DEFAULT_XCAP_ESR_LOSS_FRAC * cu_total
     loss_rows.append(("Core (est.)", core_w))
     loss_rows.append(("X-cap ESR (est.)", esr_w))
-    if ein.bleeder_r:
-        loss_rows.append(("Bleeder", (v_ln ** 2) / ein.bleeder_r))
+    if r_bleed:
+        loss_rows.append(("Bleeder", (v_ln ** 2) / r_bleed))
     loss_total_w = sum(w for _, w in loss_rows)
     loss_worst_vac = worst["vac"]
     prov["loss"] = (f"copper {cu_total:.2f} W (ΣDCR {total_dcr*1e3:.0f} mΩ × I²) worst @ "
                     f"{loss_worst_vac:.0f} V; core/ESR estimated as {DEFAULT_CORE_LOSS_FRAC*100:.0f}%/"
                     f"{DEFAULT_XCAP_ESR_LOSS_FRAC*100:.1f}% of copper; total {loss_total_w:.2f} W")
-    prov["leakage"] = (f"normal {leak_actual*1e3:.2f} mA, single-fault {leak_fault_A*1e3:.2f} mA "
-                       f"(limit {leak_limit*1e3:.2f} mA) at {v_ln:.0f} V / {p.f_line:.0f} Hz")
+    prov["leakage"] = (f"worst-case normal {leak_actual*1e3:.2f} mA, single-fault {leak_fault_A*1e3:.2f} mA "
+                       f"(limit {leak_limit*1e3:.2f} mA) at {v_ln:.0f} V / {f_line_worst:.0f} Hz, "
+                       f"Cy +{ycap_tol*100:.0f}%")
 
     # ---- delivered insertion loss (ABCD two-port) — margins computed during sizing above ----
     prov["il_model"] = ("ABCD two-port with parasitics "
                         f"(X-cap ESR {par['xcap_esr']*1e3:.0f}mΩ/ESL {par['xcap_esl']*1e9:.0f}nH, "
                         f"DM-choke Cp {par['ldm_cp']*1e12:.0f}pF, Y-cap ESL {par['ycap_esl']*1e9:.0f}nH, "
                         f"CM-choke Cp {par['lcm_cp']*1e12:.0f}pF)")
-    # After escalation, a residual shortfall means the requirement is not reachable with practical
-    # parts — surface a SOURCE-REDUCTION target (achievability gate seed, App B.3) rather than an
-    # impossible filter.
+    # ACHIEVABILITY GATE (App B.3): after growing L and escalating stages, a residual shortfall means the
+    # requirement is not reachable with practical parts. This is a compliance BLOCKER (feasible=False) with
+    # a quantified source-reduction target as the HEADLINE — never a neutral negative-margin filter.
     if dm_margin_db < 0:
-        warn.append(f"DM delivered IL still falls {abs(dm_margin_db):.1f} dB SHORT near "
-                    f"{dm_margin_f/1e3:.0f} kHz at {dm_stages} stage(s) — raise C_X / add a DM stage, "
-                    f"or reduce the input-ripple source.")
+        fb.append(f"DM SHORT by {abs(dm_margin_db):.1f} dB near {dm_margin_f/1e3:.0f} kHz at {dm_stages} "
+                  f"stage(s) even after growing L_DM — raise C_X / add a DM stage, or reduce the input "
+                  f"ripple ΔI by ≥ {abs(dm_margin_db):.0f} dB (larger L_boost, more interleaving).")
     if cm_margin_db < 0 and l_cm != float("inf"):
-        warn.append(f"CM delivered IL still falls {abs(cm_margin_db):.1f} dB SHORT near "
-                    f"{cm_margin_f/1e3:.0f} kHz at {cm_stages} stage(s) — HF CM is floored by choke self-"
-                    f"resonance/parasitics; REDUCE THE CM SOURCE (C_ps, node capacitance, dV/dt) rather "
-                    f"than adding Y-capacitance/stages.")
+        fb.append(f"CM SHORT by {abs(cm_margin_db):.1f} dB near {cm_margin_f/1e3:.0f} kHz at {cm_stages} "
+                  f"stage(s) with L_CM grown to {l_cm*1e3:.1f} mH — the Y-cap budget and choke self-"
+                  f"resonance floor the achievable attenuation. REDUCE THE CM SOURCE: halve the dominant "
+                  f"C·dV/dt (C_ps / node capacitance / dV/dt) for ~6 dB each, so reduce it by ≥ "
+                  f"{abs(cm_margin_db):.0f} dB, or add an HF ferrite-bead stage above ~5 MHz.")
 
     spectra = sample_spectra(ctx, klass, detector, l_dm, c_x, dm_stages, l_cm, cy_system,
                              cm_stages, par, damp_r, damp_l, f_first)
@@ -983,6 +1053,8 @@ def design_emi_filter(ctx: DesignContext) -> EMIResult:
         cm_il_db=cm_il_db, cm_margin_db=cm_margin_db, cm_margin_f=cm_margin_f,
         per_point=per_point, per_line=per_line, loss_rows=loss_rows, loss_total_w=loss_total_w,
         loss_worst_vac=loss_worst_vac, leak_fault_A=leak_fault_A, spectra=spectra,
+        r_bleed_ohm=r_bleed, r_bleed_sized=r_bleed_sized, xcap_vpeak=v_peak_xcap, xcap_vsafe=v_safe,
+        leak_ycap_tol=ycap_tol, leak_fline_hz=f_line_worst,
         provenance=prov, warnings=warn, feedback=fb, noise_source=noise_source,
     )
     ctx.emi = res

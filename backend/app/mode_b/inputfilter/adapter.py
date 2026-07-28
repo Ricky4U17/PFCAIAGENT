@@ -118,6 +118,10 @@ def calculate_emi(design: dict, cap: dict | None = None, protection: dict | None
         ldm_sat_max=(float(opts["ldm_sat_max_uH"]) * 1e-6) if opts.get("ldm_sat_max_uH") else 100e-6,
         leakage_use_fraction=float(opts.get("leakage_use_fraction", 0.90)),
         bleeder_r=(float(opts["bleeder_r_ohm"])) if opts.get("bleeder_r_ohm") else None,
+        # worst-case-proof tolerances (None -> engine's named defaults; overridable, never a hardcode)
+        ycap_tol=(float(opts["ycap_tol"])) if opts.get("ycap_tol") is not None else None,
+        fline_tol=(float(opts["fline_tol"])) if opts.get("fline_tol") is not None else None,
+        xcap_vsafe=(float(opts["xcap_vsafe_v"])) if opts.get("xcap_vsafe_v") is not None else None,
     )
 
     # DC-DC stage (CM source) — designer placeholders now; wired from the DC-DC script later.

@@ -5300,3 +5300,36 @@ every value from design (Vin_pk/R25/Cout/τ) or the selected-part datasheet (tol
   returns the SVG, InputProtection.tsx shows it (collapsible) + adds the datasheet/layout inputs
   (fuse I²t, relay make/path, off-time, restart-protection) which thread through ntc_opts.
 Suite 172/2; frontend typechecks; Ch8/9 report builds (13 pp) with the schematic + all sections.
+
+## C147 — 2026-07-27 — Chapter 10 EMI review round 2, Phase A (correctness proofs) + Phase C (final BOM)
+
+Implemented the agreed EMI review-2 correctness fixes (specs/Improvements/EMI/) — nominal sizing → worst-case
+design proofs — plus the final all-component values table. No hardcoding; every proof tolerance is a named,
+reported, overridable default. Phase B (schematic, both views) deferred to C148.
+- ENGINE (inputfilter/emi_filter_design.py):
+  1. CM/DM synthesis now GROWS L (×1.3/iter, ≤24 iters) until the ABCD delivered margin ≥ 0 or the per-stage
+     choke hits DEFAULT_LCM_MAX (10 mH) / ein.ldm_sat_max, keeping the best margin, then escalates 1→2 stages
+     taking the better result. Fixes the −9.4 dB CM shortfall (self-test: CM 2-stg now +0.6 dB, was −9.4).
+  2. ACHIEVABILITY GATE: a residual negative margin after growth+escalation now appends to `fb` (feasible=
+     False) with a QUANTIFIED source-reduction headline (dB to cut via C·dV/dt halving / ferrite bead), not a
+     neutral warning.
+  3. BLEEDER: sizes R_bleed = t_lim/(C·ln(Vpk/Vsafe)) when the designer leaves it blank, and reports the TRUE
+     safe-discharge time t = R·C·ln(Vpk/Vsafe) (was τ=R·C bug). New result fields r_bleed_ohm/r_bleed_sized/
+     xcap_vpeak/xcap_vsafe; V_safe default 60 V (DEFAULT_XCAP_VSAFE).
+  4. LEAKAGE: Y-cap budget SIZED to the worst-case corner (Cy +10% DEFAULT_YCAP_TOL, +5% grid freq
+     DEFAULT_FLINE_TOL) so sizing and proof agree; leakage checked at that corner; within-10%-of-limit AND
+     above the design target → FAIL-RISK warning (DEFAULT_LEAK_RISK). New fields leak_ycap_tol/leak_fline_hz.
+  5. New EMIInputs: ycap_tol/fline_tol/xcap_vsafe (None → module defaults). `log` added to math import.
+- ADAPTER (inputfilter/adapter.py): threads ycap_tol/fline_tol/xcap_vsafe_v opts (None → engine defaults).
+- REPORT (report_inputfilter.py):
+  - 10.3: A_req = V_noise − (L_limit − margin) arithmetic reconciliation at the binding CM frequency, with
+    the "worst case in mid/high band because CISPR steps 66→56 while source stays flat" note.
+  - 10.8.1: true discharge time t=R·C·ln(Vpk/Vsafe) with R_bleed/V_peak/V_safe, contrasted with τ, pass/fail.
+  - 10.9: worst-case leakage table (Cy +tol, worst freq) with FAIL-RISK verdict + pitfall annotation.
+  - 10.10: component schedule R_bleed now shows the resistor value.
+  - 10.B: source-assumption provenance table (every output → its input/default) + assumed-defaults callout.
+  - 10.C: bench acceptance criteria (sign-off gates) table.
+  - 10.D: FINAL all-component values BOM (C_X/L_DM/R_d/L_d/L_CM/C_Y/R_bleed with value/config/function/basis)
+    + summary line (loss / leakage / margins / feasibility).
+Suite 172/2; Ch10 report builds (453 KB); verify_emi_newspecs all differential-spec checks pass (no
+reference value leaked); bleeder/leakage/BOM text verified in the rendered PDF.

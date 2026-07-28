@@ -216,6 +216,18 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
     _W(f"<b>Common mode:</b> worst required attenuation <b>{_f(r['cm_req_att_db'],0)} dB</b> at "
        f"{_f(r['cm_req_att_f']/1e3,0)} kHz &#8658; {r['cm_stages']} LC stage(s), binding corner "
        f"<b>{_f(r['cm_corner_hz']/1e3,1)} kHz</b>.")
+    # Arithmetic reconciliation at the (binding) CM frequency: A_req = V_noise - (L_limit - margin).
+    try:
+        _s = r["spectra"]; _m = r["margin_db"]; _fb = r["cm_req_att_f"]
+        _i = min(range(len(_s["f"])), key=lambda k: abs(_s["f"][k] - _fb))
+        _vn = _s["cm_src"][_i]; _ll = _s["limit"][_i]
+        _W(f"<b>Arithmetic (CM @ {_f(_s['f'][_i]/1e3,0)} kHz):</b> A<sub>req</sub> = V<sub>noise</sub> "
+           f"&#8722; (L<sub>limit</sub> &#8722; margin) = {_f(_vn,0)} &#8722; ({_f(_ll,0)} &#8722; "
+           f"{_f(_m,0)}) = <b>{_f(_vn-(_ll-_m),0)} dB</b>. The worst case sits near the mid/high band, "
+           f"not 150 kHz, because the CISPR limit steps down (66&#8594;56 dB{_MU}V) while the computed "
+           f"source stays comparatively flat.")
+    except Exception:
+        pass
 
     # ── 10.4 topology & staging ──
     step_h(story, "10.4", "Filter Topology & Staging", CH)
@@ -302,12 +314,25 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
         "optional <b>GDT</b> line/neutral-to-earth for high-energy CM surges (rating set by the mains "
         "line-to-earth voltage — never a low-voltage GDT on a node that sees mains potential to earth).", CH)
     sub_h(story, "10.8.1", "X-capacitor discharge (bleeder)", CH)
-    eq_box(story, [r"R_{bleed}\leq \dfrac{-t}{C_{X,total}\,\ln(V_{safe}/V_{peak})}"], number="10.8", ch=CH)
-    _W("<b>Worked.</b> X-cap discharge "
-       + (f"time constant is {_f(r['xcap_discharge_s'],2)} s with the chosen bleeder."
-          if r.get("xcap_discharge_s") is not None else
-          "must be verified — provide a bleeder resistor so the X-caps drain below the safe voltage within "
-          "the standard's time limit."))
+    eq_box(story, [r"R_{bleed}\leq \dfrac{t_{lim}}{C_{X,total}\,\ln(V_{peak}/V_{safe})}",
+                  r"t_{disch}=R_{bleed}\,C_{X,total}\,\ln(V_{peak}/V_{safe})"], number="10.8", ch=CH)
+    _rb = r.get("r_bleed_ohm") or 0.0
+    _vpk = r.get("xcap_vpeak") or 0.0
+    _vsf = r.get("xcap_vsafe") or 0.0
+    _tdis = r.get("xcap_discharge_s")
+    if _tdis is not None and _rb:
+        _sized = "sized to the discharge limit" if r.get("r_bleed_sized") else "as specified by the designer"
+        _W(f"<b>Worked.</b> With R<sub>bleed</sub> = {_f(_rb/1e3,0)} k{_OHM} ({_sized}) and "
+           f"C<sub>X,total</sub> = {_f(r['c_x']*1e6,2)} {_MU}F, the X-caps drain from the rectified "
+           f"peak V<sub>peak</sub> = {_f(_vpk,0)} V to the touch-safe V<sub>safe</sub> = {_f(_vsf,0)} V in "
+           f"t = R&#183;C&#183;ln(V<sub>peak</sub>/V<sub>safe</sub>) = <b>{_f(_tdis,2)} s</b> "
+           f"(NOT the RC time constant &#964; = {_f(_rb*r['c_x'],2)} s). The standard's limit is 1 s; "
+           + ("this <b>meets</b> the rule." if _tdis <= 1.0 + 1e-9 else
+              "this <b>exceeds</b> the rule — lower R<sub>bleed</sub>.")
+           )
+    else:
+        _W("<b>Worked.</b> X-cap discharge must be verified — provide a bleeder resistor so the X-caps drain "
+           "below the safe voltage within the standard's time limit.")
 
     # ── 10.9 leakage ──
     step_h(story, "10.9", "Leakage (Touch) Current — Normal + Single Fault", CH)
@@ -315,18 +340,30 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
         "Y-capacitors conduct a small line-frequency current from line to protective earth; the safety "
         "standard caps this touch current for the equipment's protection class, checked under both normal "
         "and single-fault (open-neutral) conditions.", CH)
-    eq_box(story, [r"I_{leak}=2\pi f_{line}\,V\,C_{Y,total}\leq I_{lim}"], number="10.9", ch=CH)
-    _leak_ok = max(r["leakage_actual_A"], r["leak_fault_A"]) <= r["leakage_limit_A"]
-    data_table(story, "10.9", "Earth-Leakage Check", "Evaluated at the worst line corner and frequency.",
+    eq_box(story, [r"I_{leak}=2\pi f_{line}\,V\,C_{Y,total}(1+\delta_{Cy})\leq I_{lim}"], number="10.9", ch=CH)
+    _lim = r["leakage_limit_A"]
+    _leak_ok = max(r["leakage_actual_A"], r["leak_fault_A"]) <= _lim
+    _ytol = r.get("leak_ycap_tol", 0.0)
+    _fw = r.get("leak_fline_hz", 0.0)
+    _risk = r["leakage_actual_A"] > 0.90 * _lim and _leak_ok      # within 10% of the ceiling
+    body(story,
+        f"Evaluated at the WORST case: C<sub>Y</sub> at +{_f(_ytol*100,0)}% tolerance and the highest line "
+        f"frequency ({_f(_fw,0)} Hz) at maximum line voltage — not the nominal corner.", CH)
+    data_table(story, "10.9", "Earth-Leakage Check (worst case)",
+        f"C<sub>Y</sub> +{_f(_ytol*100,0)}% tolerance, {_f(_fw,0)} Hz, max line voltage.",
         ["Condition", "Current", "Limit", "Verdict"],
-        [["Normal", f"{_f(r['leakage_actual_A']*1e3,2)} mA", f"{_f(r['leakage_limit_A']*1e3,2)} mA",
-          "PASS" if r['leakage_actual_A'] <= r['leakage_limit_A'] else "OVER"],
-         ["Single fault (open neutral)", f"{_f(r['leak_fault_A']*1e3,2)} mA", f"{_f(r['leakage_limit_A']*1e3,2)} mA",
-          "PASS" if r['leak_fault_A'] <= r['leakage_limit_A'] else "OVER"]],
+        [["Normal", f"{_f(r['leakage_actual_A']*1e3,2)} mA", f"{_f(_lim*1e3,2)} mA",
+          ("OVER" if r['leakage_actual_A'] > _lim else ("FAIL-RISK" if _risk else "PASS"))],
+         ["Single fault (open neutral)", f"{_f(r['leak_fault_A']*1e3,2)} mA", f"{_f(_lim*1e3,2)} mA",
+          "PASS" if r['leak_fault_A'] <= _lim else "OVER"]],
         col_widths=[CW*0.40, CW*0.22, CW*0.20, CW*0.18], ch=CH)
     if not _leak_ok:
-        annotation(story, "PITFALL", "Leakage exceeds the class limit — reduce Y-capacitance and recover CM "
-                   "margin by source reduction (Section 10.6), or re-select a lower protection class.", CH)
+        annotation(story, "PITFALL", "Worst-case leakage exceeds the class limit — reduce Y-capacitance and "
+                   "recover CM margin by source reduction (Section 10.6), or re-select a lower protection "
+                   "class.", CH)
+    elif _risk:
+        annotation(story, "PITFALL", "Worst-case leakage is within 10% of the class limit — FAIL-RISK. There "
+                   "is little headroom against Y-cap/line tolerance; tighten the Y-cap budget.", CH)
 
     # ── 10.10 component schedule ──
     step_h(story, "10.10", "Component Schedule (Netlist, Mains → Converter)", CH)
@@ -341,7 +378,8 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
          ["R_d + L_d", f"{_f(r['damp_r'],2)} {_OHM} + {_f(r['damp_l']*1e6,1)} {_MU}H", "series-R-L damping across L_DM"],
          ["L_CM", ("&#8734;" if _linf else f"{_f(r['l_cm']*1e3,2)} mH ({r['cm_stages']} stage)"), "CM choke"],
          ["C_Y (Y2)", f"{_f(r['c_y_emi_total']*1e9,2)} nF total ({_f(_cy_each,2)} nF each)", "CM, line/neutral-to-PE"],
-         ["R_bleed", (f"{_f(r['xcap_discharge_s'],2)} s discharge" if r.get('xcap_discharge_s') is not None else "set per Sec. 10.8"), "X-cap bleeder"]],
+         ["R_bleed", (f"{_f((r.get('r_bleed_ohm') or 0)/1e3,0)} k{_OHM} ({_f(r['xcap_discharge_s'],2)} s discharge)"
+                      if r.get('xcap_discharge_s') is not None else "set per Sec. 10.8"), "X-cap bleeder"]],
         col_widths=[CW*0.24, CW*0.36, CW*0.40], ch=CH)
 
     # ── 10.11 loss ──
@@ -403,7 +441,8 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
                    r"f_c=\dfrac{1}{2\pi\sqrt{LC}},\quad C_X=\dfrac{1}{(2\pi f_c)^2 L_{DM}},\quad "
                    r"L_{CM}=\dfrac{1}{(2\pi f_c)^2\,2C_Y}",
                    r"\zeta=\dfrac{R}{2}\sqrt{C/L}\geq 0.707,\qquad R_n=\dfrac{V_{in}^2}{P_{in}}",
-                   r"R_{bleed}\leq\dfrac{-t}{C_X\ln(V_{safe}/V_{peak})},\qquad I_{leak}=2\pi f V C_{Y,total}"],
+                   r"R_{bleed}\leq\dfrac{t_{lim}}{C_X\ln(V_{peak}/V_{safe})},\qquad "
+                   r"I_{leak}=2\pi f V C_{Y,total}(1+\delta_{Cy})"],
            number="10.13", ch=CH)
 
     # ── 10.14 checklist ──
@@ -459,6 +498,79 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
         "defaults (each reported in the provenance). Confirm the common-mode-choke core (saturation + leakage "
         "inductance, which doubles as DM inductance) and re-run against a measured bare-EUT spectrum before "
         "certification.", CH)
+
+    # ── 10.B source-assumption provenance ──
+    step_h(story, "10.B", "Appendix — Source-Assumption Provenance", CH)
+    body(story,
+        "Every filter output traces to a converter-spec input or a named, overridable default. The "
+        "coupling-source assumptions (inter-winding C<sub>ps</sub>, node-to-chassis capacitance, dV/dt, "
+        "bulk-cap ESR/ESL) dominate the computed CM/DM spectra — mark each as ASSUMED (default), DATASHEET, "
+        "or MEASURED and replace the assumed ones with bench data before sign-off.", CH)
+    _prov = r.get("provenance") or {}
+    _prov_rows = [[k, str(v)[:150]] for k, v in _prov.items()]
+    if _prov_rows:
+        data_table(story, "10.B", "Derivation of Each Output (provenance)",
+            "Each row: the quantity and the input(s)/default it was derived from.",
+            ["Quantity", "Derivation / source"],
+            _prov_rows, col_widths=[CW*0.22, CW*0.78], ch=CH)
+    _assumed = [w for w in (r.get("warnings") or []) if "assumed" in w.lower() or "default" in w.lower()]
+    if _assumed:
+        annotation(story, "ASSUMED (replace with measured/datasheet)", " ".join(_assumed)[:900], CH)
+
+    # ── 10.C bench acceptance criteria ──
+    step_h(story, "10.C", "Bench Acceptance Criteria (sign-off)", CH)
+    body(story,
+        "The design is accepted only when the bench confirms the computed baseline. These are the pass/fail "
+        "gates for the compliance file:", CH)
+    _acc_margin = _f(r.get("margin_db", 6), 0)
+    data_table(story, "10.C", "Acceptance Criteria",
+        "Measured, not computed — each criterion is checked on the bench against the same corner used above.",
+        ["#", "Criterion", "Pass condition"],
+        [["1", "Conducted emissions (QP + AVG), DM+CM separated",
+          f"&#8805; {_acc_margin} dB margin to the class limit across 150 kHz&#8211;30 MHz"],
+         ["2", "Filter |Z_out| (DM) vs converter |Z_in|",
+          "&#8805; 6 dB Middlebrook margin through the DM resonance (no peaking-induced instability)"],
+         ["3", "Earth-leakage current (worst line + Cy tolerance)",
+          f"&#8804; {_f(r['leakage_limit_A']*1e3,2)} mA normal AND single-fault (open neutral)"],
+         ["4", "X-cap discharge after mains disconnect",
+          f"residual &#8804; {_f(r.get('xcap_vsafe') or 60,0)} V within the standard's 1 s limit"],
+         ["5", "Thermal soak at the two worst-current corners",
+          "choke/cap temperatures within rating; total loss consistent with the budget"],
+         ["6", "Radiated pre-scan (30 MHz&#8211;1 GHz)",
+          "no exceedance after cable/enclosure mitigation (full-compliance scan if marginal)"]],
+        col_widths=[CW*0.06, CW*0.44, CW*0.50], ch=CH)
+
+    # ── 10.D final component values (BOM) ──
+    step_h(story, "10.D", "Final Component Values (EMI-Filter BOM)", CH)
+    _rb_bom = r.get("r_bleed_ohm") or 0.0
+    _tdis_bom = r.get("xcap_discharge_s")
+    _bom = [
+        ["C_X (X2)", f"{_f(r['c_x']*1e6,3)} {_MU}F", f"{r['dm_stages']} stage", "DM, line-to-line",
+         "sized to practical max"],
+        ["L_DM", f"{_f(r['l_dm']*1e6,1)} {_MU}H", f"{r['dm_stages']} stage", "DM choke",
+         "grown to ABCD margin"],
+        ["R_d", f"{_f(r['damp_r'],2)} {_OHM}", "1", "series-R-L damping", "grid-searched"],
+        ["L_d", f"{_f(r['damp_l']*1e6,1)} {_MU}H", "1", "damping branch (&#8776; L_DM)", "computed"],
+        ["L_CM", ("&#8734;" if _linf else f"{_f(r['l_cm']*1e3,2)} mH"), f"{r['cm_stages']} stage",
+         "CM choke", "grown to ABCD margin"],
+        ["C_Y (Y2)", f"{_f(r['c_y_emi_total']*1e9,2)} nF total", f"{_f(r['c_y_emi_total']*1e9/2,2)} nF each",
+         "CM, line/neutral-to-PE", "leakage-bounded (worst case)"],
+        ["R_bleed", f"{_f(_rb_bom/1e3,0)} k{_OHM}", ("&#8212;" if _tdis_bom is None else f"{_f(_tdis_bom,2)} s"),
+         "X-cap discharge", ("sized to limit" if r.get("r_bleed_sized") else "designer")],
+    ]
+    data_table(story, "10.D", "All EMI-Filter Component Values",
+        "Complete synthesized bill of materials for the conducted-EMI filter. Safety caps are X2 (line-line) "
+        "and Y2 (line-earth); magnetics are calculated targets — confirm saturation/DCR/SRF against vendor "
+        "data before ordering.",
+        ["Ref", "Value", "Config / each", "Function", "Basis"],
+        _bom, col_widths=[CW*0.14, CW*0.18, CW*0.20, CW*0.28, CW*0.20], ch=CH)
+    body(story,
+        f"<b>Summary.</b> Total filter loss <b>{_f(r['loss_total_w'],1)} W</b> at {_f(r['loss_worst_vac'],0)} V; "
+        f"worst-case earth leakage <b>{_f(r['leakage_actual_A']*1e3,2)} mA</b> of "
+        f"{_f(r['leakage_limit_A']*1e3,2)} mA; delivered margins DM {_f(r['dm_margin_db'],1)} dB / "
+        f"CM {_f(r['cm_margin_db'],1)} dB / Middlebrook {_f(r['stability_margin_db'],1)} dB &#8658; "
+        f"<b>{'FEASIBLE' if r['feasible'] else 'INFEASIBLE'}</b>. Protection parts (fuse / MOV / NTC / GDT) "
+        "are requirements-driven — see Section 10.8.", CH)
 
 
 def _doc(target):
