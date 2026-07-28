@@ -574,6 +574,45 @@ def _gdt_label(rec):
     return f"{rec.get('mfr') or ''} {rec.get('part_number') or ''}".strip() + tail
 
 
+def screen_table_gdt(gs, top: int = 12):
+    """Structured GDT candidate screen for the common-mode paths, per the review's program logic:
+    no-fire (min sparkover after tolerance vs swelled line peak), 8/20 surge-current class vs the design
+    target, and dynamic (impulse) sparkover — the last is DATA MISSING in the combined export, so it is
+    flagged, never assumed. Follow-current / fail-short are spec-level safety gates (see the engine).
+    Returns [] when no live DB."""
+    recs = load_gdt()
+    if not recs:
+        return []
+    from . import gdt_surge_select as gdt
+    _, _, i_req = gdt.resolve_stress(gs)
+    i_req = i_req or 0.0
+    BIG = 1e9
+    scored = []
+    for rec in recs:
+        v_min = rec.get("v_spark_min")
+        if v_min is None and rec.get("v_spark_nom") is not None and rec.get("tol_low_pct") is not None:
+            v_min = rec["v_spark_nom"] * (1.0 + rec["tol_low_pct"] / 100.0)
+        v_max = rec.get("v_spark_max")
+        imax = rec.get("imax_impulse")
+        nf = gdt.no_fire(gs, v_min)
+        sc = gdt.surge_current(gs, i_req, imax)
+        ds = gdt.dynamic_sparkover(gs, rec.get("v_impulse_spark"), v_max)
+        reasons = [nf["note"], sc["note"], "dynamic sparkover: " + ds["note"]]
+        ok = (nf["ok"] is True) and (sc["ok"] is True)     # ds unknown -> not a pass-blocker but flagged
+        row = {"label": _gdt_label(rec), "part_number": rec.get("part_number"), "mfr": rec.get("mfr"),
+               "v_spark_nom": rec.get("v_spark_nom"), "v_spark_min": v_min, "v_spark_max": v_max,
+               "tolerance": rec.get("tolerance"), "imax_impulse": imax, "poles": rec.get("poles"),
+               "fail_short": rec.get("fail_short"), "package": rec.get("package"),
+               "impulse_spark": rec.get("v_impulse_spark"), "datasheet_url": rec.get("datasheet_url"),
+               "no_fire_ok": nf["ok"], "surge_ok": sc["ok"], "dynamic_status": "DATA MISSING" if ds["ok"] is None else "ok",
+               "ok": ok, "reasons": reasons}
+        # rank: no-fire pass first, then smallest sufficient sparkover (fires earliest above no-fire), then highest current
+        nf_tier = 0 if nf["ok"] else (2 if nf["ok"] is None else 1)
+        scored.append(((nf_tier, 0 if sc["ok"] else 1, rec.get("v_spark_nom") or BIG, -(imax or 0)), row))
+    scored.sort(key=lambda x: x[0])
+    return [row for _, row in scored[:top]]
+
+
 if __name__ == "__main__":
     print("ingesting ICL database…", build_all(), "parts;  local copy + cache under", _DATA)
     print("ingesting MOV database…", build_mov(), "parts (0 = no filled vendor file yet; template ignored)")

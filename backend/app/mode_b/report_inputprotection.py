@@ -16,7 +16,7 @@ import io
 from app.mode_b.doc_report_builder import (
     chapter_splash, step_h, sub_h, body, eq_box, data_table, annotation, CW,
 )
-from app.mode_b.inputprotection.adapter import calculate_ntc, calculate_mov
+from app.mode_b.inputprotection.adapter import calculate_ntc, calculate_mov, calculate_gdt
 
 _MU = "&#181;"; _DEG = "&#176;"; _OHM = "&#937;"
 
@@ -431,7 +431,8 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
          "9.5 Performance criterion — A/B/C pass-fail",
          "9.6 Candidate datasheet screen (governing path)",
          "9.6.1 Fuse / thermal coordination (fail-short safety)",
-         "9.7 Compliance summary (certification record)"])
+         "9.7 Compliance summary (certification record)",
+         "9.8 Common-mode surge diversion (GDT) — recommendation, no-fire, follow-current, fail-short"])
 
     # ── 9.1 ──
     step_h(story, "9.1", "Compliance Basis", CH)
@@ -664,6 +665,72 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
          ["Fuse / fail-short coordination", _fz_cell],
          ["Coordination verdict", verdict]],
         col_widths=[CW*0.42, CW*0.58], ch=CH)
+
+    # ── 9.8 GDT (common-mode surge diverter) ──
+    _build_gdt_section(story, design, opts, CH)
+
+
+def _build_gdt_section(story, design, opts, CH):
+    """§9.8 — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
+    class, candidate screen, and the follow-current / fail-short safety checks (with DATA-MISSING gates)."""
+    g = calculate_gdt(design, opts or {}, environment=(opts or {}).get("environment"))
+    rec = g.get("required") or {}; sN = g.get("stress") or {}
+    fc = g.get("follow_current") or {}; fs = g.get("fail_short") or {}
+    gc = g.get("candidates") or []
+
+    step_h(story, "9.8", "Common-Mode Surge Diversion (GDT)", CH)
+    body(story,
+        "A gas-discharge tube is not a precision clamp — it is a high-current common-mode surge "
+        "<b>diverter</b>. The MOV controls the fast/residual voltage; once the GDT fires it carries the "
+        "large line/neutral-to-earth surge current. Whether a GDT is needed follows from the common-mode "
+        "surge level and the install environment.", CH)
+    _rq = "REQUIRED" if rec.get("required") else "OPTIONAL"
+    annotation(story, f"RECOMMENDATION — {rec.get('recommend','MOV-only')} ({_rq})",
+        rec.get("reason", "") + " The designer may accept this or force MOV-only / MOV+GDT.", CH)
+
+    # 9.8.1 stress + no-fire
+    sub_h(story, "9.8.1", "No-Fire & Surge-Current Sizing", CH)
+    eq_box(story, [r"V_{spark,min}>V_{line,pk}\cdot K,\qquad I_{GDT}\geq K_{margin}\cdot\dfrac{V_{LE}}{Z_{cm}}"],
+           number="9.8", ch=CH)
+    body(story,
+        f"<b>Worked.</b> Common-mode surge V<sub>LE</sub> = {_f(sN.get('v_le'),0)} V through Z<sub>cm</sub> "
+        f"gives I<sub>sc</sub> = {_f(sN.get('i_sc'),0)} A; with the design margin the target is "
+        f"I<sub>GDT</sub> &#8805; <b>{_f(sN.get('i_required'),0)} A</b> (prefer a standard "
+        f"{_f(sN.get('preferred_class_A'),0)} A class). The GDT must NOT fire on the line: minimum "
+        f"sparkover (after tolerance) must exceed <b>{_f(sN.get('no_fire_need_V'),0)} V</b> "
+        "(line peak &#215; no-fire margin).", CH)
+
+    # 9.8.2 candidate screen
+    sub_h(story, "9.8.2", "Candidate GDT Screen", CH)
+    if gc:
+        def _v(x, u=""):
+            return (f"{_f(x,0)}{u}" if x is not None else "&#8212;")
+        data_table(story, "9.8", "Vendor GDT Screen (common-mode)",
+            "No-fire (min sparkover vs line peak) and 8/20 surge class from the live database. Dynamic "
+            "(impulse) sparkover is DATA MISSING in the export — flagged, never assumed.",
+            ["Part", "V<sub>spark</sub> nom/min", "I<sub>8/20</sub>", "Poles", "No-fire", "Surge", "Dyn.spark", "Verdict"],
+            [[str(c.get("part_number") or c["label"])[:18],
+              f"{_v(c.get('v_spark_nom'))}/{_v(c.get('v_spark_min'))}", _v(c.get("imax_impulse"), "A"),
+              _v(c.get("poles")), ("&#10003;" if c.get("no_fire_ok") else ("&#8212;" if c.get("no_fire_ok") is None else "&#10007;")),
+              ("&#10003;" if c.get("surge_ok") else "&#10007;"), c.get("dynamic_status", "&#8212;"),
+              "PASS" if c["ok"] else "FAIL"] for c in gc[:10]],
+            col_widths=[CW*0.19, CW*0.16, CW*0.10, CW*0.08, CW*0.11, CW*0.09, CW*0.16, CW*0.11], ch=CH)
+    else:
+        body(story, "<i>(no GDT catalog available)</i>", CH)
+
+    # 9.8.3 follow-current + fail-short safety
+    sub_h(story, "9.8.3", "Follow-Current & Fail-Short Safety", CH)
+    body(story,
+        "After the surge the AC source can sustain the arc (follow current), and a GDT can eventually fail "
+        "short. On an L/N-to-PE GDT both must be proven safe — self-extinction or fuse clearing — or the "
+        "part cannot be signed off.", CH)
+    annotation(story, "FOLLOW-CURRENT" + (" — OK" if fc.get("ok") else " — FAIL / DATA MISSING"), fc.get("note", ""), CH)
+    annotation(story, "FAIL-SHORT" + (" — OK" if fs.get("ok") else " — FAIL / DATA MISSING"), fs.get("note", ""), CH)
+    annotation(story, "MOV + GDT COORDINATION",
+        "Staged protection: the MOV limits the initial/residual voltage while the GDT diverts the high "
+        "common-mode current once it fires. Verify MOV MCOV vs continuous L-N voltage, GDT minimum "
+        "sparkover vs continuous L/N-PE voltage, MOV clamp vs downstream device limits, GDT impulse "
+        "sparkover vs insulation withstand, and the follow-current / fail-short fuse clearing above.", CH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

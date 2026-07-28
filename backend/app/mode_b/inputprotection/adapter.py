@@ -218,6 +218,57 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
     })
 
 
+# ── GDT surge diverter (common-mode) ──────────────────────────────────────────
+def build_gdt_spec(design: dict, opts: dict | None = None):
+    from . import gdt_surge_select as gdt
+    opts = opts or {}
+    level = opts.get("level", 3)
+    if isinstance(level, str):
+        level = int(level) if level.strip().isdigit() else level.strip().upper()
+    _o = lambda k: (float(opts[k]) if opts.get(k) not in (None, "") else None)
+    return gdt.GdtSpec(
+        vac_max=float(design.get("vin_max", 264)),
+        vac_nom=float(opts.get("vac_nom", 230)),
+        line_swell=float(opts.get("line_swell", 1.0)),
+        k_line_margin=float(opts.get("k_line_margin", 1.20)),
+        level=level,
+        custom_v_le=_o("custom_v_le"),
+        imax_margin=float(opts.get("imax_margin", 3.0)),
+        insulation_withstand_V=_o("insulation_withstand_V"),
+        follow_current_extinguish_A=_o("follow_current_extinguish_A"),
+        mains_fault_current_A=_o("mains_fault_current_A"),
+        fuse_i2t_rating_A2s=_o("fuse_i2t_rating_A2s"),
+        fuse_rating_A=_o("fuse_rating_A"),
+    )
+
+
+def calculate_gdt(design: dict, opts: dict | None = None, environment: str | None = None) -> dict:
+    """Screen GDTs for the common-mode paths per IEC 61000-4-5 + the Ch9 review: no-fire, surge-current
+    class, dynamic (impulse) sparkover [DATA MISSING in the export], follow-current & fail-short safety,
+    and a level/environment-driven MOV-vs-MOV+GDT recommendation. Returns {} shape with DATA-MISSING gates."""
+    from . import gdt_surge_select as gdt
+    from . import database as _db
+    gs = build_gdt_spec(design, opts)
+    gdt.validate(gs)
+    v_le, i_sc, i_req = gdt.resolve_stress(gs)
+    rec = gdt.gdt_required(gs, environment=environment)
+    follow = gdt.follow_current(gs)
+    fshort = gdt.fail_short(gs)
+    try:
+        candidates = _db.screen_table_gdt(gs)
+    except Exception:
+        candidates = []
+    return _native({
+        "spec": gs, "environment": environment,
+        "required": rec,
+        "stress": {"v_le": v_le, "i_sc": i_sc, "i_required": i_req,
+                   "preferred_class_A": gdt.snap_gdt_class(i_req) if i_req else None,
+                   "no_fire_need_V": gdt.v_line_peak(gs) * gs.k_line_margin},
+        "follow_current": follow, "fail_short": fshort,
+        "candidates": candidates,
+    })
+
+
 # ── reference smoke test:  python -m app.mode_b.inputprotection.adapter ──
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,

@@ -5410,3 +5410,31 @@ with named overridable defaults; missing datasheet fields stay DATA MISSING (nev
 Verified: MOV self-test passes; adapter smoke ok; Ch8/9 report builds (204 KB) with all new sections
 present; energy/overshoot/fuse/MCOV/criterion blocks compute. Suite 172/2. Next: Phase 3 (GDT engine + §9.8).
 Plan [[mov-gdt-review-plan]].
+
+## C151 — 2026-07-28 — Chapter 9 MOV+GDT review, Phase 3 (GDT engine + §9.8)
+
+Third phase: a full GDT (gas-discharge tube) common-mode surge-diverter path — engine, DB screen, adapter,
+and report §9.8 — with the review's DATA-MISSING safety gates. No hardcoding.
+- ENGINE (inputprotection/gdt_surge_select.py, NEW): GdtSpec + reuses LEVEL_TABLE/Z_COMMON_MODE from the MOV
+  engine. Functions: resolve_stress (I_sc=V_le/Z_cm, design target = margin×I_sc); no_fire (V_spark_min >
+  V_line_pk·K — uses the MINIMUM sparkover after tolerance, line-swell knob defaults 1.0); dynamic_sparkover
+  (let-through = max(impulse, DC-max) vs insulation withstand — DATA MISSING when the datasheet impulse
+  sparkover is absent, never assume the DC value clamps the fast edge); surge_current (8/20 class vs target);
+  follow_current + fail_short (L/N-PE safety: missing data => FAIL per review §16/§17, not a pass);
+  gdt_required (level+environment → MOV-only vs MOV+GDT recommendation). Self-test matches the review worked
+  example (600 V/480 min PASS @ 448 V need; 470 V/376 min FAIL).
+- DB (database.py): screen_table_gdt — structured candidate rows (sparkover nom/min/max, 8/20 class, poles,
+  fail-short, no-fire/surge verdicts, dynamic-sparkover DATA-MISSING flag), ranked no-fire-pass → sufficient
+  class → earliest sparkover.
+- ADAPTER (adapter.py): build_gdt_spec (threads opts) + calculate_gdt (stress, gdt_required recommendation,
+  follow-current/fail-short, candidate screen).
+- REPORT Ch9 (report_inputprotection.py): §9.8 Common-Mode Surge Diversion — MOV-vs-MOV+GDT recommendation
+  (REQUIRED/OPTIONAL) + reasoning, §9.8.1 no-fire & surge-current sizing (eq + worked), §9.8.2 vendor GDT
+  screen (no-fire/surge/dynamic-DATA-MISSING columns), §9.8.3 follow-current + fail-short safety + MOV+GDT
+  coordination checklist. TOC updated. (Fixed a \ge→\geq mathtext crash in the §9.8 eq.)
+- DOCUMENT AGENT: §9.8 flows through build_mov_story → build_inputprotection_report, so the combined
+  /documentation/generate-report Ch1-10 PDF now carries the GDT analysis too.
+Verified: GDT + MOV self-tests pass; calculate_gdt screens 172 parts (600 V/480 min no-fire PASS, 20 kA»500 A,
+dynamic sparkover DATA MISSING; L4/industrial→MOV+GDT required); Ch8/9 report builds (218 KB) with §9.8.
+Suite 172/2. Next: Phase 4 (level+environment recommendation UI, combined MOV-only vs MOV+GDT + GUI on the
+Input-Protection page). Plan [[mov-gdt-review-plan]].
