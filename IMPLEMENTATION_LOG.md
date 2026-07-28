@@ -5358,3 +5358,26 @@ pure-stdlib SVG generator (mirrors the NTC inrush_schematic.py pattern), in BOTH
 Suite 172/2; frontend typechecks; Ch10 report builds (501 KB) with both figures; both SVGs are well-formed
 XML and render through svglib; schematic endpoint returns 200 image/svg+xml for both views. EMI review-2
 COMPLETE (Phases A/B/C); Phase D (Monte-Carlo + radiated) is a later follow-up on the user's word.
+
+## C149 — 2026-07-27 — Chapter 9 MOV+GDT review, Phase 1 (vendor-DB wiring + DATA-MISSING gate)
+
+First phase of the MOV+GDT surge review (specs/Improvements/MOV/MOV_GDT_Complete_Surge_Protection_Review_
+Comments.pdf): wire the designer's two combined workbooks into the local input-protection DB and enforce the
+review's "reject candidates with missing datasheet fields, never silently pass" rule. No hardcoding.
+- DB (inputprotection/database.py): added _SURGE_SPEC (specs/Improvements/MOV). MOV ingest remapped to the
+  combined file's EXACT columns — MCOV (Maximum AC Volts), Varistor Voltage min/typ/max (= V_1mA + tolerance),
+  8/20 surge current, energy, capacitance, package→disc diameter — 1140 parts (legacy _pick fallbacks kept for
+  the old template). The max CLAMPING voltage (Vc@In) is NOT in the export → vc_imax=None. New GDT section
+  (ingest_gdt/build_gdt/load_gdt/options_gdt/_gdt_label) reads GDT_Combined_Database.xlsx — 172 parts: DC
+  sparkover nom/min/max, ±tolerance, 8/20 impulse current, poles, fail-short, package; the impulse (dynamic)
+  sparkover @ dv/dt and follow/hold current are NOT in the export → v_impulse_spark/follow_current=None.
+- DATA-MISSING gate (screen_catalog_mov): screens on the fields present (MCOV, 10-pulse-derated I_max survival
+  vs I_sc), and when Vc@In is absent the clamp/let-through verdict reads "DATA MISSING — cannot confirm
+  downstream margin" and FAILS Criterion A (ride-through) rather than passing silently. Records still rank
+  (pass-tier → best clamp / else highest survival margin). Missing MCOV/V_1mA/I_max → "incomplete record".
+- Local copies + JSON caches (MOV_Combined_Database.xlsx, GDT_Combined_Database.xlsx, mov.json, gdt.json) under
+  inputprotection/data/, same pattern as the ICL DB; `python -m ...database` builds all three.
+Verified: MOV 1140 parts (MCOV/V1ma/Imax/energy ~100%, Vc@In 0% = DATA MISSING), GDT 172 parts (sparkover/
+impulse-I 100%, impulse-sparkover/follow-current 0% = DATA MISSING); calculate_mov screens live vendor parts
+with correct DATA-MISSING clamp verdicts; MOV self-test passes; Ch8/9 report builds (182 KB). Suite 172/2.
+Next: Phase 2 (MOV energy/repetitive/fuse-I²t/layout/MCOV calcs). Plan [[mov-gdt-review-plan]].

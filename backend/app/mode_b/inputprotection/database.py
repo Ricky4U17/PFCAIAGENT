@@ -23,6 +23,8 @@ import os, re, json, shutil
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DATA = os.path.join(_HERE, "data")
 _SPEC = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "..", "specs", "Database"))
+# Surge-protection vendor workbooks (MOV + GDT) live under specs/Improvements/MOV.
+_SURGE_SPEC = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "..", "specs", "Improvements", "MOV"))
 _XLSX = "ICL_Database.xlsx"
 _JSON = "icl.json"
 
@@ -273,43 +275,71 @@ def rank(s, r, top: int = 12):
 # The TEMPLATE is NOT treated as a live source — only a filled `MOV_Database.xlsx` / `mov_varistors
 # .xlsx` counts — so until the designer drops a real file the richer built-in `MOV_CATALOG` stays
 # the fallback (no regression). The moment a real file lands, `screen_catalog_mov` goes live.
-_MOV_XLSX = ["MOV_Database.xlsx", "mov_varistors.xlsx"]     # live sources (TEMPLATE excluded)
+# Live vendor sources (TEMPLATE excluded). The designer's curated combined file is preferred.
+_MOV_XLSX = ["MOV_Combined_Database.xlsx", "MOV_Database.xlsx", "mov_varistors.xlsx"]
 _MOV_JSON = "mov.json"
 
 
-def _mov_src_path():
-    """A filled MOV workbook: local ./data copy first, else specs/. None if only the template exists."""
-    for name in _MOV_XLSX:
-        local = os.path.join(_DATA, name)
-        if os.path.exists(local):
-            return local
-    for name in _MOV_XLSX:
-        spec = os.path.join(_SPEC, name)
-        if os.path.exists(spec):
-            return spec
+def _first_existing(names, *dirs):
+    """First `dir/name` that exists, scanning dirs in order then names in order."""
+    for d in dirs:
+        for name in names:
+            p = os.path.join(d, name)
+            if os.path.exists(p):
+                return p
     return None
 
 
+def _mov_src_path():
+    """A filled MOV workbook: local ./data copy first, else the surge-spec / legacy specs folders."""
+    return _first_existing(_MOV_XLSX, _DATA, _SURGE_SPEC, _SPEC)
+
+
+def _pkg_diameter_mm(pkg):
+    """Disc diameter from a 'Disc 14mm' / 'Disc 10mm' package string (None if not a disc)."""
+    if not pkg:
+        return None
+    m = re.search(r"(\d+\.?\d*)\s*mm", str(pkg))
+    return float(m.group(1)) if m else None
+
+
 def ingest_mov(path=None):
+    """Normalize the MOV vendor workbook. The designer's MOV_Combined_Database.xlsx carries real
+    datasheet scalars by EXACT header (MCOV, varistor voltage min/typ/max = V_1mA + tolerance, 8/20
+    surge current, energy, capacitance, package); the max CLAMPING voltage (Vc @ In) is NOT exported,
+    so `vc_imax` stays None → the clamp/let-through check is DATA-LIMITED (never a silent pass). The
+    older _pick fallbacks keep the legacy template working."""
     src = path or _mov_src_path()
     if not src:
         return []
     out = []
     for r in _rows(src):
-        part = _pick(r, "part")
+        part = r.get("Mfr Part #") or _pick(r, "part")
         if not part:
             continue
+        v1ma = _num(r.get("Varistor Voltage Typ Numeric")) or _num(_pick(r, "v_1ma")) or _num(_pick(r, "1ma"))
+        v1ma_min = _num(r.get("Varistor Voltage Min Numeric"))
+        v1ma_max = _num(r.get("Varistor Voltage Max Numeric"))
+        pkg = r.get("Package / Case") or _pick(r, "package")
         out.append({
-            "mfr":           _pick(r, "manufacturer"),
+            "mfr":           r.get("Mfr") or _pick(r, "manufacturer"),
             "part_number":   part,
-            "mcov":          _num(_pick(r, "mcov")),
-            "v1ma":          _num(_pick(r, "v_1ma")) or _num(_pick(r, "1ma")),
-            "imax":          _num(_pick(r, "imax")),
-            "vc_imax":       _num(_pick(r, "vc", "imax")),
-            "energy_2ms_J":  _num(_pick(r, "energy")),
-            "diameter_mm":   _num(_pick(r, "diameter")),
-            "type":          _pick(r, "type"),
-            "datasheet_url": _pick(r, "datasheet"),
+            "series":        r.get("Series") or _pick(r, "series"),
+            "description":   r.get("Description") or _pick(r, "description"),
+            "mcov":          _num(r.get("Maximum AC Volts Numeric")) or _num(_pick(r, "mcov")),
+            "vdc_max":       _num(r.get("Maximum DC Volts Numeric")),
+            "v1ma":          v1ma,
+            "v1ma_min":      v1ma_min,
+            "v1ma_max":      v1ma_max,
+            "imax":          _num(r.get("Surge Current A Numeric")) or _num(_pick(r, "imax")),
+            "vc_imax":       _num(_pick(r, "vc", "imax")),   # absent in combined file → None (DATA MISSING)
+            "energy_2ms_J":  _num(r.get("Energy J Numeric")) or _num(_pick(r, "energy")),
+            "capacitance_pf": _num(r.get("Capacitance pF Numeric")),
+            "op_temp":       r.get("Operating Temperature"),
+            "package":       pkg,
+            "diameter_mm":   _pkg_diameter_mm(pkg) or _num(_pick(r, "diameter")),
+            "type":          r.get("Mounting Type") or _pick(r, "type"),
+            "datasheet_url": r.get("Datasheet") or _pick(r, "datasheet"),
         })
     return out
 
@@ -373,12 +403,15 @@ def screen_catalog_mov(s, gov, mcov_req, pol, top: int = 12):
     from . import mov_surge_select as mov
     v_drive = gov.v_oc + (mov.v_line_peak(s) if s.phase_superposition else 0.0)
     gate = s.device_absmax if pol.gate_uses_absmax else s.device_vds - pol.dev_margin_V
+    BIG = 1e9
     scored = []
     for rec in recs:
         mcov = rec.get("mcov"); v1ma = rec.get("v1ma")
         imax = rec.get("imax"); vc_max = rec.get("vc_imax")
-        if None in (mcov, v1ma, imax, vc_max):
-            scored.append(((2, 0.0), _mov_label(rec), False, ["incomplete record (needs MCOV/V_1mA/Imax/Vc)"]))
+        # Fields we MUST have to screen at all (MCOV / V-I anchor / survival current).
+        if None in (mcov, v1ma, imax):
+            scored.append(((3, BIG, 0.0), _mov_label(rec), False,
+                           ["incomplete record (needs MCOV / V_1mA / I_max 8/20)"]))
             continue
         reasons, ok = [], True
         if mcov < mcov_req:
@@ -387,21 +420,129 @@ def screen_catalog_mov(s, gov, mcov_req, pol, top: int = 12):
         if eff_imax < gov.i_sc:
             ok = False
             reasons.append(f"I_max {imax:g}A x{s.repetitive_derate:.2f} (10-pulse) = {eff_imax:.0f}A < I_sc {gov.i_sc:.0f}A")
-        a_eff = mov.effective_alpha(v1ma, vc_max, imax)
-        i_op, vc = mov.operating_point(v1ma, a_eff, v_drive, gov.z)
-        reasons.append(f"let-through ~{vc:.0f}V @ {i_op:.0f}A (drive {v_drive:.0f}V); gate {gate:.0f}V [crit {pol.name}]")
-        if vc > gate:
-            ok = False
-            reasons.append(f"clamp {vc:.0f}V > gate {gate:.0f}V -> "
-                           + ("cannot ride through (criterion A)" if pol.ride_through else "FAIL even for survival"))
-        elif s.device_vds - pol.dev_margin_V < vc <= gate and not pol.ride_through:
-            reasons.append(f"survives but bus disturbed -> unit resets (allowed under criterion {pol.name})")
-        # rank: passing first, then lowest let-through (best clamp)
-        scored.append(((0 if ok else 1, vc), _mov_label(rec), ok, reasons))
+        else:
+            reasons.append(f"survival OK: I_max {imax:g}A x{s.repetitive_derate:.2f} = {eff_imax:.0f}A >= I_sc {gov.i_sc:.0f}A")
+        # Clamp / let-through gate needs the datasheet max-clamping voltage (Vc @ In) to fit alpha.
+        # The combined vendor file does not export it → DATA MISSING (never a silent Criterion-A pass).
+        if vc_max is None:
+            clamp_rank = BIG
+            reasons.append("clamp/let-through: DATA MISSING (no Vc@In in DB) — cannot confirm "
+                           "downstream margin; add datasheet max-clamping voltage to the workbook")
+            if pol.ride_through:
+                ok = False      # Criterion A cannot be proven without the clamp point
+        else:
+            a_eff = mov.effective_alpha(v1ma, vc_max, imax)
+            i_op, vc = mov.operating_point(v1ma, a_eff, v_drive, gov.z)
+            clamp_rank = vc
+            reasons.append(f"let-through ~{vc:.0f}V @ {i_op:.0f}A (drive {v_drive:.0f}V); gate {gate:.0f}V [crit {pol.name}]")
+            if vc > gate:
+                ok = False
+                reasons.append(f"clamp {vc:.0f}V > gate {gate:.0f}V -> "
+                               + ("cannot ride through (criterion A)" if pol.ride_through else "FAIL even for survival"))
+            elif s.device_vds - pol.dev_margin_V < vc <= gate and not pol.ride_through:
+                reasons.append(f"survives but bus disturbed -> unit resets (allowed under criterion {pol.name})")
+        # rank: pass first (tier 0/1), then best clamp (or, when clamp unknown, highest survival margin)
+        pass_tier = 0 if ok else (2 if vc_max is None else 1)
+        scored.append(((pass_tier, clamp_rank, -eff_imax), _mov_label(rec), ok, reasons))
     scored.sort(key=lambda x: x[0])
     return [(name, ok, reasons) for _, name, ok, reasons in scored[:top]]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  GDT (gas-discharge tube) surge-diverter database
+# ══════════════════════════════════════════════════════════════════════════════
+# The designer's GDT_Combined_Database.xlsx carries, by EXACT header: DC sparkover nom/min/max, the
+# ±tolerance (low/high %), the 8/20 impulse discharge current, pole count, a fail-short flag, package,
+# and a datasheet URL. Two review-mandated fields are NOT in the export — the IMPULSE (dynamic)
+# sparkover at a stated dv/dt, and the FOLLOW/HOLD current — so `v_impulse_spark` and `follow_current`
+# stay None and the selector must treat them as DATA MISSING (a GDT on L-PE/N-PE without follow-current
+# evidence is a FAIL, not a PASS — review §16/§17), never silently pass.
+_GDT_XLSX = ["GDT_Combined_Database.xlsx", "GDT_Database.xlsx"]
+_GDT_JSON = "gdt.json"
+
+
+def _gdt_src_path():
+    return _first_existing(_GDT_XLSX, _DATA, _SURGE_SPEC, _SPEC)
+
+
+def ingest_gdt(path=None):
+    src = path or _gdt_src_path()
+    if not src:
+        return []
+    out = []
+    for r in _rows(src):
+        part = r.get("Mfr Part #") or _pick(r, "part")
+        if not part:
+            continue
+        out.append({
+            "mfr":            r.get("Mfr") or _pick(r, "manufacturer"),
+            "part_number":    part,
+            "description":    r.get("Description"),
+            "v_spark_nom":    _num(r.get("DC Sparkover Nom V Numeric")) or _num(_pick(r, "sparkover", "nom")),
+            "v_spark_min":    _num(r.get("DC Sparkover Min V Numeric")) or _num(_pick(r, "sparkover", "min")),
+            "v_spark_max":    _num(r.get("DC Sparkover Max V Numeric")) or _num(_pick(r, "sparkover", "max")),
+            "tolerance":      r.get("Tolerance"),
+            "tol_low_pct":    _num(r.get("Tolerance Low % Numeric")),
+            "tol_high_pct":   _num(r.get("Tolerance High % Numeric")),
+            "imax_impulse":   _num(r.get("Impulse Discharge Current A Numeric")) or _num(_pick(r, "impulse", "numer")),
+            "poles":          _num(r.get("Number of Poles")),
+            "fail_short":     r.get("Fail Short"),
+            "v_impulse_spark": None,        # NOT in export → DATA MISSING (impulse sparkover @ dv/dt)
+            "follow_current":  None,        # NOT in export → DATA MISSING (follow/hold current)
+            "package":        r.get("Package / Case") or _pick(r, "package"),
+            "mounting":       r.get("Mounting Type"),
+            "datasheet_url":  r.get("Datasheet") or _pick(r, "datasheet"),
+        })
+    return out
+
+
+def build_gdt():
+    """Refresh the local GDT workbook copy + JSON cache from the vendor file. 0 if none present."""
+    src = _gdt_src_path()
+    if not src:
+        return 0
+    os.makedirs(_DATA, exist_ok=True)
+    local = os.path.join(_DATA, os.path.basename(src))
+    if os.path.abspath(src) != os.path.abspath(local):
+        shutil.copyfile(src, local)
+    recs = ingest_gdt(local)
+    with open(os.path.join(_DATA, _GDT_JSON), "w", encoding="utf-8") as f:
+        json.dump(recs, f)
+    return len(recs)
+
+
+_GDT_CACHE = None
+def load_gdt():
+    global _GDT_CACHE
+    if _GDT_CACHE is None:
+        path = os.path.join(_DATA, _GDT_JSON)
+        if not os.path.exists(path):
+            if not _gdt_src_path():
+                _GDT_CACHE = []
+                return _GDT_CACHE
+            build_gdt()
+        with open(path, encoding="utf-8") as f:
+            _GDT_CACHE = json.load(f)
+    return _GDT_CACHE
+
+
+def options_gdt():
+    recs = load_gdt()
+    uniq = lambda key: sorted({(r.get(key) or "").strip() for r in recs if r.get(key)})
+    v = sorted({r["v_spark_nom"] for r in recs if r.get("v_spark_nom") is not None})
+    return {"manufacturers": uniq("mfr"), "mounting": uniq("mounting"), "sparkover_nom_V": v}
+
+
+def _gdt_label(rec):
+    bits = []
+    if rec.get("v_spark_nom") is not None: bits.append(f"{rec['v_spark_nom']:g}V DC-spark")
+    if rec.get("imax_impulse") is not None: bits.append(f"{rec['imax_impulse']:g}A 8/20")
+    if rec.get("poles") is not None: bits.append(f"{rec['poles']:g}-pole")
+    tail = f" — {', '.join(bits)}" if bits else ""
+    return f"{rec.get('mfr') or ''} {rec.get('part_number') or ''}".strip() + tail
 
 
 if __name__ == "__main__":
     print("ingesting ICL database…", build_all(), "parts;  local copy + cache under", _DATA)
     print("ingesting MOV database…", build_mov(), "parts (0 = no filled vendor file yet; template ignored)")
+    print("ingesting GDT database…", build_gdt(), "parts (0 = no filled vendor file yet)")
