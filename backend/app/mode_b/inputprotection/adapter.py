@@ -150,6 +150,14 @@ def build_mov_spec(design: dict, mosfet: dict | None = None, cap: dict | None = 
         pulse_count=int(opts.get("pulse_count", 10)),
         repetitive_derate=float(opts.get("repetitive_derate", 0.70)),
         phase_superposition=bool(opts.get("phase_superposition", True)),
+        # survival / coordination inputs (None -> engine's named defaults / DATA-MISSING gates)
+        mov_energy_derate=float(opts.get("mov_energy_derate", 0.80)),
+        lead_inductance_nH=float(opts.get("lead_inductance_nH", 20.0)),
+        surge_current_rise_us=float(opts.get("surge_current_rise_us", 8.0)),
+        is_tmov=bool(opts.get("is_tmov", False)),
+        mains_fault_current_A=(float(opts["mains_fault_current_A"]) if opts.get("mains_fault_current_A") not in (None, "") else None),
+        fuse_i2t_rating_A2s=(float(opts["fuse_i2t_rating_A2s"]) if opts.get("fuse_i2t_rating_A2s") not in (None, "") else None),
+        fuse_rating_A=(float(opts["fuse_rating_A"]) if opts.get("fuse_rating_A") not in (None, "") else None),
     )
 
 
@@ -172,9 +180,28 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
                         "imax_required": t.imax_required, "energy_8_20": t.energy_8_20,
                         "device_gate": t.device_gate, "coord": t.coord_status, "cap_status": t.cap_status})
     screen = []
+    candidates = []
     if gov:
         for name, ok, reasons in mov.screen_catalog(s, gov, mcov_req, pol):
             screen.append({"name": name, "ok": bool(ok), "reasons": reasons})
+        try:
+            from . import database as _db
+            candidates = _db.screen_table_mov(s, gov, mcov_req, pol)
+        except Exception:
+            candidates = []
+
+    # ---- Phase-2 survival + coordination (review Part A additions) ----
+    gov_t = next((t for t in targets if t["path"] == (gov.name if gov else None)), targets[0] if targets else None)
+    # datasheet energy rating: best available among the screened candidates (else None -> DATA MISSING)
+    e_rating = next((c["energy_2ms_J"] for c in candidates if c.get("energy_2ms_J")), None)
+    energy = overshoot = fuse = None
+    if gov and gov_t:
+        energy = mov.energy_survival(s, gov_t["vc"], gov_t["i_op"], pol, e_rating_J=e_rating)
+        overshoot = mov.layout_overshoot(s, gov_t["i_op"], gov_t["vc"])
+        fuse = mov.fuse_coordination(s, gov)
+    mcov_cmp = mov.mcov_comparison(s)
+    crit_matrix = mov.criterion_matrix(s, gov_t["vc"]) if gov_t else []
+
     return _native({
         "spec": s,
         "stress": {"v_le": v_le, "v_ll": v_ll, "governing": (gov.name if gov else None),
@@ -184,7 +211,9 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
         "criterion": {"name": pol.name, "ride_through": pol.ride_through,
                       "gate_uses_absmax": pol.gate_uses_absmax, "dev_margin_V": pol.dev_margin_V,
                       "energy_safety": pol.energy_safety},
-        "targets": targets, "catalog": screen,
+        "targets": targets, "catalog": screen, "candidates": candidates,
+        "energy": energy, "overshoot": overshoot, "fuse_coord": fuse,
+        "mcov_comparison": mcov_cmp, "criterion_matrix": crit_matrix,
         "sources": {"vac_max": s.vac_max, "device_vds": s.device_vds, "cap_v_rating": s.cap_v_rating},
     })
 

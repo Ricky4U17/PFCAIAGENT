@@ -397,6 +397,26 @@ def screen_catalog_mov(s, gov, mcov_req, pol, top: int = 12):
     repetitive derate vs I_sc, and the let-through solved on the part's OWN V-I curve (per-part alpha
     backed out of V_1mA / Vc@Imax) against the criterion device gate.
     """
+    rows = screen_table_mov(s, gov, mcov_req, pol, top)
+    return [(r["label"], r["ok"], r["reasons"]) for r in rows]
+
+
+def _mcov_from_text(*texts):
+    """Parse an 'NNN Vac' MCOV token from a description / part string (part-# consistency check)."""
+    for t in texts:
+        if not t:
+            continue
+        m = re.search(r"(\d{3,4})\s*v\s*ac", str(t).lower())
+        if m:
+            return float(m.group(1))
+    return None
+
+
+def screen_table_mov(s, gov, mcov_req, pol, top: int = 12):
+    """Structured MOV candidate screen for the governing path — the expanded datasheet-column table the
+    review asks for. Each row carries the real scalars (MCOV, V_1mA + tolerance, 8/20 I_max, energy,
+    capacitance, package/size), the survival + clamp verdicts, a part-number-vs-MCOV consistency flag,
+    and the overall verdict/reasons. Returns [] when no live DB (engine falls back to the builtin)."""
     recs = load_mov()
     if not recs:
         return []
@@ -408,32 +428,44 @@ def screen_catalog_mov(s, gov, mcov_req, pol, top: int = 12):
     for rec in recs:
         mcov = rec.get("mcov"); v1ma = rec.get("v1ma")
         imax = rec.get("imax"); vc_max = rec.get("vc_imax")
-        # Fields we MUST have to screen at all (MCOV / V-I anchor / survival current).
+        row = {"label": _mov_label(rec), "part_number": rec.get("part_number"), "mfr": rec.get("mfr"),
+               "mcov": mcov, "v1ma": v1ma, "v1ma_min": rec.get("v1ma_min"), "v1ma_max": rec.get("v1ma_max"),
+               "imax": imax, "energy_2ms_J": rec.get("energy_2ms_J"),
+               "capacitance_pf": rec.get("capacitance_pf"), "package": rec.get("package"),
+               "diameter_mm": rec.get("diameter_mm"), "datasheet_url": rec.get("datasheet_url"),
+               "clamp_vc": None, "clamp_status": "DATA MISSING", "part_num_consistent": None}
         if None in (mcov, v1ma, imax):
-            scored.append(((3, BIG, 0.0), _mov_label(rec), False,
-                           ["incomplete record (needs MCOV / V_1mA / I_max 8/20)"]))
-            continue
+            row.update(ok=False, reasons=["incomplete record (needs MCOV / V_1mA / I_max 8/20)"])
+            scored.append(((3, BIG, 0.0), row)); continue
         reasons, ok = [], True
         if mcov < mcov_req:
             ok = False; reasons.append(f"MCOV {mcov:g} < required {mcov_req:.0f} Vac")
         eff_imax = imax * s.repetitive_derate
+        row["imax_derated"] = eff_imax
         if eff_imax < gov.i_sc:
             ok = False
             reasons.append(f"I_max {imax:g}A x{s.repetitive_derate:.2f} (10-pulse) = {eff_imax:.0f}A < I_sc {gov.i_sc:.0f}A")
         else:
             reasons.append(f"survival OK: I_max {imax:g}A x{s.repetitive_derate:.2f} = {eff_imax:.0f}A >= I_sc {gov.i_sc:.0f}A")
-        # Clamp / let-through gate needs the datasheet max-clamping voltage (Vc @ In) to fit alpha.
-        # The combined vendor file does not export it → DATA MISSING (never a silent Criterion-A pass).
+        # part-number consistency: any 'NNN Vac' token in the description/part must match the MCOV class.
+        tok = _mcov_from_text(rec.get("description"), rec.get("part_number"))
+        if tok is not None:
+            row["part_num_consistent"] = abs(tok - mcov) <= 1
+            if not row["part_num_consistent"]:
+                ok = False
+                reasons.append(f"part-# inconsistency: description implies {tok:g} Vac vs MCOV {mcov:g} Vac")
+        # clamp / let-through — needs the datasheet Vc@In; absent in the combined export -> DATA MISSING.
         if vc_max is None:
             clamp_rank = BIG
-            reasons.append("clamp/let-through: DATA MISSING (no Vc@In in DB) — cannot confirm "
-                           "downstream margin; add datasheet max-clamping voltage to the workbook")
+            reasons.append("clamp/let-through: DATA MISSING (no Vc@In in DB) — cannot confirm downstream "
+                           "margin; add datasheet max-clamping voltage to the workbook")
             if pol.ride_through:
-                ok = False      # Criterion A cannot be proven without the clamp point
+                ok = False
         else:
             a_eff = mov.effective_alpha(v1ma, vc_max, imax)
             i_op, vc = mov.operating_point(v1ma, a_eff, v_drive, gov.z)
             clamp_rank = vc
+            row["clamp_vc"] = vc; row["clamp_status"] = "computed"
             reasons.append(f"let-through ~{vc:.0f}V @ {i_op:.0f}A (drive {v_drive:.0f}V); gate {gate:.0f}V [crit {pol.name}]")
             if vc > gate:
                 ok = False
@@ -441,11 +473,11 @@ def screen_catalog_mov(s, gov, mcov_req, pol, top: int = 12):
                                + ("cannot ride through (criterion A)" if pol.ride_through else "FAIL even for survival"))
             elif s.device_vds - pol.dev_margin_V < vc <= gate and not pol.ride_through:
                 reasons.append(f"survives but bus disturbed -> unit resets (allowed under criterion {pol.name})")
-        # rank: pass first (tier 0/1), then best clamp (or, when clamp unknown, highest survival margin)
+        row.update(ok=ok, reasons=reasons)
         pass_tier = 0 if ok else (2 if vc_max is None else 1)
-        scored.append(((pass_tier, clamp_rank, -eff_imax), _mov_label(rec), ok, reasons))
+        scored.append(((pass_tier, clamp_rank, -eff_imax), row))
     scored.sort(key=lambda x: x[0])
-    return [(name, ok, reasons) for _, name, ok, reasons in scored[:top]]
+    return [row for _, row in scored[:top]]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

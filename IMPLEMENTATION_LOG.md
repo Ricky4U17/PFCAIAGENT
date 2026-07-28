@@ -5381,3 +5381,32 @@ Verified: MOV 1140 parts (MCOV/V1ma/Imax/energy ~100%, Vc@In 0% = DATA MISSING),
 impulse-I 100%, impulse-sparkover/follow-current 0% = DATA MISSING); calculate_mov screens live vendor parts
 with correct DATA-MISSING clamp verdicts; MOV self-test passes; Ch8/9 report builds (182 KB). Suite 172/2.
 Next: Phase 2 (MOV energy/repetitive/fuse-I²t/layout/MCOV calcs). Plan [[mov-gdt-review-plan]].
+
+## C150 — 2026-07-27 — Chapter 9 MOV review, Phase 2 (survival + coordination calcs + report)
+
+Second phase of the MOV+GDT review: add the release-level MOV calculations the review flagged missing, wire
+them through the adapter, and expand the Ch9 report. No hardcoding — every added value from spec/datasheet
+with named overridable defaults; missing datasheet fields stay DATA MISSING (never a silent pass).
+- ENGINE (mov_surge_select.py): Spec gains mov_energy_derate/lead_inductance_nH/surge_current_rise_us/
+  is_tmov/mains_fault_current_A/fuse_i2t_rating_A2s/fuse_rating_A. New functions: energy_survival (E_surge
+  ≈1.4·Vc·Ipk·τ vs datasheet J × derate / criterion safety; DATA MISSING if no rating); layout_overshoot
+  (V_over=L·di/dt, V_c,eff=Vc+V_over); fuse_coordination (fail-short: needs fault current + fuse I²t else
+  DATA MISSING; TMOV noted); mcov_comparison (required class + next two, leakage/aging graded by V1mA/Vpk
+  headroom vs clamp trade-off); criterion_matrix (A/B/C gate + verdict for the governing clamp).
+- DB (database.py): refactored the MOV screen into screen_table_mov (structured datasheet-column rows:
+  MCOV/V1mA+tol/8-20 Imax/energy/capacitance/package/clamp-or-DATA-MISSING/part-# consistency/verdict) +
+  a part-number-vs-MCOV consistency check (_mcov_from_text); screen_catalog_mov now wraps it.
+- ADAPTER (adapter.py): build_mov_spec threads the new opts; calculate_mov adds energy/overshoot/fuse_coord/
+  mcov_comparison/criterion_matrix/candidates (structured) blocks.
+- REPORT Ch9 (report_inputprotection.py): §9.1 IEC 61000-4-5 installation-level table + environment/source
+  justification; §9.2 waveform (1.2/50 & 8/20) + textbook I_sc=V_oc/Z note; §9.2.1 energy survival; §9.3.1
+  MCOV class comparison; §9.4.1 layout parasitic overshoot; §9.5 A/B/C pass-fail matrix table; §9.6 expanded
+  vendor datasheet screen (clamp DATA-MISSING flagged, part-# consistency column); §9.6.1 fuse/thermal
+  fail-short coordination; §9.7 record adds overshoot/energy/fuse rows. TOC (chapter splash) updated.
+- DOCUMENT AGENT: the combined report (main.py /documentation/generate-report) routes input_protection →
+  build_inputprotection_report and input_filter → build_inputfilter_report — the same builders edited here
+  and in C147/C148 — so the full Ch1-10 PDF reflects both the MOV Phase-2 sections and the EMI schematic/
+  worst-case changes automatically.
+Verified: MOV self-test passes; adapter smoke ok; Ch8/9 report builds (204 KB) with all new sections
+present; energy/overshoot/fuse/MCOV/criterion blocks compute. Suite 172/2. Next: Phase 3 (GDT engine + §9.8).
+Plan [[mov-gdt-review-plan]].

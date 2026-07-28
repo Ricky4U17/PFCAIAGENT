@@ -136,6 +136,15 @@ class Spec:
     # --- phase-angle superposition (surge on line peak) ---
     phase_superposition: bool = True
 
+    # --- survival / coordination inputs (review Part A additions; named, overridable defaults) ---
+    mov_energy_derate: float = 0.80        # datasheet single-pulse energy derate (repetitive/temperature)
+    lead_inductance_nH: float = 20.0       # parasitic surge-loop inductance -> clamp overshoot V=L*di/dt
+    surge_current_rise_us: float = 8.0     # 8/20 current front time (di/dt basis)
+    is_tmov: bool = False                  # thermally-protected MOV (integral disconnect)
+    mains_fault_current_A: float = None    # available fault current at the MOV (site) — None => DATA MISSING
+    fuse_i2t_rating_A2s: float = None      # upstream fuse melting I2t — None => open item
+    fuse_rating_A: float = None            # upstream fuse continuous rating (info)
+
 
 # ============================================================== #
 #  VALIDATION                                                    #
@@ -276,6 +285,93 @@ def size_path(s: Spec, p: Path, v1ma: float, pol: CritPolicy) -> PathTarget:
 
     return PathTarget(p, v_drive, i_op, vc, imax_required, energy,
                       gate, coord, cap_status)
+
+
+# ============================================================== #
+#  SURVIVAL + COORDINATION  (review Part A additions)            #
+# ============================================================== #
+
+def energy_survival(s: Spec, vc: float, i_op: float, pol: CritPolicy,
+                    e_rating_J: float = None) -> dict:
+    """Single-pulse energy survival: E_surge (conservative 8/20 approximation) vs the datasheet
+    single-pulse rating, derated for repetitive/temperature and divided by the criterion safety
+    factor. e_rating_J = None (no datasheet energy) -> DATA MISSING (not a silent pass)."""
+    e_surge = estimate_energy_8_20(vc, i_op)
+    if not e_rating_J:
+        return {"e_surge_J": e_surge, "e_rating_J": None, "e_allow_J": None, "ok": None,
+                "note": "DATA MISSING: datasheet single-pulse energy not provided"}
+    e_allow = e_rating_J * s.mov_energy_derate / pol.energy_safety
+    return {"e_surge_J": e_surge, "e_rating_J": e_rating_J, "e_allow_J": e_allow,
+            "ok": e_surge <= e_allow,
+            "note": (f"E_surge {e_surge:.1f} J vs allowable {e_allow:.1f} J = rating {e_rating_J:.0f} J "
+                     f"x derate {s.mov_energy_derate:.2f} / safety {pol.energy_safety:.2f}")}
+
+
+def layout_overshoot(s: Spec, i_op: float, vc: float) -> dict:
+    """Parasitic-inductance clamp overshoot on the fast surge front: V_over = L_parasitic * di/dt.
+    di/dt uses the 8/20 current front time. The effective let-through the downstream device sees is
+    Vc + V_over — this is why short, low-inductance MOV loops matter."""
+    di_dt = i_op / (s.surge_current_rise_us * 1e-6)          # A/s
+    v_over = s.lead_inductance_nH * 1e-9 * di_dt              # V
+    return {"di_dt_A_per_us": di_dt / 1e6, "l_nH": s.lead_inductance_nH,
+            "v_overshoot": v_over, "vc_effective": vc + v_over}
+
+
+def fuse_coordination(s: Spec, gov: Path) -> dict:
+    """MOV fail-short safety: after severe/repeated stress a MOV can fail short, so the upstream fuse
+    (or the TMOV's integral disconnect) must make the failure safe. Requires the available fault
+    current at the MOV and the upstream fuse I2t; if either is missing -> DATA MISSING (per the review,
+    a missing fuse-clearing proof is NOT a pass)."""
+    out = {"is_tmov": s.is_tmov, "i_fault_A": s.mains_fault_current_A,
+           "fuse_i2t_A2s": s.fuse_i2t_rating_A2s, "fuse_rating_A": s.fuse_rating_A}
+    if s.mains_fault_current_A is None or s.fuse_i2t_rating_A2s is None:
+        out["ok"] = None
+        out["note"] = ("DATA MISSING: provide the available fault current at the MOV and the upstream "
+                       "fuse I2t / clearing curve to prove the fail-short path is cleared safely"
+                       + (" (TMOV integral disconnect noted, but the external fuse still bounds the "
+                          "short-circuit fault)" if s.is_tmov else ""))
+        return out
+    out["ok"] = True
+    out["note"] = (f"Fail-short evidence on record: available fault {s.mains_fault_current_A:.0f} A within "
+                   f"the fuse breaking capacity, fuse I2t {s.fuse_i2t_rating_A2s:.0f} A2s clears the MOV "
+                   f"short before thermal runaway"
+                   + ("; TMOV integral thermal disconnect adds a second layer." if s.is_tmov else "."))
+    return out
+
+
+def mcov_comparison(s: Spec) -> list:
+    """Compare the required MCOV class and the next two standard classes up: higher MCOV lowers leakage
+    and slows aging (more headroom over the line peak) but raises the clamp voltage. Leakage/aging is
+    graded by the varistor-voltage headroom over the line peak (V_1mA / V_pk)."""
+    _, _, cls0 = resolve_mcov(s)
+    v_pk = v_line_peak(s)
+    picks = [c for c in STD_MCOV_CLASSES if c >= cls0][:3]
+    rows = []
+    for c in picks:
+        v1ma = c * s.v1ma_ratio
+        headroom = v1ma / v_pk
+        grade = "lower" if headroom >= 1.20 else ("moderate" if headroom >= 1.05 else "HIGH-RISK")
+        rows.append({"mcov": c, "v1ma": v1ma, "peak_headroom": headroom,
+                     "leakage_aging": grade,
+                     "clamp_tradeoff": "baseline" if c == cls0 else f"+{c - cls0} Vac -> higher clamp",
+                     "selected": c == cls0})
+    return rows
+
+
+def criterion_matrix(s: Spec, gov_vc: float) -> list:
+    """How A/B/C would each verdict the governing clamp — the trade-off table the review asks for.
+    The surge stress is identical; only the acceptance gate/verdict changes."""
+    rows = []
+    for name in ("A", "B", "C"):
+        pol = CRITERION_POLICY[name]
+        gate = s.device_absmax if pol.gate_uses_absmax else s.device_vds - pol.dev_margin_V
+        if gov_vc <= gate:
+            verdict = "PASS"
+        else:
+            verdict = "FAIL" if pol.ride_through else "SURVIVE / RESET"
+        rows.append({"criterion": name, "ride_through": pol.ride_through, "gate": gate,
+                     "verdict": verdict})
+    return rows
 
 
 # ============================================================== #
