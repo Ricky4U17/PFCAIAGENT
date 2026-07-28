@@ -494,6 +494,13 @@ export const inputFilterReport = (body: { design: Record<string, number>; cap?: 
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.blob() })
 
+export const inputFilterSchematic = (view: 'asbuilt' | 'synth',
+    body: { design: Record<string, number>; cap?: Record<string, unknown>
+    protection?: Record<string, unknown>; ntc?: Record<string, unknown>; opts?: Record<string, unknown> }): Promise<string> =>
+  fetch(`${BASE}/mode-b/input-filter/schematic?view=${view}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.text() })
+
 export const inputProtectionReport = (body: { design: Record<string, number>; cap?: Record<string, unknown>
     mosfet?: Record<string, unknown>; ntc_opts?: Record<string, unknown>; mov_opts?: Record<string, unknown> }): Promise<Blob> =>
   fetch(`${BASE}/mode-b/input-protection/report`, {

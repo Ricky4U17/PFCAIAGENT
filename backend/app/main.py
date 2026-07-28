@@ -660,6 +660,24 @@ def input_filter_report(req: _EmiReq):
     except Exception as e:
         log.exception("emi report"); raise HTTPException(500, str(e))
 
+@app.post("/mode-b/input-filter/schematic", tags=["mode-b"])
+def input_filter_schematic(req: _EmiReq, view: str = "synth"):
+    """EMI-filter schematic as inline SVG (for the GUI + document). view = 'asbuilt' | 'synth';
+    the synth view is annotated with the computed values for the confirmed design."""
+    try:
+        from fastapi.responses import Response
+        from app.mode_b.inputfilter.emi_schematic import build_svg, vals_from_result
+        vals = None
+        if view != "asbuilt":
+            from app.mode_b.inputfilter.adapter import calculate_emi
+            r = calculate_emi(req.design, req.cap or {}, req.protection or {},
+                              req.ntc or {}, req.opts or {})["result"]
+            vals = vals_from_result(r)
+        svg = build_svg(view=view, vals=vals, show_header=True, show_legend=True)
+        return Response(content=svg, media_type="image/svg+xml")
+    except Exception as e:
+        log.exception("emi schematic"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/input-protection/report", tags=["mode-b"])
 def input_protection_report(req: _IpReportReq):
     """Standalone Chapters 8 (NTC inrush) + 9 (MOV surge & compliance) PDF."""

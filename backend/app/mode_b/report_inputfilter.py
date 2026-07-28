@@ -20,6 +20,7 @@ from app.mode_b.doc_report_builder import (
 )
 from app.mode_b.inputfilter.adapter import calculate_emi
 from app.mode_b.inputfilter import emi_filter_design as emi
+from app.mode_b.inputfilter import emi_schematic as _emi_schematic
 
 _MU = "&#181;"; _DEG = "&#176;"; _OHM = "&#937;"
 CH = 10
@@ -113,6 +114,25 @@ def _fig_loss_sweep(r):
     ax2.set_ylabel("Earth leakage (mA)", fontsize=8, color="#0a0"); ax2.tick_params(labelsize=7, colors="#0a0")
     fig.tight_layout()
     return _img_from_fig(fig)
+
+
+def _emi_schematic_flowable(view, vals=None):
+    """The EMI-filter schematic (parametric SVG) as a ReportLab flowable scaled to the
+    page width. view = 'asbuilt' | 'synth'. Returns None if svglib is unavailable so the
+    chapter still builds."""
+    try:
+        from svglib.svglib import svg2rlg
+        from app.mode_b.inputfilter.emi_schematic import build_svg
+        svg = build_svg(view=view, vals=vals, show_header=True, show_legend=True)
+        d = svg2rlg(io.StringIO(svg))
+        if d is None or not d.width:
+            return None
+        sf = CW / d.width
+        d.scale(sf, sf); d.width *= sf; d.height *= sf
+        d.hAlign = "CENTER"
+        return d
+    except Exception:
+        return None
 
 
 # ────────────────────────────── report body ──────────────────────────────
@@ -239,6 +259,30 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
         "steepen roll-off rather than growing one component. The CM choke provides large CM inductance while "
         "its leakage doubles as DM inductance; X-caps (line-line) filter DM; Y-caps (line-earth) filter CM "
         "and are capped by the leakage-current safety limit (Section 10.9).", CH)
+
+    # ── 10.4.1 schematics — as-built + synthesized ──
+    sub_h(story, "10.4.1", "Filter Schematic — As-Built and Synthesized", CH)
+    body(story,
+        "<b>As-built topology (Figure 10.5a).</b> The designer's reference filter: input terminal block, "
+        "line/neutral fuses, differential (line-line) and common-mode (line/neutral-to-earth) surge "
+        "protection (MOV + GDT), X-cap bleeders, then three common-mode chokes (L1/L2/L3) interleaved with "
+        "X-caps, Y-caps and ferrite beads.", CH)
+    _sch_ab = _emi_schematic_flowable("asbuilt")
+    if _sch_ab is not None:
+        story.append(_sch_ab)
+    else:
+        body(story, "<i>(as-built schematic unavailable — svglib not installed)</i>", CH)
+    body(story,
+        "<b>Synthesized functional ladder (Figure 10.5b).</b> The two-mode model this chapter actually "
+        "solves, annotated with the computed values: fuse &#8594; X-cap (C<sub>X</sub>) with bleeder "
+        "&#8594; DM choke (L<sub>DM</sub>) with series-R&#8211;L damping &#8594; CM choke(s) (L<sub>CM</sub>) "
+        "&#8594; Y-caps (C<sub>Y</sub>) to protective earth &#8594; converter. The as-built beads/extra "
+        "sections roll into the ABCD parasitics; this ladder is what the margins and BOM below refer to.", CH)
+    _sch_sy = _emi_schematic_flowable("synth", _emi_schematic.vals_from_result(r))
+    if _sch_sy is not None:
+        story.append(_sch_sy)
+    else:
+        body(story, "<i>(synthesized schematic unavailable — svglib not installed)</i>", CH)
 
     # ── 10.5 DM stage ──
     step_h(story, "10.5", "Differential-Mode Stage", CH)

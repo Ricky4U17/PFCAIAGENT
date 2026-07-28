@@ -5333,3 +5333,28 @@ reported, overridable default. Phase B (schematic, both views) deferred to C148.
     + summary line (loss / leakage / margins / feasibility).
 Suite 172/2; Ch10 report builds (453 KB); verify_emi_newspecs all differential-spec checks pass (no
 reference value leaked); bleeder/leakage/BOM text verified in the rendered PDF.
+
+## C148 — 2026-07-27 — Chapter 10 EMI review round 2, Phase B (filter schematic, both views)
+
+Added the EMI-filter schematic to the GUI + document — the last agreed EMI review-2 item — as a parametric
+pure-stdlib SVG generator (mirrors the NTC inrush_schematic.py pattern), in BOTH views the designer asked for.
+- GENERATOR (inputfilter/emi_schematic.py, new): `build_svg(view, vals)` renders two views. view="asbuilt"
+  reproduces the designer's as-built topology from specs/Improvements/EMI/EMI Schematic.pdf (reconstructed
+  from the PDF's label coordinates): TB1 input, L/N fuses, differential MOV1 + CM MOV/GDT surge to earth,
+  R1/R2 bleeders + GDT1, three CM chokes L1/L2/L3 interleaved with X-caps (C1-C11), Y-caps (C6-C14) and
+  ferrite beads (FB1-6), using the designer's ref-designators. view="synth" draws the functional ladder the
+  engine solves — F → C_X(+bleeder) → L_DM(+series-R-L damping) → L_CM(×stages) → C_Y(L-PE/N-PE) → converter
+  — annotated with the COMPUTED values via `vals_from_result(EMIResult)` (C_X µF, L_DM µH, R_d Ω+L_d µH,
+  L_CM mH ×cm_stages, C_Y nF, R_bleed kΩ). Symbol helpers: coils/CM-choke (coupled coils + core hairlines +
+  phasing dots), X-cap, Y-cap (earth colour), fuse, ferrite bead, MOV (varistor), GDT (gas tube), bleeder,
+  PE symbol. Shared IBM-Plex style + header/legend with the NTC drawing.
+- REPORT (report_inputfilter.py): `_emi_schematic_flowable(view, vals)` embeds each SVG via svglib scaled to
+  the page width (returns None gracefully if svglib absent). New §10.4.1 renders Figure 10.5a (as-built) +
+  10.5b (synthesized, from the live result) with explanatory captions.
+- API (main.py): POST /mode-b/input-filter/schematic?view=asbuilt|synth returns inline SVG; the synth view
+  runs calculate_emi to annotate with the confirmed design's values.
+- GUI (InputFilter.tsx + client.ts): inputFilterSchematic(view, body) fetches both SVGs after each design
+  run; two collapsible panels (synth open by default, as-built collapsed) render them inline.
+Suite 172/2; frontend typechecks; Ch10 report builds (501 KB) with both figures; both SVGs are well-formed
+XML and render through svglib; schematic endpoint returns 200 image/svg+xml for both views. EMI review-2
+COMPLETE (Phases A/B/C); Phase D (Monte-Carlo + radiated) is a later follow-up on the user's word.

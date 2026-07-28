@@ -10,7 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { inputFilterOptions, inputFilterDesign, docGenerateReport, type EmiDesign } from '../api/client'
+import { inputFilterOptions, inputFilterDesign, inputFilterSchematic, docGenerateReport, type EmiDesign } from '../api/client'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -72,6 +72,8 @@ export const InputFilter: React.FC<Props> = ({
   const [res, setRes] = useState<EmiDesign | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [schAsbuilt, setSchAsbuilt] = useState<string>('')
+  const [schSynth, setSchSynth] = useState<string>('')
   const setO = (k: string, v: string) => setOpts(s => ({ ...s, [k]: v }))
 
   useEffect(() => { inputFilterOptions().then(setOpt).catch(() => {}) }, [])
@@ -99,8 +101,12 @@ export const InputFilter: React.FC<Props> = ({
   const run = async () => {
     setBusy(true); setErr(null)
     try {
-      setRes(await inputFilterDesign({ design, cap,
-        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: buildOpts() }))
+      const body = { design, cap,
+        protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) }, opts: buildOpts() }
+      setRes(await inputFilterDesign(body))
+      // Refresh both schematic views (as-built = static; synth = annotated with the computed values).
+      inputFilterSchematic('asbuilt', body).then(setSchAsbuilt).catch(() => {})
+      inputFilterSchematic('synth', body).then(setSchSynth).catch(() => {})
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   useEffect(() => { run() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -264,6 +270,22 @@ export const InputFilter: React.FC<Props> = ({
             {r.feedback.map((f, i) => <div key={i} style={{ marginTop: 3 }}>!! {f}</div>)}</div>}
           {r.warnings.length > 0 && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>
             {r.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}</div>}
+
+          {/* EMI-filter schematics — same two drawings embedded in the Ch 10 report. */}
+          {(schSynth || schAsbuilt) && <div style={{ marginTop: 14 }}>
+            {schSynth && <details open style={{ marginBottom: 10 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11.5, color: C.teal, fontWeight: 600 }}>
+                🎚️ Synthesized filter ladder (computed values)</summary>
+              <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, marginTop: 8 }}
+                dangerouslySetInnerHTML={{ __html: schSynth }} />
+            </details>}
+            {schAsbuilt && <details style={{ marginBottom: 4 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11.5, color: C.teal, fontWeight: 600 }}>
+                🔧 As-built filter topology (designer schematic)</summary>
+              <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 8, marginTop: 8 }}
+                dangerouslySetInnerHTML={{ __html: schAsbuilt }} />
+            </details>}
+          </div>}
         </>)}
       </Card>
 
