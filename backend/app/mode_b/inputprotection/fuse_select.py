@@ -33,6 +33,7 @@ import sys
 class FuseSpec:
     vac_max: float = 264.0             # Vac high-line corner (AC voltage rating gate)
     i_rms: float = 0.0                 # A, worst-case continuous input RMS (from the grid)
+    inrush_peak_A: float = None        # A, worst-case cold-inrush peak (NTC-limited); fuse rating must exceed it
     available_fault_current_A: float = None  # A, site fault current (breaking-cap gate); None -> OPEN
     current_margin: float = 1.5        # I_rated >= margin * I_rms / ambient_derate
     i2t_margin: float = 2.0            # melting I2t must exceed margin * startup I2t (no nuisance blow)
@@ -41,11 +42,16 @@ class FuseSpec:
 
 
 def requirements(fs: FuseSpec, startup_i2t: float = None) -> dict:
-    """The selection thresholds a candidate fuse must meet."""
-    i_rated_min = fs.current_margin * fs.i_rms / max(fs.ambient_derate, 1e-3) if fs.i_rms else 0.0
+    """The selection thresholds a candidate fuse must meet. The continuous-current requirement is the
+    LARGER of the ambient-derated continuous margin and the worst-case inrush peak — the fuse rating must
+    exceed the inrush current so it does not blow on the (NTC-limited) startup surge."""
+    i_cont = fs.current_margin * fs.i_rms / max(fs.ambient_derate, 1e-3) if fs.i_rms else 0.0
+    i_rated_min = max(i_cont, fs.inrush_peak_A or 0.0)
     return {
         "v_min": fs.vac_max,
-        "i_rated_min": i_rated_min,
+        "i_cont_min": i_cont,                            # continuous-margin component (info)
+        "inrush_peak": fs.inrush_peak_A,                 # inrush component of the current gate
+        "i_rated_min": i_rated_min,                      # binding = max(continuous, inrush)
         "i_rated_max": i_rated_min * fs.oversize_factor if i_rated_min else None,
         "bc_min": fs.available_fault_current_A,          # None -> breaking-cap check OPEN
         "i2t_min": (fs.i2t_margin * startup_i2t) if startup_i2t else None,  # None -> ride-inrush OPEN

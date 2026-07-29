@@ -406,7 +406,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
                   f"{_f(c.get('v_ac_V'),0)}", (f"{_f(c.get('breaking_ac_A'),0)}A" if c.get("breaking_ac_A") else "&#8212;"),
                   (f"{_f(c.get('melting_i2t'),0)}" if c.get("melting_i2t") is not None else "MISSING"),
                   _mk(c.get("v_ok")), _mk(c.get("i_ok")), _mk(c.get("bc_ok")), _mk(c.get("i2t_ok")),
-                  "PASS" if c["ok"] else "FAIL"] for c in _fc[:8]],
+                  c.get("verdict", "PASS" if c["ok"] else "FAIL")] for c in _fc[:8]],
                 col_widths=[CW*0.17, CW*0.09, CW*0.08, CW*0.11, CW*0.10, CW*0.06, CW*0.06, CW*0.06, CW*0.06, CW*0.21], ch=CH)
         if fuse.get("fast_blow_only"):
             body(story, "<i>Note: the current database contains only fast-blow cartridge fuses; because the "
@@ -767,7 +767,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
               f"{_f(c.get('v1ma'),0)}", f"{_f(c.get('imax'),0)}",
               (f"{_f(c.get('energy_2ms_J'),0)}J" if c.get("energy_2ms_J") else "&#8212;"),
               (f"{_f(c.get('capacitance_pf'),0)}p" if c.get("capacitance_pf") else "&#8212;"),
-              _clamp_cell(c), _cons(c), "PASS" if c["ok"] else "FAIL"] for c in cand[:10]],
+              _clamp_cell(c), _cons(c), c.get("verdict", "PASS" if c["ok"] else "FAIL")] for c in cand[:10]],
             col_widths=[CW*0.20, CW*0.09, CW*0.10, CW*0.11, CW*0.10, CW*0.10, CW*0.13, CW*0.06, CW*0.11], ch=CH)
         body(story, "<i>P#&#8226; = part-number vs MCOV consistency check. Full reason strings and "
              "datasheet URLs are in the selector output.</i>", CH)

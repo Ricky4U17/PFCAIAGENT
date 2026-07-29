@@ -459,7 +459,15 @@ export interface MovResult {
              i_op: number; vc: number; imax_required: number; energy_8_20: number
              device_gate: number; coord: string; cap_status: string }[]
   catalog: CatalogRow[]
+  candidates?: MovCandidate[]
+  selected?: MovCandidate | null
   sources: Record<string, number>
+}
+export interface MovCandidate {
+  label: string; part_number: string | null; mfr: string | null
+  mcov: number | null; v1ma: number | null; imax: number | null; energy_2ms_J: number | null
+  clamp_vc: number | null; clamp_status: string; part_num_consistent: boolean | null
+  verdict: string; ok: boolean; reasons: string[]
 }
 export const inputProtectionNtc = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<NtcResult>('/mode-b/input-protection/ntc/calculate', body)
@@ -489,11 +497,12 @@ export interface FuseCandidate {
   label: string; part_number: string | null; mfr: string | null
   i_rated_A: number | null; v_ac_V: number | null; breaking_ac_A: number | null; melting_i2t: number | null
   response_time: string | null; fuse_type: string | null
-  v_ok: boolean | null; i_ok: boolean | null; bc_ok: boolean | null; i2t_ok: boolean | null; ok: boolean; reasons: string[]
+  v_ok: boolean | null; i_ok: boolean | null; bc_ok: boolean | null; i2t_ok: boolean | null
+  verdict: string; ok: boolean; reasons: string[]
 }
 export interface FuseResult {
-  i_rms: number; startup_i2t: number | null
-  requirements: { v_min: number; i_rated_min: number; i_rated_max: number | null; bc_min: number | null; i2t_min: number | null }
+  i_rms: number; startup_i2t: number | null; inrush_peak_A: number | null
+  requirements: { v_min: number; i_cont_min: number; inrush_peak: number | null; i_rated_min: number; i_rated_max: number | null; bc_min: number | null; i2t_min: number | null }
   candidates: FuseCandidate[]
   selected: FuseCandidate | null; selected_i2t: number | null; fast_blow_only: boolean | null
 }

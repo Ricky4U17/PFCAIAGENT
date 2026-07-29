@@ -435,9 +435,10 @@ def screen_table_mov(s, gov, mcov_req, pol, top: int = 12):
                "diameter_mm": rec.get("diameter_mm"), "datasheet_url": rec.get("datasheet_url"),
                "clamp_vc": None, "clamp_status": "DATA MISSING", "part_num_consistent": None}
         if None in (mcov, v1ma, imax):
-            row.update(ok=False, reasons=["incomplete record (needs MCOV / V_1mA / I_max 8/20)"])
+            row.update(ok=False, verdict="FAIL", reasons=["incomplete record (needs MCOV / V_1mA / I_max 8/20)"])
             scored.append(((3, BIG, 0.0), row)); continue
-        reasons, ok = [], True
+        reasons, ok, conditional = [], True, False   # ok=False only for a REAL violated limit; a missing
+        #                                              datasheet field -> CONDITIONAL (still selectable).
         if mcov < mcov_req:
             ok = False; reasons.append(f"MCOV {mcov:g} < required {mcov_req:.0f} Vac")
         eff_imax = imax * s.repetitive_derate
@@ -455,12 +456,13 @@ def screen_table_mov(s, gov, mcov_req, pol, top: int = 12):
                 ok = False
                 reasons.append(f"part-# inconsistency: description implies {tok:g} Vac vs MCOV {mcov:g} Vac")
         # clamp / let-through — needs the datasheet Vc@In; absent in the combined export -> DATA MISSING.
+        # A missing clamp does NOT fail the part (that would make EVERY part un-selectable) — it is
+        # CONDITIONAL: selectable, but the ride-through cannot be confirmed until Vc@In is entered.
         if vc_max is None:
             clamp_rank = BIG
-            reasons.append("clamp/let-through: DATA MISSING (no Vc@In in DB) — cannot confirm downstream "
-                           "margin; add datasheet max-clamping voltage to the workbook")
-            if pol.ride_through:
-                ok = False
+            conditional = True
+            reasons.append("clamp/let-through: DATA MISSING (no Vc@In in DB) — CONDITIONAL: cannot confirm "
+                           "downstream margin; add datasheet max-clamping voltage to verify ride-through")
         else:
             a_eff = mov.effective_alpha(v1ma, vc_max, imax)
             i_op, vc = mov.operating_point(v1ma, a_eff, v_drive, gov.z)
@@ -473,8 +475,10 @@ def screen_table_mov(s, gov, mcov_req, pol, top: int = 12):
                                + ("cannot ride through (criterion A)" if pol.ride_through else "FAIL even for survival"))
             elif s.device_vds - pol.dev_margin_V < vc <= gate and not pol.ride_through:
                 reasons.append(f"survives but bus disturbed -> unit resets (allowed under criterion {pol.name})")
-        row.update(ok=ok, reasons=reasons)
-        pass_tier = 0 if ok else (2 if vc_max is None else 1)
+        verdict = "FAIL" if not ok else ("CONDITIONAL" if conditional else "PASS")
+        row.update(ok=ok, verdict=verdict, reasons=reasons)
+        # rank: PASS first, then CONDITIONAL (data-limited), then FAIL; within tier best clamp / survival.
+        pass_tier = 0 if verdict == "PASS" else (1 if verdict == "CONDITIONAL" else 2)
         scored.append(((pass_tier, clamp_rank, -eff_imax), row))
     scored.sort(key=lambda x: x[0])
     return [row for _, row in scored[:top]]
@@ -732,40 +736,42 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
     req = fz.requirements(fs, startup_i2t)
     BIG = 1e18
     scored = []
+    _inr = req.get("inrush_peak")
     for rec in recs:
         i_rated = rec.get("i_rated_A"); v_ac = rec.get("v_ac_V")
         bc = rec.get("breaking_ac_A"); i2t = rec.get("melting_i2t")
-        reasons, ok = [], True
+        reasons, ok, conditional = [], True, False   # ok=False only for a REAL violated limit; a missing
+        #                                              datasheet field -> CONDITIONAL (still selectable).
         # voltage
         v_ok = (v_ac is not None and v_ac >= req["v_min"])
         if not v_ok:
             ok = False
             reasons.append(f"V_ac {v_ac:g}V < {req['v_min']:.0f}V line" if v_ac is not None else "V_ac rating missing")
-        # continuous current
+        # continuous + inrush current: I_rated must exceed BOTH the continuous margin AND the inrush peak
         i_ok = (i_rated is not None and i_rated >= req["i_rated_min"])
         if not i_ok:
             ok = False
-            reasons.append(f"I_rated {i_rated:g}A < required {req['i_rated_min']:.1f}A (margin x I_rms)" if i_rated else "I_rated missing")
+            _why = f"cont {req['i_cont_min']:.1f}A" + (f" / inrush {_inr:.0f}A" if _inr else "")
+            reasons.append(f"I_rated {i_rated:g}A < required {req['i_rated_min']:.1f}A ({_why})" if i_rated else "I_rated missing")
         elif req["i_rated_max"] and i_rated > req["i_rated_max"]:
             ok = False; reasons.append(f"I_rated {i_rated:g}A oversized (> {req['i_rated_max']:.0f}A) — won't clear a small overload")
         else:
-            reasons.append(f"I_rated {i_rated:g}A OK (>= {req['i_rated_min']:.1f}A)")
+            reasons.append(f"I_rated {i_rated:g}A OK (>= {req['i_rated_min']:.1f}A"
+                           + (f", incl. inrush {_inr:.0f}A)" if _inr else ")"))
         # breaking capacity vs available fault current
         if req["bc_min"] is None:
-            bc_ok = None; reasons.append("breaking-capacity check OPEN (available fault current not given)")
+            bc_ok = None; conditional = True; reasons.append("breaking-capacity check OPEN (available fault current not given)")
         elif bc is None:
-            bc_ok = None; reasons.append("breaking capacity missing (DATA MISSING)")
+            bc_ok = None; conditional = True; reasons.append("breaking capacity DATA MISSING")
         else:
             bc_ok = bc >= req["bc_min"]
             if not bc_ok:
                 ok = False
             reasons.append(f"breaking {bc:g}A {'>=' if bc_ok else '<'} fault {req['bc_min']:.0f}A")
-        # ride the NTC-limited startup inrush without nuisance blow
+        # ride the NTC-limited startup inrush without nuisance blow (melting I2t)
         if i2t is None:
-            i2t_ok = None
-            reasons.append("melting I2t DATA MISSING — cannot confirm no-nuisance-blow vs startup I2t")
-            if req["i2t_min"] is not None:
-                ok = False               # cannot prove it rides the inrush
+            i2t_ok = None; conditional = True   # DATA MISSING -> CONDITIONAL (selectable), not a hard FAIL
+            reasons.append("melting I2t DATA MISSING — CONDITIONAL: cannot confirm no-nuisance-blow vs startup I2t")
         elif req["i2t_min"] is None:
             i2t_ok = None; reasons.append(f"melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush OPEN)")
         else:
@@ -773,13 +779,16 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
             if not i2t_ok:
                 ok = False
             reasons.append(f"melting I2t {i2t:g} A2s {'>' if i2t_ok else '<='} {req['i2t_min']:.1f} A2s (margin x startup)")
+        verdict = "FAIL" if not ok else ("CONDITIONAL" if conditional else "PASS")
         row = {"label": _fuse_label(rec), "part_number": rec.get("part_number"), "mfr": rec.get("mfr"),
                "i_rated_A": i_rated, "v_ac_V": v_ac, "breaking_ac_A": bc, "melting_i2t": i2t,
                "response_time": rec.get("response_time"), "fuse_type": rec.get("fuse_type"),
                "package": rec.get("package"), "datasheet_url": rec.get("datasheet_url"),
-               "v_ok": v_ok, "i_ok": i_ok, "bc_ok": bc_ok, "i2t_ok": i2t_ok, "ok": ok, "reasons": reasons}
-        # rank: passing first, then smallest sufficient current rating (tightest protection), then highest I2t headroom
-        scored.append(((0 if ok else 1, i_rated or BIG, -(i2t or 0)), row))
+               "v_ok": v_ok, "i_ok": i_ok, "bc_ok": bc_ok, "i2t_ok": i2t_ok, "ok": ok,
+               "verdict": verdict, "reasons": reasons}
+        # rank: PASS first, then CONDITIONAL, then FAIL; within tier smallest sufficient rating (tightest)
+        pass_tier = 0 if verdict == "PASS" else (1 if verdict == "CONDITIONAL" else 2)
+        scored.append(((pass_tier, i_rated or BIG, -(i2t or 0)), row))
     scored.sort(key=lambda x: x[0])
     return [row for _, row in scored[:top]]
 

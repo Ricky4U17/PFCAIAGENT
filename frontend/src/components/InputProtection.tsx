@@ -144,17 +144,22 @@ export const InputProtection: React.FC<Props> = ({
     Object.entries(movOpts).forEach(([k, v]) => { if (v !== '' && v != null) o[k] = v })
     return o
   }
-  const calcMov = async () => {
+  const calcMov = async (override?: Record<string, string>) => {
     setMovBusy(true); setErr(null)
     try {
-      const opts = movOptsPayload()
+      const eff = override ?? movOpts
+      const o: Record<string, unknown> = { common_mode_protection: movCM }
+      Object.entries(eff).forEach(([k, v]) => { if (v !== '' && v != null) o[k] = v })
       const [m, g] = await Promise.all([
-        inputProtectionMov({ design, cap, mosfet: { vdss: Number(movOpts.device_vds) }, opts }),
-        inputProtectionGdt({ design, opts }),
+        inputProtectionMov({ design, cap, mosfet: { vdss: Number(eff.device_vds) }, opts: o }),
+        inputProtectionGdt({ design, opts: o }),
       ])
       setMovRes(m); setGdtRes(g)
     } catch (e) { setErr((e as Error).message) } finally { setMovBusy(false) }
   }
+  const selectMov = (pn: string) => { const o = { ...movOpts, selected_part: pn }; setMovOpts(o); calcMov(o) }
+  // verdict → badge colour (PASS green / CONDITIONAL amber / FAIL red)
+  const vColor = (v?: string) => v === 'PASS' ? 'green' : v === 'CONDITIONAL' ? 'amber' : 'red'
   // Effective architecture = recommendation unless the designer overrode it.
   const useGdt = movArch === 'movgdt' || (movArch === 'auto' && !!gdtRes?.required.required)
 
@@ -164,15 +169,17 @@ export const InputProtection: React.FC<Props> = ({
   const [fuseRes, setFuseRes] = useState<FuseResult | null>(null)
   const [fuseBusy, setFuseBusy] = useState(false)
   const setF = (k: string, v: string) => setFuseOpts(s => ({ ...s, [k]: v }))
-  const calcFuse = async () => {
+  const calcFuse = async (override?: Record<string, string>) => {
     setFuseBusy(true); setErr(null)
     try {
-      // fuse selection shares the fault current + startup basis with NTC/MOV
-      const opts: Record<string, unknown> = { ...ntcOpts, ...fuseOpts,
+      // fuse selection shares the fault current + startup basis (incl. selected NTC) with NTC/MOV
+      const fo = override ?? fuseOpts
+      const opts: Record<string, unknown> = { ...ntcOpts, ...fo,
         mains_fault_current_A: ntcOpts.mains_fault_current_A || movOpts.mains_fault_current_A }
       setFuseRes(await inputProtectionFuse({ design, cap, opts }))
     } catch (e) { setErr((e as Error).message) } finally { setFuseBusy(false) }
   }
+  const selectFuse = (pn: string) => { const o = { ...fuseOpts, fuse_selected_part: pn }; setFuseOpts(o); calcFuse(o) }
   // The selected fuse's melting I²t auto-feeds the NTC/MOV coordination in the report.
   const selFuseI2t = fuseRes?.selected_i2t ?? null
 
@@ -452,12 +459,39 @@ export const InputProtection: React.FC<Props> = ({
                 </table>
               </div>
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-                Candidate screen — governing path {movRes.stress.governing?.split('(')[0] ?? ''} (criterion {movRes.criterion.name})
+                Candidate MOVs — governing path {movRes.stress.governing?.split('(')[0] ?? ''} (criterion {movRes.criterion.name}) · select one
               </div>
-              <CatalogTable rows={movRes.catalog} emptyNote="No catalog parts loaded." />
+              {movRes.selected && (
+                <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
+                  padding: '8px 12px', marginBottom: 8, fontSize: 11.5, color: C.text }}>
+                  <b style={{ color: C.teal }}>Selected:</b> {movRes.selected.mfr} {movRes.selected.part_number} —{' '}
+                  {num(movRes.selected.mcov, 0)} Vac, V₁ₘₐ {num(movRes.selected.v1ma, 0)} V, I_max {num(movRes.selected.imax, 0)} A.{' '}
+                  {movRes.selected.verdict === 'CONDITIONAL' ? 'CONDITIONAL — clamp unverified (add Vc@In to confirm ride-through).' : ''}
+                </div>
+              )}
+              <div style={{ overflowX: 'auto', marginBottom: 6 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead><tr>{['', 'Part', 'MCOV', 'V₁ₘₐ', 'I_max', 'Energy', 'Clamp', 'Verdict'].map(h =>
+                    <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                  <tbody>{(movRes.candidates ?? []).slice(0, 12).map((c, i) => {
+                    const isSel = movOpts.selected_part === c.part_number
+                    return (
+                    <tr key={i} style={isSel ? { background: C.tealL } : undefined}>
+                      <td style={cell}><Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectMov(c.part_number ?? '')}>
+                        {isSel ? '✓' : 'Select'}</Btn></td>
+                      <td style={cell}>{c.part_number}</td>
+                      <td style={cell}>{num(c.mcov, 0)}</td>
+                      <td style={cell}>{num(c.v1ma, 0)}</td>
+                      <td style={cell}>{num(c.imax, 0)}A</td>
+                      <td style={cell}>{c.energy_2ms_J != null ? `${num(c.energy_2ms_J, 0)}J` : '—'}</td>
+                      <td style={cell}>{c.clamp_vc != null ? `${num(c.clamp_vc, 0)}V` : 'DATA MISSING'}</td>
+                      <td style={cell}><Badge color={vColor(c.verdict)}>{c.verdict}</Badge></td>
+                    </tr>)})}</tbody>
+                </table>
+              </div>
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Screened against the vendor MOV database (1140 parts). Clamp reads DATA MISSING where the
-                datasheet max-clamping voltage (Vc@In) is absent — never a silent pass. MCOV is invariant to level/criterion.
+                Screened against the vendor MOV database (1140 parts). <b>CONDITIONAL</b> = selectable but the
+                clamp is unverified (datasheet Vc@In absent) — never a silent pass. MCOV is invariant to level/criterion.
               </div>
 
               {/* ── GDT recommendation + common-mode diversion ── */}
@@ -545,8 +579,9 @@ export const InputProtection: React.FC<Props> = ({
             </div>
 
             {fuseRes && (<>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8, marginBottom: 12 }}>
                 <Chip k="Worst I_rms" v={`${num(fuseRes.i_rms, 1)} A`} />
+                <Chip k="Max inrush" v={fuseRes.inrush_peak_A != null ? `${num(fuseRes.inrush_peak_A, 0)} A` : '—'} />
                 <Chip k="I_rated req" v={`≥ ${num(fuseRes.requirements.i_rated_min, 1)} A`} />
                 <Chip k="Startup I²t" v={fuseRes.startup_i2t != null ? `${num(fuseRes.startup_i2t, 1)} A²s` : '—'} />
                 <Chip k="Melt I²t req" v={fuseRes.requirements.i2t_min != null ? `> ${num(fuseRes.requirements.i2t_min, 1)} A²s` : '—'} />
@@ -564,35 +599,38 @@ export const InputProtection: React.FC<Props> = ({
                 <div style={{ background: C.redL, border: `1px solid ${C.red}55`, borderRadius: 8,
                   padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: '#fca5a5' }}>
                   <b>No catalog fuse meets the requirement</b> — need I_rated ≥ {num(fuseRes.requirements.i_rated_min, 1)} A
-                  at ≥ {num(fuseRes.requirements.v_min, 0)} Vac with melting I²t above the startup pulse. The DB tops out
-                  at 50 A; use a higher-rated fuse, relax the current margin, or confirm the site fault current.
+                  (driven by the {num(fuseRes.inrush_peak_A, 0)} A inrush / {num(fuseRes.requirements.i_cont_min, 1)} A continuous)
+                  at ≥ {num(fuseRes.requirements.v_min, 0)} Vac. The DB tops out at 50 A; select a higher-R NTC to cut the
+                  inrush, use a higher-rated fuse, or relax the current margin.
                 </div>
               )}
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-                Candidate screen (vendor fuse database)
+                Candidate fuses — rating ≥ inrush {num(fuseRes.inrush_peak_A, 0)} A &amp; continuous, V ≥ line · select one
               </div>
               <div style={{ overflowX: 'auto', marginBottom: 8 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  <thead><tr>{['Part', 'I_rated', 'V_ac', 'Breaking', 'Melt I²t', 'V', 'I', 'BC', 'I²t', 'Verdict'].map(h =>
+                  <thead><tr>{['', 'Part', 'I_rated', 'V_ac', 'Breaking', 'Melt I²t', 'Response', 'Verdict'].map(h =>
                     <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
-                  <tbody>{fuseRes.candidates.slice(0, 8).map((c, i) => {
-                    const mk = (v: boolean | null) => v == null ? '—' : (v ? '✓' : '✗')
+                  <tbody>{fuseRes.candidates.filter(c => c.verdict !== 'FAIL').slice(0, 12).map((c, i) => {
+                    const isSel = fuseOpts.fuse_selected_part === c.part_number
                     return (
-                    <tr key={i}>
+                    <tr key={i} style={isSel ? { background: C.tealL } : undefined}>
+                      <td style={cell}><Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectFuse(c.part_number ?? '')}>
+                        {isSel ? '✓' : 'Select'}</Btn></td>
                       <td style={cell}>{c.part_number ?? c.label}</td>
                       <td style={cell}>{num(c.i_rated_A, 0)}A</td>
                       <td style={cell}>{num(c.v_ac_V, 0)}</td>
                       <td style={cell}>{c.breaking_ac_A != null ? `${num(c.breaking_ac_A, 0)}A` : '—'}</td>
                       <td style={cell}>{c.melting_i2t != null ? num(c.melting_i2t, 0) : 'MISSING'}</td>
-                      <td style={cell}>{mk(c.v_ok)}</td><td style={cell}>{mk(c.i_ok)}</td>
-                      <td style={cell}>{mk(c.bc_ok)}</td><td style={cell}>{mk(c.i2t_ok)}</td>
-                      <td style={cell}><Badge color={c.ok ? 'green' : 'red'}>{c.ok ? 'PASS' : 'FAIL'}</Badge></td>
+                      <td style={cell}>{c.response_time ?? '—'}</td>
+                      <td style={cell}><Badge color={vColor(c.verdict)}>{c.verdict}</Badge></td>
                     </tr>)})}</tbody>
                 </table>
               </div>
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Screened against the vendor fuse database (115 parts). Melting I²t is DATA MISSING for some
-                parts (blank) — flagged, never a silent pass. {fuseRes.fast_blow_only ? 'DB is fast-blow only; OK because the NTC limits inrush.' : ''}
+                Only fuses whose rating clears the inrush ({num(fuseRes.inrush_peak_A, 0)} A) and the other gates are
+                shown. <b>CONDITIONAL</b> = selectable but melting I²t / breaking capacity is DATA MISSING (never a silent
+                pass). {fuseRes.fast_blow_only ? 'DB is fast-blow only; OK because the NTC limits inrush.' : ''}
               </div>
             </>)}
           </div>

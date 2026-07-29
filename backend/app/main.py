@@ -691,7 +691,7 @@ def input_filter_schematic(req: _EmiReq, view: str = "synth"):
             r = calculate_emi(req.design, req.cap or {}, req.protection or {},
                               req.ntc or {}, req.opts or {})["result"]
             vals = vals_from_result(r)
-        svg = build_svg(view=view, vals=vals, show_header=True, show_legend=True)
+        svg = build_svg(view=view, vals=vals, show_header=True, show_legend=True, responsive=True)
         return Response(content=svg, media_type="image/svg+xml")
     except Exception as e:
         log.exception("emi schematic"); raise HTTPException(500, str(e))
@@ -2316,7 +2316,8 @@ def _add_pdf_outline(pdf_bytes):
         chap_re = re.compile(r"CHAPTER\s+(\d+)\b")
         # title cap kept generous (110) so long section headings — e.g. "6.10.14 — As-built
         # inductance basis — verification at all nine operating points" — are not dropped.
-        sec_re = re.compile(r"(?m)^\s*(\d+\.\d+(?:\.\d+)?)\s*[—–-]\s*([A-Za-z(][^\n]{1,110})$")
+        # section numbers: X.Y / X.Y.Z (numeric) OR X.A (lettered appendix, e.g. 10.A–10.D)
+        sec_re = re.compile(r"(?m)^\s*(\d+\.(?:\d+(?:\.\d+)?|[A-Z]))\s*[—–-]\s*([A-Za-z(][^\n]{1,110})$")
         toc = []; seen = set(); cur_chap = 0; last_lvl = 0
         for pno in range(doc.page_count):
             text = doc[pno].get_text()

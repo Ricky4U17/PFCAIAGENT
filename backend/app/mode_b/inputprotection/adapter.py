@@ -187,14 +187,19 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
                         "device_gate": t.device_gate, "coord": t.coord_status, "cap_status": t.cap_status})
     screen = []
     candidates = []
+    selected = None
     if gov:
         for name, ok, reasons in mov.screen_catalog(s, gov, mcov_req, pol):
             screen.append({"name": name, "ok": bool(ok), "reasons": reasons})
         try:
             from . import database as _db
-            candidates = _db.screen_table_mov(s, gov, mcov_req, pol)
+            candidates = _db.screen_table_mov(s, gov, mcov_req, pol, top=40)
         except Exception:
             candidates = []
+        # designer selection: pick a specific part from the screen (never blocked — CONDITIONAL is OK)
+        sel_pn = (opts.get("selected_part") or "").strip() if opts else ""
+        if sel_pn:
+            selected = next((c for c in candidates if (c.get("part_number") or "") == sel_pn), None)
 
     # ---- Phase-2 survival + coordination (review Part A additions) ----
     gov_t = next((t for t in targets if t["path"] == (gov.name if gov else None)), targets[0] if targets else None)
@@ -217,7 +222,7 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
         "criterion": {"name": pol.name, "ride_through": pol.ride_through,
                       "gate_uses_absmax": pol.gate_uses_absmax, "dev_margin_V": pol.dev_margin_V,
                       "energy_safety": pol.energy_safety},
-        "targets": targets, "catalog": screen, "candidates": candidates,
+        "targets": targets, "catalog": screen, "candidates": candidates, "selected": selected,
         "energy": energy, "overshoot": overshoot, "fuse_coord": fuse,
         "mcov_comparison": mcov_cmp, "criterion_matrix": crit_matrix,
         "sources": {"vac_max": s.vac_max, "device_vds": s.device_vds, "cap_v_rating": s.cap_v_rating},
@@ -294,11 +299,17 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
         _vmin = float(design.get("vin_min", 90))
         if _pout and _vmin:
             i_rms = float(_pout) / (_vmin * _eff * _pf)
-    startup_i2t = (ntc.get("worst_case") or {}).get("i2t_worst")
+    _wc = ntc.get("worst_case") or {}
+    startup_i2t = _wc.get("i2t_worst")
+    # cold-start inrush peak (NTC-limited, nominal R25) — the fuse current rating must exceed it. This is
+    # the turn-on peak the designer targets (≤ inrush target); the min-R25 tolerance extreme is a separate
+    # NTC proof and the fuse rides it via its I²t rating, not its continuous rating.
+    inrush_peak = _wc.get("i_inrush_nom_A") or _wc.get("i_inrush_max_A")
     _o = lambda k: (float(opts[k]) if opts.get(k) not in (None, "") else None)
     fs = fz.FuseSpec(
         vac_max=float(design.get("vin_max", 264)),
         i_rms=i_rms,
+        inrush_peak_A=inrush_peak,
         available_fault_current_A=(_o("mains_fault_current_A")),
         current_margin=float(opts.get("fuse_current_margin", 1.5)),
         i2t_margin=float(opts.get("fuse_i2t_margin", 2.0)),
@@ -306,12 +317,16 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
     )
     req = fz.requirements(fs, startup_i2t)
     try:
-        candidates = _db.screen_table_fuse(fs, startup_i2t)
+        candidates = _db.screen_table_fuse(fs, startup_i2t, top=40)
     except Exception:
         candidates = []
-    selected = next((c for c in candidates if c["ok"]), None)
+    # designer selection (never blocked). Uses a fuse-specific key so it can't collide with the NTC's
+    # selected_part when they share an opts dict. Default pick = best non-FAIL (PASS, else CONDITIONAL).
+    sel_pn = (opts.get("fuse_selected_part") or "").strip() if opts else ""
+    selected = (next((c for c in candidates if (c.get("part_number") or "") == sel_pn), None) if sel_pn
+                else next((c for c in candidates if c.get("verdict") in ("PASS", "CONDITIONAL")), None))
     return _native({
-        "spec": fs, "i_rms": i_rms, "startup_i2t": startup_i2t,
+        "spec": fs, "i_rms": i_rms, "startup_i2t": startup_i2t, "inrush_peak_A": inrush_peak,
         "requirements": req, "candidates": candidates, "selected": selected,
         "selected_i2t": (selected or {}).get("melting_i2t") if selected else None,
         "fast_blow_only": all((c.get("response_time") or "").lower().startswith("fast") for c in candidates) if candidates else None,

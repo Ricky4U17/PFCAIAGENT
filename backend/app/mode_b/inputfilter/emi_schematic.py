@@ -354,8 +354,11 @@ def build_svg(view: str = "synth",
               title: str | None = None,
               subtitle: str | None = None,
               date: str | None = None,
-              scale: float = 1.0) -> str:
-    """Return the EMI-filter schematic as a standalone SVG document string."""
+              scale: float = 1.0,
+              responsive: bool = False) -> str:
+    """Return the EMI-filter schematic as a standalone SVG document string. `responsive=True` emits a
+    width:100% SVG (height scales from the viewBox) for inline GUI embedding; the report path keeps the
+    fixed pixel size that svglib needs to scale to the page."""
     date = date or _dt.date.today().isoformat()
     if view == "asbuilt":
         title = title or "EMI INPUT FILTER — AS-BUILT TOPOLOGY"
@@ -368,8 +371,11 @@ def build_svg(view: str = "synth",
 
     head_h = 46 if show_header else 0
     total_h = H + head_h
+    # responsive: width 100%, height auto from the viewBox aspect ratio (no fixed px → no GUI overflow).
+    _size = ('width="100%" style="height:auto;display:block;max-width:100%"' if responsive
+             else f'width="{int(W*scale)}" height="{int(total_h*scale)}"')
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {total_h}" '
-         f'width="{int(W*scale)}" height="{int(total_h*scale)}">'
+         f'preserveAspectRatio="xMidYMid meet" {_size}>'
          f'<rect width="{W}" height="{total_h}" fill="{PAPER}"/>']
     if show_header:
         p.append(_header(title, subtitle, head_h))

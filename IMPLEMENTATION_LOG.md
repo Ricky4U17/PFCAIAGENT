@@ -5537,3 +5537,28 @@ Front-end for the fuse selector — completes the Fuse review (last designer rev
 Verified: fuse endpoint 200 (35 A/500 V/650 A²s pick); Ch8/9 builds with the GUI payload; frontend
 typechecks. Suite 172/2. FUSE REVIEW COMPLETE (C154 backend + C155 GUI). ALL FOUR designer review areas
 now done: EMI (C147/C148), MOV+GDT (C149-C152), NTC round-2 (C153), Fuse (C154/C155). Plan [[fuse-review-plan]].
+
+## C156 — 2026-07-28 — Designer feedback: selectable MOV/fuse (never blocked), fuse-inrush gate, EMI schematic GUI, full-report TOC
+
+Fixes from designer testing of the input-protection page. No hardcoding.
+- SELECTION NEVER BLOCKED (feedback: with real specs no MOV passed and none was selectable): a missing
+  datasheet field is now CONDITIONAL, not a hard FAIL. database.screen_table_mov + screen_table_fuse emit a
+  tri-state `verdict` (PASS / CONDITIONAL / FAIL); DATA-MISSING clamp (MOV Vc@In) / melting-I²t / breaking-cap
+  → CONDITIONAL (selectable), ok=False only for a REAL violated limit. Ranked PASS→CONDITIONAL→FAIL.
+- MOV/FUSE SELECTION: calculate_mov takes opts.selected_part → out["selected"]; calculate_fuse takes
+  opts.fuse_selected_part (distinct key, no NTC collision) → default pick = best non-FAIL. GUI: MOV tab now
+  shows a selectable candidates table (Select button + verdict badge) instead of the text catalog; fuse tab
+  gains a Select column; both store the pick + recalc.
+- FUSE INRUSH GATE (feedback: consider max inrush; show only fuses rated above it): fuse_select.requirements
+  I_rated_min = max(current_margin×I_rms/derate, inrush_peak); inrush_peak = NTC cold-start peak (nominal R25,
+  i_inrush_nom_A). GUI shows a "Max inrush" chip and lists only non-FAIL candidates (rating ≥ inrush + gates).
+- EMI SCHEMATIC GUI (feedback: renders improperly): emi_schematic.build_svg gains responsive=True → width
+  100% / height auto from the viewBox (no fixed px overflow); the GUI endpoint /input-filter/schematic serves
+  responsive SVG (report path keeps fixed px for svglib).
+- FULL-REPORT INDEX: the merged-report outline/printed-TOC scan (main.py _add_pdf_outline sec_re) matched
+  only numeric section numbers, dropping the lettered Ch10 appendices (10.A–10.D). Regex widened to
+  \d+\.(?:\d+(?:\.\d+)?|[A-Z]) so 10.A/10.B/10.C/10.D are indexed. Report §9.6 / §8.9a candidate tables now
+  show the tri-state verdict.
+Verified: full combined report generates (69 pp, 1.17 MB) via /documentation/generate-report; TOC now lists
+every new section incl. 10.A–10.D, 8.9 Fuse, 9.8/9.9; MOV screen → 40 CONDITIONAL selectable; fuse selects a
+50 A part (rating > 46.7 A inrush); responsive GUI schematic; frontend typechecks. Suite 172/2.
