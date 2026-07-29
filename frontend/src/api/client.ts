@@ -484,6 +484,21 @@ export interface GdtResult {
 }
 export const inputProtectionGdt = (body: { design: Record<string, number>; opts?: Record<string, unknown> }) =>
   post<GdtResult>('/mode-b/input-protection/gdt/calculate', body)
+
+export interface FuseCandidate {
+  label: string; part_number: string | null; mfr: string | null
+  i_rated_A: number | null; v_ac_V: number | null; breaking_ac_A: number | null; melting_i2t: number | null
+  response_time: string | null; fuse_type: string | null
+  v_ok: boolean | null; i_ok: boolean | null; bc_ok: boolean | null; i2t_ok: boolean | null; ok: boolean; reasons: string[]
+}
+export interface FuseResult {
+  i_rms: number; startup_i2t: number | null
+  requirements: { v_min: number; i_rated_min: number; i_rated_max: number | null; bc_min: number | null; i2t_min: number | null }
+  candidates: FuseCandidate[]
+  selected: FuseCandidate | null; selected_i2t: number | null; fast_blow_only: boolean | null
+}
+export const inputProtectionFuse = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
+  post<FuseResult>('/mode-b/input-protection/fuse/calculate', body)
 // ── input EMI filter (DM + CM conducted-emissions synthesis) ─────────────────
 export interface EmiResult {
   feasible: boolean; conducted_class: string; detector: string; margin_db: number

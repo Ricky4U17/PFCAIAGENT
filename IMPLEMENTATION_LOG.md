@@ -5521,3 +5521,19 @@ Verified: fuse self-test ok; 115 parts ingested; a 1900 W / 90-264 Vac design �
 650 A²s) auto-feeds and closes NTC §8.9 (PASS) + MOV fail-short (ok); Ch8/9 builds (240 KB). Suite 172/2.
 Next: C155 GUI Fuse tab (Input-Protection) + auto-feed the selected fuse I²t into the NTC/MOV payloads.
 Plan [[fuse-review-plan]].
+
+## C155 — 2026-07-28 — Fuse review, GUI (Line-fuse tab + coordination auto-feed)
+
+Front-end for the fuse selector — completes the Fuse review (last designer review area). No hardcoding.
+- CLIENT (client.ts): FuseResult/FuseCandidate types + inputProtectionFuse().
+- GUI (InputProtection.tsx): new 3rd tab "🔌 Line fuse". Inputs = current margin (×I_rms), I²t margin
+  (×startup), ambient derate; the fault current + startup basis are SHARED with the NTC/MOV tabs. Shows
+  worst I_rms / I_rated requirement / startup I²t / melt-I²t requirement chips, the selected fuse banner
+  (or a red "no catalog fuse fits — DB tops out at 50 A" callout), and the vendor candidate screen table
+  (I_rated/V_ac/breaking/melt-I²t with per-gate ✓/✗/— and PASS/FAIL). calcFuse runs on mount alongside
+  NTC/MOV. The selected fuse's melting I²t AUTO-FEEDS the report: ipReportPayload injects fuse_i2t_rating
+  (NTC) and fuse_i2t_rating_A2s (MOV/GDT) + the fuse margins, so the combined report's NTC §8.9 / §8.12 and
+  MOV §9.6.1 / GDT §9.8.3 close with the same fuse the designer sees.
+Verified: fuse endpoint 200 (35 A/500 V/650 A²s pick); Ch8/9 builds with the GUI payload; frontend
+typechecks. Suite 172/2. FUSE REVIEW COMPLETE (C154 backend + C155 GUI). ALL FOUR designer review areas
+now done: EMI (C147/C148), MOV+GDT (C149-C152), NTC round-2 (C153), Fuse (C154/C155). Plan [[fuse-review-plan]].

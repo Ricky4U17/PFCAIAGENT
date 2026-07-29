@@ -15,8 +15,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, docGenerateReport, inrushSchematicUrl,
-         type NtcResult, type MovResult, type GdtResult, type CatalogRow, type NtcCandidate } from '../api/client'
+import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, inputProtectionFuse, docGenerateReport, inrushSchematicUrl,
+         type NtcResult, type MovResult, type GdtResult, type FuseResult, type CatalogRow, type NtcCandidate } from '../api/client'
 import type { CapacitorResult } from './Step15Capacitor'
 
 interface Props {
@@ -98,7 +98,7 @@ export const InputProtection: React.FC<Props> = ({
   }, [approvedCapacitorDesign])
   const mosfetVds = Number((selectedMosfet as any)?.vdss ?? 650)
 
-  const [tab, setTab] = useState<'ntc' | 'mov'>('ntc')
+  const [tab, setTab] = useState<'ntc' | 'mov' | 'fuse'>('ntc')
   const [err, setErr] = useState<string | null>(null)
 
   // ── NTC ──
@@ -158,7 +158,25 @@ export const InputProtection: React.FC<Props> = ({
   // Effective architecture = recommendation unless the designer overrode it.
   const useGdt = movArch === 'movgdt' || (movArch === 'auto' && !!gdtRes?.required.required)
 
-  useEffect(() => { calcNtc(); calcMov() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Line fuse ── (reuses mains_fault_current_A + margins; feeds startup I²t via the design/NTC grid)
+  const [fuseOpts, setFuseOpts] = useState<Record<string, string>>({
+    fuse_current_margin: '1.5', fuse_i2t_margin: '2.0', fuse_ambient_derate: '1.0' })
+  const [fuseRes, setFuseRes] = useState<FuseResult | null>(null)
+  const [fuseBusy, setFuseBusy] = useState(false)
+  const setF = (k: string, v: string) => setFuseOpts(s => ({ ...s, [k]: v }))
+  const calcFuse = async () => {
+    setFuseBusy(true); setErr(null)
+    try {
+      // fuse selection shares the fault current + startup basis with NTC/MOV
+      const opts: Record<string, unknown> = { ...ntcOpts, ...fuseOpts,
+        mains_fault_current_A: ntcOpts.mains_fault_current_A || movOpts.mains_fault_current_A }
+      setFuseRes(await inputProtectionFuse({ design, cap, opts }))
+    } catch (e) { setErr((e as Error).message) } finally { setFuseBusy(false) }
+  }
+  // The selected fuse's melting I²t auto-feeds the NTC/MOV coordination in the report.
+  const selFuseI2t = fuseRes?.selected_i2t ?? null
+
+  useEffect(() => { calcNtc(); calcMov(); calcFuse() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [rptBusy, setRptBusy] = useState(false)
   // FULL report: all previous chapters (design basis, magnetics, DC-bus capacitor) + the
@@ -167,8 +185,12 @@ export const InputProtection: React.FC<Props> = ({
   // report button AND handed up via onNext so the EMI page can include Ch 8/9 in its combined report.
   const ipReportPayload = (): Record<string, unknown> => ({
     design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
-    ntc_opts: ntcOpts,
-    mov_opts: { ...movOptsPayload(), surge_architecture: useGdt ? 'MOV+GDT' : 'MOV-only' },
+    // fold the fuse selection margins in, and auto-feed the selected fuse I²t into the NTC/MOV coordination
+    ntc_opts: { ...ntcOpts, ...fuseOpts,
+      ...(selFuseI2t && !ntcOpts.fuse_i2t_rating ? { fuse_i2t_rating: String(selFuseI2t) } : {}) },
+    mov_opts: { ...movOptsPayload(), surge_architecture: useGdt ? 'MOV+GDT' : 'MOV-only',
+      ...fuseOpts,
+      ...(selFuseI2t && !movOpts.fuse_i2t_rating_A2s ? { fuse_i2t_rating_A2s: String(selFuseI2t) } : {}) },
   })
 
   const downloadReport = async () => {
@@ -199,7 +221,7 @@ export const InputProtection: React.FC<Props> = ({
         <SecHead icon="🛡️" label="Input Protection — MOV surge + NTC inrush"
           sub={`${design.vin_min}–${design.vin_max} Vac · bus ${num(design.vout, 0)} V`} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {([['ntc', '🌡️ NTC inrush limiter'], ['mov', '⚡ Surge (MOV + GDT)']] as [typeof tab, string][])
+          {([['ntc', '🌡️ NTC inrush limiter'], ['mov', '⚡ Surge (MOV + GDT)'], ['fuse', '🔌 Line fuse']] as [typeof tab, string][])
             .map(([t, lbl]) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -499,6 +521,79 @@ export const InputProtection: React.FC<Props> = ({
                   </div>
                 </>)}
               </div>)}
+            </>)}
+          </div>
+        )}
+
+        {/* ─────────────── Fuse ─────────────── */}
+        {tab === 'fuse' && (
+          <div>
+            <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
+              padding: '8px 12px', marginBottom: 12, fontSize: 11.5, color: C.text }}>
+              <b style={{ color: C.teal }}>Line fuse.</b> The upstream protective element for the whole input
+              stage. It must ride the NTC-limited startup pulse (melting I²t &gt; startup I²t), carry the
+              continuous input current with margin, withstand the high line, and safely interrupt the available
+              fault current — which is what makes the MOV/GDT fail-short safe (Ch 9). The selected fuse's I²t
+              auto-feeds the NTC &amp; MOV/GDT coordination.
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+              <Knob label="Current margin" unit="×I_rms" value={fuseOpts.fuse_current_margin} onChange={v => setF('fuse_current_margin', v)} />
+              <Knob label="I²t margin" unit="×startup" value={fuseOpts.fuse_i2t_margin} onChange={v => setF('fuse_i2t_margin', v)} />
+              <Knob label="Ambient derate" unit="×" value={fuseOpts.fuse_ambient_derate} onChange={v => setF('fuse_ambient_derate', v)} />
+              <Btn variant="primary" disabled={fuseBusy} onClick={calcFuse}>{fuseBusy ? '⏳ Selecting…' : '↻ Re-select fuse'}</Btn>
+              <span style={{ fontSize: 9.5, color: C.muted }}>Fault current + startup basis shared with the NTC/MOV tabs.</span>
+            </div>
+
+            {fuseRes && (<>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 12 }}>
+                <Chip k="Worst I_rms" v={`${num(fuseRes.i_rms, 1)} A`} />
+                <Chip k="I_rated req" v={`≥ ${num(fuseRes.requirements.i_rated_min, 1)} A`} />
+                <Chip k="Startup I²t" v={fuseRes.startup_i2t != null ? `${num(fuseRes.startup_i2t, 1)} A²s` : '—'} />
+                <Chip k="Melt I²t req" v={fuseRes.requirements.i2t_min != null ? `> ${num(fuseRes.requirements.i2t_min, 1)} A²s` : '—'} />
+              </div>
+              {fuseRes.selected ? (
+                <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
+                  padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: C.text }}>
+                  <b style={{ color: C.teal }}>Selected:</b> {fuseRes.selected.mfr} {fuseRes.selected.part_number} —{' '}
+                  {num(fuseRes.selected.i_rated_A, 0)} A / {num(fuseRes.selected.v_ac_V, 0)} Vac, breaking{' '}
+                  {num(fuseRes.selected.breaking_ac_A, 0)} A, melting I²t <b>{num(fuseRes.selected.melting_i2t, 0)} A²s</b>
+                  {fuseRes.selected.response_time ? ` (${fuseRes.selected.response_time})` : ''}.
+                  {selFuseI2t ? ' → auto-feeds the NTC/MOV coordination.' : ''}
+                </div>
+              ) : (
+                <div style={{ background: C.redL, border: `1px solid ${C.red}55`, borderRadius: 8,
+                  padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: '#fca5a5' }}>
+                  <b>No catalog fuse meets the requirement</b> — need I_rated ≥ {num(fuseRes.requirements.i_rated_min, 1)} A
+                  at ≥ {num(fuseRes.requirements.v_min, 0)} Vac with melting I²t above the startup pulse. The DB tops out
+                  at 50 A; use a higher-rated fuse, relax the current margin, or confirm the site fault current.
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                Candidate screen (vendor fuse database)
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 8 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead><tr>{['Part', 'I_rated', 'V_ac', 'Breaking', 'Melt I²t', 'V', 'I', 'BC', 'I²t', 'Verdict'].map(h =>
+                    <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                  <tbody>{fuseRes.candidates.slice(0, 8).map((c, i) => {
+                    const mk = (v: boolean | null) => v == null ? '—' : (v ? '✓' : '✗')
+                    return (
+                    <tr key={i}>
+                      <td style={cell}>{c.part_number ?? c.label}</td>
+                      <td style={cell}>{num(c.i_rated_A, 0)}A</td>
+                      <td style={cell}>{num(c.v_ac_V, 0)}</td>
+                      <td style={cell}>{c.breaking_ac_A != null ? `${num(c.breaking_ac_A, 0)}A` : '—'}</td>
+                      <td style={cell}>{c.melting_i2t != null ? num(c.melting_i2t, 0) : 'MISSING'}</td>
+                      <td style={cell}>{mk(c.v_ok)}</td><td style={cell}>{mk(c.i_ok)}</td>
+                      <td style={cell}>{mk(c.bc_ok)}</td><td style={cell}>{mk(c.i2t_ok)}</td>
+                      <td style={cell}><Badge color={c.ok ? 'green' : 'red'}>{c.ok ? 'PASS' : 'FAIL'}</Badge></td>
+                    </tr>)})}</tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
+                Screened against the vendor fuse database (115 parts). Melting I²t is DATA MISSING for some
+                parts (blank) — flagged, never a silent pass. {fuseRes.fast_blow_only ? 'DB is fast-blow only; OK because the NTC limits inrush.' : ''}
+              </div>
             </>)}
           </div>
         )}
