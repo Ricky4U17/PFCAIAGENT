@@ -16,7 +16,7 @@ import io
 from app.mode_b.doc_report_builder import (
     chapter_splash, step_h, sub_h, body, eq_box, data_table, annotation, CW,
 )
-from app.mode_b.inputprotection.adapter import calculate_ntc, calculate_mov, calculate_gdt
+from app.mode_b.inputprotection.adapter import calculate_ntc, calculate_mov, calculate_gdt, calculate_fuse
 
 _MU = "&#181;"; _DEG = "&#176;"; _OHM = "&#937;"
 
@@ -53,7 +53,13 @@ def _inrush_schematic_flowable():
 # ══════════════════════════════════════════════════════════════════════════════
 def build_ntc_story(story, design, cap=None, opts=None):
     CH = 8
-    out = calculate_ntc(design, cap or {}, opts or {})
+    opts = dict(opts or {})
+    # Fuse selection first — its melting I²t AUTO-FEEDS the §8.9 coordination when the designer left the
+    # fuse I²t blank (closes the review's OPEN item end-to-end).
+    fuse = calculate_fuse(design, cap or {}, opts)
+    if not opts.get("fuse_i2t_rating") and fuse.get("selected_i2t"):
+        opts["fuse_i2t_rating"] = fuse["selected_i2t"]
+    out = calculate_ntc(design, cap or {}, opts)
     s = out["spec"]; r = out["result"]; cat = out["catalog"]
     wc = out.get("worst_case") or {}          # review-upgrade worst-case / coordination proof
 
@@ -65,7 +71,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
          "8.3 Pulse-energy survival  ·  8.4 Continuous self-heat → bypass relay",
          "8.5 Bypass relay + precharge  ·  8.5.1 Precharge voltage & residual relay make",
          "8.6 Candidate screen  ·  8.7 Selected NTC",
-         "8.8 Warm / hot restart  ·  8.9 Fuse I²t coordination  ·  8.10 Startup-path stress",
+         "8.8 Warm / hot restart  ·  8.9 Fuse selection & I²t coordination  ·  8.10 Startup-path stress",
          "8.11 AC phase-angle sweep  ·  8.12 Final margin summary & open items"])
 
     # ── 8.1 basis ──
@@ -362,9 +368,51 @@ def build_ntc_story(story, design, cap=None, opts=None):
             + (f"<b>{_rp}</b>" if _rp else "<b>(unstated — hardware / firmware / procedure to be declared)</b>")
             + ". Add the selected part's R(T) data to replace the warm/hot estimate.", CH)
 
-    # ── 8.9 fuse I²t startup coordination — review point 7 ──
+    # ── 8.9 fuse selection + I²t startup coordination — review point 7 + fuse DB ──
     if wc:
-        sub_h(story, "8.9", "Fuse I²t Startup Coordination", CH)
+        sub_h(story, "8.9", "Fuse Selection & I²t Startup Coordination", CH)
+        # ---- 8.9.0 fuse selection from the vendor DB ----
+        _freq = fuse.get("requirements") or {}
+        _fsel = fuse.get("selected")
+        body(story,
+            "The line fuse is the upstream protective element for the whole input stage. It is selected from "
+            "the vendor database against four gates: AC voltage rating &#8805; the high line; current rating "
+            f"&#8805; {_f((fuse.get('spec') or {}).get('current_margin',1.5),2)}&#215; the worst-case input "
+            f"RMS ({_f(fuse.get('i_rms'),1)} A &#8658; &#8805; {_f(_freq.get('i_rated_min'),1)} A); breaking "
+            "capacity &#8805; the available fault current; and — critically — a melting I&#178;t that "
+            "EXCEEDS the NTC-limited startup I&#178;t with margin so it does not nuisance-blow.", CH)
+        if _fsel:
+            body(story,
+                f"<b>Selected fuse:</b> {_fsel.get('mfr','')} {_fsel.get('part_number','')} — "
+                f"{_f(_fsel.get('i_rated_A'),0)} A / {_f(_fsel.get('v_ac_V'),0)} Vac, breaking "
+                f"{_f(_fsel.get('breaking_ac_A'),0)} A, melting I&#178;t <b>{_f(_fsel.get('melting_i2t'),0)} "
+                f"A&#178;s</b>, {_fsel.get('response_time','')}. Its melting I&#178;t feeds the coordination "
+                "check below (and the MOV/GDT fail-short check in Chapter 9).", CH)
+        else:
+            annotation(story, "OPEN — no catalog fuse fits",
+                f"No database fuse meets the requirement (need I<sub>rated</sub> &#8805; "
+                f"{_f(_freq.get('i_rated_min'),1)} A at &#8805; {_f(_freq.get('v_min'),0)} Vac with melting "
+                "I&#178;t above the startup pulse). The vendor DB tops out at 50 A — use a higher-rated fuse, "
+                "relax the current margin, or confirm the site fault current.", CH)
+        _fc = fuse.get("candidates") or []
+        if _fc:
+            def _mk(v):
+                return "&#10003;" if v else ("&#8212;" if v is None else "&#10007;")
+            data_table(story, "8.9a", "Line-Fuse Candidate Screen",
+                "Vendor fuse database screened against the four gates; DATA MISSING where a datasheet field "
+                "(melting I&#178;t / breaking capacity) is absent.",
+                ["Part", "I<sub>rated</sub>", "V<sub>ac</sub>", "Breaking", "Melt I²t", "V", "I", "BC", "I²t", "Verdict"],
+                [[str(c.get("part_number") or c["label"])[:16], f"{_f(c.get('i_rated_A'),0)}A",
+                  f"{_f(c.get('v_ac_V'),0)}", (f"{_f(c.get('breaking_ac_A'),0)}A" if c.get("breaking_ac_A") else "&#8212;"),
+                  (f"{_f(c.get('melting_i2t'),0)}" if c.get("melting_i2t") is not None else "MISSING"),
+                  _mk(c.get("v_ok")), _mk(c.get("i_ok")), _mk(c.get("bc_ok")), _mk(c.get("i2t_ok")),
+                  "PASS" if c["ok"] else "FAIL"] for c in _fc[:8]],
+                col_widths=[CW*0.17, CW*0.09, CW*0.08, CW*0.11, CW*0.10, CW*0.06, CW*0.06, CW*0.06, CW*0.06, CW*0.21], ch=CH)
+        if fuse.get("fast_blow_only"):
+            body(story, "<i>Note: the current database contains only fast-blow cartridge fuses; because the "
+                 "NTC limits the inrush, a fast-blow fuse whose melting I&#178;t clears the startup pulse is "
+                 "acceptable. A time-delay (T) fuse would add margin if available.</i>", CH)
+        # ---- 8.9.1 I²t coordination (uses the selected/auto-fed fuse I²t) ----
         body(story,
             "The fuse must survive the startup pulse. For a first-order exponential charge current, the "
             "startup I&#178;t is:", CH)
@@ -508,7 +556,13 @@ def build_ntc_story(story, design, cap=None, opts=None):
 # ══════════════════════════════════════════════════════════════════════════════
 def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
     CH = 9
-    out = calculate_mov(design, mosfet or {}, cap or {}, opts or {})
+    opts = dict(opts or {})
+    # Auto-feed the selected line fuse (Ch8) into the MOV/GDT fail-short coordination when the designer
+    # left the fuse I²t blank — the same fuse closes the whole protection chain.
+    _fuse = calculate_fuse(design, cap or {}, opts)
+    if not opts.get("fuse_i2t_rating_A2s") and _fuse.get("selected_i2t"):
+        opts["fuse_i2t_rating_A2s"] = _fuse["selected_i2t"]
+    out = calculate_mov(design, mosfet or {}, cap or {}, opts)
     s = out["spec"]; st = out["stress"]; mc = out["mcov"]; cr = out["criterion"]
     tg = out["targets"]; cat = out["catalog"]
     cand = out.get("candidates") or []

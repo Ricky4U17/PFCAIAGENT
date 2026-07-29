@@ -275,6 +275,49 @@ def calculate_gdt(design: dict, opts: dict | None = None, environment: str | Non
     })
 
 
+# ── line fuse (upstream protection + NTC/MOV/GDT coordination) ─────────────────
+def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = None) -> dict:
+    """Select the line fuse and coordinate it with the startup pulse + fault path. Reuses the NTC grid
+    for the worst-case continuous I_rms and the worst-case startup I2t; the available fault current +
+    margins come from `opts` (reusing mains_fault_current_A from the NTC/MOV inputs). Returns the
+    selection, the candidate screen, the requirement thresholds, and the fuse melting I2t to feed back
+    into the NTC §8.9 / MOV-GDT fail-short checks. Missing inputs stay OPEN / DATA MISSING."""
+    from . import fuse_select as fz
+    from . import database as _db
+    opts = opts or {}
+    # worst-case continuous I_rms + startup I2t from the NTC calc (single source of the grid).
+    ntc = calculate_ntc(design, cap or {}, opts)
+    i_rms = float((ntc.get("result") or {}).get("i_rms_worst") or 0.0)
+    if i_rms <= 0:                       # grid not fully specified -> worst-case = low-line power / low line
+        _pout = design.get("pout_lo") or design.get("pout_hi")   # sustained low-line power draws the most current
+        _eff = float(opts.get("eff", 0.95)); _pf = float(opts.get("pf", 0.99))
+        _vmin = float(design.get("vin_min", 90))
+        if _pout and _vmin:
+            i_rms = float(_pout) / (_vmin * _eff * _pf)
+    startup_i2t = (ntc.get("worst_case") or {}).get("i2t_worst")
+    _o = lambda k: (float(opts[k]) if opts.get(k) not in (None, "") else None)
+    fs = fz.FuseSpec(
+        vac_max=float(design.get("vin_max", 264)),
+        i_rms=i_rms,
+        available_fault_current_A=(_o("mains_fault_current_A")),
+        current_margin=float(opts.get("fuse_current_margin", 1.5)),
+        i2t_margin=float(opts.get("fuse_i2t_margin", 2.0)),
+        ambient_derate=float(opts.get("fuse_ambient_derate", 1.0)),
+    )
+    req = fz.requirements(fs, startup_i2t)
+    try:
+        candidates = _db.screen_table_fuse(fs, startup_i2t)
+    except Exception:
+        candidates = []
+    selected = next((c for c in candidates if c["ok"]), None)
+    return _native({
+        "spec": fs, "i_rms": i_rms, "startup_i2t": startup_i2t,
+        "requirements": req, "candidates": candidates, "selected": selected,
+        "selected_i2t": (selected or {}).get("melting_i2t") if selected else None,
+        "fast_blow_only": all((c.get("response_time") or "").lower().startswith("fast") for c in candidates) if candidates else None,
+    })
+
+
 # ── reference smoke test:  python -m app.mode_b.inputprotection.adapter ──
 REFERENCE_DESIGN = {
     "vin_min": 90, "vin_max": 264, "pout_lo": 1700, "pout_hi": 3600,

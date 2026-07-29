@@ -5491,3 +5491,33 @@ Verified: adapter handles blank GUI opts; Ch8/9 builds (238 KB) with every new s
 timing, Preliminary, restart-permission, 3-col stress, status legend, release-classification, release
 statement); frontend typechecks. Suite 172/2. NTC round-2 review COMPLETE. Next designer review = Fuse.
 Plan [[ntc-review2-plan]].
+
+## C154 — 2026-07-28 — Fuse review, backend (DB + selector + coordination auto-feed + Ch8 §8.9)
+
+Last designer review area (Fuse). No review PDF — only specs/Improvements/FUSE/Fuse_Database.xlsx (115 parts).
+Wire the DB, build a line-fuse selector, and AUTO-FEED the selected fuse's melting I²t into the NTC/MOV/GDT
+fail-short checks to close their long-standing OPEN fuse-coordination items. No hardcoding; missing datasheet/
+site values stay DATA MISSING / OPEN.
+- ENGINE (inputprotection/fuse_select.py, NEW): FuseSpec + requirements() thresholds — V_ac ≥ line;
+  I_rated ≥ current_margin×I_rms/ambient_derate (and ≤ oversize_factor× that); breaking ≥ available fault
+  current; melting I²t > i2t_margin × startup I²t (no nuisance blow on the NTC-limited inrush). Self-test ok.
+- DB (database.py): _FUSE_SPEC=specs/Improvements/FUSE; ingest_fuse with a HEADER-SKIP reader (_fuse_rows —
+  the "Fuse Database" sheet has 3 title rows before the real header, unlike ICL/MOV/GDT) → 115 parts (I_rated
+  100%, V_ac 100%, breaking 114/115, melting I²t 90/115 → 25 OPEN); build_fuse/load_fuse/options_fuse/
+  _fuse_label; screen_table_fuse(fs, startup_i2t) — structured rows + per-criterion v/i/bc/i2t verdicts +
+  DATA-MISSING gate (missing melting I²t ⇒ cannot prove no-nuisance-blow, not a silent pass).
+- ADAPTER (adapter.py): calculate_fuse(design, cap, opts) — reuses the NTC grid for worst-case I_rms +
+  startup I²t (with a P_lo/(V_min·η·PF) fallback when the 9-pt grid isn't fully specified — paired low-line
+  power at low line = worst continuous current); fault current + margins from opts; returns selection +
+  candidate screen + requirements + selected melting I²t (auto-feed) + fast-blow-only flag.
+- API (main.py): POST /mode-b/input-protection/fuse/calculate.
+- REPORT Ch8 §8.9 → "Fuse Selection & I²t Startup Coordination": selection rationale + selected part +
+  candidate screen table (v/i/bc/i²t gates, DATA MISSING flagged) + fast-blow note, THEN the existing I²t
+  coordination now using the auto-fed fuse I²t. build_ntc_story auto-feeds opts["fuse_i2t_rating"] and
+  build_mov_story auto-feeds opts["fuse_i2t_rating_A2s"] when the designer left them blank → NTC §8.9,
+  §8.12 Table A, and MOV §9.6.1 / GDT §9.8.3 close to computed PASS/FAIL.
+- Local copies (Fuse_Database.xlsx + fuse.json) under inputprotection/data/, same pattern as ICL/MOV/GDT.
+Verified: fuse self-test ok; 115 parts ingested; a 1900 W / 90-264 Vac design → 35 A/500 Vac fuse (30 kA,
+650 A²s) auto-feeds and closes NTC §8.9 (PASS) + MOV fail-short (ok); Ch8/9 builds (240 KB). Suite 172/2.
+Next: C155 GUI Fuse tab (Input-Protection) + auto-feed the selected fuse I²t into the NTC/MOV payloads.
+Plan [[fuse-review-plan]].

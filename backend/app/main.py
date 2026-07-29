@@ -615,6 +615,15 @@ def input_protection_mov(req: _MovReq):
     except Exception as e:
         log.exception("mov calculate"); raise HTTPException(500, str(e))
 
+@app.post("/mode-b/input-protection/fuse/calculate", tags=["mode-b"])
+def input_protection_fuse(req: _MovReq):
+    """Select the line fuse from the vendor DB and coordinate it with the startup I²t + fault path."""
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_fuse
+        return calculate_fuse(req.design, req.cap or {}, req.opts or {})
+    except Exception as e:
+        log.exception("fuse calculate"); raise HTTPException(500, str(e))
+
 @app.post("/mode-b/input-protection/gdt/calculate", tags=["mode-b"])
 def input_protection_gdt(req: _MovReq):
     """Screen GDTs for the common-mode paths + the safety-level/environment MOV-vs-MOV+GDT recommendation."""

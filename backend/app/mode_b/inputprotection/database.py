@@ -613,7 +613,179 @@ def screen_table_gdt(gs, top: int = 12):
     return [row for _, row in scored[:top]]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  Fuse (line-fuse) database
+# ══════════════════════════════════════════════════════════════════════════════
+# specs/Improvements/MOV/../FUSE/Fuse_Database.xlsx (115 parts). NOTE: the sheet has TITLE rows before
+# the real header (first cell "Mfr Part #"), so this needs a header-skip reader — NOT the generic _rows()
+# which assumes row 0 is the header. Real datasheet scalars: current rating, AC/DC voltage, AC/DC breaking
+# capacity, melting I2t (25/115 blank -> DATA MISSING), response time, type, approvals.
+_FUSE_XLSX = ["Fuse_Database.xlsx"]
+_FUSE_JSON = "fuse.json"
+_FUSE_SPEC = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "..", "specs", "Improvements", "FUSE"))
+
+
+def _fuse_src_path():
+    return _first_existing(_FUSE_XLSX, _DATA, _FUSE_SPEC, _SURGE_SPEC, _SPEC)
+
+
+def _fuse_rows(path):
+    """Yield dict rows keyed by the real header (the first row whose first cell is 'Mfr Part #')."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb["Fuse Database"] if "Fuse Database" in wb.sheetnames else wb[wb.sheetnames[0]]
+    hdr = None
+    for row in ws.iter_rows(values_only=True):
+        if hdr is None:
+            if row and str(row[0]).strip() == "Mfr Part #":
+                hdr = [str(h).strip() if h is not None else "" for h in row]
+            continue
+        if any(v not in (None, "") for v in row):
+            yield dict(zip(hdr, row))
+    wb.close()
+
+
+def ingest_fuse(path=None):
+    src = path or _fuse_src_path()
+    if not src:
+        return []
+    out = []
+    for r in _fuse_rows(src):
+        part = r.get("Mfr Part #")
+        if not part:
+            continue
+        out.append({
+            "mfr":            r.get("Manufacturer"),
+            "part_number":    part,
+            "series":         r.get("Series"),
+            "description":    r.get("Description"),
+            "fuse_type":      r.get("Fuse Type"),
+            "response_time":  r.get("Response Time"),
+            "mounting":       r.get("Mounting Type"),
+            "i_rated_A":      _num(r.get("Current Rating (A)")),
+            "v_ac_V":         _num(r.get("Voltage AC (V)")),
+            "v_dc_V":         _num(r.get("Voltage DC (V)")),
+            "breaking_ac_A":  _num(r.get("Breaking Cap. AC (A)")),
+            "breaking_dc_A":  _num(r.get("Breaking Cap. DC (A)")),
+            "melting_i2t":    _num(r.get("Melting I²t (A²s)")),   # 25/115 blank -> None (DATA MISSING)
+            "approval":       r.get("Approval Agency"),
+            "op_temp":        r.get("Operating Temperature"),
+            "package":        r.get("Package / Case"),
+            "datasheet_url":  r.get("Datasheet"),
+        })
+    return out
+
+
+def build_fuse():
+    src = _fuse_src_path()
+    if not src:
+        return 0
+    os.makedirs(_DATA, exist_ok=True)
+    local = os.path.join(_DATA, os.path.basename(src))
+    if os.path.abspath(src) != os.path.abspath(local):
+        shutil.copyfile(src, local)
+    recs = ingest_fuse(local)
+    with open(os.path.join(_DATA, _FUSE_JSON), "w", encoding="utf-8") as f:
+        json.dump(recs, f)
+    return len(recs)
+
+
+_FUSE_CACHE = None
+def load_fuse():
+    global _FUSE_CACHE
+    if _FUSE_CACHE is None:
+        path = os.path.join(_DATA, _FUSE_JSON)
+        if not os.path.exists(path):
+            if not _fuse_src_path():
+                _FUSE_CACHE = []
+                return _FUSE_CACHE
+            build_fuse()
+        with open(path, encoding="utf-8") as f:
+            _FUSE_CACHE = json.load(f)
+    return _FUSE_CACHE
+
+
+def options_fuse():
+    recs = load_fuse()
+    uniq = lambda key: sorted({(r.get(key) or "").strip() for r in recs if r.get(key)})
+    return {"manufacturers": uniq("mfr"), "fuse_type": uniq("fuse_type"), "response_time": uniq("response_time")}
+
+
+def _fuse_label(rec):
+    bits = []
+    if rec.get("i_rated_A") is not None: bits.append(f"{rec['i_rated_A']:g}A")
+    if rec.get("v_ac_V") is not None: bits.append(f"{rec['v_ac_V']:g}Vac")
+    if rec.get("response_time"): bits.append(str(rec["response_time"]))
+    tail = f" — {', '.join(bits)}" if bits else ""
+    return f"{rec.get('mfr') or ''} {rec.get('part_number') or ''}".strip() + tail
+
+
+def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
+    """Structured line-fuse screen against the vendor Fuse_Database. Criteria (fuse_select.requirements):
+    AC voltage rating vs high line; current rating vs margin×I_rms (and not grossly oversized); breaking
+    capacity vs available fault current (OPEN if none); melting I2t vs margin×startup I2t (no nuisance blow
+    on the NTC-limited inrush) — melting I2t absent (25/115 parts) => DATA MISSING, never a silent pass."""
+    recs = load_fuse()
+    if not recs:
+        return []
+    from . import fuse_select as fz
+    req = fz.requirements(fs, startup_i2t)
+    BIG = 1e18
+    scored = []
+    for rec in recs:
+        i_rated = rec.get("i_rated_A"); v_ac = rec.get("v_ac_V")
+        bc = rec.get("breaking_ac_A"); i2t = rec.get("melting_i2t")
+        reasons, ok = [], True
+        # voltage
+        v_ok = (v_ac is not None and v_ac >= req["v_min"])
+        if not v_ok:
+            ok = False
+            reasons.append(f"V_ac {v_ac:g}V < {req['v_min']:.0f}V line" if v_ac is not None else "V_ac rating missing")
+        # continuous current
+        i_ok = (i_rated is not None and i_rated >= req["i_rated_min"])
+        if not i_ok:
+            ok = False
+            reasons.append(f"I_rated {i_rated:g}A < required {req['i_rated_min']:.1f}A (margin x I_rms)" if i_rated else "I_rated missing")
+        elif req["i_rated_max"] and i_rated > req["i_rated_max"]:
+            ok = False; reasons.append(f"I_rated {i_rated:g}A oversized (> {req['i_rated_max']:.0f}A) — won't clear a small overload")
+        else:
+            reasons.append(f"I_rated {i_rated:g}A OK (>= {req['i_rated_min']:.1f}A)")
+        # breaking capacity vs available fault current
+        if req["bc_min"] is None:
+            bc_ok = None; reasons.append("breaking-capacity check OPEN (available fault current not given)")
+        elif bc is None:
+            bc_ok = None; reasons.append("breaking capacity missing (DATA MISSING)")
+        else:
+            bc_ok = bc >= req["bc_min"]
+            if not bc_ok:
+                ok = False
+            reasons.append(f"breaking {bc:g}A {'>=' if bc_ok else '<'} fault {req['bc_min']:.0f}A")
+        # ride the NTC-limited startup inrush without nuisance blow
+        if i2t is None:
+            i2t_ok = None
+            reasons.append("melting I2t DATA MISSING — cannot confirm no-nuisance-blow vs startup I2t")
+            if req["i2t_min"] is not None:
+                ok = False               # cannot prove it rides the inrush
+        elif req["i2t_min"] is None:
+            i2t_ok = None; reasons.append(f"melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush OPEN)")
+        else:
+            i2t_ok = i2t > req["i2t_min"]
+            if not i2t_ok:
+                ok = False
+            reasons.append(f"melting I2t {i2t:g} A2s {'>' if i2t_ok else '<='} {req['i2t_min']:.1f} A2s (margin x startup)")
+        row = {"label": _fuse_label(rec), "part_number": rec.get("part_number"), "mfr": rec.get("mfr"),
+               "i_rated_A": i_rated, "v_ac_V": v_ac, "breaking_ac_A": bc, "melting_i2t": i2t,
+               "response_time": rec.get("response_time"), "fuse_type": rec.get("fuse_type"),
+               "package": rec.get("package"), "datasheet_url": rec.get("datasheet_url"),
+               "v_ok": v_ok, "i_ok": i_ok, "bc_ok": bc_ok, "i2t_ok": i2t_ok, "ok": ok, "reasons": reasons}
+        # rank: passing first, then smallest sufficient current rating (tightest protection), then highest I2t headroom
+        scored.append(((0 if ok else 1, i_rated or BIG, -(i2t or 0)), row))
+    scored.sort(key=lambda x: x[0])
+    return [row for _, row in scored[:top]]
+
+
 if __name__ == "__main__":
     print("ingesting ICL database…", build_all(), "parts;  local copy + cache under", _DATA)
     print("ingesting MOV database…", build_mov(), "parts (0 = no filled vendor file yet; template ignored)")
     print("ingesting GDT database…", build_gdt(), "parts (0 = no filled vendor file yet)")
+    print("ingesting Fuse database…", build_fuse(), "parts (0 = no filled vendor file yet)")
