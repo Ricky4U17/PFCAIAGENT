@@ -5676,3 +5676,44 @@ different places — which confuses reviewers.
 Verified empirically on a real engine design (EDGE N=28, DCR100=12.68 mΩ, Rac/Rdc=1.03): §3.6.2 worked
 Pcu100 = 1.2802(DC)+0.0197(HF) = 1.2999 W == §3.6.1 row0 1.2999 W; Ptot100 3.3624 W both (Δ=0); recomputed vs
 engine stored firstpass Δ = −0.00004 W. Suite 172 passed, 2 skipped.
+
+## C162 — 2026-07-30 — NTC selection backend: tolerance-aware R25 gate + two-tier verdict + two-column parasitic
+
+Reorg groundwork from specs/NTC/NTC Improvement.docx (Copilot-chat review). Backend = source of truth.
+- ntc_bypass_select.compute(): NtcResult.r25_nom_required = r25_pick/(1-tol) — required NOMINAL catalog
+  floor so a part's -tolerance minimum still meets the margin'd inrush. Reproduces the doc's 5.46 ohm
+  (with 2.25 parasitic) / 8.56 ohm (conservative). +r25_tol_screen.
+- database.rank(): two-tier verdict PASS/CONDITIONAL/FAIL (mirrors fuse selector). Tier-1 HARD = R25 >=
+  r25_nom_required (miss -> FAIL); Tier-2 SOFT = pulse energy (ESTIMATED from disc Ø) -> CONDITIONAL,
+  never FAIL, never blocks selection. +tier1_ok/tier2_ok/energy_estimated. screen_catalog() floors on
+  r25_nom_required, energy = soft note.
+- worst_case_startup(): two columns everywhere (conservative NTC-alone / realistic NTC+parasitic) ->
+  resolves the §8.2.1(46.7A) vs §8.7(30.5A) mismatch. Hot restart = decision packet (hot_restart_decision
+  + options): PASS when a restart policy is defined, else CHECK->CONDITIONAL; never BLOCKED, never blocks
+  selection.
+Verified end-to-end via calculate_ntc (12 candidates w/ verdicts; MF72-010D25 -> 30.5A meets target;
+hot_restart CHECK->PASS with off-time). Suite 172/2. Commit e0f6619.
+
+## C163 — 2026-07-30 — GUI two-tier NTC candidate list (pass-list + conditional group, never-empty)
+
+Designer ask: show only NTC options that pass — reconciled with the "selection never blocked by
+DATA-MISSING" rule via two tiers.
+- InputProtection.tsx: NTC candidate table groups by backend verdict — PASS first, a "Conditional —
+  confirm pulse energy on datasheet" divider, then CONDITIONAL parts; FAIL (can't hold inrush) hidden.
+  Verdict badges via vColor. Never-empty fallback (amber banner + closest parts if nothing qualifies).
+  Header shows the tolerance-aware floor (r25_nom_required, tol%).
+- client.ts: NtcCandidate += verdict/tier1_ok/tier2_ok/energy_estimated; NtcResult.result +=
+  r25_nom_required/r25_tol_screen.
+Frontend typecheck clean. Commit 8f792ad.
+
+## C164 — 2026-07-30 — Ch8 report: de-circularized §8.1 + tolerance gate + two-column parasitic + verdict screen + hot-restart decision
+
+- §8.1 renamed "Design Inputs, Limits & Selection Gates": removed the pre-announced "Selected NTC R25"
+  row; added target/parasitic/screen-tol + a "Derived Selection Gates" table. Part named only at §8.6-§8.7.
+- §8.2.1 derives required nominal R25 gate (r25_pick/(1-tol)=8.56 ohm) + two-column cold-inrush table.
+- §8.6 "Candidate Database Screen — Before Final Selection": verdict Table A (electrical) + Table B
+  (practical) note; premature selection naming removed.
+- §8.8 "Warm / Hot Restart Policy": hot-restart DECISION table + two-column restart table.
+Verified: Chapter 8 renders to PDF (207 KB). Suite 172/2. Commit da4cab0. DEFERRED (optional C165):
+physical resequencing of self-heat/relay-timing blocks after selection + full 8.1->8.14 renumber
+(higher-risk churn on an untested 500-line report builder).
