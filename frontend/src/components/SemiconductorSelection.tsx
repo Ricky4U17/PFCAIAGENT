@@ -178,6 +178,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [mosfet, setMosfet] = useState({ ...MOSFET0 })
   const [diode, setDiode] = useState({ ...DIODE0 })
   const [bridge, setBridge] = useState({ ...BRIDGE0 })
+  // Full engine block of a DB-selected / uploaded part, kept so datasheet fields the FORM doesn't
+  // expose (e.g. vf_tco, _estimated) survive into Calculate — otherwise the form round-trip drops them
+  // and the Results loss diverges from the Top-10 screen (which uses the full block).
+  const [dbBlock, setDbBlock] = useState<Record<string, Record<string, unknown>>>({})
   const [thermal, setThermal] = useState({ t_ambient: '45', rth_sa: '0.35' })
   const [tjLimit] = useState({ fet: 150, diode: 150, bridge: 130 })
 
@@ -247,6 +251,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
   }
   const pickDbPart = (which: Sub, r: DbRankResult) => {
     setWhole(which, blockToForm(r.block as Record<string, any>, FIELDS[which], BASE[which]))
+    setDbBlock(s => ({ ...s, [which]: r.block as Record<string, unknown> }))  // keep full block (vf_tco…)
     setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show the populated fields for review/edit
   }
   // Bottom bypass MOSFET (sync_bottom bridge): conduction-only, merge its fields into the bridge state
@@ -269,15 +274,21 @@ export const SemiconductorSelection: React.FC<Props> = ({
       setWhole(which, blockToForm(r.block as Record<string, any>, FIELDS[which], cur))
       setExtInfo(s => ({ ...s, [which]: { found: r.found, missing: r.missing,
         part: `${r.manufacturer ?? ''} ${r.part_number ?? ''}`.trim() } }))
+      setDbBlock(s => ({ ...s, [which]: r.block as Record<string, unknown> }))  // keep full extracted block
       setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show populated fields for confirmation
     } catch (e) { setErr((e as Error).message) } finally { setExtBusy(s => ({ ...s, [which]: false })) }
   }
 
+  // Merge a selected/uploaded part's FULL block under the form edits: the form wins for every field it
+  // exposes; the stored block supplies the rest (vf_tco, estimated params) so Calculate uses the exact
+  // same block the Top-10 screen did — Results == screen for the selected part.
+  const merged = (which: Sub, formBlock: Record<string, unknown>) =>
+    ({ ...(dbBlock[which] || {}), ...formBlock })
   const body = (): SemiReqBody => ({
     design,
-    mosfet: buildBlock(mosfet, MOSFET_FIELDS),
-    diode:  buildBlock(diode, DIODE_FIELDS),
-    bridge: buildBlock(bridge, BRIDGE_FIELDS),
+    mosfet: merged('mosfet', buildBlock(mosfet, MOSFET_FIELDS)),
+    diode:  merged('diode',  buildBlock(diode, DIODE_FIELDS)),
+    bridge: merged('bridge', buildBlock(bridge, BRIDGE_FIELDS)),
     thermal: { t_ambient: pnum(thermal.t_ambient) ?? 45, rth_sa: pnum(thermal.rth_sa) ?? 0.35 },
     tj_limit: tjLimit,
     // pass the approved inductor design so the GUI applies the SAME as-built per-point L the
@@ -447,7 +458,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
         <span style={{ fontSize: 11, color: C.muted }}>Source:</span>
         {([['database', '🔍 From database'], ['manual', '✎ Manual / external'], ['upload', '📄 Upload datasheet']] as [SrcMode, string][])
           .map(([m, lbl]) => (
-            <button key={m} onClick={() => setSrcMode(s => ({ ...s, [which]: m }))} style={{
+            <button key={m} onClick={() => {
+                setSrcMode(s => ({ ...s, [which]: m }))
+                if (m === 'manual') setDbBlock(s => { const n = { ...s }; delete n[which]; return n })  // pure manual → drop stored datasheet block
+              }} style={{
               padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
               border: `1px solid ${mode === m ? C.teal : C.border}`, background: mode === m ? 'rgba(45,212,191,.12)' : C.bg3,
               color: mode === m ? C.teal : C.muted }}>{lbl}</button>

@@ -5618,3 +5618,20 @@ parallel into the DB-search tab so the ranking reflects the real parallel count.
   context and equals the Results/report figure.
 Verified: screen == calculate for GBJ40L06 — n_parallel=1 → 27.19/27.19 W; n_parallel=2 → 26.03/26.03 W
 (parallel correctly lowers loss); frontend typechecks. Suite <pending>.
+
+## C159 — 2026-07-29 — Fix lossy DB-select round-trip (vf_tco dropped) so Results == Top-10 screen
+
+Designer: LVE5060E-M3/P Top-10 = 32.48 W (2 in parallel) but Calculate = 38.91 W @90V. PROVEN cause: the
+bridge FORM has no `vf_tco` field, so selecting a DB part (which carries vf_tco = −0.002 from to_block) →
+blockToForm → buildBlock DROPS vf_tco; Calculate then falls back to the engine's Bridge default vf_tco = 0.0
+→ Vf stays higher with temperature → higher loss (repro: 26.07 → 30.45 W, ratio 1.17; the generic-default
+Vf-curve theory was C157/C158's diode-bridge case — this is a SEPARATE dropped-field round-trip loss). The
+form round-trip is lossy for every datasheet field it doesn't expose (vf_tco, estimated params, etc.).
+- GUI (SemiconductorSelection.tsx): new `dbBlock` state holds the FULL engine block of a DB-selected /
+  uploaded part; pickDbPart + onExtract store r.block. `body()` now merges `{...dbBlock[kind], ...buildBlock
+  (form)}` per component — the form wins for every field it exposes, the stored block supplies the rest
+  (vf_tco…), so Calculate (and the report, which uses body()) uses the SAME block the Top-10 screen did.
+  Switching Source→Manual clears the stored block (pure-manual entry shouldn't carry a stale datasheet field).
+Verified (repro of the exact round-trip): screen 26.07 == calc-merged 26.07 (was 30.45 form-only); n_parallel
+still flows; frontend typechecks. Together with C158 (screen uses the designer's config) this makes the
+Top-10 loss for a selected part equal the Results/report figure. Suite <pending>.
