@@ -431,6 +431,7 @@ export interface NtcCandidate {
   mfr?: string; part_number?: string; r25?: number; imax?: number; diameter_mm?: number
   energy_est_J?: number; datasheet_url?: string; ok: boolean; reasons: string[]
   energy_margin?: number | null
+  verdict?: string; tier1_ok?: boolean; tier2_ok?: boolean; energy_estimated?: boolean
 }
 export interface NtcSelected {
   part_number?: string; mfr?: string; r25_ohm: number; imax_A?: number; diameter_mm?: number
@@ -444,6 +445,7 @@ export interface NtcResult {
   spec: Record<string, number>
   result: {
     vin_pk_max: number; r_total_min: number; r_parasitic: number; r25_required: number; r25_pick: number
+    r25_nom_required: number; r25_tol_screen: number
     e_cap: number; e_pulse_required: number; cmax_equiv_required: number; i_rms_worst: number
     tau: number; t_bypass: number; relay_contact_v: number; relay_contact_a: number
     sweep: [number, number][]; loss_rows: [number, number][]

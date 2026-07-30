@@ -340,49 +340,80 @@ export const InputProtection: React.FC<Props> = ({
                 </div>
               )}
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-                Catalog screen — R25 ≥ {num(ntcRes.result.r25_pick, 2)} Ω and pulse rating ≥ {num(ntcRes.result.e_pulse_required, 0)} J
-                — click Select to base the design on a part
+                Candidate screen — nominal R25 ≥ {num(ntcRes.result.r25_nom_required, 2)} Ω
+                (tolerance-aware: {num((ntcRes.result.r25_tol_screen ?? 0) * 100, 0)}% below still holds the inrush)
+                and pulse rating ≥ {num(ntcRes.result.e_pulse_required, 0)} J — click Select to base the design on a part
               </div>
-              {(ntcRes.candidates?.length ?? 0) > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                    <thead><tr>{['', '', 'Mfr / Part', 'R25 (Ω)', 'Ø (mm)', 'I_max (A)', 'E est. (J)', 'Notes'].map((h, i) =>
-                      <th key={i} style={{ ...cell, color: C.hint, textTransform: 'uppercase', fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
-                    <tbody>{(ntcRes.candidates as NtcCandidate[]).map((c, i) => {
-                      const isSel = ntcRes.selected?.part_number === c.part_number
-                      return (
-                        <tr key={i} style={isSel ? { background: 'rgba(45,212,191,.08)' } : undefined}>
-                          <td style={cell}>{c.ok ? <Badge color="green">PASS</Badge> : <Badge color="red">FAIL</Badge>}</td>
-                          <td style={cell}>
-                            <Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectNtc(c.part_number ?? '')}>
-                              {isSel ? '✓ Selected' : 'Select'}
-                            </Btn>
-                          </td>
-                          <td style={{ ...cell, whiteSpace: 'normal', fontWeight: 600, color: c.ok ? C.text : C.muted }}>
-                            {c.mfr} {c.datasheet_url
-                              ? <a href={(c.datasheet_url.startsWith('//') ? 'https:' : '') + c.datasheet_url} target="_blank"
-                                   rel="noreferrer" style={{ color: C.accent }}>{c.part_number}</a>
-                              : c.part_number}
-                          </td>
-                          <td style={cell}>{num(c.r25, 1)}</td>
-                          <td style={cell}>{num(c.diameter_mm, 0)}</td>
-                          <td style={cell}>{num(c.imax, 1)}</td>
-                          <td style={cell}>{num(c.energy_est_J, 0)}</td>
-                          <td style={{ ...cell, whiteSpace: 'normal', color: C.muted, fontSize: 10 }}>
-                            {(c.reasons ?? []).slice(0, 2).map((x, k) => <div key={k}>– {x}</div>)}</td>
-                        </tr>
-                      )
-                    })}</tbody>
-                  </table>
-                </div>
-              ) : (
-                <CatalogTable rows={ntcRes.catalog} emptyNote="No catalog parts loaded." />
-              )}
+              {(() => {
+                const cands = (ntcRes.candidates ?? []) as NtcCandidate[]
+                if (!cands.length) return <CatalogTable rows={ntcRes.catalog} emptyNote="No catalog parts loaded." />
+                const vd = (c: NtcCandidate) => c.verdict ?? (c.ok ? 'PASS' : 'FAIL')
+                const pass = cands.filter(c => vd(c) === 'PASS')
+                const cond = cands.filter(c => vd(c) === 'CONDITIONAL')
+                const qualifying = [...pass, ...cond]
+                const fallback = qualifying.length === 0        // never-empty: show closest if nothing qualifies
+                const shown = fallback ? cands : qualifying
+                const ntcRow = (c: NtcCandidate, key: string) => {
+                  const isSel = ntcRes.selected?.part_number === c.part_number
+                  const v = vd(c)
+                  return (
+                    <tr key={key} style={isSel ? { background: 'rgba(45,212,191,.08)' } : undefined}>
+                      <td style={cell}><Badge color={vColor(v)}>{v}</Badge></td>
+                      <td style={cell}>
+                        <Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectNtc(c.part_number ?? '')}>
+                          {isSel ? '✓ Selected' : 'Select'}
+                        </Btn>
+                      </td>
+                      <td style={{ ...cell, whiteSpace: 'normal', fontWeight: 600, color: v === 'FAIL' ? C.muted : C.text }}>
+                        {c.mfr} {c.datasheet_url
+                          ? <a href={(c.datasheet_url.startsWith('//') ? 'https:' : '') + c.datasheet_url} target="_blank"
+                               rel="noreferrer" style={{ color: C.accent }}>{c.part_number}</a>
+                          : c.part_number}
+                      </td>
+                      <td style={cell}>{num(c.r25, 1)}</td>
+                      <td style={cell}>{num(c.diameter_mm, 0)}</td>
+                      <td style={cell}>{num(c.imax, 1)}</td>
+                      <td style={cell}>{num(c.energy_est_J, 0)}</td>
+                      <td style={{ ...cell, whiteSpace: 'normal', color: C.muted, fontSize: 10 }}>
+                        {(c.reasons ?? []).slice(0, 2).map((x, k) => <div key={k}>– {x}</div>)}</td>
+                    </tr>
+                  )
+                }
+                const divider = (label: string) => (
+                  <tr><td colSpan={8} style={{ ...cell, background: C.bg3, color: C.hint, fontSize: 9,
+                    textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 700 }}>{label}</td></tr>
+                )
+                return (
+                  <div style={{ overflowX: 'auto' }}>
+                    {fallback && (
+                      <div style={{ fontSize: 10, color: C.amber, marginBottom: 6 }}>
+                        No catalog part clears the R25 inrush gate — showing the closest parts. Relax the inrush
+                        target, credit more parasitic resistance, or use active precharge.
+                      </div>
+                    )}
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <thead><tr>{['Verdict', '', 'Mfr / Part', 'R25 (Ω)', 'Ø (mm)', 'I_max (A)', 'E est. (J)', 'Notes'].map((h, i) =>
+                        <th key={i} style={{ ...cell, color: C.hint, textTransform: 'uppercase', fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {fallback
+                          ? shown.map((c, i) => ntcRow(c, `f${i}`))
+                          : <>
+                              {pass.map((c, i) => ntcRow(c, `p${i}`))}
+                              {cond.length > 0 && divider('Conditional — clears the inrush gate; confirm pulse energy on the datasheet')}
+                              {cond.map((c, i) => ntcRow(c, `c${i}`))}
+                            </>}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })()}
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Screened against the vendor ICL database (ICL_Database.xlsx). R25 is the real datasheet value;
-                pulse energy is estimated from the disc diameter — confirm energy / max-C on the datasheet before
-                ordering. Selecting a part recalculates the inrush/precharge numbers around its actual R25 and
-                documents the selection in the report (§8.7).
+                Screened against the vendor ICL database (ICL_Database.xlsx). <b>PASS</b> = nominal R25 clears the
+                tolerance-aware inrush gate and the (estimated) pulse energy meets the requirement;
+                <b> CONDITIONAL</b> = clears the inrush gate but pulse energy (estimated from disc Ø) needs datasheet
+                confirmation; parts that cannot hold the inrush are hidden. R25 is the real datasheet value.
+                Selecting a part recalculates the inrush/precharge numbers around its actual R25 and documents the
+                selection in the report (§8.7).
               </div>
             </>)}
           </div>
