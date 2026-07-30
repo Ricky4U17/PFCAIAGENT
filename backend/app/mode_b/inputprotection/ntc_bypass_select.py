@@ -106,6 +106,8 @@ class NtcResult:
     r_parasitic: float            # sum of known parasitics
     r25_required: float           # required NTC-alone cold resistance
     r25_pick: float               # recommended R25 with margin
+    r25_nom_required: float       # required *nominal* catalog R25 after -tolerance (screen floor)
+    r25_tol_screen: float         # tolerance fraction used for the screen floor
     e_cap: float                  # J, stored/charge energy to absorb
     e_pulse_required: float       # J, with margin
     cmax_equiv_required: float    # F, equivalent "max switchable C" at vref
@@ -129,6 +131,14 @@ def compute(s: Spec) -> NtcResult:
     r_parasitic = s.r_line + s.r_emi + s.r_esr + s.r_bridge
     r25_required = max(r_total_min - r_parasitic, 0.0)
     r25_pick = r25_required * s.r25_margin
+    # Tolerance-aware NOMINAL catalog floor for the candidate screen: a part is quoted at its
+    # nominal R25 but can be as low as R25·(1−tol) after tolerance, and that MINIMUM must still
+    # deliver the margin'd requirement. So the required *nominal* catalog value is the margin'd
+    # requirement grossed up by 1/(1−tol):  R25_nom_req = r25_pick / (1 − tol).
+    # (The screen uses the default tolerance since a specific part's own tol is only known once
+    # a candidate is chosen; per-part evaluation in worst_case_startup uses that part's own tol.)
+    _tol_scr = s.r25_tol_default if 0.0 <= s.r25_tol_default < 1.0 else 0.0
+    r25_nom_required = r25_pick / (1.0 - _tol_scr) if _tol_scr < 1.0 else r25_pick
 
     # energy the series element must absorb when charging the bulk cap
     e_cap = 0.5 * s.cout * vin_pk_max ** 2
@@ -166,6 +176,8 @@ def compute(s: Spec) -> NtcResult:
         r_parasitic=r_parasitic,
         r25_required=r25_required,
         r25_pick=r25_pick,
+        r25_nom_required=r25_nom_required,
+        r25_tol_screen=_tol_scr,
         e_cap=e_cap,
         e_pulse_required=e_pulse_required,
         cmax_equiv_required=cmax_equiv_required,
@@ -211,15 +223,20 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
         return {}
     r25 = float(r25); rsrc = s.rsource_min
     vpk = r.vin_pk_max
+    r_para = r.r_parasitic                  # known loop parasitics (line+EMI+ESR+bridge)
 
-    def _inrush(res):                      # cold peak into a given series resistance
-        return vpk / max(res + rsrc, 1e-9)
+    def _inrush(res, para=0.0):            # cold peak into a series resistance (+optional parasitic)
+        return vpk / max(res + rsrc + para, 1e-9)
 
     # ---- pt1: R25 tolerance -> minimum R25 -> worst-case cold inrush ----
+    # Two consistent columns everywhere: CONSERVATIVE (NTC alone, no credited parasitic) and
+    # REALISTIC (NTC + known loop parasitic). This removes the old §8.2.1-vs-§8.7 mismatch where
+    # the tolerance worst-case ignored the parasitic while the selected-part recalc credited it.
     tol = _parse_tol(rec.get("tolerance"), s.r25_tol_default)
     tol_from_part = rec.get("tolerance") is not None and _parse_tol(rec.get("tolerance"), -1) >= 0
     r25_min = r25 * (1.0 - tol)
     i_nom = _inrush(r25); i_min = _inrush(r25_min)
+    i_nom_real = _inrush(r25, r_para); i_min_real = _inrush(r25_min, r_para)
 
     # ---- pt3/pt4: precharge voltage at bypass close + residual relay make ----
     n_tau = s.tau_multiple
@@ -237,13 +254,17 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     r_path_total = s.rsource_min + s.r_bridge + s.r_esr + s.r_wiring_ohm + s.r_pcb_ohm
     i_bypassed = (vpk / r_path_total) if r_path_total > 0 else None
     restart_rows = [
-        {"case": "Cold 25C nominal", "r_ohm": round(r25, 3), "i_A": round(i_nom, 1)},
-        {"case": "Cold 25C minimum R25", "r_ohm": round(r25_min, 3), "i_A": round(i_min, 1)},
+        {"case": "Cold 25C nominal", "r_ohm": round(r25, 3),
+         "i_A": round(i_nom, 1), "i_A_real": round(i_nom_real, 1)},
+        {"case": "Cold 25C minimum R25", "r_ohm": round(r25_min, 3),
+         "i_A": round(i_min, 1), "i_A_real": round(i_min_real, 1)},
         {"case": "Warm/hot restart",
-         "r_ohm": (round(r_hot, 3) if r_hot else None), "i_A": (round(i_warm, 1) if i_warm else None)},
+         "r_ohm": (round(r_hot, 3) if r_hot else None), "i_A": (round(i_warm, 1) if i_warm else None),
+         "i_A_real": (round(_inrush(r_hot, r_para), 1) if r_hot else None)},
         {"case": "Bypass / stuck relay",
          "r_ohm": (round(r_path_total, 3) if r_path_total > 0 else None),
-         "i_A": (round(i_bypassed, 1) if i_bypassed else None)},
+         "i_A": (round(i_bypassed, 1) if i_bypassed else None),
+         "i_A_real": (round(i_bypassed, 1) if i_bypassed else None)},  # bypass path already sums all R
     ]
 
     # ---- pt7: startup I2t (first-order exp) at cold / min-R25 / warm ----
@@ -277,7 +298,12 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     st["precharge_timing"] = "PASS"
     st["relay_make"] = ("OPEN" if (s.relay_path_ohm <= 0 or s.relay_make_rating_a <= 0)
                         else ("PASS" if (i_relay_make is not None and i_relay_make <= s.relay_make_rating_a) else "CHECK"))
-    st["hot_restart"] = "CHECK"                 # decision: always CHECK with R_required shown
+    # Hot restart is a REQUIRED DESIGN DECISION, not a part-selection blocker: if a restart policy
+    # is defined (enforced min off-time OR a stated protection method) it PASSES; otherwise it stays
+    # a release-gating decision (CHECK → CONDITIONAL rollup), but it NEVER becomes BLOCKED and never
+    # stops the designer from selecting an NTC.
+    hot_restart_defined = (s.off_time_min_ms > 0) or bool(s.restart_protection)
+    st["hot_restart"] = "PASS" if hot_restart_defined else "CHECK"
     st["fuse_i2t"] = ("OPEN" if s.fuse_i2t_rating <= 0 else ("PASS" if fuse_ok else "CHECK"))
     # bridge IFSM vs the NORMAL cases (cold-start, and hot restart if allowed); the stuck-relay fault
     # IFSM is carried by the bypass_stuck item (it is cleared by the fuse, not ridden through).
@@ -301,11 +327,30 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
                       "i_nom_A": round(vth / max(r25 + rsrc, 1e-9), 1),
                       "i_min_A": round(vth / max(r25_min + rsrc, 1e-9), 1)})
 
+    # Hot-restart decision packet — surfaced in the GUI/report so the designer resolves it before
+    # release (it does not gate part selection).
+    hot_restart_decision = {
+        "defined": bool(hot_restart_defined),
+        "off_time_min_ms": (s.off_time_min_ms or None),
+        "restart_protection": (s.restart_protection or None),
+        "i_warm_A": (round(i_warm, 1) if i_warm else None),
+        "r_required_ohm": round(r_required, 3),
+        "options": [
+            "Enforce a minimum off-time so the NTC re-cools above R_required before restart",
+            "Gate restart on a measured R(T) / bus-voltage recovery threshold",
+            "Use active precharge (relay + resistor) instead of the NTC on hot restart",
+            "Firmware lockout with measured proof of NTC recovery",
+        ],
+    }
+
     return {
         "r25_ohm": r25, "r25_tol": tol, "tol_from_datasheet": bool(tol_from_part),
         "r25_min_ohm": round(r25_min, 3),
+        "r_parasitic_ohm": round(r_para, 3),
         "i_inrush_nom_A": round(i_nom, 1), "i_inrush_max_A": round(i_min, 1),
+        "i_inrush_nom_real_A": round(i_nom_real, 1), "i_inrush_max_real_A": round(i_min_real, 1),
         "inrush_target_A": s.i_inrush_target,
+        "hot_restart_decision": hot_restart_decision,
         "vcap_close_V": round(vcap_close, 1), "vcap_close_pct": round(100.0 * vcap_close / vpk, 1),
         "v_residual_V": round(v_residual, 1),
         "i_relay_make_A": (round(i_relay_make, 2) if i_relay_make is not None else None),
@@ -362,10 +407,11 @@ def screen_catalog(s: Spec, r: NtcResult):
     for name, r25, imax, ejoule, cmax in NTC_CATALOG:
         reasons = []
         ok = True
-        # R25 must be at least the required NTC-alone resistance
-        if r25 < r.r25_required:
+        # R25 must be at least the required *nominal* value so its −tolerance minimum still
+        # meets the margin'd inrush requirement (tolerance-aware hard gate).
+        if r25 < r.r25_nom_required:
             ok = False
-            reasons.append(f"R25 {r25} < {r.r25_required:.2f} ohm (inrush too high)")
+            reasons.append(f"R25 {r25} < {r.r25_nom_required:.2f} ohm nominal (−tol min misses inrush target)")
         # energy: either Joules or equivalent max-C must cover the event
         e_ok = ejoule >= r.e_pulse_required
         c_ok = (cmax is not None) and (cmax >= r.cmax_equiv_required)

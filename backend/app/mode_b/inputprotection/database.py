@@ -177,14 +177,14 @@ def screen_catalog(s, r, top: int = 12):
         r25 = rec.get("r25")
         if r25 is None:
             ok = False; reasons.append("no R25 on record")
-        elif r25 < r.r25_required:
-            ok = False; reasons.append(f"R25 {r25:g}Ω < {r.r25_required:.2f}Ω required (inrush too high)")
+        elif r25 < r.r25_nom_required:
+            ok = False; reasons.append(f"R25 {r25:g}Ω < {r.r25_nom_required:.2f}Ω nominal (-tol min misses inrush)")
+        # Tier-2 SOFT gate: pulse energy is estimated from disc size -> note only, never flips the hard verdict.
         e_est = rec.get("energy_est_J")
         if e_est is None:
-            ok = False; reasons.append("no disc diameter → energy not estimable")
+            reasons.append("energy not estimable (no disc diameter) - confirm on datasheet")
         elif e_est < r.e_pulse_required:
-            ok = False
-            reasons.append(f"energy ~{e_est:g} J (est. from Ø) < {r.e_pulse_required:.0f} J required — verify datasheet")
+            reasons.append(f"energy ~{e_est:g} J (est. fromØ) < {r.e_pulse_required:.0f} J required — verify datasheet")
         else:
             reasons.append(f"energy ~{e_est:g} J (est. from Ø; confirm on datasheet)")
         imax = rec.get("imax")
@@ -247,18 +247,48 @@ def selected_metrics(s, r, rec):
 
 
 def rank(s, r, top: int = 12):
-    """Rich variant of screen_catalog: full records + verdict, for GUI cards / future use."""
+    """Rich variant of screen_catalog: full records + a two-tier verdict, for the GUI cards.
+
+    TWO-TIER SCREEN (mirrors the fuse selector's PASS/CONDITIONAL/FAIL):
+      • Tier-1 (HARD, real datasheet R25): the nominal R25 must be ≥ r25_nom_required so its
+        −tolerance minimum still meets the margin'd inrush target. Failing this is a genuine
+        electrical miss → FAIL (the part cannot hold the inrush).
+      • Tier-2 (SOFT, estimated/derived): pulse energy is ESTIMATED from disc diameter, so it
+        can never hard-reject a part — a Tier-1 pass whose estimated energy is short (or absent)
+        is CONDITIONAL (verify on the datasheet / choose a larger disc), never FAIL.
+    Never blocks selection: every part is returned with a verdict; the GUI groups them.
+    """
+    _RANK = {"PASS": 0, "CONDITIONAL": 1, "FAIL": 2}
     scored = []
     for rec in load():
-        reasons = []; ok = True
+        reasons = []
         r25 = rec.get("r25"); e_est = rec.get("energy_est_J")
-        if r25 is None or r25 < r.r25_required:
-            ok = False; reasons.append("R25 below required")
-        if e_est is None or e_est < r.e_pulse_required:
-            ok = False; reasons.append("estimated energy below required")
+        # ---- Tier-1: hard R25 gate (tolerance-aware nominal floor) ----
+        if r25 is None:
+            tier1_ok = False; reasons.append("no R25 on record")
+        elif r25 < r.r25_nom_required:
+            tier1_ok = False
+            reasons.append(f"R25 {r25:g}Ω < {r.r25_nom_required:.2f}Ω nominal (−tol min misses inrush)")
+        else:
+            tier1_ok = True
+        # ---- Tier-2: soft pulse-energy gate (estimated from Ø) ----
+        if e_est is None:
+            tier2_ok = False; reasons.append("energy not estimable (no disc Ø) — confirm datasheet")
+        elif e_est < r.e_pulse_required:
+            tier2_ok = False
+            reasons.append(f"energy ~{e_est:g} J (est.) < {r.e_pulse_required:.0f} J — verify datasheet / larger disc")
+        else:
+            tier2_ok = True
+            reasons.append(f"energy ~{e_est:g} J (est. from Ø; confirm on datasheet)")
+        imax = rec.get("imax")
+        if tier1_ok and imax is not None and imax < r.i_rms_worst:
+            reasons.append(f"note: I_max {imax:g}A < I_rms {r.i_rms_worst:.1f}A (OK — bypassed after precharge)")
+        verdict = "FAIL" if not tier1_ok else ("PASS" if tier2_ok else "CONDITIONAL")
         d = rec.get("diameter_mm") or 1e6
-        scored.append(((0 if ok else 1, d), {**rec, "ok": ok, "reasons": reasons,
-                       "energy_margin": (e_est / r.e_pulse_required) if e_est else None}))
+        scored.append(((_RANK[verdict], d, abs((r25 or 1e6) - r.r25_pick)),
+                       {**rec, "verdict": verdict, "tier1_ok": tier1_ok, "tier2_ok": tier2_ok,
+                        "ok": verdict == "PASS", "energy_estimated": True, "reasons": reasons,
+                        "energy_margin": (e_est / r.e_pulse_required) if e_est else None}))
     scored.sort(key=lambda x: x[0])
     return [rec for _, rec in scored[:top]]
 
