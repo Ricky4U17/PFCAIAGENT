@@ -5653,3 +5653,26 @@ line points, while the designer compared it to a specific-Vac row. The diode pea
   Results value AT THAT SAME line voltage (not the 90 V row unless that is the peak).
 Verified: worst-case Vac — mosfet 90 V, diode 264 V, bridge 180 V; screen==calc confirmed (13.28/49.84 for
 mosfet, 12.05 diode). No calculation change — clarity only. Suite <pending>.
+
+## C161 — 2026-07-29 — Ch3 inductor copper loss unified (DC + HF proximity) across §3.6.1/§3.6.2/§3.6.3
+
+Designer: §3.6.3/§3.6.2 report the inductor copper/total loss at 90 Vac, but the §3.6.1 summary table showed
+DIFFERENT values at 90 Vac. ROOT CAUSE: the two paths computed copper loss differently. The §3.6.2/§3.6.3
+worked example read the engine's stored first-pass Pcu (Pcu_*_firstpass_W = I_φ,rms²·DCR + I_hf²·DCR·(Rac/Rdc)
+— DC term PLUS the HF skin/proximity term), while the §3.6.1 nine-point table RE-DERIVED I_φ,rms²·DCR only (DC
+term). So the table's 90 V row was low by exactly the HF proximity term (repro: 1.2802 vs 1.2999 W, +1.5%);
+core loss and current already matched at 90 V. This is a uniformity defect — same parameter, different value in
+different places — which confuses reviewers.
+- FIX (doc_report_builder.py _ch3): one shared helper _pcu_for(op, DCR) = I_φ,rms²·DCR + I_hf²·DCR·(Rac/Rdc),
+  with per-point I_hf from the as-built per-Vin inductance (L_vs_Vin_table) and Rac/Rdc from the design. BOTH
+  the §3.6.2/§3.6.3 worked example (reference 90 V row = ops_all[0]) and the §3.6.1 table loop now call it, so
+  the 90 V row IS the worked value by construction — they cannot disagree.
+- §3.6.2 eq box now prints the full formula and the "DC + HF = total" split, so the shown arithmetic balances
+  (previously it printed a DC-only formula against a DC+HF number).
+- §3.6.1 annotation/description updated: copper = DC I²R + HF skin/proximity; 90 V row equals §3.6.3 total.
+- Every table row now carries the HF term (more accurate); the §3.6 summary row (Ptot100) inherits the same
+  value → uniform everywhere. Legacy designs without L_vs_Vin_table/Rac_Rdc degrade the HF term to 0 in BOTH
+  places, so they still agree.
+Verified empirically on a real engine design (EDGE N=28, DCR100=12.68 mΩ, Rac/Rdc=1.03): §3.6.2 worked
+Pcu100 = 1.2802(DC)+0.0197(HF) = 1.2999 W == §3.6.1 row0 1.2999 W; Ptot100 3.3624 W both (Δ=0); recomputed vs
+engine stored firstpass Δ = −0.00004 W. Suite 172 passed, 2 skipped.

@@ -1764,21 +1764,14 @@ def _ch3(story, state, d):
     DCR25    = float(d.get("DCR_25C_mOhm", 0)) or (
                Rppm * Cu_len / n_par * 1000 if Rppm else 0)
     DCR100   = float(d.get("DCR_100C_mOhm", 0)) or DCR25*(1+ALPHA_CU*80)
-    # Sec 3.6 documents the FIRST-PASS methodology (I_rms,ref^2*DCR copper loss +
-    # peak-point Steinmetz core loss) — it must read the preserved first-pass Pcu
-    # figures, not Pcu_25C_W/Pcu_100C_W (which the engine overwrites downstream
-    # with cycle-averaged final values for Ptotal_*_W / the legacy generators).
-    # Falling back to the (possibly overwritten) plain fields only covers older
-    # saved designs that pre-date the *_firstpass_W split.
-    Pcu25    = float(d.get("Pcu_25C_firstpass_W",  0)) or float(d.get("Pcu_25C_W",  0))
-    Pcu100   = float(d.get("Pcu_100C_firstpass_W", 0)) or float(d.get("Pcu_100C_W", 0))
+    # Peak-point core loss (first-pass Steinmetz crest value from the engine).
     Pcore_pk = float(d.get("Pcore_crest_W", 0)) or float(d.get("Pcore_W", 0))
-    # P_total is the LITERAL sum of the operands shown in the Sec 3.6.3 equation
-    # box — guarantees the displayed arithmetic is always correct (no more
-    # "0.5086 + 2.6425 = 2.0550" mismatches against a Ptotal_*_W sourced from a
-    # different cycle-averaged computation chain).
-    Ptot25   = Pcu25  + Pcore_pk
-    Ptot100  = Pcu100 + Pcore_pk
+    # Copper loss (Pcu25/Pcu100) and total loss (Ptot25/Ptot100) are computed BELOW
+    # — after ops_all is built — from _pcu_for() (DC I²R + HF skin/proximity term),
+    # so the §3.6.2/§3.6.3 worked example and the §3.6.1 nine-point table share the
+    # SAME expression and cannot disagree at 90 Vac. The engine's stored
+    # Pcu_*_firstpass_W fields are no longer read here (they already fold in the HF
+    # term but the table historically re-derived DC-only, which caused the mismatch).
     dT       = float(d.get("dT_rise_C", 0))
     dT_bgt   = float(d.get("dT_budget_C", t_hot-t_amb))
     Bac_pk   = float(d.get("Bac_pk_T", 0))
@@ -1828,6 +1821,48 @@ def _ch3(story, state, d):
     skin_mm     = math.sqrt(rho_100/(math.pi*fsw*4*math.pi*1e-7))*1e3
 
     ops_all = _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min, vin_max, r_input, _eta_target(state), _pf_target(state))
+
+    # ── First-pass copper loss = DC (I²R) + HF skin/proximity term ────────────
+    # UNIFORMITY: the §3.6.2/§3.6.3 worked example (reference 90 Vac row) and the
+    # §3.6.1 nine-point sweep are now computed from the SAME expression —
+    #   P_cu(T) = I_φ,rms²·DCR(T) + I_hf²·DCR(T)·(R_ac/R_dc)
+    # — the same first-pass basis the sizing engine uses (step7_magnetic_calc.py
+    # Pcu_*_firstpass_W). Previously the worked example read the engine's stored
+    # first-pass Pcu (which INCLUDES the HF proximity term) while the table
+    # recomputed I_φ,rms²·DCR only (DC term), so the 90 Vac row disagreed with
+    # §3.6.3. Both paths share _pcu_for() below. If the as-built L table / Rac_Rdc
+    # are absent (legacy saved designs) the HF term degrades to 0 in BOTH places,
+    # so the two still agree.
+    Rac_Rdc = float(d.get("Rac_Rdc", 1.0) or 1.0) or 1.0
+    _lv_map = {round(float(r.get("Vin_rms", 0) or 0)): float(r.get("L_full_nom_uH", 0) or 0)
+               for r in (d.get("L_vs_Vin_table") or [])}
+    def _ihf_for(op):
+        """HF ripple RMS current at one operating point (per-point as-built L)."""
+        L_uH = _lv_map.get(round(op["Vin"]), 0.0) or L_tgt
+        L_H  = L_uH * 1e-6
+        if L_H <= 0 or not fsw:
+            return 0.0
+        dIpp = op["Vin_pk"] * op["D"] / (L_H * fsw)
+        return dIpp / (2.0 * math.sqrt(3.0))
+    def _pcu_for(op, dcr_mohm):
+        """Returns (DC term, HF proximity term) in W for one operating point."""
+        if not dcr_mohm:
+            return 0.0, 0.0
+        irms = op["Iph_rms"]
+        ihf  = _ihf_for(op)
+        dc   = irms**2 * dcr_mohm / 1000.0
+        ac   = ihf**2  * dcr_mohm / 1000.0 * Rac_Rdc
+        return dc, ac
+    # Reference row = 90 Vac low line → drives the §3.6.2/§3.6.3 worked example,
+    # and equals the FIRST row of Table 3.6.1 by construction (same _pcu_for()).
+    _op0 = ops_all[0]
+    Ihf_ref              = _ihf_for(_op0)
+    Pcu25_dc,  Pcu25_ac  = _pcu_for(_op0, DCR25)
+    Pcu100_dc, Pcu100_ac = _pcu_for(_op0, DCR100)
+    Pcu25   = Pcu25_dc  + Pcu25_ac
+    Pcu100  = Pcu100_dc + Pcu100_ac
+    Ptot25  = Pcu25  + Pcore_pk
+    Ptot100 = Pcu100 + Pcore_pk
 
     chapter_splash(story, 3, "PFC Inductor Sizing",
         "What inductance and winding do we need?",
@@ -3103,10 +3138,11 @@ def _ch3(story, state, d):
 
     sub_h(story, "3.6.2", "Copper and core loss estimate (peak-point)", 3)
     eq_box(story, [
-        r"P_{cu}(T) = I_{\varphi,rms}^2 \, \mathrm{DCR}(T)",
-        rf"P_{{cu}}(25^\circ\mathrm{{C}}) = {Iph_rms:.4f}^2 \times {DCR25/1000:.6f} = {Pcu25:.4f}\ \mathrm{{W}}",
-        rf"P_{{cu}}(100^\circ\mathrm{{C}}) = {Iph_rms:.4f}^2 \times {DCR100/1000:.6f} = {Pcu100:.4f}\ \mathrm{{W}}",
-    ], heading="Copper loss from per-phase RMS current and DCR", ch=3)
+        r"P_{cu}(T) = I_{\varphi,rms}^2\,\mathrm{DCR}(T) + I_{hf}^2\,\mathrm{DCR}(T)\,(R_{ac}/R_{dc})",
+        rf"I_{{\varphi,rms}} = {Iph_rms:.4f}\ \mathrm{{A}}, \quad I_{{hf}} = {Ihf_ref:.4f}\ \mathrm{{A}}\ (\mathrm{{HF\ ripple\ RMS}}), \quad R_{{ac}}/R_{{dc}} = {Rac_Rdc:.3f}",
+        rf"P_{{cu}}(25^\circ\mathrm{{C}}) = {Pcu25_dc:.4f}\ (\mathrm{{DC}}) + {Pcu25_ac:.4f}\ (\mathrm{{HF}}) = {Pcu25:.4f}\ \mathrm{{W}}",
+        rf"P_{{cu}}(100^\circ\mathrm{{C}}) = {Pcu100_dc:.4f}\ (\mathrm{{DC}}) + {Pcu100_ac:.4f}\ (\mathrm{{HF}}) = {Pcu100:.4f}\ \mathrm{{W}}",
+    ], heading="Copper loss = DC term (I-squared-R) plus HF skin/proximity term", ch=3)
     eq_box(story, [
         rf"B_{{ac,pk}} = \dfrac{{\Delta B_{{pp}}}}{{2}} = {Bac_val:.6f}\ \mathrm{{T}} \quad ({vin_min:.0f}\ \mathrm{{V_{{ac}}}}\ \mathrm{{crest}})",
         rf"V_{{e,total}} = {Ve_cm3:.3f}\ \mathrm{{cm^3}}",
@@ -3129,7 +3165,10 @@ def _ch3(story, state, d):
     annotation(story, "CONCEPT",
         "The nine-point loss sweep uses the per-phase I<sub>rms</sub> from Table 3.1.1 "
         "and the peak-point Steinmetz core loss at the crest of each half cycle. "
-        "Min/nom/max A<sub>L</sub> columns show the tolerance sensitivity. "
+        "Copper loss at each point is the DC term I<sub>φ,rms</sub><super>2</super>·DCR "
+        "<b>plus</b> the HF skin/proximity term I<sub>hf</sub><super>2</super>·DCR·(R<sub>ac</sub>/R<sub>dc</sub>) "
+        "— the same first-pass basis as the Section 3.6.3 worked example, so the "
+        f"{vin_min:.0f} V<sub>rms</sub> row of Table 3.6.1 equals the Section 3.6.3 total. "
         "These first-pass values are conservative — Chapter 4 uses the more accurate "
         "cycle-averaged iGSE model.", 3)
 
@@ -3149,8 +3188,10 @@ def _ch3(story, state, d):
         bac_i   = _bac_for(op)
         pc_i    = _pcore_for(bac_i)
         irms_i  = op["Iph_rms"]
-        pcu25_i  = irms_i**2 * DCR25  / 1000 if DCR25  else 0
-        pcu100_i = irms_i**2 * DCR100 / 1000 if DCR100 else 0
+        dc25_i,  ac25_i  = _pcu_for(op, DCR25)   # DC + HF proximity (matches §3.6.2/§3.6.3)
+        dc100_i, ac100_i = _pcu_for(op, DCR100)
+        pcu25_i  = dc25_i  + ac25_i
+        pcu100_i = dc100_i + ac100_i
         pt100_i  = pcu100_i + pc_i
         if pt100_i > wp: wp = pt100_i; worst_loss = i
         loss_rows.append([
@@ -3166,8 +3207,8 @@ def _ch3(story, state, d):
         ])
 
     data_table(story, "3.6.1", "Inductor Loss vs Input Voltage — First-Pass (Nominal A_L)",
-        "Amber row = worst-case total loss. P<sub>cu</sub> at 25°C and 100°C shown separately. "
-        "P<sub>core</sub> is peak-point Steinmetz estimate only.",
+        "Amber row = worst-case total loss. P<sub>cu</sub> (DC I<super>2</super>R + HF skin/proximity) "
+        "at 25°C and 100°C shown separately. P<sub>core</sub> is peak-point Steinmetz estimate only.",
         ["V<sub>in,rms</sub> (V)", "V<sub>in,pk</sub> (V)", "D@crest",
          "I<sub>φ,rms</sub> (A)", "B<sub>ac,pk</sub> (T)",
          "P<sub>cu,25C</sub> (W)", "P<sub>cu,100C</sub> (W)",
