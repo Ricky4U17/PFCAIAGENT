@@ -251,26 +251,49 @@ def rank_bottom_mosfets(design, crit, top=10):
     scored.sort(key=lambda x: x["loss_W"])
     return scored[:top]
 
-def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full"):
+# config keys overlaid from the designer's OWN block onto each ranked candidate, so the screening loss
+# reflects the ACTUAL configuration (devices-in-parallel, topology, bottom-FET) the Results tab will use —
+# NOT the candidate's default. The candidate's real datasheet Vf / Rds / Rθjc are kept (never overlaid).
+_RANK_CFG_KEYS = {
+    "bridge": ("topology", "n_parallel", "n_parallel_top", "share_worst",
+               "rdson_bottom_25", "rdson_bottom_tj", "qg_bottom", "n_parallel_bottom", "rth_cs"),
+    "mosfet": ("n_parallel", "rth_cs"),
+    "diode":  ("n_parallel", "rth_cs"),
+}
+
+
+def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full", context=None):
     """Filter, then evaluate each candidate's loss across the 9 operating points and return the
     `top` lowest-loss parts. Returns [{part…, block, loss_W, tj_max_C}].
-    mode='conduction' + kind='mosfet' → bottom (bypass) MOSFETs ranked by conduction loss only."""
+    mode='conduction' + kind='mosfet' → bottom (bypass) MOSFETs ranked by conduction loss only.
+
+    `context` (optional) carries the designer's actual design context so the screening loss equals the
+    Results-tab value for the selected part: {mosfet, diode, bridge, thermal} — the companion blocks +
+    thermal replace the seed defaults, and the designer's own-kind config (n_parallel / topology / bottom
+    FET) is overlaid onto each candidate (its real datasheet Vf/Rds is preserved)."""
     if mode == "conduction" and kind == "mosfet":
         return rank_bottom_mosfets(design, crit, top)
     from app.mode_b.semiconductor.adapter import build_semi_cfg
     from app.mode_b.semiconductor import pfc_loss_model as engine
     from app.mode_b.semiconductor.library import _SEED          # defaults for the other two blocks
+    context = context or {}
     cands = filter_parts(kind, crit)
     # cheap pre-sort so we evaluate the most promising first: low Rdson / low Vf
     key = (lambda r: r.get("rdson") or 9) if kind == "mosfet" else (lambda r: r.get("vf") or 9)
     cands = sorted(cands, key=key)[:max_eval]
     loss_key = {"mosfet": "P_FET_total", "diode": "P_DIODE_total", "bridge": "P_BRIDGE_total"}[kind]
     tj_key = {"mosfet": "Tj_FET", "diode": "Tj_DIODE", "bridge": "Tj_BRIDGE_top"}[kind]
-    base = {"mosfet": _SEED["mosfet"][0], "diode": _SEED["diode"][0], "bridge": _SEED["bridge"][0],
-            "thermal": {"t_ambient": 45.0, "rth_sa": 0.35}}
+    base = {"mosfet": context.get("mosfet") or _SEED["mosfet"][0],
+            "diode":  context.get("diode")  or _SEED["diode"][0],
+            "bridge": context.get("bridge") or _SEED["bridge"][0],
+            "thermal": context.get("thermal") or {"t_ambient": 45.0, "rth_sa": 0.35}}
+    _cfg = context.get(kind) or {}                       # designer's own-kind config for the overlay
     scored = []
     for rec in cands:
         blk = to_block(rec, kind)
+        for k in _RANK_CFG_KEYS.get(kind, ()):           # overlay parallel/topology/bottom-FET
+            if _cfg.get(k) not in (None, ""):
+                blk[k] = _cfg[k]
         parts = {k: dict(base[k]) for k in ("mosfet", "diode", "bridge")}
         parts[kind] = blk
         try:

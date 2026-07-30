@@ -230,7 +230,18 @@ export const SemiconductorSelection: React.FC<Props> = ({
       if (c.package) criteria.package = c.package
       if (pnum(c.tj_min) != null) criteria.tj_min = pnum(c.tj_min)
       if (c.technology) criteria.technology = c.technology
-      const r = await semiconductorDbRank(kind, { design, criteria, top: 10, mode })
+      // design context so the SCREEN loss equals the Results value for the selected part: companion
+      // blocks + thermal + as-built L, and the designer's devices-in-parallel applied to the ranked kind.
+      const mBlk = buildBlock(mosfet, MOSFET_FIELDS) as Record<string, unknown>
+      const dBlk = buildBlock(diode, DIODE_FIELDS) as Record<string, unknown>
+      const bBlk = buildBlock(bridge, BRIDGE_FIELDS) as Record<string, unknown>
+      const np = pnum(c.n_parallel)
+      if (np != null && kind === 'bridge') bBlk.n_parallel = np
+      if (np != null && kind === 'mosfet') mBlk.n_parallel = np
+      const r = await semiconductorDbRank(kind, { design, criteria, top: 10, mode,
+        mosfet: mBlk, diode: dBlk, bridge: bBlk,
+        thermal: { t_ambient: pnum(thermal.t_ambient) ?? 45, rth_sa: pnum(thermal.rth_sa) ?? 0.35 },
+        approved_design: approvedInductorDesign as Record<string, unknown> })
       setDbRes(s => ({ ...s, [key]: r.results }))
     } catch (e) { setErr((e as Error).message) } finally { setDbBusy(s => ({ ...s, [key]: false })) }
   }
@@ -358,10 +369,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
 
   const dbResultsTable = (results: DbRankResult[], lossLabel: string, onPick: (r: DbRankResult) => void,
-    note = "Screening loss — worst-case over the 9 points, computed with default companion parts and this " +
-           "part's own default configuration (not the final assembled n-parallel / sync-bottom topology). " +
-           "Use it to compare candidates; the exact figure appears in Results and the report once selected. " +
-           "Datasheet curves not in the DB (Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated.") =>
+    note = "Worst-case loss over the 9 operating points, computed with the part's REAL datasheet Vf/Rds and " +
+           "YOUR actual design context — devices-in-parallel, topology, companion parts, thermal and as-built " +
+           "inductance. Selecting a part carries that exact configuration into the form, so this number equals " +
+           "the Results-tab / report figure. Datasheet curves not in the DB (Eoss, Qrr/Qc, Vf slope) are estimated.") =>
     results.length === 0
       ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
       : <div style={{ overflowX: 'auto' }}>
@@ -464,6 +475,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
             <label style={{ fontSize: 10.5, color: C.muted }}>Technology<br />
               <select style={critSel} value={crit.technology ?? ''} onChange={e => setCrit(which, 'technology', e.target.value)}>
                 <option value="">any</option>{(opts.technology ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+          )}
+          {(which === 'bridge' || which === 'mosfet') && (
+            <label style={{ fontSize: 10.5, color: C.muted }}>Devices in parallel<br />
+              <input style={{ ...critIn, width: 70 }} value={crit.n_parallel ?? ''} placeholder="1"
+                onChange={e => setCrit(which, 'n_parallel', e.target.value)} /></label>
           )}
           <Btn variant="primary" disabled={!!dbBusy[which]} onClick={() => runDbSearch(which, which)}>
             {dbBusy[which] ? '⏳ Ranking…' : '🔎 Find top 10 (lowest loss)'}

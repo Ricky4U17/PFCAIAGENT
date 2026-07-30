@@ -5596,3 +5596,25 @@ Investigated + fixed the designer's report-review discrepancy list; no hardcodin
   approval-carried into the report. The semiconductor L-enrichment was the one systemic divergence; fixed.
 Verified: full combined report generates (200, 1.4 MB); wording + 7.8b label confirmed in the PDF; standalone
 Ch7 builds with the labeled 7.8b; #3 L-threading proven; frontend typechecks. Suite <pending>.
+
+## C158 — 2026-07-29 — Bridge DB-screen == Results (real Vf + design-context) + parallel-devices in DB tab
+
+Designer report: Top-10 bridge loss (GBJ40L06 32.85 W) ≠ Calculate (41.35 W). Root cause (proven): the
+screen used the part's REAL datasheet Vf (0.90 V) while Calculate ran the bridge form's GENERIC placeholder
+Vf curve (0.75/0.95/1.15 V) — ratio 1.266 == the observed gap. Fix: make the screen use the designer's
+actual design context so its loss equals the Results value for the selected part, and move devices-in-
+parallel into the DB-search tab so the ranking reflects the real parallel count. No hardcoding.
+- ENGINE (semiconductor/database.py): rank_by_loss gains `context={mosfet,diode,bridge,thermal}` — companion
+  blocks + thermal replace the seed defaults, and the designer's own-kind config (n_parallel / topology /
+  bottom-FET / rth_cs, via _RANK_CFG_KEYS) is overlaid onto each ranked candidate. The candidate's REAL
+  datasheet Vf/Rds/Rθjc are preserved (never overlaid). The returned block carries the overlaid config, so
+  selecting it fills the form with the exact configuration → Calculate matches the screen.
+- API (main.py): _DbRankReq gains mosfet/diode/bridge/thermal/approved_design; semiconductor_db_rank applies
+  _apply_asbuilt_L (same per-point L as Results) and passes the context to rank_by_loss.
+- CLIENT (client.ts): semiconductorDbRank body carries mosfet/diode/bridge/thermal/approved_design.
+- GUI (SemiconductorSelection.tsx): runDbSearch sends the companion blocks + thermal + as-built L, and applies
+  the DB-search "Devices in parallel" to the ranked kind. Added a "Devices in parallel" input to the bridge
+  (and mosfet) DB-search panel. DB-results note updated: the figure now uses real datasheet Vf + your actual
+  context and equals the Results/report figure.
+Verified: screen == calculate for GBJ40L06 — n_parallel=1 → 27.19/27.19 W; n_parallel=2 → 26.03/26.03 W
+(parallel correctly lowers loss); frontend typechecks. Suite <pending>.

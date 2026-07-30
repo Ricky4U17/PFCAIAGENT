@@ -527,6 +527,14 @@ class _DbRankReq(BaseModel):
     criteria: Dict[str, Any] = {}
     top:      int = 10
     mode:     str = "full"          # 'conduction' + mosfet → bottom-bypass MOSFET ranking
+    # design context so the SCREEN loss equals the Results-tab value for the selected part:
+    # companion blocks + thermal replace the seed defaults; the designer's own-kind config
+    # (devices-in-parallel / topology / bottom-FET) is applied to each ranked candidate.
+    mosfet:   Dict[str, Any] = {}
+    diode:    Dict[str, Any] = {}
+    bridge:   Dict[str, Any] = {}
+    thermal:  Dict[str, Any] = {}
+    approved_design: Optional[Dict[str, Any]] = None
 
 @app.get("/mode-b/semiconductor/database/{kind}/options", tags=["mode-b"])
 def semiconductor_db_options(kind: str):
@@ -549,8 +557,13 @@ def semiconductor_db_rank(kind: str, req: _DbRankReq):
         from app.mode_b.semiconductor import database as db
         if kind not in ("mosfet", "diode", "bridge"):
             raise HTTPException(404, "unknown component kind")
-        return {"results": db.rank_by_loss(kind, req.design, req.criteria or {},
-                                           top=int(req.top), mode=req.mode or "full")}
+        _design = dict(req.design)
+        _apply_asbuilt_L(_design, req.approved_design)     # same per-point L the Results tab uses
+        # design context so the screen loss matches the Results value for the selected part
+        context = {k: v for k, v in (("mosfet", req.mosfet), ("diode", req.diode),
+                                     ("bridge", req.bridge), ("thermal", req.thermal)) if v}
+        return {"results": db.rank_by_loss(kind, _design, req.criteria or {},
+                                           top=int(req.top), mode=req.mode or "full", context=context)}
     except HTTPException:
         raise
     except Exception as e:

@@ -406,7 +406,10 @@ export interface DbRankResult {
 export const semiconductorDbOptions = (kind: string) =>
   get<Record<string, string[]>>(`/mode-b/semiconductor/database/${kind}/options`)
 export const semiconductorDbRank = (kind: string,
-  body: { design: Record<string, number>; criteria: Record<string, unknown>; top?: number; mode?: string }) =>
+  body: { design: Record<string, number>; criteria: Record<string, unknown>; top?: number; mode?: string
+    // design context → screen loss equals the Results value for the selected part
+    mosfet?: Record<string, unknown>; diode?: Record<string, unknown>; bridge?: Record<string, unknown>
+    thermal?: Record<string, unknown>; approved_design?: Record<string, unknown> | null }) =>
   post<{ results: DbRankResult[] }>(`/mode-b/semiconductor/database/${kind}/rank`, body)
 export interface DsExtract {
   block: Record<string, unknown>; found: string[]; missing: string[]
