@@ -401,7 +401,7 @@ export const semiconductorLibrary = () =>
 export interface DbRankResult {
   manufacturer: string; part_number: string; technology: string | null; package: string | null
   mounting: string | null; datasheet_url: string | null; v_rating: number | null; i_rating: number | null
-  loss_W: number; tj_max_C: number; block: Record<string, unknown>
+  loss_W: number; loss_at_Vac?: number; tj_max_C: number; block: Record<string, unknown>
 }
 export const semiconductorDbOptions = (kind: string) =>
   get<Record<string, string[]>>(`/mode-b/semiconductor/database/${kind}/options`)

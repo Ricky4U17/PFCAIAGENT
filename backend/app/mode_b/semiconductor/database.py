@@ -298,8 +298,11 @@ def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full", context=
         parts[kind] = blk
         try:
             cfg, _ = build_semi_cfg(design, parts["mosfet"], parts["diode"], parts["bridge"], base["thermal"])
-            rows = [engine.simulate_point(float(v), *engine.design_from_dict(cfg)) for v in cfg["run"]["vac_list"]]
-            loss = max(r[loss_key] for r in rows)
+            vac_list = list(cfg["run"]["vac_list"])
+            rows = [engine.simulate_point(float(v), *engine.design_from_dict(cfg)) for v in vac_list]
+            worst = max(range(len(rows)), key=lambda i: rows[i][loss_key])  # worst-case operating point
+            loss = rows[worst][loss_key]
+            loss_vac = float(vac_list[worst])
             tjm = max(r[tj_key] for r in rows)
         except Exception:
             continue
@@ -308,8 +311,8 @@ def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full", context=
                        "mounting": rec.get("mounting"), "datasheet_url": rec.get("datasheet_url"),
                        "v_rating": rec.get("vdss") if kind == "mosfet" else rec.get("vr"),
                        "i_rating": rec.get("id_25") if kind == "mosfet" else rec.get("io"),
-                       "loss_W": round(float(loss), 2), "tj_max_C": round(float(tjm), 1),
-                       "block": blk})
+                       "loss_W": round(float(loss), 2), "loss_at_Vac": round(loss_vac, 0),
+                       "tj_max_C": round(float(tjm), 1), "block": blk})
     scored.sort(key=lambda x: x["loss_W"])
     return scored[:top]
 

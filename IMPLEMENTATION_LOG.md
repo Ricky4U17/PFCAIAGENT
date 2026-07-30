@@ -5635,3 +5635,21 @@ form round-trip is lossy for every datasheet field it doesn't expose (vf_tco, es
 Verified (repro of the exact round-trip): screen 26.07 == calc-merged 26.07 (was 30.45 form-only); n_parallel
 still flows; frontend typechecks. Together with C158 (screen uses the designer's config) this makes the
 Top-10 loss for a selected part equal the Results/report figure. Suite <pending>.
+
+## C160 — 2026-07-29 — MOSFET/diode Top-10 vs Results: show worst-case line voltage (it was max-vs-point, not a bug)
+
+Designer: MOSFET Top-10 17.57 W vs Results 17.46 W @90V; diode Top-10 15.04 W vs Results 8.43 W @90V / 15.03 W
+@180V. INVESTIGATED: unlike the bridge (C159 vf_tco round-trip bug), the MOSFET and diode forms already capture
+every loss field (diode form HAS vf_tco; mosfet form has rdson_tj/eoss/qgd/vpl/…). Replicated the full GUI
+round-trip: screen == form-only == C159-merged (mosfet 49.84 all three; only datasheet_url/_estimated metadata
+dropped). So NO round-trip loss — the "mismatch" is max-vs-point: the Top-10 shows the WORST-CASE over the 9
+line points, while the designer compared it to a specific-Vac row. The diode peaks at HIGH line (264 V), so
+15.04 W == the 264 V row and 8.43 W @90 V is a legitimately lower point; the MOSFET peaks near LOW line.
+- ENGINE (semiconductor/database.py): rank_by_loss now records `loss_at_Vac` — the line voltage where the
+  worst-case loss occurs (argmax over the 9 points), returned per candidate.
+- CLIENT (client.ts): DbRankResult += loss_at_Vac.
+- GUI (SemiconductorSelection.tsx): the Top-10 loss column shows "<W> @<V>" and is headed "loss (worst-case)";
+  the note explains the @V is where it peaks (diode HIGH line, MOSFET LOW line) and that the figure equals the
+  Results value AT THAT SAME line voltage (not the 90 V row unless that is the peak).
+Verified: worst-case Vac — mosfet 90 V, diode 264 V, bridge 180 V; screen==calc confirmed (13.28/49.84 for
+mosfet, 12.05 diode). No calculation change — clarity only. Suite <pending>.

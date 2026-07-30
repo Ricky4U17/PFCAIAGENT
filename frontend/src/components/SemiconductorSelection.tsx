@@ -380,20 +380,23 @@ export const SemiconductorSelection: React.FC<Props> = ({
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
 
   const dbResultsTable = (results: DbRankResult[], lossLabel: string, onPick: (r: DbRankResult) => void,
-    note = "Worst-case loss over the 9 operating points, computed with the part's REAL datasheet Vf/Rds and " +
-           "YOUR actual design context — devices-in-parallel, topology, companion parts, thermal and as-built " +
-           "inductance. Selecting a part carries that exact configuration into the form, so this number equals " +
-           "the Results-tab / report figure. Datasheet curves not in the DB (Eoss, Qrr/Qc, Vf slope) are estimated.") =>
+    note = "Worst-case loss over the 9 operating points (the @V is the line voltage where it peaks — e.g. the " +
+           "boost diode peaks at HIGH line, the MOSFET usually at LOW line). Computed with the part's REAL " +
+           "datasheet Vf/Rds and YOUR actual design context (devices-in-parallel, topology, companions, thermal, " +
+           "as-built L). Selecting a part carries that exact configuration into the form, so this figure equals " +
+           "the Results-tab value AT THAT SAME LINE VOLTAGE (not the 90 V row unless that is where it peaks) and " +
+           "the report. Datasheet curves not in the DB (Eoss, Qrr/Qc, Vf slope) are estimated.") =>
     results.length === 0
       ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
       : <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead><tr>{['#', `${lossLabel} loss`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
+            <thead><tr>{['#', `${lossLabel} loss (worst-case)`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
               <th key={h} style={{ ...rcell, color: C.hint, textTransform: 'uppercase', fontSize: 9 }}>{h}</th>)}</tr></thead>
             <tbody>{results.map((r, i) => (
               <tr key={i}>
                 <td style={rcell}>{i + 1}</td>
-                <td style={{ ...rcell, fontWeight: 700, color: C.teal }}>{r.loss_W.toFixed(2)} W</td>
+                <td style={{ ...rcell, fontWeight: 700, color: C.teal }}>{r.loss_W.toFixed(2)} W
+                  {r.loss_at_Vac != null && <span style={{ color: C.muted, fontWeight: 400 }}> @{r.loss_at_Vac.toFixed(0)} V</span>}</td>
                 <td style={rcell}>{r.tj_max_C.toFixed(0)}°C</td>
                 <td style={rcell}>{r.v_rating ?? '—'}V / {r.i_rating ?? '—'}A</td>
                 <td style={rcell}>{(r.manufacturer ?? '').slice(0, 18)}</td>
