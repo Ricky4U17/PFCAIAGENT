@@ -474,8 +474,34 @@ class _SemiReq(BaseModel):
     diode:   Dict[str, Any]
     bridge:  Dict[str, Any]
     thermal: Dict[str, Any]
-    tj_limit:     Optional[Dict[str, Any]] = None
-    selected_vac: Optional[float] = None
+    tj_limit:        Optional[Dict[str, Any]] = None
+    selected_vac:    Optional[float] = None
+    approved_design: Optional[Dict[str, Any]] = None   # inductor design → as-built per-point L (match report)
+
+
+def _apply_asbuilt_L(design: dict, approved_design: dict | None) -> dict:
+    """Enrich a semiconductor `design` with the as-built per-point inductance — the SAME step the
+    combined report applies — so the GUI's loss calc matches the report instead of using a flat L.
+    Sets L_phi_uH to the as-built minimum full-load L (worst case for ripple) and L_phi_curve to the
+    powder-core bias roll-off. No-op when there is no inductor design to read."""
+    ad = approved_design or {}
+    lvt = ad.get("L_vs_Vin_table") or []
+    asb_min = None
+    try:
+        _vals = [float(r["L_full_nom_uH"]) for r in lvt if r.get("L_full_nom_uH")]
+        asb_min = min(_vals) if _vals else None
+    except Exception:
+        asb_min = None
+    L_final = asb_min or design.get("L_phi_uH") or ad.get("L_target_uH")
+    if L_final:
+        design["L_phi_uH"] = float(L_final)
+    try:
+        _curve = _bias_L_curve(ad, L_final, design)
+        if _curve:
+            design["L_phi_curve"] = _curve
+    except Exception:
+        pass
+    return design
 
 @app.get("/mode-b/semiconductor/manifest", tags=["mode-b"])
 def semiconductor_manifest():
@@ -550,6 +576,7 @@ def semiconductor_calculate(req: _SemiReq):
     consistency gate, and return per-point losses + worst-case summary."""
     try:
         from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+        _apply_asbuilt_L(req.design, req.approved_design)   # match the report's per-point L
         res = calculate_semiconductor_losses(req.design, req.mosfet, req.diode, req.bridge,
                                              req.thermal, req.tj_limit)
         res.pop("cfg", None)               # internal/report use only
@@ -566,6 +593,7 @@ def semiconductor_figures(req: _SemiReq):
         from app.mode_b.semiconductor import (pfc_loss_model as engine,
                                               pfc_component_intake as intake,
                                               pfc_visualization as viz)
+        _apply_asbuilt_L(req.design, req.approved_design)   # match the report's per-point L
         cfg, _ref = build_semi_cfg(req.design, req.mosfet, req.diode, req.bridge, req.thermal)
         ok, _ = intake.validate_design(cfg)
         if not ok:

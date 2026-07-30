@@ -5562,3 +5562,37 @@ Fixes from designer testing of the input-protection page. No hardcoding.
 Verified: full combined report generates (69 pp, 1.17 MB) via /documentation/generate-report; TOC now lists
 every new section incl. 10.A–10.D, 8.9 Fuse, 9.8/9.9; MOV screen → 40 CONDITIONAL selectable; fuse selects a
 50 A part (rating > 46.7 A inrush); responsive GUI schematic; frontend typechecks. Suite 172/2.
+
+## C157 — 2026-07-29 — Report/GUI discrepancy fixes (designer review, 7 items)
+
+Investigated + fixed the designer's report-review discrepancy list; no hardcoding.
+- (#1 Ch7 page compaction) report_semiconductor.py: 7.2–7.9 demoted step_h→sub_h (flow) so subtopics no
+  longer each force a new page; 7.1 stays step_h as the chapter's page-break anchor.
+- (#7 wording) report_inputprotection.py: §8.1 "Design Basis (carried in)"→"Design Basis"; Table 8.1 Source
+  cell "Step 15 (approved)"→"Selected capacitor value".
+- (#3 R_CS 6.6.5≠7.8b) report_steps1_8.py §6.6.5: the ops grid now passes L_phi_uH + L_phi_curve (the same
+  as-built inductance Ch7 uses), so per-phase RMS — and hence R_CS loss — matches Table 7.8b instead of
+  drifting on the default L. Root cause: build_design_ops recomputes I_φ,rms with ripple that depends on L;
+  6.6.5 previously omitted L (proved: iph[0] 10.179 no-L vs 10.200 with-L).
+- (#5 7.8b vs Ch4 4.x) report_semiconductor.py: Table 7.8b re-titled "…— worst-case approximation" and its
+  caption now states the inductor core loss is a CONSTANT worst-case Ch4 value (budget approx), so it will
+  not match Ch4's per-point 4.5/4.6 — kept as a labeled approximation per designer's instruction.
+- (#6 3.6.1 vs worked calc) doc_report_builder.py: analysis shows the 90 V worked calc (§3.6.3) and the 90 V
+  row of Table 3.6.1 already match (same build_design_ops_table[0] current; same low-line flux); the apparent
+  difference is the AMBER worst-case row (a different, higher-current corner). Added an interpretation note
+  tying the worked example to the FIRST (low-line) row and clarifying the amber row is a different corner.
+- (#4 Ch5 cap loss) doc_report_builder.py §5.3: Table 5.3.1 gains per-cap (P/cap) and total-bank (P_bank)
+  ESR-loss columns + a "total capacitor bank loss (worst case)" line; added step-by-step worked loss examples
+  at one low-line and one high-line point (in addition to the hottest corner). Data already existed
+  (P_dissipated_W per thermal-table row); now surfaced.
+- (#2 bridge/semiconductor loss GUI≠report) main.py: new _apply_asbuilt_L(design, approved_design) enriches
+  the design with the as-built per-point bias L (min full-load L + L_phi_curve) — the SAME step the report
+  applies — and is now called in /semiconductor/calculate + /semiconductor/figures. _SemiReq gains
+  approved_design; SemiconductorSelection.tsx passes approvedInductorDesign so on-screen losses equal the
+  report. The DB-search "loss" column is relabeled as a worst-case SCREENING loss (default companions /
+  default topology) to distinguish it from the final assembled-config loss.
+- AUDIT (other GUI↔report pairs): NTC/MOV/GDT/Fuse/EMI GUIs call the same adapter functions the report uses
+  (calculate_ntc/mov/gdt/fuse/emi) → match by construction; Cap (Step15) + Control (Step16) numbers are
+  approval-carried into the report. The semiconductor L-enrichment was the one systemic divergence; fixed.
+Verified: full combined report generates (200, 1.4 MB); wording + 7.8b label confirmed in the PDF; standalone
+Ch7 builds with the labeled 7.8b; #3 L-threading proven; frontend typechecks. Suite <pending>.

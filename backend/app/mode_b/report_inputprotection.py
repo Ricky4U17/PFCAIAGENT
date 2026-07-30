@@ -75,7 +75,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
          "8.11 AC phase-angle sweep  ·  8.12 Final margin summary & open items"])
 
     # ── 8.1 basis ──
-    step_h(story, "8.1", "Design Basis (carried in)", CH)
+    step_h(story, "8.1", "Design Basis", CH)
     annotation(story, "CONCEPT",
         "The inrush element is sized from values already fixed upstream: the high-line peak sets the "
         "worst-case stress, the approved bulk capacitance (Step 15) sets the charge energy, and the "
@@ -86,7 +86,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V", "design grid"],
          ["High-line peak", "V<sub>in,pk</sub>", f"{_f(r['vin_pk_max'],1)} V", "computed = &#8730;2&#183;V<sub>ac,max</sub>"],
          ["Regulated bus", "V<sub>bus</sub>", f"{_f(s['vout_bus'],1)} V", "design"],
-         ["Bulk capacitance", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F", "Step 15 (approved)"],
+         ["Bulk capacitance", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F", "Selected capacitor value"],
          ["Worst-case input RMS", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A", "operating grid"],
          ["Selected NTC R<sub>25</sub>", "R<sub>25</sub>", (f"{_f((out.get('selected') or {}).get('r25_ohm'),1)} {_OHM}" if out.get("selected") else f"{_f(r['r25_pick'],2)} {_OHM} (pick)"),
           "datasheet" if out.get("selected") else "sizing pick"],

@@ -394,7 +394,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         col_widths=[CW*0.10, CW*0.11, CW*0.08, CW*0.10, CW*0.14, CW*0.14, CW*0.13, CW*0.11, CW*0.09], ch=CH)
 
     # ── 7.2 Selected components ──────────────────────────────────────────────
-    step_h(story, "7.2", "Selected Components", CH)
+    sub_h(story, "7.2", "Selected Components", CH)
     def _part(kind, label):
         m = meta.get(kind, {}); p = cfg[kind]
         return [label, m.get("manufacturer", "—") or "—", m.get("part_number", "—") or "—",
@@ -488,7 +488,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         col_widths=[CW*0.26, CW*0.52, CW*0.22], ch=CH)
 
     # ── 7.3 Bridge rectifier ─────────────────────────────────────────────────
-    step_h(story, "7.3", "Bridge Rectifier Loss", CH)
+    sub_h(story, "7.3", "Bridge Rectifier Loss", CH)
     # configuration schematic — selected by the designer's topology + parallel-device choice
     _cfg_img, _cfg_cap = _config_schematic(_br.topology, _br.n_parallel_top if is_sync else _br.n_parallel)
     if _cfg_img is not None:
@@ -540,7 +540,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             col_widths=[CW*0.30, CW*0.22, CW*0.48], ch=CH)
 
     # ── 7.4 MOSFET ───────────────────────────────────────────────────────────
-    step_h(story, "7.4", "Boost MOSFET Loss", CH)
+    sub_h(story, "7.4", "Boost MOSFET Loss", CH)
     annotation(story, "THEORY",
         "The MOSFET loss is the sum of five mechanisms — ohmic conduction, hard-switching crossover, "
         "output-capacitance (E<sub>oss</sub>) dissipation, the diode charge dumped into the FET, and "
@@ -556,7 +556,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         col_widths=[CW*0.13, CW*0.13, CW*0.14, CW*0.13, CW*0.12, CW*0.17, CW*0.18], ch=CH)
 
     # ── 7.5 Boost diode ──────────────────────────────────────────────────────
-    step_h(story, "7.5", "Boost Diode Loss", CH)
+    sub_h(story, "7.5", "Boost Diode Loss", CH)
     _diode_section(story, traces)
     data_table(story, "7.5", "Diode Loss vs Line Voltage",
         "Conduction + switching loss of the boost diode(s), at every input voltage.",
@@ -566,7 +566,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         col_widths=[CW*0.18, CW*0.27, CW*0.27, CW*0.28], ch=CH)
 
     # ── 7.6 Thermal ──────────────────────────────────────────────────────────
-    step_h(story, "7.6", "Thermal Network and Junction Temperatures", CH)
+    sub_h(story, "7.6", "Thermal Network and Junction Temperatures", CH)
     _thermal_section(story, traces, thermal)
     data_table(story, "7.6", "Junction Temperatures vs Line Voltage",
         f"Ambient {_f(thermal.get('t_ambient', 45), 0)} &#176;C, sink R&#952; "
@@ -587,7 +587,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "evaluated only when a Foster Z<sub>&#952;</sub> network is supplied (zth_foster).", CH)
 
     # ── 7.7 Figures ──────────────────────────────────────────────────────────
-    step_h(story, "7.7", "Loss and Temperature vs Line Voltage", CH)
+    sub_h(story, "7.7", "Loss and Temperature vs Line Voltage", CH)
     try:
         from app.mode_b.semiconductor import pfc_loss_model as engine, pfc_visualization as viz
         sel = float(cfg["run"]["vac_list"][0])
@@ -606,7 +606,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         annotation(story, "NOTE", "Figures unavailable in this build.", CH)
 
     # ── 7.8 Summary + cross-check ────────────────────────────────────────────
-    step_h(story, "7.8", "Summary and Efficiency Cross-Check", CH)
+    sub_h(story, "7.8", "Summary and Efficiency Cross-Check", CH)
     wr = max(rows, key=lambda r: r["P_SEMI_total"])   # worst-case operating point
     data_table(story, "7.8", "Worst-Case Semiconductor Loss and Margin",
         f"Worst semiconductor dissipation occurs at {wr['Vac']:.0f} Vac.",
@@ -651,12 +651,14 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             p_other = p_sys - p_semi - p_ind - p_rcs - cap_w
             brows.append([f"{r['Vac']:.0f} V", f"{_f(p_semi,1)}", f"{_f(p_ind,1)}", f"{_f(cap_w,1)}",
                           f"{_f(p_rcs,1)}", f"{_f(p_other,1)}", f"{_f(p_sys,1)} W"])
-        data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W)",
+        data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W) — worst-case approximation",
             "Every system loss reconciled against P<sub>system</sub> from the efficiency. The <b>Inductor</b> "
-            "column is total (copper I&#178;&#183;DCR + core, Ch 4); the <b>Capacitor</b> column is the bank "
-            "ESR loss (Ch 5); the <b>Balance</b> = P<sub>system</sub> &#8722; (all the above) is the control / "
-            "auxiliary remainder.",
-            ["V_AC", "Semicond.", "Inductor (Cu+core)", "Capacitor", "R_CS", "Balance (ctrl)", "System total"],
+            "column is copper (I&#178;&#183;DCR, per line) plus a <b>constant worst-case core loss held at the "
+            "Chapter-4 value</b> — a budget approximation, so it will NOT match Chapter 4's per-point core loss "
+            "(Tables 4.5/4.6), which vary with line; the two agree only near the worst-case corner. The "
+            "<b>Capacitor</b> column is the worst-case bank ESR loss (Ch 5); the <b>Balance</b> = "
+            "P<sub>system</sub> &#8722; (all the above) is the control / auxiliary remainder.",
+            ["V_AC", "Semicond.", "Inductor (Cu+core*)", "Capacitor", "R_CS", "Balance (ctrl)", "System total"],
             brows, col_widths=[CW*0.12, CW*0.15, CW*0.19, CW*0.14, CW*0.12, CW*0.15, CW*0.13], ch=CH)
         annotation(story, "NOTE",
             "<b>Reading the Balance.</b> With inductor (copper + core) and capacitor loss now itemised, the "
@@ -676,7 +678,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
            f"{_f(cap_w,1)} W, the current-sense resistors {_f(prcs_w,1)} W, leaving "
            f"{_f(wr['P_SYSTEM_total']-wr['P_SEMI_total']-p_ind_w-cap_w-prcs_w,1)} W for control / auxiliary.")
         # ── realistic efficiency derived from the computed losses ──
-        step_h(story, "7.9", "Efficiency Re-Estimate from Computed Losses", CH)
+        sub_h(story, "7.9", "Efficiency Re-Estimate from Computed Losses", CH)
         body(story,
             "The operating grid carries an <i>assumed</i> efficiency curve (a stored default for the "
             "2-stage interleaved stage). We now re-estimate it from the losses actually computed. The "

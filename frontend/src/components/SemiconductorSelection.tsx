@@ -269,6 +269,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
     bridge: buildBlock(bridge, BRIDGE_FIELDS),
     thermal: { t_ambient: pnum(thermal.t_ambient) ?? 45, rth_sa: pnum(thermal.rth_sa) ?? 0.35 },
     tj_limit: tjLimit,
+    // pass the approved inductor design so the GUI applies the SAME as-built per-point L the
+    // report uses — keeps the on-screen losses identical to the document (no flat-L divergence).
+    approved_design: approvedInductorDesign as Record<string, unknown>,
   })
 
   const calc = async () => {
@@ -355,8 +358,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
 
   const dbResultsTable = (results: DbRankResult[], lossLabel: string, onPick: (r: DbRankResult) => void,
-    note = "Loss ranked by the calc engine at this design's 9 operating points. Datasheet curves not in the DB " +
-           "(Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated — selecting a part fills the form for review/edit.") =>
+    note = "Screening loss — worst-case over the 9 points, computed with default companion parts and this " +
+           "part's own default configuration (not the final assembled n-parallel / sync-bottom topology). " +
+           "Use it to compare candidates; the exact figure appears in Results and the report once selected. " +
+           "Datasheet curves not in the DB (Eoss, Rθjc, Qrr/Qc, Vf slope) are estimated.") =>
     results.length === 0
       ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
       : <div style={{ overflowX: 'auto' }}>

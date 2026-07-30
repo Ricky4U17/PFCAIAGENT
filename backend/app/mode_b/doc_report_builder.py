@@ -3176,11 +3176,13 @@ def _ch3(story, state, d):
         col_widths=[CW*0.09,CW*0.10,CW*0.09,CW*0.10,CW*0.11,CW*0.11,CW*0.11,CW*0.11,CW*0.18],
         worst_rows=[worst_loss], ch=3,
         interpretation=(
-            f"Worst-case total loss at 100°C: "
-            f"{loss_rows[worst_loss][8]} W at {loss_rows[worst_loss][0]} V<sub>rms</sub>. "
-            f"Note that loss at {vin_max:.0f} V<sub>rms</sub> drops sharply because D → 0 "
-            "(very small volt-seconds → very small B<sub>ac,pk</sub> → very low core loss). "
-            "The 180 V<sub>rms</sub> high-line corner has the highest absolute current "
+            f"The worked example in Section 3.6.3 is the <b>{vin_min:.0f} V<sub>rms</sub> low-line</b> point — "
+            f"it corresponds to the FIRST row of this table ({loss_rows[0][8]} W), not the amber row. "
+            f"The amber row is the <b>worst-case</b> total loss at 100°C: "
+            f"{loss_rows[worst_loss][8]} W at {loss_rows[worst_loss][0]} V<sub>rms</sub>, a different (higher-"
+            f"current) operating point. Loss at {vin_max:.0f} V<sub>rms</sub> drops sharply because D → 0 "
+            "(very small volt-seconds → very small B<sub>ac,pk</sub> → very low core loss); "
+            "the 180 V<sub>rms</sub> high-line corner has the highest absolute current "
             "and is often the worst thermal corner despite lower D."
         ))
 
@@ -4268,26 +4270,48 @@ def _ch5(story, state, s15):
         ], heading=f"Worked example at the hottest corner "
                    f"({_hr['Vin_rms']:.0f} Vac, {_hr['Pout_W']:.0f} W)", ch=5)
 
+        # Step-by-step capacitor-loss worked examples at one LOW-line and one HIGH-line point.
+        _lo = min(thermal["thermal_table"], key=lambda r: r["Vin_rms"])
+        _hi = max(thermal["thermal_table"], key=lambda r: r["Vin_rms"])
+        for _pt, _lbl in ((_lo, "low line"), (_hi, "high line")):
+            _pc = float(_pt.get("P_dissipated_W", 0.0)); _pb = _ncap * _pc
+            eq_box(story, [
+                rf"I_{{cap,total}} = {_pt['I_cap_total_A']:.3f}\ \mathrm{{A}},\quad "
+                rf"I_{{per\,cap}} = \dfrac{{{_pt['I_cap_total_A']:.3f}}}{{{_ncap}}} = {_pt['I_cap_per_unit_A']:.3f}\ \mathrm{{A}}",
+                rf"P_{{cap}} = I_{{per\,cap}}^2\,\mathrm{{ESR}} = ({_pt['I_cap_per_unit_A']:.3f})^2\,\mathrm{{ESR}} "
+                rf"= {_pc:.4f}\ \mathrm{{W\ per\ cap}}",
+                rf"P_{{bank}} = N_{{cap}}\times P_{{cap}} = {_ncap}\times{_pc:.4f} = {_pb:.3f}\ \mathrm{{W}}",
+            ], heading=f"Capacitor loss worked example — {_lbl} "
+                       f"({_pt['Vin_rms']:.0f} Vac, {_pt['Pout_W']:.0f} W)", ch=5)
+
         tt, srows, worst_idx, worst_T = thermal["thermal_table"], [], None, -1e9
+        _tot_bank_worst = 0.0
         for i, r in enumerate(tt):
+            _pcap = float(r.get("P_dissipated_W", 0.0))          # per-capacitor ESR loss
+            _pbank = _ncap * _pcap                                # total bank loss
             srows.append([
                 f"{r['Vin_rms']:.0f}", f"{r['Pout_W']:.0f}",
                 f"{r['I_cap_total_A']:.2f}", f"{r['I_cap_per_unit_A']:.2f}",
-                f"{r['I_rated_A']:.2f}", f"{r['V_ripple_pp_V']:.1f}",
-                f"{r['T_cap_C']:.1f}",
+                f"{r['I_rated_A']:.2f}", f"{_pcap:.2f}", f"{_pbank:.2f}",
+                f"{r['V_ripple_pp_V']:.1f}", f"{r['T_cap_C']:.1f}",
                 "PASS" if r['ripple_pass'] else "FAIL",
             ])
             if r['T_cap_C'] > worst_T:
                 worst_T, worst_idx = r['T_cap_C'], i
-        data_table(story, "5.3.1", "Capacitor Ripple Current, Ripple Voltage and Temperature",
-            "Per-point bank RMS current, per-cap share, rated current, output ripple and "
-            "estimated case temperature. Worst-case (hottest) row highlighted.",
+            _tot_bank_worst = max(_tot_bank_worst, _pbank)
+        data_table(story, "5.3.1", "Capacitor Ripple Current, Loss, Ripple Voltage and Temperature",
+            f"Per-point bank RMS current, per-cap share, rated current, per-cap and total-bank ESR loss "
+            f"(P = I<sub>/cap</sub>²·ESR(T), ×{_ncap} caps), output ripple and estimated case temperature. "
+            "Worst-case (hottest) row highlighted.",
             ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)", "I<sub>cap</sub> (A)",
-             "I/cap (A)", "I<sub>rated</sub> (A)", "ΔV<sub>pp</sub> (V)",
+             "I/cap (A)", "I<sub>rated</sub> (A)", "P/cap (W)", "P<sub>bank</sub> (W)", "ΔV<sub>pp</sub> (V)",
              "T<sub>cap</sub> (°C)", "Verdict"],
             srows,
-            col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.13, CW*0.13, CW*0.13, CW*0.13],
+            col_widths=[CW*0.10, CW*0.10, CW*0.11, CW*0.10, CW*0.11, CW*0.10, CW*0.11, CW*0.09, CW*0.09, CW*0.09],
             worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
+        body(story, f"<b>Total capacitor bank loss (worst case): {_tot_bank_worst:.2f} W</b> "
+                    f"(the P<sub>bank</sub> column, {_ncap} caps × per-cap ESR loss). This is the figure "
+                    "carried into the Chapter-7 §7.8b system loss budget.", 5)
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
         verdict_row(story, "Ripple-current rating (all 9 points)",

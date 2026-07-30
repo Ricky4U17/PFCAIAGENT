@@ -392,8 +392,9 @@ export interface SemiReqBody {
   diode:   Record<string, unknown>
   bridge:  Record<string, unknown>
   thermal: Record<string, unknown>
-  tj_limit?:     Record<string, number>
-  selected_vac?: number
+  tj_limit?:       Record<string, number>
+  selected_vac?:   number
+  approved_design?: Record<string, unknown> | null   // inductor design → as-built L (match report)
 }
 export const semiconductorLibrary = () =>
   get<Record<string, Array<Record<string, unknown>>>>('/mode-b/semiconductor/library')
