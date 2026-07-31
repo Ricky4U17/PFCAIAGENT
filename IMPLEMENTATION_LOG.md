@@ -5974,3 +5974,41 @@ semiconductor block present (the standing verify harness omits Ch7, so it could 
 Suite 172 passed / 2 skipped. Logged the remaining ESR-source sprawl as PENDING_ITEMS B4 (open parts:
 verify_configuration should prefer the part record's esr_ohm over the curated series table; and whether
 the control-loop ESR should come from the same model).
+
+## C172 — 2026-07-30 — verify_configuration resolves ESR from the PART RECORD, not the series table
+
+Closes PENDING_ITEMS B4, the remaining half of the C171 finding.
+
+PROBLEM: `verify_configuration` resolved per-capacitor ESR only through `_interp_esr(esr_db, ...)` — the
+curated per-SERIES `ESR_mohm` table keyed by (value, voltage class). That table has no 383LX entry, so
+`ESR_parallel_mohm` came back None even though the selected part's own `esr_ohm` is in the capacitor DB
+(populated for all 3267 parts; this one is 0.152 Ohm). Worse, the ESR(T) model's no-cap_ref fallback then
+used a **500 mOhm placeholder** instead of the real 152 mOhm.
+`calculate_thermal_table` in the SAME MODULE already did the part-number lookup properly — so two
+functions side by side had different ESR-resolution policies, and the report quoted whichever it hit.
+
+FIX: new local `_part_esr_mohm(row)` inside verify_configuration, resolving in order
+  1. `cap_ref["esr_ohm"]`            (caller-supplied selected-part record — the GUI path)
+  2. capacitor-DB lookup by the config row's `part_number`
+  3. the curated series table        (previous behaviour, now only a fallback)
+and used at ALL THREE sites that previously called `_interp_esr` (bank parallel ESR, the ESR(T) model
+source, the per-cap spec table). Returns `ESR_basis` so the provenance is visible rather than implied.
+This matches what the GUI already computed (`esr_each_ohm/qty` in Step15Capacitor.tsx) — backend and GUI
+now agree instead of quietly differing.
+
+Chapter 5 Section 5.2's "ESR each / bank parallel" row now prefers the engine-resolved value and prints
+the basis, so it can no longer read "— mΩ / <number> mΩ".
+
+VERIFIED (reference design, 2 x 383LX122M450B082VS):
+  before: ESR_parallel_mohm = None,   I_rated_per_cap_A = None,  Ch5 row "— mΩ / — mΩ"
+  after : ESR_parallel_mohm = 76.0,   I_rated_per_cap_A = 6.02,  Ch5 row
+          "152.0 mΩ / 76.0 mΩ (selected part datasheet)"
+          — equals the GUI's own esr_eff_mohm = 152/2 = 76.0 exactly.
+  Both entry paths agree: no cap_ref -> basis "part record (capacitor DB)"; with cap_ref -> "selected
+  part datasheet"; both 76.0 mOhm.
+C171's loss numbers are UNCHANGED (bank_loss_table by_vac identical to the C171 baseline) because
+calculate_thermal_table was already on the part record. 199-page report builds; Ch7 Table 7.8b still
+matches Ch5 Table 5.3.1 row for row. Suite 172 passed / 2 skipped.
+
+NOTE left open deliberately: `_extra["esr_mohm"]` in main.py is now dead (C171 removed its only consumer)
+but still carries the `or step16_params.ESR_mOhm` pattern. Left in place as out of scope; it feeds nothing.

@@ -146,10 +146,41 @@ def verify_configuration(
     total_count = sum(r["qty"] for r in config)
     C_total_F   = C_total_uF * 1e-6
 
-    # Parallel ESR
+    # ── Per-capacitor ESR resolution ──────────────────────────────────────────────────────
+    # The SELECTED PART's own datasheet ESR wins. The curated per-series `ESR_mohm` table is
+    # only a fallback: it is indexed by (value, voltage class) and is missing for many series,
+    # which used to return None and leave ESR_parallel_mohm empty even though the part record
+    # in the capacitor DB carries a real `esr_ohm`. That empty value then propagated into the
+    # control-loop plant ESR and (before C171) the loss budget. See PENDING_ITEMS B4.
+    _esr_src = {"basis": None}
+
+    def _part_esr_mohm(row):
+        """ESR (mOhm) for ONE capacitor of this config row, part record first."""
+        # 1) the caller-supplied selected-part record
+        if cap_ref and cap_ref.get("esr_ohm"):
+            _esr_src["basis"] = "selected part datasheet"
+            return float(cap_ref["esr_ohm"]) * 1000.0
+        # 2) look the row's part number up in the capacitor DB
+        pn = (row.get("part_number") or "").strip()
+        if pn:
+            try:
+                from app.mode_b.step15_cap_db import _load as _load_parts
+                rec = next((r for r in _load_parts() if r.get("part_number") == pn), None)
+            except Exception:
+                rec = None
+            if rec and rec.get("esr_ohm"):
+                _esr_src["basis"] = "part record (capacitor DB)"
+                return float(rec["esr_ohm"]) * 1000.0
+        # 3) curated per-series interpolation table
+        v = _interp_esr(esr_db, int(row["value_uF"]), voltage_rating)
+        if v:
+            _esr_src["basis"] = _esr_src["basis"] or "series ESR table"
+        return v
+
+    # Parallel ESR of the bank
     esr_inv = 0.0
     for row in config:
-        esr_each = _interp_esr(esr_db, int(row["value_uF"]), voltage_rating)
+        esr_each = _part_esr_mohm(row)
         if esr_each and row["qty"] > 0:
             esr_inv += row["qty"] / esr_each
     ESR_par = (1.0 / esr_inv) if esr_inv > 0 else None
@@ -157,8 +188,8 @@ def verify_configuration(
     # ── Vendor-implied ESR(T) model (cap_esr_model): selected part record preferred ────────
     from app.mode_b.cap_esr_model import build_esr_model, solve_core_temp, temp_multiplier, esr_lf_at
     _model_src = dict(cap_ref) if cap_ref else {
-        "esr_ohm": ((_interp_esr(esr_db, int(config[0]["value_uF"]), voltage_rating) or 500.0) / 1000.0)
-                   if config else 0.5,
+        # same resolution order as the bank ESR above — part record before the series table
+        "esr_ohm": (((_part_esr_mohm(config[0]) or 500.0) / 1000.0) if config else 0.5),
         "capacitance_uF": config[0]["value_uF"] if config else 470,
         "op_temp_max_C":  temp_rating,
     }
@@ -169,7 +200,7 @@ def verify_configuration(
     cap_specs = []
     for row in config:
         v_uF     = int(row["value_uF"])
-        esr_each = _interp_esr(esr_db, v_uF, voltage_rating)
+        esr_each = _part_esr_mohm(row)
         if esr_m.get("I_rated_A"):
             # one basis: K(T_amb) × the datasheet 120 Hz rating (matches table + sim page)
             I_rated = esr_m["I_rated_A"] * _K["K"]
@@ -232,6 +263,7 @@ def verify_configuration(
         "valid":                 C_total_uF >= C_required_uF,
         "margin_pct":            round(margin, 1),
         "ESR_parallel_mohm":     round(ESR_par, 1) if ESR_par is not None else None,
+        "ESR_basis":             _esr_src["basis"],   # where the per-cap ESR came from
         "I_rated_per_cap_A":     round(I_rated_bank, 2) if I_rated_bank else None,
         "ripple_current_pass":   wc_perf["ripple_current_pass"],
         "cap_specs":             cap_specs,

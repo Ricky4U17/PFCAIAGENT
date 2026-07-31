@@ -4214,8 +4214,15 @@ def _ch5(story, state, s15):
             ["Value × Qty",             f"{sel.get('value_uF','—')} µF × {sel.get('qty','—')}"],
             ["Installed capacitance",   f"{(verified or {}).get('C_total_uF','—')} µF"],
             ["Voltage rating",          f"{sel.get('voltage_rating_V','—')} V"],
+            # ESR each: prefer the value the verify engine actually resolved (part record first),
+            # falling back to whatever the approved selection carried, so this row can never read
+            # "—" while the bank-parallel figure beside it shows a number.
             ["ESR each / bank parallel",
-             f"{sel.get('ESR_each_mohm','—')} mΩ / {(verified or {}).get('ESR_parallel_mohm','—')} mΩ"],
+             (lambda _cs, _v: (
+                 f"{(_cs[0].get('ESR_each_mohm') if _cs else None) or sel.get('ESR_each_mohm','—')} mΩ"
+                 f" / {_v.get('ESR_parallel_mohm','—')} mΩ"
+                 + (f" ({_v['ESR_basis']})" if _v.get("ESR_basis") else "")
+             ))((verified or {}).get("cap_specs") or [], (verified or {}))],
             ["Rated I<sub>rms</sub>",   f"{sel.get('I_rated_A','—')} A"],
             ["Temperature rating",      f"{sel.get('op_temp','—')}"],
             ["Lifetime",                f"{sel.get('lifetime','—')}"],
