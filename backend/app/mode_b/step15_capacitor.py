@@ -675,3 +675,55 @@ def run_capacitor_design(state: dict) -> dict:
         "default_supplier":     def_sup,
         "default_series":       def_ser,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Capacitor bank loss — SINGLE SOURCE OF TRUTH
+# ══════════════════════════════════════════════════════════════════════════════
+def bank_loss_table(step15_result: dict, state: dict) -> dict | None:
+    """Per-operating-point DC-bus capacitor bank loss, from the ONE engine that owns it.
+
+    Chapter 5 (Table 5.3.1) and the Chapter-7 Section 7.8b system loss budget must quote the same
+    capacitor loss. Both now come from here, which wraps `calculate_thermal_table` — the model that
+    solves the vendor-implied ESR at each point's actual core temperature (`cap_esr_model`).
+
+    Do NOT re-derive this as I_rms^2 * ESR from a nominal ESR elsewhere: the series-level ESR table and
+    the control-loop plant ESR (`step16_params.ESR_mOhm`, which sizes the loop zero) are different
+    quantities and give answers that differ by several times.
+
+    Returns {"by_vac": {Vac: P_bank_W}, "rows": [...], "worst": {...}, "n_cap": N} or None when the
+    bank is not resolvable (no selected part) — None means DATA MISSING, never a substituted value.
+    """
+    sel = (step15_result or {}).get("selected_cap") or {}
+    if not sel:
+        return None
+    try:
+        n_cap = int(float(sel.get("qty", 1) or 1))
+        cfg = [{"value_uF": int(float(sel.get("value_uF", 0) or 0)), "qty": n_cap,
+                "part_number": sel.get("part_number", "")}]
+        th = calculate_thermal_table(config=cfg, state=state or {},
+                                     supplier=sel.get("supplier", "—"),
+                                     series=sel.get("series", "—"),
+                                     voltage_rating=int(float(sel.get("voltage_rating_V", 0) or 0)))
+    except Exception:
+        return None
+    rows = (th or {}).get("thermal_table") or []
+    if not rows:
+        return None
+    out_rows, by_vac, worst = [], {}, None
+    for r in rows:
+        p_cap = float(r.get("P_dissipated_W", 0.0))
+        p_bank = n_cap * p_cap
+        rec = {"Vin_rms": float(r["Vin_rms"]), "Pout_W": float(r["Pout_W"]),
+               "I_cap_total_A": float(r["I_cap_total_A"]),
+               "I_cap_per_unit_A": float(r["I_cap_per_unit_A"]),
+               "T_cap_C": float(r.get("T_cap_C", 0.0)),
+               "P_cap_W": p_cap, "P_bank_W": p_bank,
+               # ESR the model actually used at this point, so the report can show its basis
+               "ESR_per_cap_mohm": (1e3 * p_cap / (float(r["I_cap_per_unit_A"]) ** 2)
+                                    if r.get("I_cap_per_unit_A") else None)}
+        out_rows.append(rec)
+        by_vac[round(rec["Vin_rms"])] = p_bank
+        if worst is None or p_bank > worst["P_bank_W"]:
+            worst = rec
+    return {"by_vac": by_vac, "rows": out_rows, "worst": worst, "n_cap": n_cap}

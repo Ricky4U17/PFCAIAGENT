@@ -5931,3 +5931,46 @@ changes the report, which it never did before); section order confirmed 9.1->9.1
 selected part named ("YAGEO 471KD53"), part clamp 718 V shown against "class-level was 673 V", margin
 -118 V, alpha flagged ESTIMATED, decision box + options table present, selection map present; 0
 section-signs, 0 glyph boxes, 0 ASCII ">=" left. Suite 172 passed / 2 skipped; frontend tsc clean.
+
+## C171 — 2026-07-30 — Capacitor bank loss: one engine, per line, Ch5 == Ch7
+
+Designer: "Table 7.8b capacitor loss numbers do not match the actually calculated values." Confirmed —
+Chapter 7 was RE-DERIVING the loss instead of carrying Chapter 5's, from a different ESR.
+
+ROOT CAUSE (measured on the reference design, 2 x 1200 uF / 450 V 383LX):
+- Ch5 Table 5.3.1: per point, P_bank = N x I_percap^2 x ESR(T), ESR solved at each point's own core
+  temperature by cap_esr_model. Ranges 0.790 W (132 Vac) -> 2.330 W (180 Vac).
+- Ch7 Table 7.8b (main.py): cap_loss_w = I_total(worst)^2 x esr_mohm, where
+  esr_mohm = step15.ESR_parallel_mohm or step16_params.ESR_mOhm. Written as a CONSTANT into all 9 rows.
+- ESR_parallel_mohm comes from verify_configuration's curated per-SERIES table, which has no 383LX
+  entry -> None -> the `or` silently fell through to the CONTROL-LOOP plant ESR (12.7 mOhm, the value
+  that sizes the loop zero) -> 1.267 W vs Ch5's 2.330 W, i.e. 0.54x / 46% low.
+- Three ESRs existed for one bank, spanning 6x: ESR(T) 45.7-55.9 mOhm/cap; datasheet esr_ohm 152
+  mOhm/cap (76 mOhm bank); control-loop 12.7 mOhm bank.
+- Both chapters ASSERTED the link in prose. Ch5: "This is the figure carried into the Chapter-7 Section
+  7.8b system loss budget." Ch7 caption: "the worst-case bank ESR loss (Ch 5)." Neither was true.
+- The error hid in the Balance column, which is a remainder (P_system - semi - ind - rcs - cap), so the
+  budget still reconciled while ~1 W sat in the wrong column.
+
+FIX — single source of truth:
+- NEW step15_capacitor.bank_loss_table(step15_result, state): wraps calculate_thermal_table and returns
+  {by_vac, rows, worst, n_cap} with per-point P_bank plus the ESR the model actually used. Returns None
+  (DATA MISSING) when the bank is not resolvable — never a substituted value. Docstring states plainly
+  that the series ESR table and the control-loop ESR are different quantities and must not be used here.
+- main.py: replaced the I^2*ESR re-derivation with bank_loss_table(); passes cap_loss_by_vac (per line)
+  + cap_loss_w (worst-case fallback) + cap_loss_worst_vac + cap_loss_n_cap. The
+  `or step16_params.ESR_mOhm` fallback is GONE.
+- report_semiconductor.py: Table 7.8b Capacitor column now uses _cap_at(Vac) per row instead of one
+  constant, so it varies with line exactly as Table 5.3.1 does; Balance subtracts the per-point value.
+  Nearest-line guard kept for robustness (both chapters sweep the same grid). Printed to 2 dp since the
+  values are ~1-2 W.
+- Captions corrected in BOTH chapters to describe what actually happens.
+
+VERIFIED end-to-end on a 199-page report built through /documentation/generate-report with the
+semiconductor block present (the standing verify harness omits Ch7, so it could not have caught this):
+  Vac    90    110   120   132   180   200   220   230   264
+  Ch5   1.15  0.95  0.87  0.79  2.33  2.14  2.02  1.95  1.82
+  Ch7   1.15  0.95  0.87  0.79  2.33  2.14  2.02  1.95  1.82   -> all 9 rows match.
+Suite 172 passed / 2 skipped. Logged the remaining ESR-source sprawl as PENDING_ITEMS B4 (open parts:
+verify_configuration should prefer the part record's esr_ohm over the curated series table; and whether
+the control-loop ESR should come from the same model).

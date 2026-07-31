@@ -4351,8 +4351,10 @@ def _ch5(story, state, s15):
             col_widths=[CW*0.10, CW*0.10, CW*0.11, CW*0.10, CW*0.11, CW*0.10, CW*0.11, CW*0.09, CW*0.09, CW*0.09],
             worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
         body(story, f"<b>Total capacitor bank loss (worst case): {_tot_bank_worst:.2f} W</b> "
-                    f"(the P<sub>bank</sub> column, {_ncap} caps × per-cap ESR loss). This is the figure "
-                    "carried into the Chapter-7 Section 7.8b system loss budget.", 5)
+                    f"(the P<sub>bank</sub> column, {_ncap} caps × per-cap ESR loss at each point's own "
+                    "ESR(T)). The Chapter-7 Section 7.8b system loss budget reads this P<sub>bank</sub> "
+                    "column PER LINE VOLTAGE from the same engine, so its Capacitor column matches this "
+                    "table row for row rather than carrying a single averaged figure.", 5)
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
         verdict_row(story, "Ripple-current rating (all 9 points)",

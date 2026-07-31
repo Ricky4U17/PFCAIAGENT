@@ -118,7 +118,28 @@ for 16 — the sign is dominated by the temperature effect rather than by curren
   but it does mean the loss will not move at all when paralleling is changed.
 - Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
 
-### B4. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
+### B4. Capacitor-loss ESR sources are not unified  *(partly FIXED — see C171)*
+The DC-bus capacitor loss now comes from ONE engine (`step15_capacitor.bank_loss_table`, wrapping the
+ESR(T) thermal model), so Chapter 5 Table 5.3.1 and Chapter 7 Table 7.8b agree row for row (C171).
+What remains is the underlying ESR-source sprawl that caused it — **three** different ESRs exist for the
+same bank and they disagree by up to 6×:
+
+| Source | Where | Value on the reference design |
+|---|---|---|
+| `cap_esr_model` ESR(T) at the operating temperature | Chapter 5 + now Chapter 7 | 45.7–55.9 mΩ per cap (varies per point) |
+| curated per-series `ESR_mohm` interpolation table | `verify_configuration` → `ESR_parallel_mohm` | **absent** for this series → `None` |
+| `step16_params.ESR_mOhm` (control-loop plant ESR, sizes the loop zero) | was Chapter 7's silent fallback | 12.7 mΩ bank |
+| part record `esr_ohm` (datasheet, 120 Hz) | cap DB, all 3267 parts populated | 152 mΩ each = 76 mΩ bank |
+
+- **Open:** `verify_configuration` reads the curated series table and returns `ESR_parallel_mohm = None`
+  when the series is absent, even though the selected part's own `esr_ohm` is present in the DB. It
+  should prefer the part record. This still affects anything else reading `ESR_parallel_mohm`.
+- **Open:** decide whether the control-loop ESR should be derived from the same model, so the loop zero
+  and the loss model describe the same capacitor.
+- **Closed by C171:** the Ch5/Ch7 mismatch itself, and the silent fallback from dissipative ESR to
+  control-loop ESR.
+
+### B5. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
 The MOV review asks for exactly six status words: **PASS / FAIL / DATA MISSING / REVIEW / OPTIONAL /
 BLOCKED**. Today two different sets are in use:
 
@@ -139,12 +160,12 @@ it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, 
   only those words, and the GUI badge mapping covers all of them.
 - Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
 
-### B5. EMI Phase D
+### B6. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B6. EMI filter — Rev J methodology
+### B7. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
@@ -212,6 +233,7 @@ workflow path only. Found during C117.
 | Three section-reference conventions (`§` / "Sec." / "Section") | C167 |
 | Ch9 never named a selected MOV part; clamp/energy judged on the class | C168–C170 |
 | Ch9 clamp result had no engineering decision beside it | C170 |
+| Ch5 vs Ch7 capacitor loss disagreed (different ESR, re-derived not carried) | C171 |
 | Backend test suite red (33 failures) | C107–C120, now 172 passed / 2 skipped |
 | Printed TOC covered only Ch1–5 | `_rebuild_printed_toc` |
 | MOV vendor workbook not wired | C149 |

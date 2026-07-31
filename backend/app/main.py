@@ -2569,9 +2569,21 @@ def doc_generate_report(req: _DocReportReq):
                 # Total inductor loss = copper (per-line, computed in Ch7) + CORE loss (Ch4), and
                 # total CAPACITOR loss (Ch5) so Table 7.8b accounts for every loss, not just resistive.
                 _extra["core_loss_w"] = _ad.get("Pcore_W")
-                _wc15 = _s15.get("worst_case") or {}
-                if _wc15.get("I_total_A") and _extra.get("esr_mohm"):
-                    _extra["cap_loss_w"] = float(_wc15["I_total_A"]) ** 2 * float(_extra["esr_mohm"]) / 1e3
+                # Capacitor bank loss comes from the ONE engine that owns it (Chapter 5's ESR(T)
+                # thermal model), per operating point — NOT re-derived here as I_rms^2 * ESR from a
+                # nominal ESR. The old re-derivation used the series-level ESR table and silently fell
+                # back to step16_params.ESR_mOhm (the control-loop plant ESR, a different quantity),
+                # which made Table 7.8b disagree with Table 5.3.1 by several times.
+                try:
+                    from app.mode_b.step15_capacitor import bank_loss_table
+                    _blt = bank_loss_table(_s15, req.state or {})
+                except Exception:
+                    _blt = None
+                if _blt:
+                    _extra["cap_loss_by_vac"] = _blt["by_vac"]          # per-line, matches Table 5.3.1
+                    _extra["cap_loss_w"] = _blt["worst"]["P_bank_W"]    # worst-case scalar fallback
+                    _extra["cap_loss_worst_vac"] = _blt["worst"]["Vin_rms"]
+                    _extra["cap_loss_n_cap"] = _blt["n_cap"]
                 if req.input_protection:            # Ch-8 inrush → §7.3.1 bridge surge verification
                     try:
                         from app.mode_b.inputprotection.adapter import calculate_ntc
