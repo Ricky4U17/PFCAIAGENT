@@ -14,7 +14,7 @@ passed.
 `OPEN`, `CONDITIONAL` or `DATA MISSING` — never as a silent PASS, and never as something that blocks
 the designer from selecting a part.
 
-Last updated 2026-07-30 (after C166).
+Last updated 2026-07-30 (after C170).
 
 ---
 
@@ -118,40 +118,7 @@ for 16 — the sign is dominated by the temperature effect rather than by curren
   but it does mean the loss will not move at all when paralleling is changed.
 - Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
 
-### B4. Section-reference convention sweep → "Section"  *(decided, D0a)*
-Three conventions are live in the report. Normalise all of them to spelled-out **"Section"**:
-
-| Convention | Set by | Where | Rendered hits in Ch8/9 |
-|---|---|---|---|
-| `§8.4` | C164 / C166 (regression) | Ch8, Ch9 | 23 |
-| "Section 8.10" | C105 | Ch1–6 | 5 |
-| "Sec. 7.3.1" | C145 | Ch7, Ch10 | 2 |
-
-- **Scope:** `report_inputprotection.py` (Ch8/9), plus the "Sec." uses in Ch7/Ch10.
-- **Careful:** 7 of the 25 `§` hits in `report_inputprotection.py` are Python comments / docstrings that
-  never render — leave those alone, they aid code navigation.
-- **Done when:** a rendered PDF text-extract contains zero `§` and zero "Sec." across all chapters.
-- Verify with a render → `fitz` text extract, the same check used for missing-glyph boxes.
-
-### B5. Chapter 9 MOV — no selected-part section  ⭐ highest value in Ch9
-`calculate_mov` returns `out["selected"]` (adapter.py:225) and the GUI has a selectable MOV candidate
-table (C152/C156), but **`build_mov_story` never reads it**. Verified by rendering Ch9 with
-`selected_part='471KD53'`: the part number appears exactly **once** in the whole chapter — as one row
-among 40 in the §9.6 candidate screen — and the phrase "Selected MOV" appears **zero** times.
-
-So Chapter 9 states a selected MOV *class* (the ★ in Table 9.3.1) but never a selected MOV *part*, and
-never recalculates clamp / energy / margin on the part the designer actually picked. This is the MOV
-analogue of the Ch8 problem fixed by C164/C166 — and worse: NTC named the part too early, MOV never
-names it at all.
-
-Secondary, same cause: §9.4 clamp and §9.5 Criterion A/B/C are computed from the *class* representative
-BEFORE any part is screened (§9.6), so a reader cannot tell whether a clamp failure is inherent or
-fixable by part choice.
-
-Full plan in the `mov-ch9-reorg-plan` memory. Source: `specs/NTC and MOV/
-MOV_Calculation_Selection_Review_for_Design_Script.pdf`.
-
-### B6. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
+### B4. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
 The MOV review asks for exactly six status words: **PASS / FAIL / DATA MISSING / REVIEW / OPTIONAL /
 BLOCKED**. Today two different sets are in use:
 
@@ -172,12 +139,12 @@ it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, 
   only those words, and the GUI badge mapping covers all of them.
 - Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
 
-### B7. EMI Phase D
+### B5. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B8. EMI filter — Rev J methodology
+### B6. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
@@ -242,6 +209,9 @@ workflow path only. Found during C117.
 | Ch8 Table B practical filter was prose, not a table | C166 |
 | Fuse I²t collapsed 4 different events into one worst case | C166 |
 | Ch8 section order / full 8.1→8.14 renumber | C166 |
+| Three section-reference conventions (`§` / "Sec." / "Section") | C167 |
+| Ch9 never named a selected MOV part; clamp/energy judged on the class | C168–C170 |
+| Ch9 clamp result had no engineering decision beside it | C170 |
 | Backend test suite red (33 failures) | C107–C120, now 172 passed / 2 skipped |
 | Printed TOC covered only Ch1–5 | `_rebuild_printed_toc` |
 | MOV vendor workbook not wired | C149 |
