@@ -286,7 +286,7 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
     for the worst-case continuous I_rms and the worst-case startup I2t; the available fault current +
     margins come from `opts` (reusing mains_fault_current_A from the NTC/MOV inputs). Returns the
     selection, the candidate screen, the requirement thresholds, and the fuse melting I2t to feed back
-    into the NTC §8.9 / MOV-GDT fail-short checks. Missing inputs stay OPEN / DATA MISSING."""
+    into the NTC §8.11 / MOV-GDT fail-short checks. Missing inputs stay OPEN / DATA MISSING."""
     from . import fuse_select as fz
     from . import database as _db
     opts = opts or {}

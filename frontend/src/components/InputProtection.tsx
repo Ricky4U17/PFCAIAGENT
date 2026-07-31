@@ -417,8 +417,8 @@ export const InputProtection: React.FC<Props> = ({
                 tolerance-aware inrush gate and the (estimated) pulse energy meets the requirement;
                 <b> CONDITIONAL</b> = clears the inrush gate but pulse energy (estimated from disc Ø) needs datasheet
                 confirmation; parts that cannot hold the inrush are hidden. R25 is the real datasheet value.
-                Selecting a part recalculates the inrush/precharge numbers around its actual R25 and documents the
-                selection in the report (§8.7).
+                Selecting a part documents the choice in the report (§8.7) and recalculates the inrush/precharge
+                numbers around its actual R25 (§8.8).
               </div>
             </>)}
           </div>

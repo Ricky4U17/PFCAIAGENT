@@ -5768,3 +5768,50 @@ VERIFIED on the reference design (2-ch, 90-264 Vac, 1700/3600 W, I_rms 20.96 A, 
   2340 A2s, ALL SIX GATES PASS — the same part the review doc analyses.
 Ch8/9 PDF renders (20 pp, ~211 KB), zero missing-glyph boxes (C89 check). fuse_select --selftest all pass.
 Backend suite 172 passed / 2 skipped (baseline). Frontend tsc clean.
+
+## C166 — 2026-07-30 — Ch8 full resequence 8.1→8.14 + Table B practical filter + fuse I²t case separation
+
+Closes the LAST three open items of specs/NTC/NTC Improvement.docx (report-side only; no engine change).
+
+(1) TABLE B — PRACTICAL FILTER is now a real table (8.6b), not an annotation. Columns per the doc:
+Mfr/Part | Package (Ø + lead pitch) | Current rating | Datasheet pulse data | R25 tol. | Availability |
+Result. Every column is a real ICL-DB field; a field the vendor sheet does not carry prints CONFIRM.
+Result is deliberately never PASS — the practical items are confirmed by the buyer, not computed.
+I_max below I_rms is annotated "(bypassed)" because that is correct BY DESIGN here.
+
+(2) FUSE I²t SEPARATED INTO FOUR CASES (new 8.11.1 + Table 8.11c) instead of one "worst case" row. The
+four events have DIFFERENT acceptance criteria and collapsing them hid that: 1/1b normal startup (cold
+nominal, min-R25) must NOT open the fuse; 2 warm/hot restart must not open it IF restart is permitted;
+3 stuck/bypassed relay is a fault the fuse SHOULD clear; 4 MOV/GDT fail-short reads the C165 gate-5
+status. New _vs() verdict helper flips the pass sense for fault cases; ratios <1% print "<1%" not "0%".
+Two findings this surfaces on the reference design: hot restart (585 A²s) sits at 25% of the 2340 A²s
+pre-arcing I²t so the FUSE DOES NOT PROTECT AGAINST IT (added a "READ THIS THE RIGHT WAY" annotation
+pointing at the §8.10 restart policy), and a welded-relay fault (606.6 A²s, 26%) will NOT open the fuse.
+
+(3) FULL RESEQUENCE + RENUMBER to the doc's proposed flow. New map:
+  8.1 Design Inputs, Limits & Selection Gates    8.8  Selected-Part Recalculation
+  8.2 Maximum Allowed Inrush Target (NEW split)  8.9  Bypass Relay Timing & Residual Make
+  8.3 Required Cold Series Resistance            8.9.1 Continuous Self-Heat → Why a Bypass Relay
+  8.4 R25 Tolerance → Required Nominal R25       8.9.2 Precharge Timing
+  8.5 Pulse-Energy Requirement                   8.9.3 Precharge Voltage & Residual Relay-Make
+  8.6 Candidate Database Screen (Tables A + B)   8.10 Warm / Hot Restart Policy
+  8.7 Final NTC Selection (NEW, + rationale tbl) 8.11 Fuse Selection & I²t Coordination (+8.11.1)
+                                                 8.12 Startup-Path Stress  8.13 Phase-Angle Sweep
+                                                 8.14 Final Margin Summary & Open Items
+Everything that depends on the ACTUAL part (relay timing, restart policy, fuse coordination) now FOLLOWS
+selection — the self-heat + relay blocks were physically moved from before §8.6 to §8.9.x. §8.2 split out
+of the old §8.2 so the chapter starts from the inrush TARGET and its rationale (bridge IFSM / fuse / relay
+/ cap ripple + agency limits). §8.7 is new and is the first place the chapter names a part, with a
+Selection Rationale table mapping the part back to each gate. All eq/table numbers follow their sections;
+all prose cross-refs updated (incl. adapter.py docstring §8.9→§8.11 and the GUI's §8.7→§8.7–§8.8).
+
+DELIBERATE DEVIATION (designer's own decision #3 in the agreed plan, not an oversight): the doc asks for
+hot restart to be BLOCKED; we implement it as DECISION-REQUIRED — it gates release sign-off but never
+blocks part selection, per [[feedback-selection-never-blocked]].
+STILL OPEN (data, not code): the doc's point 4 wants the final DB to carry an actual datasheet Joule /
+max-switchable-C rating; the vendor workbook has no such column, so pulse energy stays ESTIMATED-from-Ø
+and CONDITIONAL. Same cross-area workbook-enrichment item as MOV Vc@In and GDT impulse-sparkover.
+
+VERIFIED: Ch8/9 renders 23 pp / 237 KB, section order confirmed 8.1→8.14 by PDF text extraction, zero
+missing-glyph boxes (C89 check), /mode-b/input-protection/report returns 200. Suite 172 passed / 2
+skipped; frontend tsc clean.
