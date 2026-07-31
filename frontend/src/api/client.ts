@@ -468,6 +468,24 @@ export interface MovResult {
   candidates?: MovCandidate[]
   selected?: MovCandidate | null
   sources: Record<string, number>
+  // M1: gates stated BEFORE the candidate screen, and the recalculation on the SELECTED part
+  // (the clamp in `targets` is a voltage-CLASS result; `selected_recalc.vc` is the part result).
+  gates?: MovGate[]
+  selected_recalc?: MovSelectedRecalc | null
+  energy_basis?: string
+}
+export interface MovGate {
+  n: number; name: string; requirement: string; value: number | null; unit: string; basis: string
+}
+export interface MovSelectedGate { n: number; name: string; requirement: string; result: string; status: string }
+export interface MovSelectedRecalc {
+  part_number: string | null; mfr: string | null; mcov: number | null
+  v1ma: number; alpha: number; alpha_estimated: boolean
+  i_op: number; vc: number; device_gate: number; clamp_margin_V: number; imax_required: number
+  energy: { e_surge_J: number; e_rating_J: number | null; e_allow_J: number | null; ok: boolean | null; note: string }
+  overshoot: { di_dt_A_per_us: number; l_nH: number; v_overshoot: number; vc_effective: number }
+  gates: MovSelectedGate[]; blockers: string[]
+  release_status: string; selection_blocked: boolean
 }
 export interface MovCandidate {
   label: string; part_number: string | null; mfr: string | null

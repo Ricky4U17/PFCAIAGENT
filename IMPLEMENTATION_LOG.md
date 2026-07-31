@@ -5870,3 +5870,64 @@ selection_blocked False. Ch8/9 PDF still builds 24 pp byte-identical with and wi
 which is correct: criterion_matrix rows carry only criterion/gate/verdict (no Vc), and both 673 V and
 718 V fail A / survive B-C. mov_surge_select --selftest passes. Suite 172 passed / 2 skipped.
 Status-vocabulary unification deliberately NOT done here — parked by the designer as PENDING_ITEMS B6.
+
+## C169 — 2026-07-30 — M2: MOV GUI — selection gates + selected-part recalculation panel
+
+- client.ts: MovResult += gates / selected_recalc / energy_basis; new MovGate, MovSelectedGate,
+  MovSelectedRecalc types.
+- InputProtection.tsx (MOV tab): (1) "Selection gates" table rendered BEFORE the candidate list so the
+  screen reads as a filter against declared numbers, not a conclusion; (2) an explicit class-vs-part
+  line — "the 275/300 Vac MCOV class is a voltage-class decision, not a part selection"; (3) a
+  "Selected part — recalculated" panel with a release-status badge, chips for the part's own V1mA /
+  clamp Vc / the CLASS clamp side by side / margin / clamp-with-overshoot, and the gate-by-gate table;
+  (4) an amber note whenever the clamp rests on an ESTIMATED exponent, saying plainly that DATA MISSING
+  is neither PASS nor FAIL; (5) a blockers line stating they gate RELEASE only, never selection (D0b);
+  (6) the energy_basis line so it is visible WHICH part's energy rating was used.
+Frontend typecheck clean.
+
+## C170 — 2026-07-30 — M3: Chapter 9 restructured to the review's 9.1–9.11 flow
+
+Physical reorder of build_mov_story + _build_gdt_section to the map in
+specs/NTC and MOV/MOV_Calculation_Selection_Review_for_Design_Script.pdf section 5. Content preserved;
+sequence, three new sections and the decision box are the change.
+
+NEW ORDER (was: 9.1 basis, 9.2+9.2.1 stress/energy, 9.3+9.3.1 MCOV, 9.4+9.4.1 clamp/overshoot,
+9.5 criterion, 9.6+9.6.1 screen/fuse, 9.7 record, 9.8 GDT, 9.9 matrix):
+  9.1 Compliance basis                        9.7 Selected MOV & Recalculation   [NEW]
+  9.2 Surge stress per coupling mode            9.7.1 Layout parasitic overshoot [moved from 9.4.1]
+  9.3 Protection Architecture Decision  [NEW]  9.8 Criterion A/B/C + DECISION BOX [moved from 9.5]
+  9.4 MOV voltage CLASS selection (MCOV)       9.9 Fuse / thermal coordination   [promoted from 9.6.1]
+    9.4.1 Class comparison                     9.10 Optional GDT path (.1/.2/.3) [moved from 9.8]
+    9.4.2 CLASS-level clamp [moved from 9.4]   9.11 Release-readiness matrix
+  9.5 Electrical Selection Gates        [NEW]    9.11.1 Certification record     [moved from 9.7]
+    9.5.1 Energy survival [moved from 9.2.1]
+
+- 9.3 states the MOV-only vs MOV+GDT architecture BEFORE any part is screened. The GDT recommendation
+  packet is now computed ONCE in build_mov_story and handed to _build_gdt_section via gdt_pre= so the
+  two sections cannot disagree.
+- 9.5 prints the C168 gates table; 9.7 is the first place a part is named and shows the part's own V1mA,
+  alpha (flagged ESTIMATED when derived generically), I_op, clamp Vc WITH the class-level figure beside
+  it, gate, margin, plus a gate-by-gate verdict table. When no part is selected it says so explicitly:
+  every clamp/energy figure in the chapter is then a CLASS-level result, not a part result.
+- 9.8 gains the review's DECISION BOX — a numeric result never sits alone. Three branches: estimated
+  clamp -> "cannot be settled, DATA MISSING is neither PASS nor FAIL"; negative margin -> formal
+  Criterion FAIL that gates RELEASE only; positive margin -> met, confirm on the bench. A "Engineering
+  Options" table (lower let-through MOV / raise withstand / coordinated second stage / series impedance
+  / accept Criterion B-C) renders whenever the clamp is estimated or the margin is negative.
+- Chapter splash rewritten + a one-page SELECTION MAP annotation naming the five decision layers.
+- MOV-only verdict handed to the release matrix now prefers the SELECTED part's clamp over the class
+  per-path result, and an estimated clamp yields REVIEW rather than asserting PASS.
+- Engine gate strings are ASCII (">= 264 Vac"); the report now renders them with the same glyphs as the
+  rest of the document.
+
+TWO BUGS I INTRODUCED AND FIXED DURING THE MOVE (both caught by building, not by review):
+(a) the certification-record block was first appended at EOF, which put it after
+build_inputprotection_report's return — dead code that still parsed; relocated inside
+_build_gdt_section. (b) `verdict` had been defined inside that moved block, so build_mov_story lost it
+-> NameError; it is now computed explicitly before the _build_gdt_section call.
+
+VERIFIED: Ch8/9 builds both ways — 27 pp with a MOV selected, 26 pp without (the selection now visibly
+changes the report, which it never did before); section order confirmed 9.1->9.11 by PDF text extract;
+selected part named ("YAGEO 471KD53"), part clamp 718 V shown against "class-level was 673 V", margin
+-118 V, alpha flagged ESTIMATED, decision box + options table present, selection map present; 0
+section-signs, 0 glyph boxes, 0 ASCII ">=" left. Suite 172 passed / 2 skipped; frontend tsc clean.

@@ -796,24 +796,37 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
     en = out.get("energy") or {}; ov = out.get("overshoot") or {}; fz = out.get("fuse_coord") or {}
     mcmp = out.get("mcov_comparison") or []; cmx = out.get("criterion_matrix") or []
     lvl = s.get("level"); crit = cr["name"]
+    # Architecture recommendation is needed by Section 9.3 (before parts) AND by Section 9.10;
+    # compute once and hand the same packet to both so they can never disagree.
+    try:
+        _gdt_pre = calculate_gdt(design, opts, environment=opts.get("environment"))
+    except Exception:
+        _gdt_pre = None
 
     chapter_splash(story, CH, "Surge Protection & Compliance (MOV, IEC/EN 61000-4-5)",
         "Does the metal-oxide varistor clamp the combination-wave surge below the downstream "
         "withstand while surviving the repetitive pulse current — and is the result traceable to the "
         "declared test level and performance criterion for certification?",
-        ["9.1 Compliance basis — LEVEL (stress), CRITERION (acceptance), LINE (MCOV) are orthogonal",
-         "9.2 Surge stress per coupling mode",
-         "9.2.1 Surge energy survival",
-         "9.3 Continuous voltage (MCOV) — line-driven, level/criterion-independent",
-         "9.3.1 MCOV class comparison — leakage/aging vs clamp",
-         "9.4 Clamp / coordination — load-line let-through vs the device gate",
-         "9.4.1 Layout parasitic overshoot",
-         "9.5 Performance criterion — A/B/C pass-fail",
-         "9.6 Candidate datasheet screen (governing path)",
-         "9.6.1 Fuse / thermal coordination (fail-short safety)",
-         "9.7 Compliance summary (certification record)",
-         "9.8 Common-mode surge diversion (GDT) — recommendation, no-fire, follow-current, fail-short",
-         "9.9 MOV-only vs MOV+GDT — release-readiness matrix"])
+        ["9.1 Design inputs & compliance target  ·  9.2 Surge stress per coupling mode",
+         "9.3 Protection architecture decision — MOV-only vs MOV+GDT, before any part",
+         "9.4 MOV voltage CLASS selection (9.4.1 class comparison · 9.4.2 class-level clamp)",
+         "9.5 Electrical selection gates (9.5.1 energy survival) — declared before screening",
+         "9.6 Candidate database screen  ·  9.7 Selected MOV & recalculation (9.7.1 overshoot)",
+         "9.8 Criterion A/B/C decision  ·  9.9 Fuse / thermal coordination (fail-short)",
+         "9.10 Optional GDT path  ·  9.11 Release-readiness matrix (9.11.1 certification record)"])
+
+    # One-page selection map, so the reader knows which decision each section settles before
+    # meeting any numbers (MOV review, "Immediate report improvements").
+    annotation(story, "HOW THIS CHAPTER IS ORGANISED — FIVE DECISION LAYERS",
+        "A pass in one layer does NOT imply a pass in the next. <b>Layer 1 — compliance target</b> "
+        "(Section 9.1-9.2): what surge must be survived, and to which performance criterion. "
+        "<b>Layer 2 — architecture</b> (Section 9.3): MOV-only, or MOV plus a GDT for the earth-referred "
+        "paths. <b>Layer 3 — MOV voltage class</b> (Section 9.4): which MCOV class can sit on the line "
+        "continuously; this is a CLASS decision, not a part. <b>Layer 4 — part selection and electrical "
+        "coordination</b> (Sections 9.5-9.8): gates declared, catalog screened, a part chosen, then clamp "
+        "and energy recalculated on THAT part and judged against the criterion. <b>Layer 5 — safety "
+        "coordination</b> (Section 9.9-9.10): if the MOV fails short or the GDT conducts follow current, "
+        "the upstream fuse must clear it. Section 9.11 is the release sign-off.", CH)
 
     # ── 9.1 ──
     step_h(story, "9.1", "Compliance Basis", CH)
@@ -865,8 +878,102 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         "current; L-N is the governing (highest-current) case in this design. Worked substitution for the "
         "governing path: I<sub>sc</sub> = V<sub>oc</sub>/Z.", CH)
 
-    # ── 9.2.1 energy survival ──
-    sub_h(story, "9.2.1", "Surge Energy Survival", CH)
+    # ── 9.3 protection architecture decision — BEFORE any part is chosen ──
+    sub_h(story, "9.3", "Protection Architecture Decision", CH)
+    body(story,
+        "Before any part is screened the protection ARCHITECTURE must be fixed, because it decides which "
+        "gates apply. The differential L-N path is always clamped by a MOV. The common-mode L-PE / N-PE "
+        "paths may be handled by MOVs alone, or by a MOV plus a gas-discharge tube that diverts the large "
+        "earth-referred surge current. A GDT adds its own no-fire, dynamic-sparkover, follow-current and "
+        "fail-short gates (Section 9.10), so it is only taken when the common-mode stress or the install "
+        "environment calls for it.", CH)
+    _arch_rec = (_gdt_pre or {}).get("required") or {}
+    _arch_chosen = (opts or {}).get("surge_architecture")
+    data_table(story, "9.3", "Protection Architecture",
+        "The baseline is MOV-only; MOV+GDT is a separate optional branch evaluated in Section 9.10.",
+        ["Item", "Value"],
+        [["Install environment", str((opts or {}).get("environment", "commercial"))],
+         ["Recommended architecture", str(_arch_rec.get("recommend", "MOV-only"))],
+         ["GDT status", "REQUIRED" if _arch_rec.get("required") else "OPTIONAL"],
+         ["Reason", str(_arch_rec.get("reason", "common-mode stress within MOV capability"))[:150]],
+         ["Designer decision", str(_arch_chosen) if _arch_chosen else "follow recommendation"]],
+        col_widths=[CW*0.30, CW*0.70], ch=CH)
+
+    # ── 9.4 mcov ──
+    sub_h(story, "9.4", "MOV Voltage CLASS Selection (MCOV)", CH)
+    body(story,
+        "<b>Model.</b> The maximum continuous operating voltage is set ONLY by the continuous worst-case "
+        "line, independent of the surge test level and the performance criterion — a varistor that "
+        "conducts at the line peak would overheat. It snaps up to the next standard varistor class.", CH)
+    body(story,
+        f"<b>Worked.</b> With the continuous worst-case line of {_f(s['vac_max'],0)} V<sub>ac</sub> and the "
+        f"binding margin, the required MCOV is {_f(mc['required'],0)} V<sub>ac</sub>; this snaps up to the "
+        f"standard <b>{_f(mc['class'],0)} V<sub>ac</sub></b> class, whose nominal varistor voltage is "
+        f"V<sub>1mA</sub> &#8776; {_f(mc['v1ma'],0)} V. Because it depends on the line alone, changing the "
+        f"surge level must not move this number.", CH)
+
+    # ── 9.4.1 MCOV class comparison ──
+    sub_h(story, "9.4.1", "MCOV Class Comparison — Leakage/Aging vs Clamp", CH)
+    body(story,
+        "A higher MCOV class buys more headroom over the line peak (V<sub>pk</sub> = "
+        f"{_f(1.41421356*s['vac_max'],0)} V), which lowers standby leakage and slows aging — but it raises "
+        "the clamp voltage, eroding downstream margin. Leakage/aging is graded by the varistor-voltage "
+        "headroom over the line peak (V<sub>1mA</sub>/V<sub>pk</sub>).", CH)
+    data_table(story, "9.4.1", "Candidate MCOV Classes",
+        "Higher class → lower leakage/aging, higher clamp. Selected class is the binding minimum.",
+        ["MCOV (V<sub>ac</sub>)", "V<sub>1mA</sub> (V)", "Peak headroom", "Leakage/aging", "Clamp trade-off"],
+        [[f"{_f(r['mcov'],0)}" + (" &#9733;" if r.get("selected") else ""), f"{_f(r['v1ma'],0)}",
+          f"{_f(r['peak_headroom'],2)}&#215;", r["leakage_aging"], r["clamp_tradeoff"]] for r in mcmp]
+          or [["&#8212;", "", "", "", ""]],
+        col_widths=[CW*0.18, CW*0.16, CW*0.18, CW*0.18, CW*0.30], ch=CH)
+
+    # ── 9.4.2 clamp ──
+    sub_h(story, "9.4.2", "Class-Level Clamp (Load-Line Let-Through)", CH)
+    body(story,
+        "<b>Model.</b> The let-through (clamp) voltage is the operating point where the varistor's highly "
+        "non-linear V-I curve V = V<sub>1mA</sub>(I/1mA)<sup>1/&#945;</sup> meets the surge source load "
+        "line V = V<sub>drive</sub> &#8722; I&#183;Z. We solve that intersection rather than reading a "
+        "fixed datasheet clamp, because the actual clamp depends on the surge current the source can push. "
+        "The surge rides on the line peak (phase superposition), so V<sub>drive</sub> includes the line "
+        "peak. The clamp must stay under the criterion-set device gate.", CH)
+    eq_box(story, [r"V=V_{1mA}\left(\dfrac{I}{1mA}\right)^{1/\alpha}=V_{drive}-I\,Z"], number="9.4.2", ch=CH)
+    _gov = next((t for t in tg if t["path"] == st.get("governing")), tg[0] if tg else None)
+    if _gov:
+        body(story,
+            f"<b>Worked (governing path — {_gov['path']}).</b> The drive voltage is V<sub>drive</sub> = "
+            f"{_f(_gov['v_drive'],0)} V through Z = {_f(_gov['z'],0)} {_OHM}; the V-I curve meets that load "
+            f"line at I<sub>op</sub> = {_f(_gov['i_op'],0)} A, giving a let-through clamp <b>V<sub>c</sub> = "
+            f"{_f(_gov['vc'],0)} V</b>. The criterion-{crit} device gate is {_f(_gov['device_gate'],0)} V, so "
+            f"the coordination verdict is <b>{_gov['coord']}</b>; the chosen part's 8/20 surge rating must "
+            f"also exceed the design target I<sub>max</sub> &#8805; {_f(_gov['imax_required'],0)} A. The full "
+            f"per-path picture is below.", CH)
+    data_table(story, "9.4.2", "Per-Path Clamp & Coordination", "Let-through vs the device gate at each path.",
+        ["Path", "V<sub>drive</sub> (V)", "I<sub>op</sub> (A)", "Clamp V<sub>c</sub> (V)",
+         "I<sub>max</sub> req (A)", "Gate (V)", "Verdict"],
+        [[t["path"], f"{_f(t['v_drive'],0)}", f"{_f(t['i_op'],0)}", f"{_f(t['vc'],0)}",
+          f"{_f(t['imax_required'],0)}", f"{_f(t['device_gate'],0)}", t["coord"]] for t in tg]
+          or [["&#8212;", "", "", "", "", "", ""]],
+        col_widths=[CW*0.26, CW*0.13, CW*0.11, CW*0.14, CW*0.14, CW*0.11, CW*0.11], ch=CH)
+
+    # ── 9.5 electrical selection gates — declared BEFORE the candidate screen ──
+    sub_h(story, "9.5", "MOV Electrical Selection Gates", CH)
+    body(story,
+        "These are the numbers a catalog MOV must clear, derived from the requirement alone. They are "
+        "stated <b>before</b> the candidate screen so that Section 9.6 is a filter against declared gates "
+        "rather than a conclusion. Nothing here names a part — the MOV voltage class chosen in Section 9.4 "
+        "is a <i>class</i> decision, not a selection.", CH)
+    # engine gate strings are ASCII; render them with the same glyphs the rest of the report uses
+    _ge = lambda x: str(x).replace(">=", "&#8805;").replace("<=", "&#8804;")
+    _gts = out.get("gates") or []
+    data_table(story, "9.5", "Electrical Selection Gates",
+        "Every gate is derived above; a candidate must clear all of them to be release-qualified.",
+        ["#", "Gate", "Requirement", "Basis"],
+        [[str(g["n"]), g["name"], _ge(g["requirement"]), g["basis"]] for g in _gts]
+          or [["&#8212;", "", "", ""]],
+        col_widths=[CW*0.05, CW*0.26, CW*0.21, CW*0.48], ch=CH)
+
+    # ── 9.5.1 energy survival requirement ──
+    sub_h(story, "9.5.1", "Energy Survival Requirement", CH)
     body(story,
         "MOV survival is not set by peak current alone — the absorbed pulse energy must stay under the "
         "datasheet single-pulse rating, derated for repetitive pulses and temperature. Exact integration "
@@ -885,97 +992,6 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         annotation(story, "DATA MISSING",
             "Datasheet single-pulse energy not available for the governing candidate — energy survival "
             "cannot be confirmed. Add the J rating to the workbook.", CH)
-
-    # ── 9.3 mcov ──
-    sub_h(story, "9.3", "Continuous Voltage (MCOV)", CH)
-    body(story,
-        "<b>Model.</b> The maximum continuous operating voltage is set ONLY by the continuous worst-case "
-        "line, independent of the surge test level and the performance criterion — a varistor that "
-        "conducts at the line peak would overheat. It snaps up to the next standard varistor class.", CH)
-    body(story,
-        f"<b>Worked.</b> With the continuous worst-case line of {_f(s['vac_max'],0)} V<sub>ac</sub> and the "
-        f"binding margin, the required MCOV is {_f(mc['required'],0)} V<sub>ac</sub>; this snaps up to the "
-        f"standard <b>{_f(mc['class'],0)} V<sub>ac</sub></b> class, whose nominal varistor voltage is "
-        f"V<sub>1mA</sub> &#8776; {_f(mc['v1ma'],0)} V. Because it depends on the line alone, changing the "
-        f"surge level must not move this number.", CH)
-
-    # ── 9.3.1 MCOV class comparison ──
-    sub_h(story, "9.3.1", "MCOV Class Comparison — Leakage/Aging vs Clamp", CH)
-    body(story,
-        "A higher MCOV class buys more headroom over the line peak (V<sub>pk</sub> = "
-        f"{_f(1.41421356*s['vac_max'],0)} V), which lowers standby leakage and slows aging — but it raises "
-        "the clamp voltage, eroding downstream margin. Leakage/aging is graded by the varistor-voltage "
-        "headroom over the line peak (V<sub>1mA</sub>/V<sub>pk</sub>).", CH)
-    data_table(story, "9.3.1", "Candidate MCOV Classes",
-        "Higher class → lower leakage/aging, higher clamp. Selected class is the binding minimum.",
-        ["MCOV (V<sub>ac</sub>)", "V<sub>1mA</sub> (V)", "Peak headroom", "Leakage/aging", "Clamp trade-off"],
-        [[f"{_f(r['mcov'],0)}" + (" &#9733;" if r.get("selected") else ""), f"{_f(r['v1ma'],0)}",
-          f"{_f(r['peak_headroom'],2)}&#215;", r["leakage_aging"], r["clamp_tradeoff"]] for r in mcmp]
-          or [["&#8212;", "", "", "", ""]],
-        col_widths=[CW*0.18, CW*0.16, CW*0.18, CW*0.18, CW*0.30], ch=CH)
-
-    # ── 9.4 clamp ──
-    sub_h(story, "9.4", "Clamp / Coordination (Load-Line Let-Through)", CH)
-    body(story,
-        "<b>Model.</b> The let-through (clamp) voltage is the operating point where the varistor's highly "
-        "non-linear V-I curve V = V<sub>1mA</sub>(I/1mA)<sup>1/&#945;</sup> meets the surge source load "
-        "line V = V<sub>drive</sub> &#8722; I&#183;Z. We solve that intersection rather than reading a "
-        "fixed datasheet clamp, because the actual clamp depends on the surge current the source can push. "
-        "The surge rides on the line peak (phase superposition), so V<sub>drive</sub> includes the line "
-        "peak. The clamp must stay under the criterion-set device gate.", CH)
-    eq_box(story, [r"V=V_{1mA}\left(\dfrac{I}{1mA}\right)^{1/\alpha}=V_{drive}-I\,Z"], number="9.4", ch=CH)
-    _gov = next((t for t in tg if t["path"] == st.get("governing")), tg[0] if tg else None)
-    if _gov:
-        body(story,
-            f"<b>Worked (governing path — {_gov['path']}).</b> The drive voltage is V<sub>drive</sub> = "
-            f"{_f(_gov['v_drive'],0)} V through Z = {_f(_gov['z'],0)} {_OHM}; the V-I curve meets that load "
-            f"line at I<sub>op</sub> = {_f(_gov['i_op'],0)} A, giving a let-through clamp <b>V<sub>c</sub> = "
-            f"{_f(_gov['vc'],0)} V</b>. The criterion-{crit} device gate is {_f(_gov['device_gate'],0)} V, so "
-            f"the coordination verdict is <b>{_gov['coord']}</b>; the chosen part's 8/20 surge rating must "
-            f"also exceed the design target I<sub>max</sub> &#8805; {_f(_gov['imax_required'],0)} A. The full "
-            f"per-path picture is below.", CH)
-    data_table(story, "9.4", "Per-Path Clamp & Coordination", "Let-through vs the device gate at each path.",
-        ["Path", "V<sub>drive</sub> (V)", "I<sub>op</sub> (A)", "Clamp V<sub>c</sub> (V)",
-         "I<sub>max</sub> req (A)", "Gate (V)", "Verdict"],
-        [[t["path"], f"{_f(t['v_drive'],0)}", f"{_f(t['i_op'],0)}", f"{_f(t['vc'],0)}",
-          f"{_f(t['imax_required'],0)}", f"{_f(t['device_gate'],0)}", t["coord"]] for t in tg]
-          or [["&#8212;", "", "", "", "", "", ""]],
-        col_widths=[CW*0.26, CW*0.13, CW*0.11, CW*0.14, CW*0.14, CW*0.11, CW*0.11], ch=CH)
-
-    # ── 9.4.1 layout overshoot ──
-    sub_h(story, "9.4.1", "Layout Parasitic Overshoot", CH)
-    body(story,
-        "During the fast surge front the parasitic inductance of the MOV loop adds a voltage overshoot "
-        "V<sub>over</sub> = L<sub>parasitic</sub>&#183;di/dt on top of the clamp — the effective let-through "
-        "the downstream device sees is V<sub>c</sub> + V<sub>over</sub>. This is why the MOV must sit at the "
-        "AC inlet on short, wide, low-loop-area copper, right after the fuse.", CH)
-    eq_box(story, [r"V_{over}=L_{parasitic}\,\dfrac{di}{dt},\qquad V_{c,eff}=V_c+V_{over}"],
-           number="9.4a", ch=CH)
-    if ov:
-        body(story,
-            f"<b>Worked.</b> With L<sub>parasitic</sub> = {_f(ov['l_nH'],0)} nH and di/dt = "
-            f"{_f(ov['di_dt_A_per_us'],1)} A/&#181;s (8/20 front), V<sub>over</sub> &#8776; "
-            f"<b>{_f(ov['v_overshoot'],1)} V</b> &#8658; effective let-through V<sub>c,eff</sub> &#8776; "
-            f"<b>{_f(ov['vc_effective'],0)} V</b>. Long leads (100s of nH) multiply this — keep the loop "
-            "tight.", CH)
-
-    # ── 9.5 criterion ──
-    sub_h(story, "9.5", "Performance Criterion — A/B/C Pass-Fail", CH)
-    annotation(story, "THEORY",
-        f"Criterion {crit}: ride-through = {cr['ride_through']}; the device gate is "
-        + ("the transient abs-max (survival)." if cr["gate_uses_absmax"]
-           else f"V<sub>ds</sub> &#8722; {_f(cr['dev_margin_V'],0)} V (protective margin).")
-        + " Under A, a clamp above the gate is a FAIL — the bus must keep regulating; under B/C a clamp "
-          "above V<sub>ds</sub> but below abs-max is acceptable (the unit may dip/reset). The criterion "
-          "changes the gate and verdict wording, not the surge currents or energies.", CH)
-    data_table(story, "9.5", "Criterion A/B/C — Governing Clamp Verdict",
-        "Same surge stress; only the acceptance gate and verdict change.",
-        ["Criterion", "Meaning", "Device gate (V)", "Verdict"],
-        [[r["criterion"] + (" &#9733;" if r["criterion"] == crit else ""),
-          "ride-through" if r["ride_through"] else "survive / reset allowed",
-          f"{_f(r['gate'],0)}", r["verdict"]] for r in cmx]
-          or [["&#8212;", "", "", ""]],
-        col_widths=[CW*0.16, CW*0.42, CW*0.20, CW*0.22], ch=CH)
 
     # ── 9.6 candidates ──
     sub_h(story, "9.6", "Candidate Datasheet Screen (Governing Path)", CH)
@@ -1010,8 +1026,129 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         "L-PE and N-PE (watch leakage & creepage). Keep leads short/low-inductance (overshoot on the "
         "1.2 &#181;s edge). Pair with an upstream fuse + thermal protection (or a TMOV).", CH)
 
-    # ── 9.6.1 fuse / thermal coordination ──
-    sub_h(story, "9.6.1", "Fuse / Thermal Coordination (Fail-Short Safety)", CH)
+    # ── 9.7 selected MOV + recalculation — the FIRST place a part is named ──
+    _sel = out.get("selected"); _rc = out.get("selected_recalc")
+    sub_h(story, "9.7", "Selected MOV & Recalculation", CH)
+    if _sel and _rc:
+        body(story,
+            f"Only now, with the gates declared (Section 9.5) and the catalog screened (Section 9.6), is a "
+            f"part named. <b>Selected MOV: {_sel.get('mfr','')} {_sel.get('part_number','')}</b> — "
+            f"{_f(_sel.get('mcov'),0)} V<sub>ac</sub> MCOV, V<sub>1mA</sub> = {_f(_rc.get('v1ma'),0)} V. "
+            "Every figure below is recomputed from THIS part's datasheet, not from the voltage class: the "
+            "class-level clamp in Section 9.4.2 used a snapped class V<sub>1mA</sub>, whereas the load line "
+            "below is solved against the part's own varistor voltage.", CH)
+        _cls_vc = (_gov or {}).get("vc")
+        data_table(story, "9.7", "Selected Part — Recalculated Design Values",
+            "Part-specific results. The clamp supersedes the class-level figure of Section 9.4.2.",
+            ["Quantity", "Value", "Check"],
+            [["Part", f"{_sel.get('mfr','')} {_sel.get('part_number','')}", "designer-selected"],
+             ["V<sub>1mA</sub> (datasheet)", f"{_f(_rc.get('v1ma'),0)} V", "drives the load line"],
+             ["Varistor exponent &#945;", f"{_f(_rc.get('alpha'),1)}",
+              ("ESTIMATED — no datasheet V<sub>c</sub>" if _rc.get("alpha_estimated") else "from datasheet V<sub>c</sub>")],
+             ["Operating current I<sub>op</sub>", f"{_f(_rc.get('i_op'),0)} A", "load-line intersection"],
+             ["Clamp V<sub>c</sub> (this part)", f"<b>{_f(_rc.get('vc'),0)} V</b>",
+              (f"class-level was {_f(_cls_vc,0)} V" if _cls_vc is not None else "&#8212;")],
+             ["Device gate", f"{_f(_rc.get('device_gate'),0)} V", f"Criterion {crit}"],
+             ["Clamp margin", f"{_f(_rc.get('clamp_margin_V'),0)} V",
+              "positive = clamps below the gate"]],
+            col_widths=[CW*0.32, CW*0.30, CW*0.38], ch=CH)
+        data_table(story, "9.7b", "Selected Part — Gate-by-Gate Verdict",
+            "Each Section 9.5 gate re-evaluated against this part's datasheet.",
+            ["#", "Gate", "Requirement", "Result", "Status"],
+            [[str(g["n"]), g["name"], _ge(g["requirement"]), _ge(g["result"]), g["status"]]
+             for g in (_rc.get("gates") or [])],
+            col_widths=[CW*0.05, CW*0.24, CW*0.28, CW*0.26, CW*0.17], ch=CH)
+        if _rc.get("alpha_estimated"):
+            annotation(story, "CLAMP IS ESTIMATED — NOT A VERIFIED PASS OR FAIL",
+                "This part publishes no clamp voltage at a rated current, so the generic varistor exponent "
+                "was used to solve the load line. The clamp gate is therefore reported DATA MISSING: an "
+                f"estimate cannot settle Criterion {crit} in either direction. Add the datasheet "
+                "V<sub>c</sub>@I<sub>n</sub> to the workbook to close it.", CH)
+        _blk = _rc.get("blockers") or []
+        if _blk:
+            annotation(story, f"RELEASE STATUS: {_rc.get('release_status','DATA MISSING')}",
+                "Open before sign-off: " + "; ".join(_blk) + ". These gate the final RELEASE only — "
+                "the part above remains selectable and every downstream section is computed from it.", CH)
+        body(story, f"<i>Energy survival is judged against the {out.get('energy_basis','selected part')}.</i>", CH)
+    else:
+        annotation(story, "NO MOV PART SELECTED YET",
+            "Section 9.4 fixed the MOV voltage CLASS and Section 9.6 screened the catalog, but no part has "
+            "been selected. The clamp, energy and margin figures elsewhere in this chapter are therefore "
+            "CLASS-level results, not part results. Select a candidate to recalculate the design around a "
+            "real datasheet.", CH)
+
+    # ── 9.7.1 layout overshoot ──
+    sub_h(story, "9.7.1", "Layout Parasitic Overshoot", CH)
+    body(story,
+        "During the fast surge front the parasitic inductance of the MOV loop adds a voltage overshoot "
+        "V<sub>over</sub> = L<sub>parasitic</sub>&#183;di/dt on top of the clamp — the effective let-through "
+        "the downstream device sees is V<sub>c</sub> + V<sub>over</sub>. This is why the MOV must sit at the "
+        "AC inlet on short, wide, low-loop-area copper, right after the fuse.", CH)
+    eq_box(story, [r"V_{over}=L_{parasitic}\,\dfrac{di}{dt},\qquad V_{c,eff}=V_c+V_{over}"],
+           number="9.7", ch=CH)
+    if ov:
+        body(story,
+            f"<b>Worked.</b> With L<sub>parasitic</sub> = {_f(ov['l_nH'],0)} nH and di/dt = "
+            f"{_f(ov['di_dt_A_per_us'],1)} A/&#181;s (8/20 front), V<sub>over</sub> &#8776; "
+            f"<b>{_f(ov['v_overshoot'],1)} V</b> &#8658; effective let-through V<sub>c,eff</sub> &#8776; "
+            f"<b>{_f(ov['vc_effective'],0)} V</b>. Long leads (100s of nH) multiply this — keep the loop "
+            "tight.", CH)
+
+    # ── 9.8 criterion ──
+    sub_h(story, "9.8", "Performance Criterion — A/B/C Pass-Fail", CH)
+    annotation(story, "THEORY",
+        f"Criterion {crit}: ride-through = {cr['ride_through']}; the device gate is "
+        + ("the transient abs-max (survival)." if cr["gate_uses_absmax"]
+           else f"V<sub>ds</sub> &#8722; {_f(cr['dev_margin_V'],0)} V (protective margin).")
+        + " Under A, a clamp above the gate is a FAIL — the bus must keep regulating; under B/C a clamp "
+          "above V<sub>ds</sub> but below abs-max is acceptable (the unit may dip/reset). The criterion "
+          "changes the gate and verdict wording, not the surge currents or energies.", CH)
+    data_table(story, "9.8", "Criterion A/B/C — Governing Clamp Verdict",
+        "Same surge stress; only the acceptance gate and verdict change.",
+        ["Criterion", "Meaning", "Device gate (V)", "Verdict"],
+        [[r["criterion"] + (" &#9733;" if r["criterion"] == crit else ""),
+          "ride-through" if r["ride_through"] else "survive / reset allowed",
+          f"{_f(r['gate'],0)}", r["verdict"]] for r in cmx]
+          or [["&#8212;", "", "", ""]],
+        col_widths=[CW*0.16, CW*0.42, CW*0.20, CW*0.22], ch=CH)
+    # DECISION BOX — the review's core ask: a numeric result must never sit alone without the
+    # engineering decision that follows from it.
+    _dec_vc = (_rc or {}).get("vc", (_gov or {}).get("vc") if _gov else None)
+    _dec_gate = (_rc or {}).get("device_gate", (_gov or {}).get("device_gate") if _gov else None)
+    _dec_est = bool((_rc or {}).get("alpha_estimated"))
+    if _dec_vc is not None and _dec_gate is not None:
+        _margin = _dec_gate - _dec_vc
+        _basis = ("the SELECTED part" if _rc else "the MOV voltage CLASS (no part selected yet)")
+        if _dec_est:
+            annotation(story, f"DECISION REQUIRED — Criterion {crit} cannot be settled on estimated data",
+                f"Calculated let-through is {_f(_dec_vc,0)} V against a {_f(_dec_gate,0)} V gate "
+                f"({_margin:+.0f} V) on {_basis}, but the clamp rests on an ESTIMATED varistor exponent "
+                "because no datasheet V<sub>c</sub>@I<sub>n</sub> is available. Status is DATA MISSING, "
+                "not PASS and not FAIL. To close it: add the datasheet clamp, or decide on one of the "
+                "options below in case the verified clamp also exceeds the gate.", CH)
+        elif _margin < 0:
+            annotation(story, f"DECISION REQUIRED — Criterion {crit} NOT met (MOV-only)",
+                f"Calculated let-through is {_f(_dec_vc,0)} V against a {_f(_dec_gate,0)} V gate on "
+                f"{_basis} &#8658; margin {_margin:+.0f} V. This is a formal Criterion-{crit} FAIL for the "
+                "MOV-only architecture and gates RELEASE (it does not block part selection).", CH)
+        else:
+            annotation(story, f"Criterion {crit} met (MOV-only)",
+                f"Let-through {_f(_dec_vc,0)} V against a {_f(_dec_gate,0)} V gate on {_basis} &#8658; "
+                f"margin {_margin:+.0f} V. Confirm on the bench with the real layout, since parasitic "
+                "overshoot (Section 9.7.1) adds to the clamp the device actually sees.", CH)
+    if _dec_est or (_dec_vc is not None and _dec_gate is not None and _dec_gate - _dec_vc < 0):
+        data_table(story, "9.8b", "Engineering Options if the Verified Clamp Exceeds the Gate",
+            "Resolve ONE of these; each is a design decision, not a calculation.",
+            ["Option", "What it changes"],
+            [["Lower let-through MOV", "larger disc / lower MCOV class — watch leakage and aging (Section 9.4.1)"],
+             ["Raise the downstream withstand", "higher-V<sub>ds</sub> device or a clamped snubber — a Chapter-7 change"],
+             ["Add a coordinated second stage", "series impedance + follow-on clamp so the MOV is not alone"],
+             ["Add series impedance", "raises the source Z the MOV works against, lowering I<sub>op</sub> and V<sub>c</sub>"],
+             ["Accept Criterion B or C", "only if the product specification permits dip/reset behaviour"]],
+            col_widths=[CW*0.34, CW*0.66], ch=CH)
+
+    # ── 9.9 fuse / thermal coordination ──
+    sub_h(story, "9.9", "Fuse / Thermal Coordination (Fail-Short Safety)", CH)
     body(story,
         "After severe or repeated surges a MOV can fail SHORT. The upstream fuse (or a TMOV's integral "
         "thermal disconnect) must make that failure safe — the MOV must be downstream of the fuse, the "
@@ -1024,42 +1161,26 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
             fz.get("note", "Provide the available fault current and the upstream fuse I&#178;t to prove "
                    "the fail-short path is cleared safely."), CH)
 
-    # ── 9.7 compliance summary ──
-    sub_h(story, "9.7", "Compliance Summary (Certification Record)", CH)
-    worst = min(tg, key=lambda t: t["device_gate"] - t["vc"]) if tg else None
-    verdict = "PASS" if all(t["coord"] != "FAIL" for t in tg) and tg else "REVIEW"
-    _en_cell = ("&#8212;" if en.get("ok") is None else
-                (f"PASS ({_f(en['e_surge_J'],1)}/{_f(en['e_allow_J'],0)} J)" if en.get("ok")
-                 else f"OVER ({_f(en['e_surge_J'],1)}/{_f(en['e_allow_J'],0)} J)"))
-    _fz_cell = ("DATA MISSING" if fz.get("ok") is None else ("cleared by fuse/TMOV" if fz.get("ok") else "NOT PROVEN"))
-    data_table(story, "9.7", "Surge-Immunity Compliance Record",
-        "The traceable record for the technical construction file.",
-        ["Item", "Declared / computed"],
-        [["Standard", "IEC/EN 61000-4-5 (combination wave)"],
-         ["Test level", str(lvl)],
-         ["Performance criterion", crit],
-         ["MCOV class", f"{_f(mc['class'],0)} V<sub>ac</sub>"],
-         ["Worst-case let-through", (f"{_f(worst['vc'],0)} V at {worst['path']}" if worst else "&#8212;")],
-         ["+ layout overshoot", (f"{_f(ov['v_overshoot'],1)} V &#8658; V<sub>c,eff</sub> {_f(ov['vc_effective'],0)} V" if ov else "&#8212;")],
-         ["Device gate", (f"{_f(worst['device_gate'],0)} V" if worst else "&#8212;")],
-         ["Energy survival", _en_cell],
-         ["Fuse / fail-short coordination", _fz_cell],
-         ["Coordination verdict", verdict]],
-        col_widths=[CW*0.42, CW*0.58], ch=CH)
-
-    # ── 9.8 GDT (common-mode surge diverter) + 9.9 combined release matrix ──
-    _build_gdt_section(story, design, opts, CH, mov_out=out, mov_verdict=verdict)
+    # ── 9.10 GDT (common-mode surge diverter) + 9.9 combined release matrix ──
+    # MOV-only coordination verdict handed to the release matrix. Prefer the SELECTED part's clamp
+    # (Section 9.7) over the class-level per-path result; an estimated clamp cannot assert PASS.
+    if _rc:
+        verdict = ("REVIEW" if _rc.get("alpha_estimated")
+                   else ("PASS" if (_rc.get("clamp_margin_V") or 0) >= 0 else "FAIL"))
+    else:
+        verdict = "PASS" if (tg and all(t["coord"] != "FAIL" for t in tg)) else "REVIEW"
+    _build_gdt_section(story, design, opts, CH, mov_out=out, mov_verdict=verdict, gdt_pre=_gdt_pre)
 
 
-def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIEW"):
-    """Section 9.8 — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
+def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIEW", gdt_pre=None):
+    """Section "9.10" — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
     class, candidate screen, and the follow-current / fail-short safety checks (with DATA-MISSING gates)."""
-    g = calculate_gdt(design, opts or {}, environment=(opts or {}).get("environment"))
+    g = gdt_pre or calculate_gdt(design, opts or {}, environment=(opts or {}).get("environment"))
     rec = g.get("required") or {}; sN = g.get("stress") or {}
     fc = g.get("follow_current") or {}; fs = g.get("fail_short") or {}
     gc = g.get("candidates") or []
 
-    step_h(story, "9.8", "Common-Mode Surge Diversion (GDT)", CH)
+    step_h(story, "9.10", "Common-Mode Surge Diversion (GDT)", CH)
     body(story,
         "A gas-discharge tube is not a precision clamp — it is a high-current common-mode surge "
         "<b>diverter</b>. The MOV controls the fast/residual voltage; once the GDT fires it carries the "
@@ -1073,9 +1194,9 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         rec.get("reason", "") + _dec, CH)
 
     # 9.8.1 stress + no-fire
-    sub_h(story, "9.8.1", "No-Fire & Surge-Current Sizing", CH)
+    sub_h(story, "9.10.1", "No-Fire & Surge-Current Sizing", CH)
     eq_box(story, [r"V_{spark,min}>V_{line,pk}\cdot K,\qquad I_{GDT}\geq K_{margin}\cdot\dfrac{V_{LE}}{Z_{cm}}"],
-           number="9.8", ch=CH)
+           number="9.10", ch=CH)
     body(story,
         f"<b>Worked.</b> Common-mode surge V<sub>LE</sub> = {_f(sN.get('v_le'),0)} V through Z<sub>cm</sub> "
         f"gives I<sub>sc</sub> = {_f(sN.get('i_sc'),0)} A; with the design margin the target is "
@@ -1085,11 +1206,11 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         "(line peak &#215; no-fire margin).", CH)
 
     # 9.8.2 candidate screen
-    sub_h(story, "9.8.2", "Candidate GDT Screen", CH)
+    sub_h(story, "9.10.2", "Candidate GDT Screen", CH)
     if gc:
         def _v(x, u=""):
             return (f"{_f(x,0)}{u}" if x is not None else "&#8212;")
-        data_table(story, "9.8", "Vendor GDT Screen (common-mode)",
+        data_table(story, "9.10", "Vendor GDT Screen (common-mode)",
             "No-fire (min sparkover vs line peak) and 8/20 surge class from the live database. Dynamic "
             "(impulse) sparkover is DATA MISSING in the export — flagged, never assumed.",
             ["Part", "V<sub>spark</sub> nom/min", "I<sub>8/20</sub>", "Poles", "No-fire", "Surge", "Dyn.spark", "Verdict"],
@@ -1103,7 +1224,7 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         body(story, "<i>(no GDT catalog available)</i>", CH)
 
     # 9.8.3 follow-current + fail-short safety
-    sub_h(story, "9.8.3", "Follow-Current & Fail-Short Safety", CH)
+    sub_h(story, "9.10.3", "Follow-Current & Fail-Short Safety", CH)
     body(story,
         "After the surge the AC source can sustain the arc (follow current), and a GDT can eventually fail "
         "short. On an L/N-to-PE GDT both must be proven safe — self-extinction or fuse clearing — or the "
@@ -1116,10 +1237,10 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         "sparkover vs continuous L/N-PE voltage, MOV clamp vs downstream device limits, GDT impulse "
         "sparkover vs insulation withstand, and the follow-current / fail-short fuse clearing above.", CH)
 
-    # ── 9.9 combined MOV-only vs MOV+GDT release-readiness matrix ──
+    # ── 9.11 combined MOV-only vs MOV+GDT release-readiness matrix ──
     mo = mov_out or {}
     en = mo.get("energy") or {}; fz = mo.get("fuse_coord") or {}; mc = mo.get("mcov") or {}
-    step_h(story, "9.9", "MOV-only vs MOV+GDT — Release-Readiness Matrix", CH)
+    step_h(story, "9.11", "MOV-only vs MOV+GDT — Release-Readiness Matrix", CH)
     body(story,
         "The certification sign-off view. MOV-only is release-ready when clamp, energy, lifetime and fuse "
         "coordination pass; MOV+GDT additionally requires the GDT no-fire tolerance, dynamic sparkover, "
@@ -1137,7 +1258,7 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
     if gc:
         _gdt_nofire = any(c.get("no_fire_ok") and c.get("surge_ok") for c in gc)
     _dyn = "DATA MISSING"   # impulse sparkover absent in the export for every GDT part
-    data_table(story, "9.9", "Release-Readiness Matrix",
+    data_table(story, "9.11", "Release-Readiness Matrix",
         f"Recommended: {rec.get('recommend','MOV-only')}. Final status is PASS only when the required column "
         "clears end-to-end.",
         ["Check", "MOV-only", "MOV + GDT"],
@@ -1152,6 +1273,38 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         "Chapter 9 is RELEASE-READY only when every cell in the required column is PASS. DATA MISSING cells "
         "(e.g. GDT dynamic sparkover, MOV clamp Vc@In) must be filled from the datasheet before "
         "certification — they are not passes.", CH)
+
+
+    # Certification record — folded in after the release matrix (M3). It now runs inside
+    # _build_gdt_section rather than build_mov_story, so re-bind the names it uses from mov_out.
+    tg = mo.get("targets") or []
+    ov = mo.get("overshoot") or {}
+    lvl = (mo.get("spec") or {}).get("level")
+    crit = (mo.get("criterion") or {}).get("name", "A")
+    _rcd = mo.get("selected_recalc")
+    # ── 9.11.1 certification record ──
+    sub_h(story, "9.11.1", "Compliance Summary (Certification Record)", CH)
+    worst = min(tg, key=lambda t: t["device_gate"] - t["vc"]) if tg else None
+    verdict = "PASS" if all(t["coord"] != "FAIL" for t in tg) and tg else "REVIEW"
+    _en_cell = ("&#8212;" if en.get("ok") is None else
+                (f"PASS ({_f(en['e_surge_J'],1)}/{_f(en['e_allow_J'],0)} J)" if en.get("ok")
+                 else f"OVER ({_f(en['e_surge_J'],1)}/{_f(en['e_allow_J'],0)} J)"))
+    _fz_cell = ("DATA MISSING" if fz.get("ok") is None else ("cleared by fuse/TMOV" if fz.get("ok") else "NOT PROVEN"))
+    data_table(story, "9.11.1", "Surge-Immunity Compliance Record",
+        "The traceable record for the technical construction file.",
+        ["Item", "Declared / computed"],
+        [["Standard", "IEC/EN 61000-4-5 (combination wave)"],
+         ["Test level", str(lvl)],
+         ["Performance criterion", crit],
+         ["MCOV class", f"{_f(mc['class'],0)} V<sub>ac</sub>"],
+         ["Worst-case let-through", (f"{_f(worst['vc'],0)} V at {worst['path']}" if worst else "&#8212;")],
+         ["+ layout overshoot", (f"{_f(ov['v_overshoot'],1)} V &#8658; V<sub>c,eff</sub> {_f(ov['vc_effective'],0)} V" if ov else "&#8212;")],
+         ["Device gate", (f"{_f(worst['device_gate'],0)} V" if worst else "&#8212;")],
+         ["Energy survival", _en_cell],
+         ["Fuse / fail-short coordination", _fz_cell],
+         ["Coordination verdict", verdict]],
+        col_widths=[CW*0.42, CW*0.58], ch=CH)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1174,3 +1327,8 @@ def build_inputprotection_report(design, cap=None, mosfet=None, ntc_opts=None, m
     buf = io.BytesIO()
     _doc(buf).build(story)
     return buf.getvalue()
+
+    # certification record — folded in after the release matrix (M3). Re-bind the names it
+    # uses from mov_out, since it now lives in _build_gdt_section rather than build_mov_story.
+    tg = mo.get("targets") or []
+    ov = mo.get("overshoot") or {}

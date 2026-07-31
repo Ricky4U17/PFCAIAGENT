@@ -494,8 +494,33 @@ export const InputProtection: React.FC<Props> = ({
                     </tr>))}</tbody>
                 </table>
               </div>
+              {/* Selection gates, stated BEFORE the candidate list so the screen filters against
+                  declared numbers instead of reading as a conclusion (MOV review, layer 3). */}
+              {(movRes.gates ?? []).length > 0 && (<>
+                <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                  Selection gates — what a catalog MOV must clear (derived before screening)
+                </div>
+                <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <thead><tr>{['#', 'Gate', 'Requirement', 'Basis'].map(h =>
+                      <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                    <tbody>{(movRes.gates ?? []).map(g => (
+                      <tr key={g.n}>
+                        <td style={cell}>{g.n}</td>
+                        <td style={cell}>{g.name}</td>
+                        <td style={{ ...cell, fontWeight: 600 }}>{g.requirement}</td>
+                        <td style={{ ...cell, fontSize: 9.5, color: C.muted }}>{g.basis}</td>
+                      </tr>))}</tbody>
+                  </table>
+                </div>
+              </>)}
+
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
                 Candidate MOVs — governing path {movRes.stress.governing?.split('(')[0] ?? ''} (criterion {movRes.criterion.name}) · select one
+              </div>
+              <div style={{ fontSize: 9.5, color: C.muted, marginBottom: 6 }}>
+                The <b>{movRes.mcov.class} Vac MCOV class</b> above is a <i>voltage-class</i> decision, not a part
+                selection. Clamp, energy, surge current and safety are only proven once a part is chosen below.
               </div>
               {movRes.selected && (
                 <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
@@ -505,6 +530,58 @@ export const InputProtection: React.FC<Props> = ({
                   {movRes.selected.verdict === 'CONDITIONAL' ? 'CONDITIONAL — clamp unverified (add Vc@In to confirm ride-through).' : ''}
                 </div>
               )}
+
+              {/* Recalculation on the ACTUAL part — the clamp above is the voltage-CLASS figure. */}
+              {movRes.selected_recalc && (() => {
+                const R = movRes.selected_recalc!
+                const classVc = movRes.targets.find(t => t.path === movRes.stress.governing)?.vc
+                return (
+                <div style={{ border: `1px solid ${C.teal}55`, borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                  <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 6 }}>
+                    Selected part — recalculated{' '}
+                    <Badge color={vColor(R.release_status)}>{R.release_status}</Badge>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8, marginBottom: 10 }}>
+                    <Chip k="V₁ₘₐ (datasheet)" v={`${num(R.v1ma, 0)} V`} />
+                    <Chip k="Clamp Vc (this part)" v={`${num(R.vc, 0)} V${R.alpha_estimated ? ' est.' : ''}`} />
+                    <Chip k="Clamp Vc (class)" v={classVc != null ? `${num(classVc, 0)} V` : '—'} />
+                    <Chip k="Margin vs gate" v={`${R.clamp_margin_V >= 0 ? '+' : ''}${num(R.clamp_margin_V, 0)} V`} />
+                    <Chip k="With layout overshoot" v={`${num(R.overshoot.vc_effective, 0)} V`} />
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <thead><tr>{['#', 'Gate', 'Requirement', 'Result', 'Status'].map(h =>
+                        <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                      <tbody>{R.gates.map(g => (
+                        <tr key={g.n}>
+                          <td style={cell}>{g.n}</td>
+                          <td style={cell}>{g.name}</td>
+                          <td style={{ ...cell, fontSize: 9.5, color: C.muted }}>{g.requirement}</td>
+                          <td style={{ ...cell, fontSize: 9.5 }}>{g.result}</td>
+                          <td style={cell}><Badge color={vColor(g.status)}>{g.status}</Badge></td>
+                        </tr>))}</tbody>
+                    </table>
+                  </div>
+                  {R.alpha_estimated && (
+                    <div style={{ fontSize: 9.5, color: C.amber, marginTop: 8 }}>
+                      The clamp is <b>ESTIMATED</b>: this part publishes no Vc at a rated current, so the generic
+                      varistor exponent was used. It is reported DATA MISSING rather than PASS or FAIL — an estimate
+                      cannot settle Criterion {movRes.criterion.name} either way.
+                    </div>
+                  )}
+                  {R.blockers.length > 0 && (
+                    <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
+                      <b>Release blockers:</b> {R.blockers.join(' · ')}. These stop final sign-off only —
+                      part selection is never blocked.
+                    </div>
+                  )}
+                  {movRes.energy_basis && (
+                    <div style={{ fontSize: 9.5, color: C.muted, marginTop: 4 }}>
+                      Energy survival judged against the <b>{movRes.energy_basis}</b>.
+                    </div>
+                  )}
+                </div>)
+              })()}
               <div style={{ overflowX: 'auto', marginBottom: 6 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                   <thead><tr>{['', 'Part', 'MCOV', 'V₁ₘₐ', 'I_max', 'Energy', 'Clamp', 'Verdict'].map(h =>
