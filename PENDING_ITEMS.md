@@ -151,12 +151,33 @@ fixable by part choice.
 Full plan in the `mov-ch9-reorg-plan` memory. Source: `specs/NTC and MOV/
 MOV_Calculation_Selection_Review_for_Design_Script.pdf`.
 
-### B6. EMI Phase D
+### B6. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
+The MOV review asks for exactly six status words: **PASS / FAIL / DATA MISSING / REVIEW / OPTIONAL /
+BLOCKED**. Today two different sets are in use:
+
+| Chapter | Words currently emitted |
+|---|---|
+| Ch8 (NTC / fuse) | PASS · OPEN · CHECK · BLOCKED · CONDITIONAL |
+| Ch9 (MOV / GDT) | PASS · FAIL · DATA MISSING · REVIEW · OPTIONAL · CONDITIONAL, plus strays "NOT PROVEN" and "DATA MISSING / OPEN ITEM" |
+
+This is deliberately **not** a Ch9-local fix — doing it per-chapter would entrench the split. It needs one
+project-wide pass over Ch7–Ch10 plus the GUI badge colours (`vColor` in `InputProtection.tsx`, which
+already special-cases OPEN/CHECK).
+
+**Recommendation when it is picked up:** keep **CONDITIONAL** — it is load-bearing, it is the mechanism
+that implements rule D0b (a gate may stop release without blocking selection) — and fold **REVIEW** into
+it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, retire "NOT PROVEN".
+
+- **Done when:** one vocabulary is defined in a single module-level constant set, every chapter emits
+  only those words, and the GUI badge mapping covers all of them.
+- Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
+
+### B7. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B7. EMI filter — Rev J methodology
+### B8. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 

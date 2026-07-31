@@ -118,7 +118,7 @@ def _bridge_section(story, traces, is_sync):
     def _iavg(tr):
         return (2.0 / 3.141592653589793) * (2 ** 0.5) * tr["Iin_rms"]
     steps = [
-        ("I<sub>in,rms</sub> (from Sec. 7.1)", lambda tr: f"{_f(tr['Iin_rms'],3)} A"),
+        ("I<sub>in,rms</sub> (from Section 7.1)", lambda tr: f"{_f(tr['Iin_rms'],3)} A"),
         ("I<sub>in,avg</sub> = (2&#8730;2/&#960;)&#183;I<sub>in,rms</sub>",
          lambda tr: f"(2&#8730;2/&#960;)&#215;{_f(tr['Iin_rms'],3)} = {_f(_iavg(tr),3)} A"),
         ("V<sub>f</sub>(i) along the curve",
@@ -249,11 +249,11 @@ def _diode_section(story, traces):
          ("For the selected <b>SiC Schottky</b> diode there is no minority-carrier reverse recovery "
           "(Q<sub>rr</sub> = 0): it is a majority-carrier device. The only stored charge is the "
           "junction-capacitance Q<sub>c</sub>, which is swept through the MOSFET channel at turn-on, so it "
-          "is booked to the MOSFET (Sec. 7.4.4). The diode's own reverse-recovery loss is therefore "
+          "is booked to the MOSFET (Section 7.4.4). The diode's own reverse-recovery loss is therefore "
           "0 W — this is a key reason SiC is chosen for the boost diode."
           if is_sic else
           "For the selected <b>Si</b> diode the recovery energy Q<sub>rr</sub>&#183;V<sub>OUT</sub> is split "
-          "between the two devices: &#8776; 85 % is dissipated in the MOSFET at its hard turn-on (Sec. 7.4.4) "
+          "between the two devices: &#8776; 85 % is dissipated in the MOSFET at its hard turn-on (Section 7.4.4) "
           "and &#8776; 15 % in the diode itself; both shares scale with f<sub>sw</sub>, the recovered "
           "charge Q<sub>rr</sub>(I<sub>F</sub>, di/dt, T<sub>j</sub>) and V<sub>OUT</sub>.")), CH)
     _W(story,
@@ -348,7 +348,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 " L&#966; is bias-adjusted per operating point (see the L<sub>&#966;</sub> column)."
                 if L_varies else " (L&#966; = %s &#181;H everywhere.)" % _f(L_phi * 1e6, 0)), CH)
     annotation(story, "METHOD",
-        "<b>How the losses are computed — time domain.</b> Every loss in Sec. 7.3&#8211;7.6 is obtained by "
+        "<b>How the losses are computed — time domain.</b> Every loss in Section 7.3&#8211;7.6 is obtained by "
         "integrating over the LINE cycle, not from a single peak or RMS figure. The half-line current "
         "envelope is sampled at several hundred angles &#952;; at each angle the per-switching-cycle "
         "waveforms — channel current, diode current, the turn-on/turn-off instants and the inductor "
@@ -443,7 +443,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
          "package-level (per-package thermal)"],
     ] + ([[ "Surge ratings I<sub>FSM</sub> / I&#178;t",
             f"{_f(bridge.get('ifsm_A'),0)} A / {_f(bridge.get('i2t_A2s'),0)} A&#178;s",
-            "verified vs Ch-8 inrush in Sec. 7.3.1"]]
+            "verified vs Ch-8 inrush in Section 7.3.1"]]
          if bridge.get("ifsm_A") and bridge.get("i2t_A2s") else []) + [
         ["<b>Thermal / application</b>", "", ""],
         [f"Ambient T<sub>a</sub>", f"{_th.t_ambient:.0f} {_DEG}C", "worst-case"],
@@ -451,7 +451,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     ]
     data_table(story, "7.2b", "Selected-Component Datasheet & Application Parameters",
         "The actual values fed to the loss engine (datasheet parameters as confirmed, engine defaults "
-        "shown where a field was left blank). These drive every calculation in Sec. 7.3&#8211;7.6.",
+        "shown where a field was left blank). These drive every calculation in Section 7.3&#8211;7.6.",
         ["Parameter", "Value", "Note"], prows,
         col_widths=[CW*0.36, CW*0.30, CW*0.34], ch=CH)
     annotation(story, "NOTE",
@@ -474,8 +474,8 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             + ". Replace them with the part's real datasheet curves (incl. the hot V<sub>f</sub> "
             "curve) on the manual form before sign-off.", CH)
     data_table(story, "7.2c", "Loss-Model Summary — what is computed and how",
-        "Every loss mechanism in Sec. 7.3&#8211;7.6, the model used, and the current basis. All are "
-        "evaluated by time-domain integration over the line cycle (Sec. 7.1).",
+        "Every loss mechanism in Section 7.3&#8211;7.6, the model used, and the current basis. All are "
+        "evaluated by time-domain integration over the line cycle (Section 7.1).",
         ["Mechanism", "Model / method", "Current basis"],
         [["Bridge conduction", "V<sub>f</sub>(i)&#183;i integrated; datasheet V-I curve", "average current"],
          ["MOSFET conduction", "R<sub>ds(on)</sub>(T<sub>j</sub>)&#183;I&#178;, duty-weighted; hot R<sub>ds</sub>", "on-state RMS"],

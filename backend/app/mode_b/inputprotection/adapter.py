@@ -203,8 +203,13 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
 
     # ---- Phase-2 survival + coordination (review Part A additions) ----
     gov_t = next((t for t in targets if t["path"] == (gov.name if gov else None)), targets[0] if targets else None)
-    # datasheet energy rating: best available among the screened candidates (else None -> DATA MISSING)
-    e_rating = next((c["energy_2ms_J"] for c in candidates if c.get("energy_2ms_J")), None)
+    # Datasheet energy rating. Once the designer has SELECTED a part, its own rating governs — using
+    # "first candidate that happens to publish an energy" would judge survival against a different part.
+    # No selection yet -> fall back to the best available among the screened candidates (else DATA MISSING).
+    e_rating = (selected or {}).get("energy_2ms_J") if selected else None
+    e_rating_from_selected = e_rating is not None
+    if e_rating is None:
+        e_rating = next((c["energy_2ms_J"] for c in candidates if c.get("energy_2ms_J")), None)
     energy = overshoot = fuse = None
     if gov and gov_t:
         energy = mov.energy_survival(s, gov_t["vc"], gov_t["i_op"], pol, e_rating_J=e_rating)
@@ -212,6 +217,18 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
         fuse = mov.fuse_coordination(s, gov)
     mcov_cmp = mov.mcov_comparison(s)
     crit_matrix = mov.criterion_matrix(s, gov_t["vc"]) if gov_t else []
+    # Selection gates stated BEFORE the candidate screen (MOV review: the screen must filter against
+    # declared numbers, not be a conclusion), and the recalculation around the ACTUAL selected PART —
+    # the class-level clamp above is a voltage-CLASS result, not a part result.
+    gates = mov.selection_gates(s, gov, mcov_req, pol) if gov else []
+    sel_recalc = None
+    if gov and selected:
+        try:
+            sel_recalc = mov.selected_metrics_mov(s, gov, pol, selected, mcov_req)
+        except Exception:
+            sel_recalc = None
+    if sel_recalc:                       # part-specific clamp supersedes the class figure downstream
+        crit_matrix = mov.criterion_matrix(s, sel_recalc["vc"])
 
     return _native({
         "spec": s,
@@ -225,6 +242,10 @@ def calculate_mov(design: dict, mosfet: dict | None = None, cap: dict | None = N
         "targets": targets, "catalog": screen, "candidates": candidates, "selected": selected,
         "energy": energy, "overshoot": overshoot, "fuse_coord": fuse,
         "mcov_comparison": mcov_cmp, "criterion_matrix": crit_matrix,
+        # M1: gates declared before the screen; recalculation on the selected PART (vs the class)
+        "gates": gates, "selected_recalc": sel_recalc,
+        "energy_basis": ("selected part" if e_rating_from_selected
+                         else ("best screened candidate" if e_rating else "DATA MISSING")),
         "sources": {"vac_max": s.vac_max, "device_vds": s.device_vds, "cap_v_rating": s.cap_v_rating},
     })
 

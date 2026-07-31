@@ -4352,7 +4352,7 @@ def _ch5(story, state, s15):
             worst_rows=[worst_idx] if worst_idx is not None else None, ch=5)
         body(story, f"<b>Total capacitor bank loss (worst case): {_tot_bank_worst:.2f} W</b> "
                     f"(the P<sub>bank</sub> column, {_ncap} caps × per-cap ESR loss). This is the figure "
-                    "carried into the Chapter-7 §7.8b system loss budget.", 5)
+                    "carried into the Chapter-7 Section 7.8b system loss budget.", 5)
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
         verdict_row(story, "Ripple-current rating (all 9 points)",

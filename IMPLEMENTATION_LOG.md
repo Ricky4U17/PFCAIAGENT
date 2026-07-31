@@ -5815,3 +5815,58 @@ and CONDITIONAL. Same cross-area workbook-enrichment item as MOV Vc@In and GDT i
 VERIFIED: Ch8/9 renders 23 pp / 237 KB, section order confirmed 8.1→8.14 by PDF text extraction, zero
 missing-glyph boxes (C89 check), /mode-b/input-protection/report returns 200. Suite 172 passed / 2
 skipped; frontend tsc clean.
+
+## C167 — 2026-07-30 — B4: section-reference convention unified to "Section" (report-wide)
+
+Designer decision D0a: section references spell out "Section" — no section-sign, no "Sec.". Three
+conventions were live; the section-signs in Ch8/9 were a C164/C166 regression of my own making.
+- report_inputprotection.py: all 35 occurrences across 25 lines -> "Section" / "Sections" for ranges
+  ("§8.6–§8.8" -> "Sections 8.6–8.8"). Converted the Python COMMENTS too, not just rendered strings, so
+  a later copy-paste out of a comment cannot reintroduce the symbol. Its 2 "Sec." also converted.
+- doc_report_builder.py: the ONE rendered string (Chapter-7 7.8b loss-budget sentence). Its other
+  section-signs are code comments about internal 3.6.x plumbing and never reach the PDF — left alone.
+- report_semiconductor.py: 8 rendered "Sec." -> "Section"; the line-303 docstring preserved.
+- report_inputfilter.py: internal "Sec. 10.8" -> "Section 10.8". "FCC Sec. 15.107" DELIBERATELY KEPT —
+  it is an external standard citation, not our numbering.
+VERIFIED by render -> PyMuPDF text extract (the same technique as the C89 missing-glyph check):
+combined report 184 pp = 0 section-signs / 0 "Sec." / 102 "Section" / 0 glyph boxes; Ch8+9 24 pp = 0/0;
+Ch7 14 pp = 0/0; Ch10 19 pp = 0 section-signs and 1 "Sec." (the intended FCC citation).
+Suite 172 passed / 2 skipped.
+
+## C168 — 2026-07-30 — M1: MOV backend — selection gates + selected-PART recalculation
+
+First of the Ch9 reorg batch (specs/NTC and MOV/MOV_Calculation_Selection_Review_for_Design_Script.pdf).
+Backend only — no rendered output changes yet; M3 will consume these.
+
+ROOT PROBLEM (verified by rendering before touching anything): calculate_mov already returned
+out["selected"] and the GUI could select a part, but build_mov_story never read it — rendering Ch9 with
+selected_part='471KD53' put the part number in the chapter exactly ONCE, as one candidate row among 40,
+and "Selected MOV" appeared zero times. So Ch9 stated a MOV voltage CLASS and never a MOV PART.
+
+- mov_surge_select.selection_gates(s, gov, mcov_req, pol): the 5 electrical gates a catalog MOV must
+  clear, derived from the REQUIREMENT alone, before any candidate is screened — MCOV, I_max(8/20),
+  single-pulse energy, clamp/let-through, and clamp-data completeness. The MOV analogue of the NTC's
+  derived R25 / pulse-energy gates: it turns the candidate screen into a filter against declared
+  numbers instead of a conclusion.
+- mov_surge_select.selected_metrics_mov(...): recalculates around the ACTUAL part. Uses the part's own
+  datasheet V1mA for the load-line (not the snapped class V1mA) and its own nonlinearity exponent via
+  effective_alpha() WHEN the part publishes a clamp at a rated current; when it does not (the present
+  workbook has no Vc column at all — PENDING_ITEMS A2) alpha falls back to the generic value and the
+  clamp is reported ESTIMATED, so it can never read as a verified PASS. Emits per-gate PASS/FAIL/DATA
+  MISSING + blockers + release_status, with selection_blocked=False always (rule D0b: BLOCKED gates
+  RELEASE, never part selection). Uses the same repetitive_derate as the candidate screen so the two
+  cannot disagree.
+- adapter.calculate_mov: returns "gates", "selected_recalc" and "energy_basis"; the part-specific clamp
+  supersedes the class figure for criterion_matrix. FIXED A REAL BUG: e_rating was
+  `next(c for c in candidates if c.energy_2ms_J)` — energy survival was judged against whichever
+  candidate happened to publish an energy, NOT the selected part. Now the selected part's rating governs
+  when one is chosen, with the old heuristic only as the no-selection fallback (energy_basis says which).
+
+VERIFIED on the reference design with 471KD53 selected: gates print before the screen (MCOV >= 264 Vac,
+I_max >= 1500 A, energy >= 10.6 J, clamp <= 600 V, clamp-data required); recalc gives V1mA 470 V ->
+part-specific Vc 718 V vs the class-level 673 V, margin -118 V, energy now judged against the part's own
+1080 J; clamp gate correctly DATA MISSING (not FAIL — alpha is estimated), release_status DATA MISSING,
+selection_blocked False. Ch8/9 PDF still builds 24 pp byte-identical with and without a MOV selected,
+which is correct: criterion_matrix rows carry only criterion/gate/verdict (no Vc), and both 673 V and
+718 V fail A / survive B-C. mov_surge_select --selftest passes. Suite 172 passed / 2 skipped.
+Status-vocabulary unification deliberately NOT done here — parked by the designer as PENDING_ITEMS B6.

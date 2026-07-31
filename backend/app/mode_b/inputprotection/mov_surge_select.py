@@ -397,6 +397,109 @@ def effective_alpha(v1ma: float, vc_imax: float, imax: float) -> float:
     return log(imax / 1e-3) / log(vc_imax / v1ma)
 
 
+# ============================================================== #
+#  SELECTION GATES  +  SELECTED-PART RECALCULATION               #
+#  (MOV review: state the gates BEFORE the candidate screen, and #
+#   never confuse the MOV voltage CLASS with the MOV PART.)       #
+# ============================================================== #
+
+# Status vocabulary is deliberately NOT unified here — that is a separate project-wide pass
+# (PENDING_ITEMS). These helpers emit only PASS / FAIL / DATA MISSING.
+_PASS, _FAIL, _MISSING = "PASS", "FAIL", "DATA MISSING"
+
+
+def selection_gates(s: Spec, gov: Path, mcov_req: float, pol: CritPolicy) -> list:
+    """The electrical gates a CATALOG MOV must clear, derived from the requirement alone — before any
+    candidate is screened and before any part is named. This is the MOV analogue of the NTC's derived
+    R25 / pulse-energy gates: it makes the candidate screen a filter against stated numbers rather than
+    a conclusion. Returns one row per gate: {n, name, requirement, value, unit, basis}."""
+    tgt = size_path(s, gov, resolve_mcov(s)[2], pol)      # class-level sizing target for the gov path
+    e_req = tgt.energy_8_20 * pol.energy_safety / max(s.mov_energy_derate, 1e-9)
+    return [
+        {"n": 1, "name": "Continuous voltage (MCOV)", "value": mcov_req, "unit": "Vac",
+         "requirement": f">= {mcov_req:.0f} Vac",
+         "basis": "max continuous line voltage x margin — keeps the MOV off during normal operation"},
+        {"n": 2, "name": "Surge current I_max (8/20)", "value": tgt.imax_required, "unit": "A",
+         "requirement": f">= {tgt.imax_required:.0f} A",
+         "basis": f"{s.imax_margin:.2f} x governing-path I_sc {gov.i_sc:.0f} A"},
+        {"n": 3, "name": "Single-pulse energy", "value": e_req, "unit": "J",
+         "requirement": f">= {e_req:.1f} J",
+         "basis": f"E_surge {tgt.energy_8_20:.1f} J x safety {pol.energy_safety:.2f} "
+                  f"/ derate {s.mov_energy_derate:.2f}"},
+        {"n": 4, "name": "Clamp / let-through", "value": tgt.device_gate, "unit": "V",
+         "requirement": f"<= {tgt.device_gate:.0f} V",
+         "basis": f"Criterion {pol.name} gate on the downstream device withstand"},
+        {"n": 5, "name": "Clamp data completeness", "value": None, "unit": "",
+         "requirement": "datasheet Vc at rated current REQUIRED",
+         "basis": "without it the let-through cannot be verified — DATA MISSING, never a silent pass"},
+    ]
+
+
+def selected_metrics_mov(s: Spec, gov: Path, pol: CritPolicy, rec: dict, mcov_req: float) -> dict:
+    """Recalculate the design around the ACTUAL selected MOV part, not the voltage class.
+
+    The class-level sizing uses a snapped MCOV class and the generic `varistor_alpha`. Once a part is
+    chosen, its own datasheet V1mA drives the load-line, and — when the part publishes a clamp voltage
+    at a rated current — its own nonlinearity exponent too. When the clamp is absent (the current vendor
+    workbook has no Vc column) alpha falls back to the generic value and the clamp is reported as
+    ESTIMATED, so it can never read as a verified PASS."""
+    v1ma = rec.get("v1ma") or rec.get("v1ma_min")
+    if not v1ma:
+        return {"part_number": rec.get("part_number"), "ok": None,
+                "note": "DATA MISSING: part has no V1mA — clamp cannot be recalculated"}
+    vc_imax, imax = rec.get("clamp_vc"), rec.get("imax")
+    alpha_estimated = not (vc_imax and imax)
+    alpha = s.varistor_alpha if alpha_estimated else effective_alpha(float(v1ma), float(vc_imax), float(imax))
+
+    tgt = size_path(s, gov, float(v1ma), pol)             # part-specific load-line solution
+    e_rating = rec.get("energy_2ms_J")
+    energy = energy_survival(s, tgt.vc, tgt.i_op, pol, e_rating_J=e_rating)
+    over = layout_overshoot(s, tgt.i_op, tgt.vc)
+    margin = tgt.device_gate - tgt.vc
+
+    def _gate(ok):
+        return _MISSING if ok is None else (_PASS if ok else _FAIL)
+
+    mcov_ok = (rec.get("mcov") is not None) and (float(rec["mcov"]) >= mcov_req)
+    # same repetitive derate the candidate screen applies, so the two can never disagree
+    imax_derated = (float(imax) * s.repetitive_derate) if imax else None
+    imax_ok = (imax_derated is not None) and (imax_derated >= tgt.imax_required)
+    clamp_ok = None if alpha_estimated else (margin >= 0)
+
+    gates = [
+        {"n": 1, "name": "Continuous voltage (MCOV)", "result": f"{rec.get('mcov')} Vac",
+         "requirement": f">= {mcov_req:.0f} Vac", "status": _gate(mcov_ok)},
+        {"n": 2, "name": "Surge current I_max (8/20)",
+         "result": (f"{float(imax):.0f} A x{s.repetitive_derate:.2f} = {imax_derated:.0f} A" if imax else "—"),
+         "requirement": f">= {tgt.imax_required:.0f} A", "status": _gate(imax_ok)},
+        {"n": 3, "name": "Single-pulse energy",
+         "result": (f"{e_rating:.0f} J" if e_rating else "—"),
+         "requirement": (f"allowable {energy['e_allow_J']:.1f} J vs surge {energy['e_surge_J']:.1f} J"
+                         if energy.get("e_allow_J") else "datasheet energy required"),
+         "status": _gate(energy.get("ok"))},
+        {"n": 4, "name": "Clamp / let-through",
+         "result": (f"{tgt.vc:.0f} V ({'ESTIMATED alpha' if alpha_estimated else 'from datasheet Vc'})"),
+         "requirement": f"<= {tgt.device_gate:.0f} V (Criterion {pol.name})",
+         "status": _gate(clamp_ok)},
+        {"n": 5, "name": "Clamp data completeness",
+         "result": ("datasheet Vc at rated current absent" if alpha_estimated else "Vc on record"),
+         "requirement": "datasheet Vc REQUIRED for release",
+         "status": (_MISSING if alpha_estimated else _PASS)},
+    ]
+    blockers = [g["name"] for g in gates if g["status"] in (_FAIL, _MISSING)]
+    return {
+        "part_number": rec.get("part_number"), "mfr": rec.get("mfr"), "mcov": rec.get("mcov"),
+        "v1ma": float(v1ma), "alpha": alpha, "alpha_estimated": alpha_estimated,
+        "i_op": tgt.i_op, "vc": tgt.vc, "device_gate": tgt.device_gate, "clamp_margin_V": margin,
+        "imax_required": tgt.imax_required, "energy": energy, "overshoot": over,
+        "gates": gates, "blockers": blockers,
+        # Release-only gating: a blocker stops SIGN-OFF, never the designer's ability to pick this part.
+        "release_status": (_PASS if not blockers else ("FAIL" if any(g["status"] == _FAIL for g in gates)
+                                                       else _MISSING)),
+        "selection_blocked": False,
+    }
+
+
 def screen_catalog(s: Spec, gov: Path, mcov_req: float, pol: CritPolicy):
     """Screen parts for the GOVERNING (highest-current) path.
 

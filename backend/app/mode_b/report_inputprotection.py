@@ -54,7 +54,7 @@ def _inrush_schematic_flowable():
 def build_ntc_story(story, design, cap=None, opts=None):
     CH = 8
     opts = dict(opts or {})
-    # Fuse selection first — its melting I²t AUTO-FEEDS the §8.11 coordination when the designer left the
+    # Fuse selection first — its melting I²t AUTO-FEEDS the Section 8.11 coordination when the designer left the
     # fuse I²t blank (closes the review's OPEN item end-to-end).
     fuse = calculate_fuse(design, cap or {}, opts)
     if not opts.get("fuse_i2t_rating") and fuse.get("selected_i2t"):
@@ -76,17 +76,17 @@ def build_ntc_story(story, design, cap=None, opts=None):
 
     # ── 8.1 inputs, limits & selection gates ──
     # The selected NTC is NOT stated here — the chapter derives the REQUIREMENT first
-    # (§8.2–§8.5), then screens the catalog (§8.6), names the selected part (§8.7) and
-    # recalculates around it (§8.8). Everything that depends on the ACTUAL part — relay
-    # timing (§8.9), restart policy (§8.10), fuse coordination (§8.11) — follows selection.
-    # §8.1 carries only the fixed upstream inputs and the resulting selection gates.
+    # (Sections 8.2–8.5), then screens the catalog (Section 8.6), names the selected part (Section 8.7) and
+    # recalculates around it (Section 8.8). Everything that depends on the ACTUAL part — relay
+    # timing (Section 8.9), restart policy (Section 8.10), fuse coordination (Section 8.11) — follows selection.
+    # Section 8.1 carries only the fixed upstream inputs and the resulting selection gates.
     step_h(story, "8.1", "Design Inputs, Limits & Selection Gates", CH)
     annotation(story, "CONCEPT",
         "The inrush element is sized from values already fixed upstream: the high-line peak sets the "
         "worst-case stress, the approved bulk capacitance (Step 15) sets the charge energy, and the "
         "worst-case input RMS current (from the shared operating grid) sets the continuous self-heat "
         "that forces a bypass. This section states ONLY those inputs and the selection gates they imply — "
-        "the NTC part itself is derived and named later (§8.6–§8.8), not pre-selected here.", CH)
+        "the NTC part itself is derived and named later (Sections 8.6–8.8), not pre-selected here.", CH)
     data_table(story, "8.1", "Carried-in Operating Basis", "Each input with its source and status.",
         ["Quantity", "Symbol", "Value", "Source / status"],
         [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V", "design grid"],
@@ -99,12 +99,12 @@ def build_ntc_story(story, design, cap=None, opts=None):
          ["R25 tolerance (screen)", "Tol<sub>R25</sub>", f"{_f((r.get('r25_tol_screen') if isinstance(r,dict) else s.get('r25_tol_default',0.2) or 0.2)*100,0)}%",
           "default — replaced by the selected part's datasheet tolerance"]],
         col_widths=[CW*0.30, CW*0.16, CW*0.24, CW*0.30], ch=CH)
-    # Selection gates derived from the inputs above — the catalog screen (§8.6) accepts on these.
-    data_table(story, "8.1b", "Derived Selection Gates", "What a catalog NTC must clear (derived in §8.3–§8.5).",
+    # Selection gates derived from the inputs above — the catalog screen (Section 8.6) accepts on these.
+    data_table(story, "8.1b", "Derived Selection Gates", "What a catalog NTC must clear (derived in Sections 8.3–8.5).",
         ["Gate", "Requirement", "Basis"],
-        [["Nominal R25 (tolerance-aware)", f"&#8805; {_f(r['r25_nom_required'],2)} {_OHM}", "§8.4 — −tol min still holds the inrush"],
-         ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J", "§8.5 — bulk-cap charge energy × margin"],
-         ["Equivalent max switchable C", f"&#8805; {_f(r['cmax_equiv_required']*1e6,0)} {_MU}F @ {_f(s['vref_pulse'],0)} V", "§8.5 — vendor pulse reference"]],
+        [["Nominal R25 (tolerance-aware)", f"&#8805; {_f(r['r25_nom_required'],2)} {_OHM}", "Section 8.4 — −tol min still holds the inrush"],
+         ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J", "Section 8.5 — bulk-cap charge energy × margin"],
+         ["Equivalent max switchable C", f"&#8805; {_f(r['cmax_equiv_required']*1e6,0)} {_MU}F @ {_f(s['vref_pulse'],0)} V", "Section 8.5 — vendor pulse reference"]],
         col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
 
     # ── Figure 8.1 — inrush-limiter topology (NTC + relay bypass) ──
@@ -153,7 +153,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"{_OHM}: line + EMI + ESR + bridge) leaves the NTC-alone requirement R<sub>25</sub> &#8805; "
         f"{_f(r['r25_required'],3)} {_OHM}; applying the &#215;{_f(s['r25_margin'],2)} margin gives the pick "
         f"<b>R<sub>25</sub> = {_f(r['r25_pick'],3)} {_OHM}</b>. This is a REQUIREMENT, not yet a part — the "
-        "catalog value must still absorb the R25 tolerance (§8.4).", CH)
+        "catalog value must still absorb the R25 tolerance (Section 8.4).", CH)
 
     # ── 8.4 R25 tolerance → required nominal R25 (must precede the candidate screen) ──
     if wc:
@@ -170,7 +170,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
             f"<b>Selection gate.</b> With the {_f((r.get('r25_tol_screen') or 0)*100,0)}% screen tolerance the "
             f"required <b>nominal</b> catalog value is R<sub>25,nom,req</sub> = {_f(r['r25_pick'],2)} {_OHM} / "
             f"(1&#8722;{_f(r.get('r25_tol_screen') or 0,2)}) = <b>{_f(r['r25_nom_required'],2)} {_OHM}</b> — this "
-            "is the R25 floor the candidate screen (§8.6) applies, so a part's &#8722;tolerance minimum still "
+            "is the R25 floor the candidate screen (Section 8.6) applies, so a part's &#8722;tolerance minimum still "
             "holds the inrush target.", CH)
         _tol_src = "selected-part datasheet" if wc.get("tol_from_datasheet") else "placeholder (confirm from datasheet)"
         body(story,
@@ -293,19 +293,19 @@ def build_ntc_story(story, design, cap=None, opts=None):
     if sel:
         sub_h(story, "8.7", "Final NTC Selection", CH)
         body(story,
-            f"Only now, with the requirement closed (§8.3–§8.5) and the catalog screened (§8.6), is the part "
+            f"Only now, with the requirement closed (Sections 8.3–8.5) and the catalog screened (Section 8.6), is the part "
             f"named. <b>Selected NTC: {sel.get('mfr','')} {sel.get('part_number','')}</b> — R<sub>25</sub> = "
             f"{_f(sel['r25_ohm'],1)} {_OHM}, &#216;{_f(sel.get('diameter_mm'),0)} mm disc.", CH)
         data_table(story, "8.7", "Selection Rationale",
             "Why this part, against the gates derived above.",
             ["Gate / criterion", "Requirement", "Selected part"],
-            [["Nominal R25 (tolerance-aware)", f"&#8805; {_f(r['r25_nom_required'],2)} {_OHM} (§8.4)",
+            [["Nominal R25 (tolerance-aware)", f"&#8805; {_f(r['r25_nom_required'],2)} {_OHM} (Section 8.4)",
               f"{_f(sel['r25_ohm'],1)} {_OHM}"],
-             ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J (§8.5)",
+             ["Pulse energy", f"&#8805; {_f(r['e_pulse_required'],0)} J (Section 8.5)",
               f"~{_f(sel.get('energy_est_J'),0)} J (est. from &#216;)"],
              ["Headroom vs precharge time", "largest R25 that keeps precharge reasonable",
-              f"&#964; = {_f(sel['tau_ms'],1)} ms &#8658; bypass {_f(sel['t_bypass_ms'],0)} ms (§8.9)"],
-             ["Practical items", "package / current rating / availability (§8.6 Table B)",
+              f"&#964; = {_f(sel['tau_ms'],1)} ms &#8658; bypass {_f(sel['t_bypass_ms'],0)} ms (Section 8.9)"],
+             ["Practical items", "package / current rating / availability (Section 8.6 Table B)",
               ("confirm on datasheet" if sel.get("energy_estimated", True) else "datasheet-backed")]],
             col_widths=[CW*0.30, CW*0.40, CW*0.30], ch=CH)
 
@@ -348,9 +348,9 @@ def build_ntc_story(story, design, cap=None, opts=None):
     # ── 8.9 bypass relay timing & residual make — AFTER selection, on the actual part ──
     sub_h(story, "8.9", "Bypass Relay Timing & Residual Make Current", CH)
     body(story,
-        "The bypass relay is sized and timed around the part chosen in §8.7, not the generic pick: "
-        "§8.9.1 establishes WHY the NTC must be bypassed at all, §8.9.2 sets the precharge delay from the "
-        "selected R<sub>25</sub>, and §8.9.3 checks what the contacts actually close into.", CH)
+        "The bypass relay is sized and timed around the part chosen in Section 8.7, not the generic pick: "
+        "Section 8.9.1 establishes WHY the NTC must be bypassed at all, Section 8.9.2 sets the precharge delay from the "
+        "selected R<sub>25</sub>, and Section 8.9.3 checks what the contacts actually close into.", CH)
 
     # ── 8.9.1 continuous self-heat — the JUSTIFICATION for the bypass relay ──
     sub_h(story, "8.9.1", "Continuous Self-Heat → Why a Bypass Relay", CH)
@@ -620,13 +620,13 @@ def build_ntc_story(story, design, cap=None, opts=None):
               _vs(wc.get('i2t_cold'), must_ride=True)],
              ["1b", "Normal startup — minimum R25", "must NOT open the fuse", _f(wc['i2t_min_r25'],1),
               _vs(wc.get('i2t_min_r25'), must_ride=True)],
-             ["2", "Abnormal — warm / hot restart", "must NOT open the fuse IF restart is permitted (§8.10)",
+             ["2", "Abnormal — warm / hot restart", "must NOT open the fuse IF restart is permitted (Section 8.10)",
               (_f(wc['i2t_warm'],1) if wc.get('i2t_warm') else "OPEN"),
               _vs(wc.get('i2t_warm'), must_ride=True)],
              ["3", "Fault — stuck / bypassed relay", "fuse SHOULD clear this fault",
               (_f(_i2t_bp,1) if _i2t_bp else "OPEN (startup-path R)"),
               _vs(_i2t_bp, must_ride=False)],
-             ["4", "Fault — MOV/GDT fail-short", "fuse must interrupt safely (Ch 9, gate 5 of §8.11)",
+             ["4", "Fault — MOV/GDT fail-short", "fuse must interrupt safely (Ch 9, gate 5 of Section 8.11)",
               "see breaking capacity",
               (_g5.get("status") if _g5 else "OPEN")]],
             col_widths=[CW*0.05, CW*0.27, CW*0.28, CW*0.14, CW*0.26], ch=CH)
@@ -635,7 +635,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
                 f"Case 2 passing means the fuse does NOT protect against a hot restart — the "
                 f"{_f(wc['i2t_warm'],0)} A&#178;s restart pulse stays below the {_f(_fr,0)} A&#178;s "
                 "pre-arcing I&#178;t, so the fuse will sit there while the bridge, relay and bulk capacitor "
-                "take the surge. Hot restart must therefore be handled by the restart policy of §8.10, not "
+                "take the surge. Hot restart must therefore be handled by the restart policy of Section 8.10, not "
                 "by the fuse.", CH)
         if not _fr:
             annotation(story, "NOTE",
@@ -720,13 +720,13 @@ def build_ntc_story(story, design, cap=None, opts=None):
               _stat.get("relay_make", "OPEN")],
              ["Fuse I²t", "&#8804; pre-arcing I²t", f"{_f(wc['i2t_worst'],1)} A²s worst",
               _stat.get("fuse_i2t", "OPEN")],
-             ["Fuse — six-gate screen", "all 6 gates closed (Sec. 8.11)",
+             ["Fuse — six-gate screen", "all 6 gates closed (Section 8.11)",
               (("gates " + ", ".join(str(n) for n in (fuse.get("gates_open") or [])) + " OPEN")
                if fuse.get("gates_open") else
                (("gates " + ", ".join(str(n) for n in (fuse.get("gates_conditional") or [])) + " estimated")
                 if fuse.get("gates_conditional") else "all closed")),
               fuse.get("gate_status", "OPEN")],
-             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Sec. 7.3.1"),
+             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Section 7.3.1"),
               _stat.get("bridge_surge", "OPEN")],
              ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "OPEN (path R)"),
               _stat.get("bypass_stuck", "OPEN")],
@@ -1052,7 +1052,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
 
 
 def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIEW"):
-    """§9.8 — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
+    """Section 9.8 — GDT common-mode surge diversion: MOV-vs-MOV+GDT recommendation, no-fire gate, surge-current
     class, candidate screen, and the follow-current / fail-short safety checks (with DATA-MISSING gates)."""
     g = calculate_gdt(design, opts or {}, environment=(opts or {}).get("environment"))
     rec = g.get("required") or {}; sN = g.get("stress") or {}

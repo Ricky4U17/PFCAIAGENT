@@ -423,7 +423,7 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
          ["L_CM", ("&#8734;" if _linf else f"{_f(r['l_cm']*1e3,2)} mH ({r['cm_stages']} stage)"), "CM choke"],
          ["C_Y (Y2)", f"{_f(r['c_y_emi_total']*1e9,2)} nF total ({_f(_cy_each,2)} nF each)", "CM, line/neutral-to-PE"],
          ["R_bleed", (f"{_f((r.get('r_bleed_ohm') or 0)/1e3,0)} k{_OHM} ({_f(r['xcap_discharge_s'],2)} s discharge)"
-                      if r.get('xcap_discharge_s') is not None else "set per Sec. 10.8"), "X-cap bleeder"]],
+                      if r.get('xcap_discharge_s') is not None else "set per Section 10.8"), "X-cap bleeder"]],
         col_widths=[CW*0.24, CW*0.36, CW*0.40], ch=CH)
 
     # ── 10.11 loss ──
