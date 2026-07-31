@@ -422,13 +422,25 @@ def build_ntc_story(story, design, cap=None, opts=None):
         # ---- 8.9.0 fuse selection from the vendor DB ----
         _freq = fuse.get("requirements") or {}
         _fsel = fuse.get("selected")
+        _fspec = fuse.get("spec") or {}
+        _lf = float(_freq.get("load_factor") or 0.75) * 100.0
         body(story,
             "The line fuse is the upstream protective element for the whole input stage. It is selected from "
-            "the vendor database against four gates: AC voltage rating &#8805; the high line; current rating "
-            f"&#8805; {_f((fuse.get('spec') or {}).get('current_margin',1.5),2)}&#215; the worst-case input "
-            f"RMS ({_f(fuse.get('i_rms'),1)} A &#8658; &#8805; {_f(_freq.get('i_rated_min'),1)} A); breaking "
-            "capacity &#8805; the available fault current; and — critically — a melting I&#178;t that "
-            "EXCEEDS the NTC-limited startup I&#178;t with margin so it does not nuisance-blow.", CH)
+            "the vendor database against <b>six gates</b>: (1) AC voltage rating &#8805; the high line; "
+            f"(2) continuous RMS current — rating &#8805; {_f(_fspec.get('current_margin',1.5),2)}&#215; the "
+            f"worst-case input RMS ({_f(fuse.get('i_rms'),1)} A) and the load within {_lf:.0f}% of the rating "
+            f"after temperature de-rating (&#8658; &#8805; {_f(_freq.get('i_rated_min'),1)} A); (3) a melting "
+            "I&#178;t that EXCEEDS the NTC-limited startup I&#178;t with margin so it does not nuisance-blow; "
+            "(4) breaking capacity &#8805; the available fault current; (5) fault coordination — the fuse must "
+            "safely interrupt a MOV/GDT fail-short or a stuck bypass relay; and (6) thermal implementation — "
+            "the re-rated current at the real maximum ambient plus fuseholder / PCB rise must still carry the "
+            "load, with the fuse body inside its temperature limit.", CH)
+        annotation(story, "Why the inrush PEAK does not set the current rating",
+            f"The NTC-limited cold-start peak is {_f(fuse.get('inrush_peak_A'),1)} A, well above any sensible "
+            "continuous rating. A fuse survives a high peak when the pulse is SHORT and the melting-I&#178;t "
+            "margin holds — that is gate 3. Sizing the continuous rating to the inrush peak would force a "
+            "grossly oversized fuse that no longer clears a small overload, so the peak is reported for "
+            "context and the startup pulse is proven by I&#178;t.", CH)
         if _fsel:
             body(story,
                 f"<b>Selected fuse:</b> {_fsel.get('mfr','')} {_fsel.get('part_number','')} — "
@@ -446,16 +458,51 @@ def build_ntc_story(story, design, cap=None, opts=None):
         if _fc:
             def _mk(v):
                 return "&#10003;" if v else ("&#8212;" if v is None else "&#10007;")
-            data_table(story, "8.9a", "Line-Fuse Candidate Screen",
-                "Vendor fuse database screened against the four gates; DATA MISSING where a datasheet field "
-                "(melting I&#178;t / breaking capacity) is absent.",
-                ["Part", "I<sub>rated</sub>", "V<sub>ac</sub>", "Breaking", "Melt I²t", "V", "I", "BC", "I²t", "Verdict"],
+            data_table(story, "8.9a", "Line-Fuse Candidate Screen (Six Gates)",
+                "Vendor fuse database screened against all six gates (columns 1&#8211;6 above). A dash means "
+                "the gate is OPEN — a datasheet field (melting I&#178;t, breaking capacity, temperature limit) "
+                "or a site input (fault current, ambient) is absent, so the part stays CONDITIONAL and "
+                "selectable rather than being silently passed or hidden.",
+                ["Part", "I<sub>rated</sub>", "V<sub>ac</sub>", "Breaking", "Melt I²t", "1", "2", "3", "4", "5", "6", "Verdict"],
                 [[str(c.get("part_number") or c["label"])[:16], f"{_f(c.get('i_rated_A'),0)}A",
                   f"{_f(c.get('v_ac_V'),0)}", (f"{_f(c.get('breaking_ac_A'),0)}A" if c.get("breaking_ac_A") else "&#8212;"),
                   (f"{_f(c.get('melting_i2t'),0)}" if c.get("melting_i2t") is not None else "MISSING"),
-                  _mk(c.get("v_ok")), _mk(c.get("i_ok")), _mk(c.get("bc_ok")), _mk(c.get("i2t_ok")),
+                  _mk(c.get("v_ok")), _mk(c.get("i_ok")), _mk(c.get("i2t_ok")), _mk(c.get("bc_ok")),
+                  _mk(c.get("coord_ok")), _mk(c.get("thermal_ok")),
                   c.get("verdict", "PASS" if c["ok"] else "FAIL")] for c in _fc[:8]],
-                col_widths=[CW*0.17, CW*0.09, CW*0.08, CW*0.11, CW*0.10, CW*0.06, CW*0.06, CW*0.06, CW*0.06, CW*0.21], ch=CH)
+                col_widths=[CW*0.16, CW*0.08, CW*0.07, CW*0.10, CW*0.09, CW*0.045, CW*0.045, CW*0.045,
+                            CW*0.045, CW*0.045, CW*0.045, CW*0.155], ch=CH)
+        # ---- 8.9b six-gate release table for the SELECTED fuse ----
+        _fg = fuse.get("gates") or []
+        if _fg:
+            _deg = lambda s: str(s or "").replace("degC", "&#176;C").replace(">=", "&#8805;").replace("<=", "&#8804;")
+            data_table(story, "8.9b", "Selected Fuse — Six-Gate Release Check",
+                "Requirement, measured/datasheet result and status for each gate. OPEN = the input or "
+                "datasheet field needed to close the gate is not yet available; CONDITIONAL = the gate passes "
+                "on an ESTIMATED value (e.g. a typical re-rating slope) and must be confirmed before release.",
+                ["#", "Gate", "Requirement", "Result", "Status"],
+                [[str(g["n"]), g["name"], _deg(g["requirement"]), _deg(g["result"]), g["status"]] for g in _fg],
+                col_widths=[CW*0.05, CW*0.20, CW*0.33, CW*0.28, CW*0.14], ch=CH)
+            _gopen = fuse.get("gates_open") or []
+            _gcond = fuse.get("gates_conditional") or []
+            if _gopen or _gcond:
+                _bits = []
+                if _gopen:
+                    _bits.append("gate" + ("s " if len(_gopen) > 1 else " ") +
+                                 ", ".join(str(n) for n in _gopen) + " OPEN")
+                if _gcond:
+                    _bits.append("gate" + ("s " if len(_gcond) > 1 else " ") +
+                                 ", ".join(str(n) for n in _gcond) + " CONDITIONAL")
+                annotation(story, f"Fuse release status: {fuse.get('gate_status','OPEN')}",
+                    "The electrical gates are closed by calculation, but " + " and ".join(_bits) + ". "
+                    "Supply the available fault current, the MOV/GDT fail-short and stuck-relay fault paths, "
+                    "the maximum ambient at the fuse, the datasheet re-rating slope and the measured "
+                    "fuseholder / PCB temperature rise to convert these to a computed PASS. Until then the "
+                    "fuse is CONDITIONALLY acceptable and must not be signed off for release.", CH)
+            else:
+                annotation(story, "Fuse release status: PASS",
+                    "All six gates close by calculation against datasheet and site data. Confirm on the bench "
+                    "with a time-current curve overlay of the cold-start, warm-restart and fault cases.", CH)
         if fuse.get("fast_blow_only"):
             body(story, "<i>Note: the current database contains only fast-blow cartridge fuses; because the "
                  "NTC limits the inrush, a fast-blow fuse whose melting I&#178;t clears the startup pulse is "
@@ -554,6 +601,12 @@ def build_ntc_story(story, design, cap=None, opts=None):
               _stat.get("relay_make", "OPEN")],
              ["Fuse I²t", "&#8804; pre-arcing I²t", f"{_f(wc['i2t_worst'],1)} A²s worst",
               _stat.get("fuse_i2t", "OPEN")],
+             ["Fuse — six-gate screen", "all 6 gates closed (Sec. 8.9)",
+              (("gates " + ", ".join(str(n) for n in (fuse.get("gates_open") or [])) + " OPEN")
+               if fuse.get("gates_open") else
+               (("gates " + ", ".join(str(n) for n in (fuse.get("gates_conditional") or [])) + " estimated")
+                if fuse.get("gates_conditional") else "all closed")),
+              fuse.get("gate_status", "OPEN")],
              ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Sec. 7.3.1"),
               _stat.get("bridge_surge", "OPEN")],
              ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "OPEN (path R)"),
@@ -567,6 +620,10 @@ def build_ntc_story(story, design, cap=None, opts=None):
              ["R(T) / hot resistance", "NTC datasheet", "warm/hot restart current"],
              ["Pulse energy / max-C", "NTC datasheet", "NTC survival"],
              ["Fuse I²t rating", "fuse datasheet", "no nuisance/unsafe fuse"],
+             ["Available fault current", "site / installation", "fuse breaking capacity (gate 4)"],
+             ["MOV/GDT fail-short &amp; stuck-relay fault current", "Ch 9 + schematic", "fuse must clear safely (gate 5)"],
+             ["Max ambient at the fuse + re-rating slope", "enclosure thermal + fuse datasheet", "current de-rating (gate 6)"],
+             ["Fuseholder / PCB temperature rise", "measured on the bench", "fuse body within its limit (gate 6)"],
              ["Bridge I<sub>FSM</sub>", "bridge datasheet (Ch 7)", "rectifier survival"],
              ["Relay make rating", "relay datasheet", "safe bypass timing"],
              ["Relay-path impedance", "schematic / layout", "true make current & inrush"],
@@ -588,6 +645,9 @@ def build_ntc_story(story, design, cap=None, opts=None):
              ["Relay make-current verification", _cls("relay_make", "Ready", "Conditional")],
              ["Warm / hot restart", _cls("hot_restart", "Ready", "Conditional — define restart policy")],
              ["Fuse I²t coordination", _cls("fuse_i2t", "Ready", "Conditional")],
+             ["Fuse selection — six gates", {"PASS": "Ready", "CONDITIONAL": "Conditional — estimated value to confirm",
+                                             "OPEN": "Open — site / thermal data needed",
+                                             "FAIL": "Blocked"}.get(fuse.get("gate_status", "OPEN"), "Open")],
              ["Bridge / diode surge verification", _cls("bridge_surge", "Ready", "Conditional")],
              ["Pulse-energy confirmation", _cls("pulse_energy", "Ready", "Conditional")],
              ["Phase-angle startup sweep", "Ready"]],

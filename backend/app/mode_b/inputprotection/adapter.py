@@ -301,11 +301,16 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
             i_rms = float(_pout) / (_vmin * _eff * _pf)
     _wc = ntc.get("worst_case") or {}
     startup_i2t = _wc.get("i2t_worst")
-    # cold-start inrush peak (NTC-limited, nominal R25) — the fuse current rating must exceed it. This is
-    # the turn-on peak the designer targets (≤ inrush target); the min-R25 tolerance extreme is a separate
-    # NTC proof and the fuse rides it via its I²t rating, not its continuous rating.
+    # cold-start inrush peak (NTC-limited, nominal R25) — REPORTED for context. Per the designer review the
+    # peak does NOT gate the continuous rating: a fuse survives a high peak when the pulse is short and the
+    # melting-I²t margin holds (gate 3). Set fuse_inrush_gates_rating to restore the old, over-strict rule.
     inrush_peak = _wc.get("i_inrush_nom_A") or _wc.get("i_inrush_max_A")
     _o = lambda k: (float(opts[k]) if opts.get(k) not in (None, "") else None)
+    # gate 5 — a fitted MOV/GDT means a fail-short is a bolted line fault; a stuck bypass relay is the
+    # other failed-protection path. Ch9 supplies the surge devices; the NTC opts supply the relay.
+    _mov_gdt = opts.get("mov_gdt_present")
+    if _mov_gdt in (None, ""):
+        _mov_gdt = bool(opts.get("mov_selected_part") or opts.get("gdt_selected_part")) or None
     fs = fz.FuseSpec(
         vac_max=float(design.get("vin_max", 264)),
         i_rms=i_rms,
@@ -313,7 +318,19 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
         available_fault_current_A=(_o("mains_fault_current_A")),
         current_margin=float(opts.get("fuse_current_margin", 1.5)),
         i2t_margin=float(opts.get("fuse_i2t_margin", 2.0)),
+        load_factor=float(opts.get("fuse_load_factor", fz.DEFAULT_LOAD_FACTOR)),
         ambient_derate=float(opts.get("fuse_ambient_derate", 1.0)),
+        # gate 6 — thermal implementation (all optional; absent -> OPEN / ESTIMATED, never a silent pass)
+        t_ambient_C=_o("fuse_ambient_C"),
+        t_rating_ref_C=float(opts.get("fuse_rating_ref_C", fz.DEFAULT_T_RATING_REF_C)),
+        derate_per_C=_o("fuse_derate_per_C"),
+        fuseholder_rise_C=_o("fuseholder_rise_C"),
+        # gate 5 — fault coordination
+        mov_fail_short_current_A=_o("mov_fail_short_current_A"),
+        gdt_follow_current_A=_o("gdt_follow_current_A"),
+        relay_stuck_fault_current_A=_o("relay_stuck_fault_current_A"),
+        mov_gdt_present=(bool(_mov_gdt) if _mov_gdt not in (None, "") else None),
+        inrush_gates_rating=bool(opts.get("fuse_inrush_gates_rating", False)),
     )
     req = fz.requirements(fs, startup_i2t)
     try:
@@ -325,10 +342,17 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
     sel_pn = (opts.get("fuse_selected_part") or "").strip() if opts else ""
     selected = (next((c for c in candidates if (c.get("part_number") or "") == sel_pn), None) if sel_pn
                 else next((c for c in candidates if c.get("verdict") in ("PASS", "CONDITIONAL")), None))
+    gates = fz.gate_summary(fs, req, selected)
+    _open = [g for g in gates if g["status"] == "OPEN"]
+    _fail = [g for g in gates if g["status"] == "FAIL"]
+    _cond = [g for g in gates if g["status"] == "CONDITIONAL"]
     return _native({
         "spec": fs, "i_rms": i_rms, "startup_i2t": startup_i2t, "inrush_peak_A": inrush_peak,
         "requirements": req, "candidates": candidates, "selected": selected,
         "selected_i2t": (selected or {}).get("melting_i2t") if selected else None,
+        "gates": gates,
+        "gate_status": ("FAIL" if _fail else ("OPEN" if _open else ("CONDITIONAL" if _cond else "PASS"))),
+        "gates_open": [g["n"] for g in _open], "gates_conditional": [g["n"] for g in _cond],
         "fast_blow_only": all((c.get("response_time") or "").lower().startswith("fast") for c in candidates) if candidates else None,
     })
 

@@ -5717,3 +5717,54 @@ Frontend typecheck clean. Commit 8f792ad.
 Verified: Chapter 8 renders to PDF (207 KB). Suite 172/2. Commit da4cab0. DEFERRED (optional C165):
 physical resequencing of self-heat/relay-timing blocks after selection + full 8.1->8.14 renumber
 (higher-risk churn on an untested 500-line report builder).
+
+## C165 — 2026-07-30 — Fuse selection: 4 -> 6 gates (+ inrush-peak rating rule corrected)
+
+Closes the last open item of the Ch8 NTC reorg plan (specs/NTC/NTC Improvement.docx, "expand it into six
+gates"). Backend -> GUI -> report in one commit; suite stays 172/2.
+
+REAL BUG FOUND AND FIXED (the reason nothing was selectable): the C156 rule
+`i_rated_min = max(current_margin*I_rms, inrush_peak)` made the NTC-limited cold-start peak gate the
+CONTINUOUS current rating. On the reference design that is max(31.4 A, 54.5 A) = 54.5 A against a DB that
+tops out at 50 A -> ALL 40 candidates FAIL, `selected` = None, GUI shows "no fuse fits >50 A". The review doc
+is explicit that this is wrong ("The fuse does not need to be rated above the inrush peak current... it must
+survive the startup pulse ENERGY") and its own worked example selects a 40 A fuse against a 46.7 A inrush.
+The inrush is now carried by gate 3 (melting I2t) where it belongs; the peak is reported for context.
+`FuseSpec.inrush_gates_rating` (default False) restores the old behaviour if ever wanted.
+
+- ENGINE `fuse_select.py`: GATES registry (one definition, rendered by report+GUI). New
+  `thermal_derating()` (gate 6) — catalog rating is stated at t_rating_ref_C, re-rated along the datasheet
+  slope over ambient + fuseholder/PCB rise; slope absent -> ESTIMATED at DEFAULT_DERATE_PER_C (never a
+  silent pass). New `fault_coordination()` (gate 5) — governing of MOV fail-short / GDT follow current /
+  stuck bypass relay; a fitted MOV/GDT with a known site fault current = bolted line fault; nothing given ->
+  OPEN. `requirements()` gate 2 now has TWO components, binding = max: the current_margin rule AND the
+  load_factor (75 %) rule, both divided by k_thermal. New `gate_summary()` -> 6 rows
+  {n,name,requirement,result,status} with status PASS/FAIL/OPEN/CONDITIONAL.
+- DB `database.py`: `screen_table_fuse` evaluates all six per candidate (+`_op_temp_max_C` parses the
+  'Operating Temperature' column, e.g. '-55degC ~ 125degC' -> 125, for the body-temperature limit). Rows gain
+  coord_ok/thermal_ok/gate_ok/i_usable_A/load_pct_of_usable/op_temp/t_body_max_C; reasons prefixed [1]..[6].
+  ok=False only for a REAL violated limit -> missing data stays CONDITIONAL and selectable
+  (feedback: selection never blocked by DATA MISSING).
+- ADAPTER: threads fuse_load_factor / fuse_ambient_C / fuse_rating_ref_C / fuse_derate_per_C /
+  fuseholder_rise_C / mov_fail_short_current_A / gdt_follow_current_A / relay_stuck_fault_current_A /
+  mov_gdt_present (auto-True when a MOV/GDT part is selected) / fuse_inrush_gates_rating. Returns
+  gates + gate_status + gates_open + gates_conditional. No API change (opts is a free dict).
+- REPORT Ch8: Sec 8.9 intro rewritten to six gates + an annotation explaining why the inrush PEAK does not
+  set the rating; Table 8.9a candidate screen gains gate columns 1-6; NEW Table 8.9b "Selected Fuse —
+  Six-Gate Release Check" (the doc's requested table) + a release-status annotation; Table 8.12a gains a
+  "Fuse — six-gate screen" row, 8.12b four new open items (fault current, MOV/GDT fail-short + stuck relay,
+  ambient + re-rating slope, fuseholder rise), 8.12c a "Fuse selection — six gates" classification.
+- GUI `InputProtection.tsx`: six-gate intro; new gate-5/6 inputs (max ambient, fuseholder rise, re-rating
+  slope, MOV/GDT fail-short, stuck-relay fault) + load factor; chips for the 75 %-rule/margin split,
+  thermal de-rate k, fault-coordination threshold, inrush peak relabelled "(ridden by I2t)"; NEW six-gate
+  release table with status badges; candidate table gains gate columns 1-6. `vColor` OPEN/CHECK -> gray
+  (was red — OPEN is "not yet proven", not a failure). client.ts types extended (FuseGate, FuseResult
+  gates/gate_status/gates_open/gates_conditional, FuseCandidate coord_ok/thermal_ok/...).
+
+VERIFIED on the reference design (2-ch, 90-264 Vac, 1700/3600 W, I_rms 20.96 A, startup I2t 29.9 A2s):
+- before: 0/40 selectable. After, fault current only: Bourns PF-63R50H35X 35 A CONDITIONAL, gates 5+6 OPEN.
+- with 55 degC ambient + 15 degC holder rise + 0.4 %/degC slope + 900 A stuck-relay: k=0.82 raises the
+  requirement 31.4 -> 38.3 A and selection moves to Littelfuse 0526040.UXTHP 40 A / 500 Vac / 10 kA /
+  2340 A2s, ALL SIX GATES PASS — the same part the review doc analyses.
+Ch8/9 PDF renders (20 pp, ~211 KB), zero missing-glyph boxes (C89 check). fuse_select --selftest all pass.
+Backend suite 172 passed / 2 skipped (baseline). Frontend tsc clean.

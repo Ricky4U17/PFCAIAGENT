@@ -503,14 +503,27 @@ export interface FuseCandidate {
   label: string; part_number: string | null; mfr: string | null
   i_rated_A: number | null; v_ac_V: number | null; breaking_ac_A: number | null; melting_i2t: number | null
   response_time: string | null; fuse_type: string | null
+  // six-gate screen: 1 voltage · 2 continuous current · 3 startup I²t · 4 breaking capacity
+  //                  5 fault coordination (MOV/GDT fail-short, stuck relay) · 6 thermal implementation
   v_ok: boolean | null; i_ok: boolean | null; bc_ok: boolean | null; i2t_ok: boolean | null
+  coord_ok: boolean | null; thermal_ok: boolean | null
+  op_temp: string | null; t_body_max_C: number | null
+  i_usable_A: number | null; load_pct_of_usable: number | null
   verdict: string; ok: boolean; reasons: string[]
 }
+export interface FuseGate { n: number; name: string; requirement: string; result: string; status: string }
 export interface FuseResult {
   i_rms: number; startup_i2t: number | null; inrush_peak_A: number | null
-  requirements: { v_min: number; i_cont_min: number; inrush_peak: number | null; i_rated_min: number; i_rated_max: number | null; bc_min: number | null; i2t_min: number | null }
+  requirements: {
+    v_min: number; i_cont_min: number; i_load_min: number; inrush_peak: number | null
+    i_rated_min: number; i_rated_max: number | null; bc_min: number | null; i2t_min: number | null
+    load_factor: number; k_thermal: number; coord_min: number | null
+    thermal: { known: boolean; estimated: boolean; rise_known: boolean; k_thermal: number; t_body_C: number | null; note: string }
+    coord: { known: boolean; i_A: number | null; source: string | null; note: string }
+  }
   candidates: FuseCandidate[]
   selected: FuseCandidate | null; selected_i2t: number | null; fast_blow_only: boolean | null
+  gates: FuseGate[]; gate_status: string; gates_open: number[]; gates_conditional: number[]
 }
 export const inputProtectionFuse = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<FuseResult>('/mode-b/input-protection/fuse/calculate', body)

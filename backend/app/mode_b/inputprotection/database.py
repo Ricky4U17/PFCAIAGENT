@@ -754,11 +754,23 @@ def _fuse_label(rec):
     return f"{rec.get('mfr') or ''} {rec.get('part_number') or ''}".strip() + tail
 
 
+def _op_temp_max_C(rec):
+    """Upper bound of the DB 'Operating Temperature' string (e.g. '-55°C ~ 125°C' -> 125.0). None when the
+    field is absent or unparseable ('—') -> the body-temperature part of gate 6 stays OPEN."""
+    s = str(rec.get("op_temp") or "")
+    vals = re.findall(r"[-+]?\d+(?:\.\d+)?", s)
+    return max(float(v) for v in vals) if vals else None
+
+
 def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
-    """Structured line-fuse screen against the vendor Fuse_Database. Criteria (fuse_select.requirements):
-    AC voltage rating vs high line; current rating vs margin×I_rms (and not grossly oversized); breaking
-    capacity vs available fault current (OPEN if none); melting I2t vs margin×startup I2t (no nuisance blow
-    on the NTC-limited inrush) — melting I2t absent (25/115 parts) => DATA MISSING, never a silent pass."""
+    """Structured line-fuse screen against the vendor Fuse_Database, SIX gates (fuse_select.GATES):
+      1 voltage rating vs high line;  2 current rating vs margin×I_rms AND the load-factor (75 %) rule,
+      both after thermal de-rating, and not grossly oversized;  3 melting I2t vs margin×startup I2t (the
+      inrush PEAK does NOT gate the rating — see fuse_select);  4 breaking capacity vs available fault
+      current;  5 fault coordination (MOV/GDT fail-short, stuck bypass relay);  6 thermal implementation
+      (body temperature within the part's operating limit).
+    ok=False only for a REAL violated limit; a missing datasheet field or site input -> CONDITIONAL, so the
+    designer can always select a part (see feedback: selection never blocked by DATA MISSING)."""
     recs = load_fuse()
     if not recs:
         return []
@@ -767,54 +779,96 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
     BIG = 1e18
     scored = []
     _inr = req.get("inrush_peak")
+    _th = req["thermal"]; _co = req["coord"]
     for rec in recs:
         i_rated = rec.get("i_rated_A"); v_ac = rec.get("v_ac_V")
         bc = rec.get("breaking_ac_A"); i2t = rec.get("melting_i2t")
         reasons, ok, conditional = [], True, False   # ok=False only for a REAL violated limit; a missing
         #                                              datasheet field -> CONDITIONAL (still selectable).
-        # voltage
+        # ── gate 1: AC voltage rating ────────────────────────────────────────
         v_ok = (v_ac is not None and v_ac >= req["v_min"])
         if not v_ok:
             ok = False
-            reasons.append(f"V_ac {v_ac:g}V < {req['v_min']:.0f}V line" if v_ac is not None else "V_ac rating missing")
-        # continuous + inrush current: I_rated must exceed BOTH the continuous margin AND the inrush peak
+            reasons.append(f"[1] V_ac {v_ac:g}V < {req['v_min']:.0f}V line" if v_ac is not None else "[1] V_ac rating missing")
+        else:
+            reasons.append(f"[1] V_ac {v_ac:g}V >= {req['v_min']:.0f}V line")
+        # ── gate 2: continuous RMS current (margin rule + load-factor rule, after de-rating) ──
         i_ok = (i_rated is not None and i_rated >= req["i_rated_min"])
+        _why = (f"cont {req['i_cont_min']:.1f}A, {req['load_factor']*100:.0f}% rule {req['i_load_min']:.1f}A"
+                + (f", inrush {_inr:.0f}A" if _inr and req.get("inrush_gates_rating") else ""))
         if not i_ok:
             ok = False
-            _why = f"cont {req['i_cont_min']:.1f}A" + (f" / inrush {_inr:.0f}A" if _inr else "")
-            reasons.append(f"I_rated {i_rated:g}A < required {req['i_rated_min']:.1f}A ({_why})" if i_rated else "I_rated missing")
+            reasons.append(f"[2] I_rated {i_rated:g}A < required {req['i_rated_min']:.1f}A ({_why})" if i_rated else "[2] I_rated missing")
         elif req["i_rated_max"] and i_rated > req["i_rated_max"]:
-            ok = False; reasons.append(f"I_rated {i_rated:g}A oversized (> {req['i_rated_max']:.0f}A) — won't clear a small overload")
+            ok = False; reasons.append(f"[2] I_rated {i_rated:g}A oversized (> {req['i_rated_max']:.0f}A) — won't clear a small overload")
         else:
-            reasons.append(f"I_rated {i_rated:g}A OK (>= {req['i_rated_min']:.1f}A"
-                           + (f", incl. inrush {_inr:.0f}A)" if _inr else ")"))
-        # breaking capacity vs available fault current
-        if req["bc_min"] is None:
-            bc_ok = None; conditional = True; reasons.append("breaking-capacity check OPEN (available fault current not given)")
-        elif bc is None:
-            bc_ok = None; conditional = True; reasons.append("breaking capacity DATA MISSING")
-        else:
-            bc_ok = bc >= req["bc_min"]
-            if not bc_ok:
-                ok = False
-            reasons.append(f"breaking {bc:g}A {'>=' if bc_ok else '<'} fault {req['bc_min']:.0f}A")
-        # ride the NTC-limited startup inrush without nuisance blow (melting I2t)
+            reasons.append(f"[2] I_rated {i_rated:g}A >= {req['i_rated_min']:.1f}A ({_why})")
+        # usable current after de-rating, and how much of it the load takes (the doc's 75 % check)
+        i_usable = (i_rated * req["load_factor"] * req["k_thermal"]) if i_rated else None
+        load_pct = (100.0 * fs.i_rms / i_usable) if (i_usable and fs.i_rms) else None
+        if i_usable is not None:
+            reasons.append(f"[2] usable {i_usable:.1f}A ({req['load_factor']*100:.0f}% x k={req['k_thermal']:.2f})"
+                           + (f", load {fs.i_rms:.1f}A = {load_pct:.0f}% of usable" if load_pct else ""))
+        # ── gate 3: startup / inrush I2t (this is what rides the inrush, not the rating) ──
         if i2t is None:
             i2t_ok = None; conditional = True   # DATA MISSING -> CONDITIONAL (selectable), not a hard FAIL
-            reasons.append("melting I2t DATA MISSING — CONDITIONAL: cannot confirm no-nuisance-blow vs startup I2t")
+            reasons.append("[3] melting I2t DATA MISSING — CONDITIONAL: cannot confirm no-nuisance-blow vs startup I2t")
         elif req["i2t_min"] is None:
-            i2t_ok = None; reasons.append(f"melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush OPEN)")
+            i2t_ok = None; reasons.append(f"[3] melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush OPEN)")
         else:
             i2t_ok = i2t > req["i2t_min"]
             if not i2t_ok:
                 ok = False
-            reasons.append(f"melting I2t {i2t:g} A2s {'>' if i2t_ok else '<='} {req['i2t_min']:.1f} A2s (margin x startup)")
+            reasons.append(f"[3] melting I2t {i2t:g} A2s {'>' if i2t_ok else '<='} {req['i2t_min']:.1f} A2s (margin x startup)"
+                           + (f"; rides inrush peak {_inr:.0f}A" if (i2t_ok and _inr) else ""))
+        # ── gate 4: breaking capacity vs available fault current ─────────────
+        if req["bc_min"] is None:
+            bc_ok = None; conditional = True; reasons.append("[4] breaking-capacity check OPEN (available fault current not given)")
+        elif bc is None:
+            bc_ok = None; conditional = True; reasons.append("[4] breaking capacity DATA MISSING")
+        else:
+            bc_ok = bc >= req["bc_min"]
+            if not bc_ok:
+                ok = False
+            reasons.append(f"[4] breaking {bc:g}A {'>=' if bc_ok else '<'} fault {req['bc_min']:.0f}A")
+        # ── gate 5: fault coordination (MOV/GDT fail-short, stuck bypass relay) ──
+        if not _co["known"]:
+            coord_ok = None; conditional = True
+            reasons.append("[5] fault coordination OPEN — " + _co["note"])
+        elif bc is None:
+            coord_ok = None; conditional = True
+            reasons.append("[5] fault coordination CONDITIONAL — breaking capacity DATA MISSING")
+        else:
+            coord_ok = bc >= _co["i_A"]
+            if not coord_ok:
+                ok = False
+            reasons.append(f"[5] breaking {bc:g}A {'>=' if coord_ok else '<'} {_co['source']} {_co['i_A']:.0f}A")
+        # ── gate 6: thermal implementation (de-rating applied above; body temperature here) ──
+        t_max = _op_temp_max_C(rec)
+        if not _th["known"]:
+            thermal_ok = None; conditional = True
+            reasons.append("[6] thermal implementation OPEN — " + _th["note"])
+        elif t_max is None:
+            thermal_ok = None; conditional = True
+            reasons.append(f"[6] de-rated k={req['k_thermal']:.2f}; part temperature limit DATA MISSING")
+        else:
+            thermal_ok = _th["t_body_C"] <= t_max
+            if not thermal_ok:
+                ok = False
+            if _th["estimated"] or not _th["rise_known"]:
+                conditional = True      # de-rating slope estimated / holder rise unknown -> not a clean PASS
+            reasons.append(f"[6] body {_th['t_body_C']:.0f}degC {'<=' if thermal_ok else '>'} limit {t_max:.0f}degC"
+                           f"; k={req['k_thermal']:.2f} — {_th['note']}")
         verdict = "FAIL" if not ok else ("CONDITIONAL" if conditional else "PASS")
         row = {"label": _fuse_label(rec), "part_number": rec.get("part_number"), "mfr": rec.get("mfr"),
                "i_rated_A": i_rated, "v_ac_V": v_ac, "breaking_ac_A": bc, "melting_i2t": i2t,
                "response_time": rec.get("response_time"), "fuse_type": rec.get("fuse_type"),
                "package": rec.get("package"), "datasheet_url": rec.get("datasheet_url"),
-               "v_ok": v_ok, "i_ok": i_ok, "bc_ok": bc_ok, "i2t_ok": i2t_ok, "ok": ok,
+               "op_temp": rec.get("op_temp"), "t_body_max_C": t_max,
+               "i_usable_A": i_usable, "load_pct_of_usable": load_pct,
+               "v_ok": v_ok, "i_ok": i_ok, "bc_ok": bc_ok, "i2t_ok": i2t_ok,
+               "coord_ok": coord_ok, "thermal_ok": thermal_ok, "ok": ok,
+               "gate_ok": {"1": v_ok, "2": i_ok, "3": i2t_ok, "4": bc_ok, "5": coord_ok, "6": thermal_ok},
                "verdict": verdict, "reasons": reasons}
         # rank: PASS first, then CONDITIONAL, then FAIL; within tier smallest sufficient rating (tightest)
         pass_tier = 0 if verdict == "PASS" else (1 if verdict == "CONDITIONAL" else 2)

@@ -159,13 +159,18 @@ export const InputProtection: React.FC<Props> = ({
   }
   const selectMov = (pn: string) => { const o = { ...movOpts, selected_part: pn }; setMovOpts(o); calcMov(o) }
   // verdict → badge colour (PASS green / CONDITIONAL amber / FAIL red)
-  const vColor = (v?: string) => v === 'PASS' ? 'green' : v === 'CONDITIONAL' ? 'amber' : 'red'
+  // OPEN/CHECK are "not yet proven", not failures — they must not read as red (see the fuse six-gate table)
+  const vColor = (v?: string) => v === 'PASS' ? 'green' : v === 'CONDITIONAL' ? 'amber'
+    : (v === 'OPEN' || v === 'CHECK') ? 'gray' : 'red'
   // Effective architecture = recommendation unless the designer overrode it.
   const useGdt = movArch === 'movgdt' || (movArch === 'auto' && !!gdtRes?.required.required)
 
   // ── Line fuse ── (reuses mains_fault_current_A + margins; feeds startup I²t via the design/NTC grid)
   const [fuseOpts, setFuseOpts] = useState<Record<string, string>>({
-    fuse_current_margin: '1.5', fuse_i2t_margin: '2.0', fuse_ambient_derate: '1.0' })
+    fuse_current_margin: '1.5', fuse_i2t_margin: '2.0', fuse_ambient_derate: '1.0', fuse_load_factor: '0.75',
+    // gate 6 (thermal implementation) + gate 5 (fault coordination) — blank leaves the gate OPEN
+    fuse_ambient_C: '', fuseholder_rise_C: '', fuse_derate_per_C: '',
+    mov_fail_short_current_A: '', relay_stuck_fault_current_A: '' })
   const [fuseRes, setFuseRes] = useState<FuseResult | null>(null)
   const [fuseBusy, setFuseBusy] = useState(false)
   const setF = (k: string, v: string) => setFuseOpts(s => ({ ...s, [k]: v }))
@@ -595,27 +600,46 @@ export const InputProtection: React.FC<Props> = ({
           <div>
             <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
               padding: '8px 12px', marginBottom: 12, fontSize: 11.5, color: C.text }}>
-              <b style={{ color: C.teal }}>Line fuse.</b> The upstream protective element for the whole input
-              stage. It must ride the NTC-limited startup pulse (melting I²t &gt; startup I²t), carry the
-              continuous input current with margin, withstand the high line, and safely interrupt the available
-              fault current — which is what makes the MOV/GDT fail-short safe (Ch 9). The selected fuse's I²t
+              <b style={{ color: C.teal }}>Line fuse — six gates.</b> The upstream protective element for the
+              whole input stage: <b>1</b> voltage rating ≥ high line · <b>2</b> continuous RMS current with
+              margin and within the load factor after temperature de-rating · <b>3</b> melting I²t &gt; the
+              NTC-limited startup I²t (this is what rides the inrush — the inrush <i>peak</i> does not set the
+              current rating) · <b>4</b> breaking capacity ≥ available fault current · <b>5</b> fault
+              coordination: clears a MOV/GDT fail-short or stuck bypass relay (Ch 9) · <b>6</b> thermal
+              implementation: re-rated current at the real ambient + fuseholder rise. The selected fuse's I²t
               auto-feeds the NTC &amp; MOV/GDT coordination.
             </div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
               <Knob label="Current margin" unit="×I_rms" value={fuseOpts.fuse_current_margin} onChange={v => setF('fuse_current_margin', v)} />
+              <Knob label="Load factor" unit="× rating" value={fuseOpts.fuse_load_factor} onChange={v => setF('fuse_load_factor', v)} />
               <Knob label="I²t margin" unit="×startup" value={fuseOpts.fuse_i2t_margin} onChange={v => setF('fuse_i2t_margin', v)} />
               <Knob label="Ambient derate" unit="×" value={fuseOpts.fuse_ambient_derate} onChange={v => setF('fuse_ambient_derate', v)} />
               <Btn variant="primary" disabled={fuseBusy} onClick={calcFuse}>{fuseBusy ? '⏳ Selecting…' : '↻ Re-select fuse'}</Btn>
-              <span style={{ fontSize: 9.5, color: C.muted }}>Fault current + startup basis shared with the NTC/MOV tabs.</span>
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+              <Knob label="Max ambient at fuse" unit="°C" value={fuseOpts.fuse_ambient_C} onChange={v => setF('fuse_ambient_C', v)} />
+              <Knob label="Fuseholder/PCB rise" unit="°C" value={fuseOpts.fuseholder_rise_C} onChange={v => setF('fuseholder_rise_C', v)} />
+              <Knob label="Re-rating slope" unit="%/°C" value={fuseOpts.fuse_derate_per_C} onChange={v => setF('fuse_derate_per_C', v)} />
+              <Knob label="MOV/GDT fail-short" unit="A" value={fuseOpts.mov_fail_short_current_A} onChange={v => setF('mov_fail_short_current_A', v)} />
+              <Knob label="Stuck-relay fault" unit="A" value={fuseOpts.relay_stuck_fault_current_A} onChange={v => setF('relay_stuck_fault_current_A', v)} />
+              <span style={{ fontSize: 9.5, color: C.muted, maxWidth: 230 }}>
+                Gates 5 &amp; 6. Blank = gate stays OPEN (never a silent pass). Fault current + startup basis
+                shared with the NTC/MOV tabs.
+              </span>
             </div>
 
             {fuseRes && (<>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8, marginBottom: 12 }}>
                 <Chip k="Worst I_rms" v={`${num(fuseRes.i_rms, 1)} A`} />
-                <Chip k="Max inrush" v={fuseRes.inrush_peak_A != null ? `${num(fuseRes.inrush_peak_A, 0)} A` : '—'} />
                 <Chip k="I_rated req" v={`≥ ${num(fuseRes.requirements.i_rated_min, 1)} A`} />
+                <Chip k="75%-rule / margin" v={`${num(fuseRes.requirements.i_load_min, 1)} / ${num(fuseRes.requirements.i_cont_min, 1)} A`} />
+                <Chip k="Thermal de-rate k" v={fuseRes.requirements.thermal.known
+                  ? `${num(fuseRes.requirements.k_thermal, 2)}×${fuseRes.requirements.thermal.estimated ? ' (est.)' : ''}` : 'OPEN'} />
                 <Chip k="Startup I²t" v={fuseRes.startup_i2t != null ? `${num(fuseRes.startup_i2t, 1)} A²s` : '—'} />
                 <Chip k="Melt I²t req" v={fuseRes.requirements.i2t_min != null ? `> ${num(fuseRes.requirements.i2t_min, 1)} A²s` : '—'} />
+                <Chip k="Inrush peak (ridden by I²t)" v={fuseRes.inrush_peak_A != null ? `${num(fuseRes.inrush_peak_A, 1)} A` : '—'} />
+                <Chip k="Fault coordination" v={fuseRes.requirements.coord.known
+                  ? `≥ ${num(fuseRes.requirements.coord.i_A, 0)} A` : 'OPEN'} />
               </div>
               {fuseRes.selected ? (
                 <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
@@ -624,26 +648,54 @@ export const InputProtection: React.FC<Props> = ({
                   {num(fuseRes.selected.i_rated_A, 0)} A / {num(fuseRes.selected.v_ac_V, 0)} Vac, breaking{' '}
                   {num(fuseRes.selected.breaking_ac_A, 0)} A, melting I²t <b>{num(fuseRes.selected.melting_i2t, 0)} A²s</b>
                   {fuseRes.selected.response_time ? ` (${fuseRes.selected.response_time})` : ''}.
+                  {fuseRes.selected.i_usable_A != null
+                    ? ` Usable ${num(fuseRes.selected.i_usable_A, 1)} A after de-rating — load is ${num(fuseRes.selected.load_pct_of_usable, 0)}% of it.` : ''}
                   {selFuseI2t ? ' → auto-feeds the NTC/MOV coordination.' : ''}
                 </div>
               ) : (
                 <div style={{ background: C.redL, border: `1px solid ${C.red}55`, borderRadius: 8,
                   padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: '#fca5a5' }}>
                   <b>No catalog fuse meets the requirement</b> — need I_rated ≥ {num(fuseRes.requirements.i_rated_min, 1)} A
-                  (driven by the {num(fuseRes.inrush_peak_A, 0)} A inrush / {num(fuseRes.requirements.i_cont_min, 1)} A continuous)
-                  at ≥ {num(fuseRes.requirements.v_min, 0)} Vac. The DB tops out at 50 A; select a higher-R NTC to cut the
-                  inrush, use a higher-rated fuse, or relax the current margin.
+                  (continuous margin {num(fuseRes.requirements.i_cont_min, 1)} A / load-factor rule {num(fuseRes.requirements.i_load_min, 1)} A
+                  {fuseRes.requirements.thermal.known ? `, de-rated ×${num(fuseRes.requirements.k_thermal, 2)}` : ''})
+                  at ≥ {num(fuseRes.requirements.v_min, 0)} Vac. The DB tops out at 50 A; use a higher-rated fuse, lower the
+                  ambient/fuseholder rise, or relax the current margin.
                 </div>
               )}
+
+              {/* six-gate release check for the selected fuse */}
               <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-                Candidate fuses — rating ≥ inrush {num(fuseRes.inrush_peak_A, 0)} A &amp; continuous, V ≥ line · select one
+                Six-gate release check{' '}
+                <Badge color={vColor(fuseRes.gate_status)}>{fuseRes.gate_status}</Badge>
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead><tr>{['#', 'Gate', 'Requirement', 'Result', 'Status'].map(h =>
+                    <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                  <tbody>{fuseRes.gates.map(g => (
+                    <tr key={g.n}>
+                      <td style={cell}>{g.n}</td>
+                      <td style={cell}>{g.name}</td>
+                      <td style={{ ...cell, fontSize: 9.5, color: C.muted }}>{g.requirement}</td>
+                      <td style={{ ...cell, fontSize: 9.5 }}>{g.result}</td>
+                      <td style={cell}><Badge color={vColor(g.status)}>{g.status}</Badge></td>
+                    </tr>))}</tbody>
+                </table>
+              </div>
+
+              <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                Candidate fuses — screened on all six gates · select one
               </div>
               <div style={{ overflowX: 'auto', marginBottom: 8 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  <thead><tr>{['', 'Part', 'I_rated', 'V_ac', 'Breaking', 'Melt I²t', 'Response', 'Verdict'].map(h =>
-                    <th key={h} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
+                  <thead><tr>{['', 'Part', 'I_rated', 'V_ac', 'Breaking', 'Melt I²t', 'Response',
+                               '1', '2', '3', '4', '5', '6', 'Verdict'].map((h, hi) =>
+                    <th key={hi} style={{ ...cell, color: C.hint, fontSize: 9, textAlign: 'left' }}>{h}</th>)}</tr></thead>
                   <tbody>{fuseRes.candidates.filter(c => c.verdict !== 'FAIL').slice(0, 12).map((c, i) => {
                     const isSel = fuseOpts.fuse_selected_part === c.part_number
+                    const mk = (v: boolean | null) => v == null
+                      ? <span style={{ color: C.muted }}>—</span>
+                      : <span style={{ color: v ? C.teal : C.red }}>{v ? '✓' : '✗'}</span>
                     return (
                     <tr key={i} style={isSel ? { background: C.tealL } : undefined}>
                       <td style={cell}><Btn variant={isSel ? 'success' : 'ghost'} onClick={() => selectFuse(c.part_number ?? '')}>
@@ -654,14 +706,21 @@ export const InputProtection: React.FC<Props> = ({
                       <td style={cell}>{c.breaking_ac_A != null ? `${num(c.breaking_ac_A, 0)}A` : '—'}</td>
                       <td style={cell}>{c.melting_i2t != null ? num(c.melting_i2t, 0) : 'MISSING'}</td>
                       <td style={cell}>{c.response_time ?? '—'}</td>
+                      <td style={cell}>{mk(c.v_ok)}</td>
+                      <td style={cell}>{mk(c.i_ok)}</td>
+                      <td style={cell}>{mk(c.i2t_ok)}</td>
+                      <td style={cell}>{mk(c.bc_ok)}</td>
+                      <td style={cell}>{mk(c.coord_ok)}</td>
+                      <td style={cell}>{mk(c.thermal_ok)}</td>
                       <td style={cell}><Badge color={vColor(c.verdict)}>{c.verdict}</Badge></td>
                     </tr>)})}</tbody>
                 </table>
               </div>
               <div style={{ fontSize: 9.5, color: C.muted, marginTop: 6 }}>
-                Only fuses whose rating clears the inrush ({num(fuseRes.inrush_peak_A, 0)} A) and the other gates are
-                shown. <b>CONDITIONAL</b> = selectable but melting I²t / breaking capacity is DATA MISSING (never a silent
-                pass). {fuseRes.fast_blow_only ? 'DB is fast-blow only; OK because the NTC limits inrush.' : ''}
+                Gate columns 1–6 as above; <b>—</b> means that gate is OPEN (a datasheet field or a site input is
+                missing), so the part stays <b>CONDITIONAL</b> and selectable rather than being silently passed or
+                hidden. Fuses that violate a real limit are hidden.
+                {fuseRes.fast_blow_only ? ' DB is fast-blow only; OK because the NTC limits inrush.' : ''}
               </div>
             </>)}
           </div>
