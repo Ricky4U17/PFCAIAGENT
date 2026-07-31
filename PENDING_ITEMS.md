@@ -14,7 +14,7 @@ passed.
 `OPEN`, `CONDITIONAL` or `DATA MISSING` — never as a silent PASS, and never as something that blocks
 the designer from selecting a part.
 
-Last updated 2026-07-30 (after C170).
+Last updated 2026-07-30 (after C172).
 
 ---
 
@@ -139,12 +139,35 @@ it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, 
   only those words, and the GUI badge mapping covers all of them.
 - Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
 
-### B5. EMI Phase D
+### B5. Dead `_extra["esr_mohm"]` in main.py still carries the bug pattern  *(small, do it next tidy-up)*
+`main.py` (~line 2567, in the Chapter-7 `_extra` block) still builds:
+
+```python
+"esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
+```
+
+**It feeds nothing.** C171 removed its only consumer (the capacitor-loss re-derivation);
+`report_semiconductor.py` now mentions `esr_mohm` in a docstring only.
+
+**Why remove it rather than leave it:** this exact line is the C171 bug in miniature — an `or` chain that
+silently substitutes the **control-loop plant ESR** (`step16_params.ESR_mOhm`, which sizes the voltage-loop
+zero) for a **dissipative ESR** when the first term is absent. The two are different physical quantities.
+Left in place it is a loaded gun: the next person needing an ESR in the Chapter-7 budget will find a
+plausible-looking `extra["esr_mohm"]` already populated and wire it up, reintroducing a 6× error that took
+a designer report and a full trace to find the first time.
+
+- **Done when:** the `esr_mohm` key is deleted from the `_extra` dict, the stale mention is removed from
+  `report_semiconductor.py`'s docstring, and the suite still passes. Anything genuinely needing a
+  capacitor ESR should call `step15_capacitor.bank_loss_table()` (loss) or read `ESR_parallel_mohm` with
+  its `ESR_basis` (display) — never the `or` chain.
+- Left deliberately out of scope in C172 to keep that diff tight. Raised 2026-07-30.
+
+### B6. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B6. EMI filter — Rev J methodology
+### B7. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 

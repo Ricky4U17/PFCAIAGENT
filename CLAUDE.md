@@ -48,6 +48,9 @@
 
 ## Open work
 
+\- `SESSION_HANDOFF.md` — READ FIRST on a restart: where we are, what to pick up next,
+  settled conventions, and the traps that have bitten more than once. Refresh it at every
+  commit wrap-up so a cold session resumes from the right point.
 \- `PENDING_ITEMS.md` — running log of everything the agent cannot close by calculation
   (missing vendor-datasheet columns, missing site inputs, deferred features, open decisions).
   Read it before starting new work in an area; add to it whenever a check has to report
