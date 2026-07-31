@@ -86,12 +86,44 @@ so the report cannot draw B(t)/L(t)/P(t) families over the cycle for all 9 input
 re-deriving them (which would break the one-engine rule). Needs the engine to export the per-Vin time
 series into the approved payload.
 
-### B3. EMI Phase D
+### B3. Bridge rectifier: DB parts have no dynamic resistance `rd`  ⭐ affects paralleling
+`database.to_block(rec, "bridge")` sets `topology / vf_curve / vf_tco / n_parallel / rth_jc / rth_cs`
+but **never `rd`**, so every DB-selected bridge runs with the engine default `rd = 0.0`
+(`pfc_loss_model.Bridge.rd`).
+
+Why it matters: bridge loss is `2·mean(vf(i·a)·i + rd·a·i²)` where `a = 1/n_parallel`. The `rd·a·i²`
+term is exactly the one that halves when devices are paralleled. With `rd = 0` the only benefit of
+paralleling is the shape of the Vf curve, and that is partly or wholly cancelled by the negative
+`vf_tco = −0.002 V/°C`: two packages run cooler, and a cooler Si diode has a HIGHER Vf.
+
+Measured on the 9-point sweep (2-ch, 90–264 Vac, 1700/3600 W), worst-case-over-line:
+
+| Configuration | n=1 | n=2 | Δ |
+|---|---|---|---|
+| GBJ40L06 as the DB gives it (rd=0, tco=−0.002) | 26.99 W | 25.82 W | −1.16 W |
+| same, tco forced to 0 | 33.21 W | 30.41 W | −2.80 W |
+| same, rd = 5 mΩ | 30.80 W | 27.83 W | −2.97 W |
+| same, rd = 5 mΩ and tco = 0 | 37.59 W | 32.60 W | −4.99 W |
+
+Across a random 70-part sample, paralleling **increased** worst-case loss for 54 parts and decreased it
+for 16 — the sign is dominated by the temperature effect rather than by current sharing.
+
+- **Done when:** `to_block` derives `rd` from the datasheet (slope of the Vf–If curve above the knee, or
+  a dedicated `rd` column), so the I²R term is present and paralleling behaves physically.
+- **Related `DATA` need:** the bridge workbook has a single `Vf @ If` point; `_vf_curve` synthesises a
+  3-point curve around it (shape is an ESTIMATE, already flagged). A real datasheet Vf–If curve would fix
+  both `rd` and the curve shape.
+- **Note (not a bug):** setting `share_worst = 1.0` on the bridge form makes `n_parallel` have literally
+  zero effect (`a` clamps to 1.0). That is correct — it declares that one die carries the whole arm —
+  but it does mean the loss will not move at all when paralleling is changed.
+- Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
+
+### B4. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B4. EMI filter — Rev J methodology
+### B5. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
