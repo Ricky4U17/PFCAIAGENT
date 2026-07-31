@@ -118,12 +118,45 @@ for 16 — the sign is dominated by the temperature effect rather than by curren
   but it does mean the loss will not move at all when paralleling is changed.
 - Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
 
-### B4. EMI Phase D
+### B4. Section-reference convention sweep → "Section"  *(decided, D0a)*
+Three conventions are live in the report. Normalise all of them to spelled-out **"Section"**:
+
+| Convention | Set by | Where | Rendered hits in Ch8/9 |
+|---|---|---|---|
+| `§8.4` | C164 / C166 (regression) | Ch8, Ch9 | 23 |
+| "Section 8.10" | C105 | Ch1–6 | 5 |
+| "Sec. 7.3.1" | C145 | Ch7, Ch10 | 2 |
+
+- **Scope:** `report_inputprotection.py` (Ch8/9), plus the "Sec." uses in Ch7/Ch10.
+- **Careful:** 7 of the 25 `§` hits in `report_inputprotection.py` are Python comments / docstrings that
+  never render — leave those alone, they aid code navigation.
+- **Done when:** a rendered PDF text-extract contains zero `§` and zero "Sec." across all chapters.
+- Verify with a render → `fitz` text extract, the same check used for missing-glyph boxes.
+
+### B5. Chapter 9 MOV — no selected-part section  ⭐ highest value in Ch9
+`calculate_mov` returns `out["selected"]` (adapter.py:225) and the GUI has a selectable MOV candidate
+table (C152/C156), but **`build_mov_story` never reads it**. Verified by rendering Ch9 with
+`selected_part='471KD53'`: the part number appears exactly **once** in the whole chapter — as one row
+among 40 in the §9.6 candidate screen — and the phrase "Selected MOV" appears **zero** times.
+
+So Chapter 9 states a selected MOV *class* (the ★ in Table 9.3.1) but never a selected MOV *part*, and
+never recalculates clamp / energy / margin on the part the designer actually picked. This is the MOV
+analogue of the Ch8 problem fixed by C164/C166 — and worse: NTC named the part too early, MOV never
+names it at all.
+
+Secondary, same cause: §9.4 clamp and §9.5 Criterion A/B/C are computed from the *class* representative
+BEFORE any part is screened (§9.6), so a reader cannot tell whether a clamp failure is inherent or
+fixable by part choice.
+
+Full plan in the `mov-ch9-reorg-plan` memory. Source: `specs/NTC and MOV/
+MOV_Calculation_Selection_Review_for_Design_Script.pdf`.
+
+### B6. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B5. EMI filter — Rev J methodology
+### B7. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
@@ -139,13 +172,24 @@ Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
 
 ## D. Decisions  `DECISION`
 
-### D1. Hot restart — DECISION-REQUIRED vs BLOCKED
+### D0. SETTLED 2026-07-30 — two project-wide conventions
+Both decided by the designer; apply everywhere, do not re-litigate per chapter.
+
+**(a) Section references spell out "Section".** No `§`, no "Sec.". Applies to the WHOLE report.
+Currently three conventions are live — `§` (23 rendered hits in Ch8/9, introduced by C164/C166),
+"Section" (Ch1–6, set by C105), "Sec." (Ch7/Ch10, set by C145). See B4 for the sweep.
+
+**(b) BLOCKED gates RELEASE ONLY, never part selection.** A BLOCKED or DATA-MISSING gate stops the
+release sign-off and must be listed as a blocker, but the designer can always still select a part.
+This is now the general rule behind [[feedback-selection-never-blocked]] — D1 below is one instance of
+it, and it is the answer to the MOV review's request for BLOCKED on a negative clamp margin.
+
+### D1. Hot restart — DECISION-REQUIRED, not BLOCKED  *(instance of D0b)*
 `specs/NTC/NTC Improvement.docx` asks for hot restart to be marked **BLOCKED** until a restart policy
 exists. We implement it as **DECISION-REQUIRED**: it gates the final release sign-off but never blocks
-NTC part selection — per the designer's own decision when the Ch8 reorg was agreed, and consistent with
-the standing rule that a missing datasheet value must never make every part un-selectable.
+NTC part selection.
 
-Report §8.10 + Table 8.10b. **Revisit only if the designer wants the document's literal reading.**
+Report §8.10 + Table 8.10b. Settled — consistent with D0b.
 
 ### D2. Max-stacks 3-stack sighting
 A designer once saw a 3-stack candidate when max_stacks should have excluded it. The chain was verified
