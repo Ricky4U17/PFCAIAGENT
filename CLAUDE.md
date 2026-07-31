@@ -46,6 +46,14 @@
 
 
 
+## Open work
+
+\- `PENDING_ITEMS.md` — running log of everything the agent cannot close by calculation
+  (missing vendor-datasheet columns, missing site inputs, deferred features, open decisions).
+  Read it before starting new work in an area; add to it whenever a check has to report
+  OPEN / CONDITIONAL / DATA MISSING, and move the row to "Recently closed" when it is fixed.
+\- `IMPLEMENTATION_LOG.md` — what was actually done, newest C-entry at the bottom.
+
 ## Backend
 
 \- POST /mode-b/generate-full-report — combined Steps 1-14 PDF
