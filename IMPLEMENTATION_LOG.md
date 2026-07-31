@@ -6012,3 +6012,24 @@ matches Ch5 Table 5.3.1 row for row. Suite 172 passed / 2 skipped.
 
 NOTE left open deliberately: `_extra["esr_mohm"]` in main.py is now dead (C171 removed its only consumer)
 but still carries the `or step16_params.ESR_mOhm` pattern. Left in place as out of scope; it feeds nothing.
+
+## C173 — 2026-07-30 — Top-10 "Devices in parallel" box no longer lies about its default
+
+Designer: selecting 1 vs 2 bridge rectifiers gave identical loss (32.7 W) from "Find top 10".
+The engine was fine — every backend path responds to n_parallel (verified: seed part 41.44 -> 35.48 W;
+Top-10 screen 26.99 -> 25.82 W; 0 of 70 sampled DB parts gave an identical result). The GUI was the
+problem: the DB-search "Devices in parallel" box shows placeholder "1", but when left BLANK
+runDbSearch falls back to the bridge FORM's own n_parallel, which defaults to '2' (BRIDGE0). So
+blank == 2, and a designer who read the placeholder as 1 and typed 2 saw nothing change.
+
+Reproduced exactly against the real DB:
+  box EMPTY (placeholder "1") -> effective n_par 2 -> GBJ40L06 26.03, LVE4060E 26.03, LVE5060E 26.07
+  box = 1                     -> effective n_par 1 -> GBU8K-LV-T 26.73, GBJ40L06 27.19, LVE4060E 27.19
+  box = 2                     -> effective n_par 2 -> byte-identical to the EMPTY case
+FIX: the input now displays the EFFECTIVE value (the form's n_parallel) instead of rendering blank with
+a misleading placeholder, so it can never disagree with what is actually ranked. No calculation changed.
+Frontend typecheck clean.
+
+NOTE (separate, still open as PENDING_ITEMS B3): even with n_parallel working, the benefit is understated
+because to_block never sets `rd` for DB bridges — paralleling shows ~1 W instead of ~4-5 W, and for 54 of
+70 sampled parts it makes worst-case loss slightly WORSE (cooler dies -> higher Vf via vf_tco = -0.002).

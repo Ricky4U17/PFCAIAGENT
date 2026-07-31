@@ -494,8 +494,13 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 <option value="">any</option>{(opts.technology ?? []).map(o => <option key={o} value={o}>{o}</option>)}</select></label>
           )}
           {(which === 'bridge' || which === 'mosfet') && (
+            // Blank does NOT mean 1 — runDbSearch falls back to the part form's own n_parallel
+            // (which defaults to 2 for the bridge). Show that effective value so the box can never
+            // disagree with what is actually ranked.
             <label style={{ fontSize: 10.5, color: C.muted }}>Devices in parallel<br />
-              <input style={{ ...critIn, width: 70 }} value={crit.n_parallel ?? ''} placeholder="1"
+              <input style={{ ...critIn, width: 70 }}
+                value={crit.n_parallel ?? ((which === 'bridge' ? bridge.n_parallel : mosfet.n_parallel) ?? '')}
+                placeholder="1"
                 onChange={e => setCrit(which, 'n_parallel', e.target.value)} /></label>
           )}
           <Btn variant="primary" disabled={!!dbBusy[which]} onClick={() => runDbSearch(which, which)}>
