@@ -636,6 +636,17 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     cap_w = float(extra["cap_loss_w"]) if extra.get("cap_loss_w") is not None else 0.0       # Ch5 worst case
     # Per-line capacitor bank loss straight from Chapter 5's ESR(T) engine, so this column IS
     # Table 5.3.1's P_bank column rather than a re-derivation. Falls back to the worst-case scalar.
+    # Per-line inductor CORE loss (cycle-averaged basis) from Chapter 4's engine, so the Inductor
+    # column tracks line voltage instead of holding one worst-case constant. Same pattern as the
+    # capacitor column added in C171.
+    _core_by_vac = extra.get("core_loss_by_vac") or {}
+    def _core_at(vac):
+        if not _core_by_vac:
+            return core_w
+        try:
+            return float(_core_by_vac[round(float(vac))])
+        except (KeyError, TypeError, ValueError):
+            return float(_core_by_vac[min(_core_by_vac, key=lambda k: abs(float(k) - float(vac)))])
     _cap_by_vac = extra.get("cap_loss_by_vac") or {}
     def _cap_at(vac):
         if not _cap_by_vac:
@@ -650,7 +661,10 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         srcs = (f"R<sub>CS</sub> = {_f(extra['rcs_mohm'],2)} m{_OHM}, " if rcs else "")
         annotation(story, "NOTE",
             f"Loss-budget inputs carried in: inductor DCR = {_f(extra.get('dcr_mohm', 0),1)} m{_OHM}/phase "
-            f"(copper), inductor core loss = {_f(core_w,2)} W (Chapter 4), capacitor bank loss "
+            f"(copper), inductor core loss "
+            + (f"taken PER LINE from Chapter 4 Table 4.2 (cycle-averaged basis; {_f(core_w,2)} W at the "
+               f"design corner)" if _core_by_vac else f"= {_f(core_w,2)} W (Chapter 4)")
+            + f", capacitor bank loss "
             + (f"{_f(cap_w,2)} W worst case at {_f(extra.get('cap_loss_worst_vac'),0)} Vac, taken PER LINE "
                f"from Chapter 5 Table 5.3.1 ({extra.get('cap_loss_n_cap','N')} caps &#215; per-cap ESR(T) loss)"
                if _cap_by_vac else f"{_f(cap_w,2)} W (Chapter 5)")
@@ -661,20 +675,21 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         for i, r in enumerate(rows):
             iphi = float(iph[i]); p_sys = float(r["P_SYSTEM_total"]); p_semi = float(r["P_SEMI_total"])
             p_lcu = nch * iphi * iphi * dcr if dcr else 0.0
-            p_ind = p_lcu + core_w                       # inductor TOTAL = copper + core
+            p_ind = p_lcu + _core_at(r["Vac"])           # inductor TOTAL = copper + core (per line)
             p_rcs = nch * iphi * iphi * rcs if rcs else 0.0
             p_cap = _cap_at(r["Vac"])                    # per-line, == Chapter 5 Table 5.3.1
             p_other = p_sys - p_semi - p_ind - p_rcs - p_cap
             brows.append([f"{r['Vac']:.0f} V", f"{_f(p_semi,1)}", f"{_f(p_ind,1)}", f"{_f(p_cap,2)}",
                           f"{_f(p_rcs,1)}", f"{_f(p_other,1)}", f"{_f(p_sys,1)} W"])
-        data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W) — worst-case approximation",
+        data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W)",
             "Every system loss reconciled against P<sub>system</sub> from the efficiency. The <b>Inductor</b> "
             "column is copper (I&#178;&#183;DCR, per line) plus a <b>constant worst-case core loss held at the "
-            "Chapter-4 value</b> — a budget approximation, so it will NOT match Chapter 4's per-point core loss "
-            "(Tables 4.5/4.6), which vary with line; the two agree only near the worst-case corner. The "
-            "<b>Capacitor</b> column is the per-line bank ESR loss taken directly from Chapter 5 "
-            "Table 5.3.1 (P<sub>bank</sub> column) — the SAME engine and the same ESR(T) at each point, so "
-            "the two tables agree row for row. The <b>Balance</b> = P<sub>system</sub> &#8722; (all the "
+            "Chapter-4 cycle-averaged core loss AT THAT LINE VOLTAGE</b> (Table 4.2, "
+            "P<sub>core</sub>,avg column) — the same engine, so the two tables agree row for row. The "
+            "averaged basis is used because it is the heat actually generated; the crest-point value is "
+            "the saturation reference only. The <b>Capacitor</b> column is the per-line bank ESR loss "
+            "taken directly from Chapter 5 Table 5.3.1 (P<sub>bank</sub> column) — again the same engine "
+            "and the same ESR(T) at each point. The <b>Balance</b> = P<sub>system</sub> &#8722; (all the "
             "above) is the control / auxiliary remainder.",
             ["V_AC", "Semicond.", "Inductor (Cu+core*)", "Capacitor", "R_CS", "Balance (ctrl)", "System total"],
             brows, col_widths=[CW*0.12, CW*0.15, CW*0.19, CW*0.14, CW*0.12, CW*0.15, CW*0.13], ch=CH)

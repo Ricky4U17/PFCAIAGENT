@@ -6072,3 +6072,58 @@ FIX (4 parts):
 4. PENDING_ITEMS B6 records the rule (wrap any handler that takes parameters) so it stays visible.
 
 Frontend typecheck clean. Backend untouched — no suite impact.
+
+## C175 — 2026-07-31 — GROUP 1: core loss on TWO bases (crest + cycle-average), each used where correct
+
+Designer review items 1-9. Decision: compute cycle-averaged iGSE at ALL operating points and show it
+beside the crest value; AVERAGE drives thermal rise and efficiency, PEAK/CREST drives saturation.
+
+ROOT CAUSE of the 2.127 vs 3.648 "contradiction": a NAMING COLLISION. `Pcore_W` meant the
+cycle-AVERAGE at DesignResult top level but the CREST-POINT value inside every loss_table row. Section
+4.5 quoted the former, Table 4.2 the latter, and Table 4.2's caption claimed "cycle-averaged iGSE".
+Nothing was miscalculated — two different quantities shared one key.
+
+ENGINE (step7_magnetic_calc.py)
+- Explicit names: Pcore_avg_W (cycle-averaged) and Pcore_crest_W/Pcore_peak_W (line-crest). Legacy
+  Pcore_W / Pcore_crest_W kept as aliases so nothing breaks.
+- NEW `_add_cycle_avg_core_loss()` annotates each loss-table row with Pcore_crest_W, Pcore_avg_W and
+  Ptotal_avg_W, from the SAME `_half_cycle_averages` integrator the design corner uses. Row `Pcore_W`
+  left untouched (still crest) so existing readers keep their meaning.
+- THERMAL basis switched to the average via `_k_shape` = avg/crest, computed once from the same
+  integrator and applied inside the convergence loop while Pv(T) keeps tracking temperature. Exposed as
+  Pcore_shape_ratio (0.585 on the reference design).
+- BUG I INTRODUCED AND CAUGHT: once the loop carried _k_shape, `Pcore` was on the averaged basis, so
+  Pcore_crest_W/Pcore_peak_W silently became the average. The crest is now recovered explicitly at the
+  converged temperature.
+- PERFORMANCE: annotating every catalog core cost ~60 s (27 ms x 9 pts x 2 tables x ~120 cores) and
+  timed the endpoint out. Moved to `rank_candidates()` so only RETURNED candidates pay it (the only
+  designs a report can be built from); shape factor uses M=90. Sizing back to ~25 s.
+- NO HARDCODES (designer requirement): removed `Vout_V=393.0` and `f_line_Hz=60.0` from the
+  design-corner integrator call (vout_V's own comment already said "never hardcode"); added
+  `f_line_Hz` to design_one_core, plumbed from intake `nominal_line_frequency_hz` in main.py. Also
+  de-hardcoded build_view_contract: Vout, f_line and the 90 V design corner now come from the intake /
+  stored design, so the studios cannot drift from the report when the GUI changes.
+
+REPORT
+- Table 4.2 retitled "Loss vs Input Voltage — Core Loss on BOTH Bases"; new P_core,crest and P_core,avg
+  columns; P_tot and the amber worst-row now use the AVERAGED basis. The old caption claiming
+  "cycle-averaged" over crest numbers is gone.
+- New annotation above it explaining which basis applies where, including WHY they diverge with line.
+- Section 4.3 gains a "SATURATION USES THE CREST, NOT THE CYCLE AVERAGE" note.
+- Chapter 7 Table 7.8b: Inductor column now takes the per-line averaged core loss
+  (`core_loss_by_vac`) instead of one constant — same one-engine fix as C171's capacitor column.
+  Caption and the loss-budget note corrected; "worst-case approximation" dropped from the title.
+
+PHYSICS SURFACED (validates the designer's instinct): crest vs average diverge strongly with line —
+90 V 3.666/2.144 (0.58x) but 264 V 0.195/2.227 (11.4x). At high line the duty at the line crest
+collapses toward zero, so the crest-point loss nearly vanishes while the real cycle-averaged loss stays
+~2.2 W. Quoting the crest as an efficiency figure at high line would understate core loss ~11x.
+
+VERIFIED: engine reproduces both of the designer's numbers as distinct fields (avg 2.14 / crest 3.67 vs
+their 2.127 / 3.648). 7.8b Inductor column now VARIES with line (8.5/7.0/6.5/6.1/10.6/9.1/7.9/7.3/5.7 W)
+and peaks at 180 V where the averaged core loss peaks. 199-page report builds, 0 glyph boxes.
+Suite 172 passed / 2 skipped.
+
+CONSEQUENCE TO WATCH: dT_rise_C now uses the averaged core loss, so it is LOWER than before
+(shape 0.585 on the reference design). dT is a pass/fail criterion and feeds the ranking score, so
+candidate order and PASS verdicts can shift. Designers should re-check a previously-marginal selection.

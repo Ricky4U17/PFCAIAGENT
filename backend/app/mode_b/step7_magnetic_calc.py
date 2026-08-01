@@ -191,8 +191,17 @@ class DesignResult:
     Pcu_25C_firstpass_W:  float = 0.0
     Pcu_100C_firstpass_W: float = 0.0
     P_fringing_W:   float = 0.0
-    Pcore_W:        float = 0.0
-    Pcore_crest_W:  float = 0.0
+    # CORE LOSS — TWO BASES, used in different places (do not mix):
+    #   *_avg  = cycle-averaged iGSE over the line half-cycle  -> THERMAL rise + EFFICIENCY
+    #   *_peak = crest/peak-point value at the flux maximum    -> SATURATION checks
+    # Pcore_W / Pcore_crest_W are the legacy names kept for back-compat and alias these.
+    Pcore_W:        float = 0.0   # == Pcore_avg_W  (legacy name)
+    Pcore_crest_W:  float = 0.0   # == Pcore_peak_W (legacy name)
+    Pcore_avg_W:    float = 0.0
+    Pcore_peak_W:   float = 0.0
+    Pcore_shape_ratio: float = 1.0   # cycle-avg / peak — the thermal-basis factor
+    # inputs rank_candidates needs to compute the per-point cycle averages (see _cyc_ctx use)
+    _cyc_ctx:       dict = field(default_factory=dict)
     Ptotal_25C_W:   float = 0.0
     Ptotal_100C_W:  float = 0.0
 
@@ -562,6 +571,7 @@ def design_one_core(
     FFcu_limit: float = 0.40,
     mounting:   str   = 'horizontal',
     vout_V:     float = 393.0,   # bus voltage for the L-vs-bias table (never hardcode)
+    f_line_Hz:  float = 60.0,    # mains frequency — sets the half-cycle the core loss averages over
     r_input:    float = 0.0,     # designer crest ripple ratio → per-point L_req column
     lead_length_mm: float = _LEAD_MM_DEFAULT,
 ) -> DesignResult:
@@ -846,9 +856,31 @@ def design_one_core(
     if not _is_toroid:
         Rth = _thermal_Rth(core, res.stacks, h_conv)
 
+    # THERMAL BASIS = CYCLE-AVERAGED core loss. The crest value is the instantaneous peak the
+    # flux reaches twice per line cycle; the core is heated by the half-cycle AVERAGE, so using
+    # the crest here overestimates the temperature rise. `_k_shape` is the average/peak ratio
+    # from the same waveform integrator used everywhere else, evaluated once at the starting
+    # temperature — it is a waveform-shape factor and only weakly temperature-dependent, so it
+    # is applied inside the loop while Pv(T) keeps tracking temperature. Saturation continues to
+    # use the PEAK (see Pcore_peak_W / Bmax_FL_T).
+    _k_shape = 1.0
+    try:
+        _w0 = _half_cycle_averages(
+            material_key=material_key, core_type=res.core_type, N=N, Ae_m2=Ae, Ve_m3=Ve,
+            Le_s=Le_s, L0_nom_H=(res.AL_nom_nH * res.stacks) * 1e-9 * N**2,
+            Icrest_A=I_phi_avg_crest, Vout_V=Vout_V, Vin_pk_V=Vin_pk90,
+            fsw_Hz=fsw_Hz, Rdc=DCR_100, Rac=DCR_100 * Rac_Rdc,
+            T_core_C=T_core, f_line_Hz=f_line_Hz, M=90)
+        _pk0 = (_db().get_core_loss(material_key, fsw_Hz, Bac_pk, T_core) * 1e3) * Fd_crest * Ve
+        if _pk0 > 0:
+            _k_shape = max(0.05, min(1.0, float(_w0.get("Pcore_avg_W", 0) or 0) / _pk0))
+    except Exception:
+        _k_shape = 1.0                      # fall back to the previous (peak) basis, never crash
+    res.Pcore_shape_ratio = round(_k_shape, 4)
+
     for _ in range(10):
         Pv    = _db().get_core_loss(material_key, fsw_Hz, Bac_pk, T_core) * 1e3
-        Pcore = Pv * Fd_crest * Ve
+        Pcore = Pv * Fd_crest * Ve * _k_shape       # cycle-averaged basis for the thermal rise
         Pcu_T = IL_rms_ref**2 * R_pm_20 * (1 + ALPHA_CU * (T_core - 20)) * Cu_len * Rac_Rdc
         Ptot  = Pcore + Pcu_T + res.P_fringing_W
         if _is_toroid:
@@ -875,13 +907,13 @@ def design_one_core(
         Le_s         = Le_s,
         L0_nom_H     = L0_nom_H,
         Icrest_A     = I_phi_avg_crest,
-        Vout_V       = 393.0,
+        Vout_V       = Vout_V,        # designer bus voltage (was hardcoded 393.0)
         Vin_pk_V     = Vin_pk90,
         fsw_Hz       = fsw_Hz,
         Rdc          = Rdc_Tc,
         Rac          = Rac_Tc,
         T_core_C     = T_core,
-        f_line_Hz    = 60.0,
+        f_line_Hz    = f_line_Hz,     # designer mains frequency (was hardcoded 60.0)
         M            = 360,
     )
 
@@ -890,8 +922,13 @@ def design_one_core(
 
     res.T_core_C      = round(T_core, 2)
     res.dT_rise_C     = round(T_core - T_amb_C, 2)   # SA surface ΔT (pass/fail criterion)
-    res.Pcore_crest_W = round(Pcore, 4)
-    res.Pcore_W       = round(Pcore_avg, 4)
+    # The thermal loop's `Pcore` is now on the AVERAGED basis (it carries _k_shape), so the
+    # crest-point value is recovered explicitly at the converged temperature.
+    _Pcore_crest = (_db().get_core_loss(material_key, fsw_Hz, Bac_pk, T_core) * 1e3) * Fd_crest * Ve
+    res.Pcore_crest_W = round(_Pcore_crest, 4)   # loss AT THE LINE CREST (where Bmax occurs)
+    res.Pcore_W       = round(Pcore_avg, 4)      # legacy alias of Pcore_avg_W
+    res.Pcore_peak_W  = round(_Pcore_crest, 4)   # alias of Pcore_crest_W
+    res.Pcore_avg_W   = round(Pcore_avg, 4)      # cycle-averaged -> thermal + efficiency
     res.Ihf_rms_A     = round(wf["IhfRms_A"], 5)
     res.Pac_W         = round(wf["Pac_W"], 5)
     res.Bdc_max_T     = round(wf["BdcMax_T"], 6)
@@ -979,6 +1016,14 @@ def design_one_core(
                                             Vout_V, OPS, T_C=100.0,
                                             L_target_H=L_eff_target_H,
                                             L_per_point_uH=_L_pp_uH)
+    # NOTE: the per-operating-point cycle-averaged core loss is NOT computed here. It costs ~27 ms
+    # per point, and design_one_core runs for every core in the catalog (~120), which added ~60 s
+    # to a sizing run. It is computed in rank_candidates() for the RANKED candidates only — the
+    # only designs a report can be built from. See _add_cycle_avg_core_loss.
+    res._cyc_ctx = dict(material_key=material_key, core_type=res.core_type, N=N, Ae_m2=Ae,
+                        Ve_m3=Ve, Le_s=Le_s, L0_nom_H=L0_nom_H,
+                        Icrest_ref_A=I_phi_avg_crest, Vout_V=Vout_V, fsw_Hz=fsw_Hz,
+                        T_core_C=T_core, f_line_Hz=f_line_Hz, Rdc=Rdc_Tc, Rac=Rac_Tc)
 
     # ── Medical creepage check ────────────────────────────────────────────────
     if app_class == "Medical":
@@ -1268,6 +1313,58 @@ def _build_loss_table(mat_key: str, N: int, Ae: float, Ve: float,
     return result
 
 
+
+def _add_cycle_avg_core_loss(rows: list, l_vs_vin: list, *, material_key: str, core_type: str,
+                             N: int, Ae_m2: float, Ve_m3: float, Le_s: float, L0_nom_H: float,
+                             Icrest_ref_A: float, Vout_V: float, fsw_Hz: float,
+                             Rdc: float, Rac: float, T_core_C: float, f_line_Hz: float,
+                             M: int = 180) -> list:
+    """Annotate a loss table with the CYCLE-AVERAGED core loss at every operating point.
+
+    Each row already carries `Pcore_W`, which is the PEAK-POINT value (computed from the crest
+    Bac_pk) — correct for saturation, but an overestimate of the heat actually generated, because
+    the flux only reaches its crest twice per line cycle. This adds the true half-cycle average
+    from the SAME engine the design corner uses (`_half_cycle_averages`), so the report can show
+    both bases from one source instead of quoting a peak in one table and an average in another.
+
+    Writes per row:  Pcore_peak_W (= the existing Pcore_W), Pcore_avg_W, Ptotal_avg_W.
+    The legacy `Pcore_W` key is left untouched so existing readers keep their current meaning.
+    """
+    if not rows or N <= 0 or Ae_m2 <= 0 or Le_s <= 0:
+        return rows
+    # crest current per Vin comes from the L-vs-Vin sweep, anchored to the design-corner crest so
+    # the averaged series lines up with the converged design numbers (same anchor as the studios).
+    by_vin = {round(float(r.get("Vin_rms", 0) or 0)): r for r in (l_vs_vin or [])}
+    _ref = next((float(r.get("Iavg_crest", 0) or 0) for v, r in by_vin.items()
+                 if abs(v - 90) < 1.0), 0.0)
+    for row in rows:
+        vin = float(row.get("Vin_rms", 0) or 0)
+        peak = float(row.get("Pcore_W", 0) or 0)
+        row["Pcore_crest_W"] = round(peak, 4)   # value AT the line crest
+        row["Pcore_peak_W"]  = round(peak, 4)   # alias (legacy readers)
+        lv = by_vin.get(round(vin), {})
+        ic = float(lv.get("Iavg_crest", 0) or 0)
+        if Icrest_ref_A > 0 and _ref > 0 and ic > 0:
+            ic = Icrest_ref_A * (ic / _ref)
+        if vin <= 0 or ic <= 0:
+            row["Pcore_avg_W"] = None          # not computable -> never silently reuse the peak
+            row["Ptotal_avg_W"] = None
+            continue
+        try:
+            w = _half_cycle_averages(
+                material_key=material_key, core_type=core_type, N=N, Ae_m2=Ae_m2, Ve_m3=Ve_m3,
+                Le_s=Le_s, L0_nom_H=L0_nom_H, Icrest_A=ic, Vout_V=Vout_V,
+                Vin_pk_V=vin * math.sqrt(2), fsw_Hz=fsw_Hz, Rdc=Rdc, Rac=Rac,
+                T_core_C=T_core_C, f_line_Hz=f_line_Hz, M=M)
+            avg = float(w.get("Pcore_avg_W", 0) or 0)
+        except Exception:
+            row["Pcore_avg_W"] = None; row["Ptotal_avg_W"] = None
+            continue
+        row["Pcore_avg_W"]  = round(avg, 4)
+        row["Ptotal_avg_W"] = round(avg + float(row.get("Pcu_W", 0) or 0), 4)
+    return rows
+
+
 def rank_candidates(results: list[DesignResult], n_top: int = 5,
                     optimization_goal: str = 'best_performance') -> list[dict]:
     """
@@ -1355,6 +1452,20 @@ def rank_candidates(results: list[DesignResult], n_top: int = 5,
             if count >= n_top:
                 break
 
+    # Per-operating-point CYCLE-AVERAGED core loss, computed only for the candidates that are
+    # actually returned (a report can only be built from one of these). Doing it for every core in
+    # the catalog cost ~60 s per sizing run; here it is ~9 points x the handful of ranked designs.
+    for item in output:
+        r = item["result"]
+        ctx = getattr(r, "_cyc_ctx", None) or {}
+        if not ctx or not r.loss_table_100C:
+            continue
+        try:
+            r.loss_table_100C = _add_cycle_avg_core_loss(
+                r.loss_table_100C, r.L_vs_Vin_table, **ctx)
+        except Exception:
+            pass          # leave the peak-only table rather than fail the whole sizing run
+
     return output
 
 
@@ -1370,7 +1481,13 @@ def build_view_contract(result: dict, state: dict) -> dict:
     R   = result or {}
     tsi = (state or {}).get("topology_specific_inputs", {}) or {}
     fsw = float(tsi.get("recommended_frequency_hz", 70000) or 70000)
-    Vout = 393.0                                   # matches step7 design_one_core internal Vout
+    # Bus voltage, mains frequency and the design corner all come from the intake / the stored
+    # design — never hardcoded here, or the studios would drift from the report when a designer
+    # changes any of them in the GUI.
+    _app = ((state or {}).get("intake", {}) or {}).get("application", {}) or {}
+    Vout = float(R.get("Vout_V") or _app.get("output_bus_voltage_v") or 393.0)
+    f_line = float(_app.get("nominal_line_frequency_hz", 60) or 60)
+    _vin_design = float(_app.get("vin_rms_min") or 90.0)
     N        = int(R.get("N", 0) or 0)
     core_type= str(R.get("core_type", "powder")).lower()
     mat_key  = str(R.get("material_key", ""))
@@ -1393,8 +1510,8 @@ def build_view_contract(result: dict, state: dict) -> dict:
         wf = _half_cycle_averages(
             material_key=mat_key, core_type=core_type, N=N, Ae_m2=Ae_m2, Ve_m3=Ve_m3,
             Le_s=Le_s, L0_nom_H=L0_nom_H, Icrest_A=Icrest, Vout_V=Vout,
-            Vin_pk_V=90.0 * math.sqrt(2), fsw_Hz=fsw, Rdc=Rdc_100, Rac=Rac_100,
-            T_core_C=T_core, f_line_Hz=60.0, M=360, return_series=True)
+            Vin_pk_V=_vin_design * math.sqrt(2), fsw_Hz=fsw, Rdc=Rdc_100, Rac=Rac_100,
+            T_core_C=T_core, f_line_Hz=f_line, M=360, return_series=True)
         waveform = {k: wf[k] for k in
                     ("t_ms", "Vin", "D", "Iavg", "H_Oe", "Bdc", "Bac_pk", "Bmax",
                      "Ihf", "Pcore", "Pcu", "Ptot") if k in wf}
@@ -1445,7 +1562,7 @@ def build_view_contract(result: dict, state: dict) -> dict:
                 material_key=mat_key, core_type=core_type, N=N, Ae_m2=Ae_m2, Ve_m3=Ve_m3,
                 Le_s=Le_s, L0_nom_H=L0_nom_H, Icrest_A=ic, Vout_V=Vout,
                 Vin_pk_V=vin * math.sqrt(2), fsw_Hz=fsw, Rdc=Rdc_100, Rac=Rac_100,
-                T_core_C=T_core, f_line_Hz=60.0, M=180, return_series=True)
+                T_core_C=T_core, f_line_Hz=f_line, M=180, return_series=True)
             waveforms_by_vin[str(int(round(vin)))] = {k: w[k] for k in
                 ("t_ms", "Vin", "D", "Iavg", "H_Oe", "Bdc", "Bac_pk", "Bmax",
                  "Ihf", "Pcore", "Pcu", "Ptot") if k in w}
@@ -1481,6 +1598,6 @@ def build_view_contract(result: dict, state: dict) -> dict:
         scalars={k: R.get(k) for k in scalar_keys},
         waveform=waveform, waveforms_by_vin=waveforms_by_vin, sweep=sweep, L_vs_Vin=lvt,
         acceptance=acceptance,
-        meta=dict(Vout_V=Vout, fsw_Hz=fsw, vin_design=90.0,
+        meta=dict(Vout_V=Vout, fsw_Hz=fsw, vin_design=_vin_design,
                   vins=sorted(int(k) for k in waveforms_by_vin), source="step7"),
     )

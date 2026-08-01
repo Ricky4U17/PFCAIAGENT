@@ -3639,6 +3639,12 @@ def _ch4(story, state, d):
         f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,2)} T  "
         f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
         "The full nine-point flux table follows.", 4)
+    annotation(story, "BASIS — SATURATION USES THE CREST, NOT THE CYCLE AVERAGE",
+        "Saturation is an instantaneous limit, so every figure in this section is evaluated at the "
+        "LINE CREST, where the flux reaches B<sub>max</sub>. That is deliberately a different basis "
+        "from the core-LOSS figures used for temperature rise and efficiency (Section 4.6, Table 4.2, "
+        "P<sub>core</sub>,avg), which are cycle-averaged over the line half-cycle. Peak flux decides "
+        "whether the core saturates; average loss decides how hot it gets. The two must not be mixed.", 4)
 
     # Item 20 / 5 — flux density at all 9 points incl. inner-bore radial crowding.
     crowd = float(d.get("crowd_axial", 0) or 0)
@@ -3801,33 +3807,49 @@ def _ch4(story, state, d):
 
     # ── 4.6 Authoritative per-operating-point engine results ─────────────
     step_h(story, "4.6", "Per-Operating-Point Engine Results — All 9 Points", 4)
-    annotation(story, "CONCEPT",
-        "The table below holds the authoritative Step 7 engine numbers at every operating "
-        "point — cycle-averaged iGSE core loss with the F(D) duty correction and split "
-        "DC/HF copper loss — superseding the Chapter 3 first-pass peak-point estimate.", 4)
+    annotation(story, "CORE LOSS HAS TWO BASES — WHICH ONE APPLIES WHERE",
+        "The table below reports core loss on BOTH bases at every operating point, because they "
+        "answer different questions and must not be interchanged. "
+        "<b>P<sub>core</sub>,crest</b> is the loss at the LINE CREST, where the flux reaches "
+        "B<sub>max</sub> — that is the instant saturation is judged at (Section 4.3). "
+        "<b>P<sub>core</sub>,avg</b> is the cycle-averaged iGSE integral over the line half-cycle "
+        "— that is the heat the core actually generates, so it drives the TEMPERATURE RISE and the "
+        "EFFICIENCY budget (Chapter 7 Table 7.8b). "
+        "The two diverge strongly with line voltage: near low line the crest value is the larger of "
+        "the two, while at high line the duty cycle at the crest collapses toward zero, so the crest "
+        "value falls away while the cycle average stays high — the loss simply occurs away from the "
+        "crest (the double-hump of Section 4.6). Quoting the crest value as an efficiency figure at "
+        "high line would understate core loss by an order of magnitude.", 4)
     if lt100:
         Prows = []; worst = 0; wmax = -1.0
+        _has_avg = any(r.get("Pcore_avg_W") is not None for r in lt100)
         for i, r in enumerate(lt100):
-            pt = float(r.get("Ptotal_W",0) or 0)
+            # rank the worst row on the TOTAL that uses the averaged core loss when available,
+            # since that is the basis the thermal design and efficiency budget are built on
+            pt = float(r.get("Ptotal_avg_W") or r.get("Ptotal_W", 0) or 0)
             if pt > wmax:
                 wmax = pt; worst = i
+            _crest = r.get("Pcore_crest_W", r.get("Pcore_W"))
+            _avg   = r.get("Pcore_avg_W")
             Prows.append([
                 _f(r.get("Vin_rms"),0), _f(r.get("Vin_pk"),1), _f(r.get("D_crest"),4),
-                _f(r.get("Irms"),3), _f(r.get("Ihf_rms"),4), _f(r.get("Bac_pk"),5),
-                _f(r.get("Fd"),4), _f(r.get("Pcu_W"),3), _f(r.get("Pcore_W"),3),
-                _f(r.get("Ptotal_W"),3),
+                _f(r.get("Irms"),3), _f(r.get("Bac_pk"),5),
+                _f(r.get("Fd"),4), _f(r.get("Pcu_W"),3),
+                _f(_crest,3), _f(_avg,3),
+                _f(r.get("Ptotal_avg_W") or r.get("Ptotal_W"),3),
             ])
         data_table(story, "4.2",
-            "Authoritative Loss vs Input Voltage — Engine iGSE (100°C, all 9 points)",
-            "Amber row = worst-case total loss. These are the Step 7 engine values "
-            "(cycle-averaged iGSE core loss + split DC/HF copper loss), not the Chapter 3 "
-            "first-pass estimate.",
+            "Loss vs Input Voltage — Core Loss on BOTH Bases (100°C, all 9 points)",
+            "Amber row = worst-case total loss on the AVERAGED basis. P<sub>core</sub>,crest is the "
+            "line-crest value used for the saturation check; P<sub>core</sub>,avg is the "
+            "cycle-averaged iGSE value used for temperature rise and efficiency. P<sub>tot</sub> "
+            "uses the AVERAGED core loss.",
             ["V<sub>in</sub> (V)","V<sub>pk</sub> (V)","D@crest","I<sub>rms</sub> (A)",
-             "I<sub>hf,rms</sub> (A)","B<sub>ac,pk</sub> (T)","F(D)",
-             "P<sub>cu</sub> (W)","P<sub>core</sub> (W)","P<sub>tot</sub> (W)"],
+             "B<sub>ac,pk</sub> (T)","F(D)","P<sub>cu</sub> (W)",
+             "P<sub>core</sub>,crest (W)","P<sub>core</sub>,avg (W)","P<sub>tot</sub> (W)"],
             Prows,
-            col_widths=[CW*0.09,CW*0.09,CW*0.09,CW*0.10,CW*0.11,CW*0.11,CW*0.08,
-                        CW*0.10,CW*0.11,CW*0.10],
+            col_widths=[CW*0.08,CW*0.08,CW*0.09,CW*0.10,CW*0.11,CW*0.07,
+                        CW*0.10,CW*0.12,CW*0.12,CW*0.10],
             worst_rows=[worst], ch=4,
             interpretation=(
                 f"Worst-case total loss: {Prows[worst][9]} W at {Prows[worst][0]} "

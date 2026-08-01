@@ -1290,6 +1290,8 @@ def step7_run_sizing(req: _SizingReq):
         # Extract design parameters from confirmed state
         L_uH   = float(tsi.get("confirmed_L_uH_sel", tsi.get("recommended_L_uH", 240)))
         fsw_Hz = float(tsi.get("recommended_frequency_hz", 70000))
+        _f_line_sizing = float(intake.get("application", {})
+                               .get("nominal_line_frequency_hz", 60) or 60)
         Vout   = float(intake.get("application",{}).get("output_bus_voltage_v", 394))
         Pout_lo= float(intake.get("application",{}).get("output_power_w_low_line", 1700))
         Pout_hi= float(intake.get("application",{}).get("output_power_w_high_line", 3600))
@@ -1409,6 +1411,9 @@ def step7_run_sizing(req: _SizingReq):
                     FFcu_limit=FFcu_lim,
                     mounting=getattr(req, 'mounting', 'horizontal'),
                     vout_V=Vout, r_input=r_input,
+                    # mains frequency from the intake — sets the half-cycle the core-loss
+                    # average integrates over (was hardcoded 60 Hz inside the engine)
+                    f_line_Hz=_f_line_sizing,
                     J_target=float(getattr(req, 'J_target', 5.0) or 5.0),
                 )
                 all_results.append(r)
@@ -2568,7 +2573,19 @@ def doc_generate_report(req: _DocReportReq):
                 }
                 # Total inductor loss = copper (per-line, computed in Ch7) + CORE loss (Ch4), and
                 # total CAPACITOR loss (Ch5) so Table 7.8b accounts for every loss, not just resistive.
-                _extra["core_loss_w"] = _ad.get("Pcore_W")
+                # Inductor CORE loss for the Chapter-7 budget: the CYCLE-AVERAGED basis (heat
+                # actually generated), per line voltage where the engine provides it — same
+                # one-engine rule as the capacitor bank loss below. The crest-point value is the
+                # saturation reference only and must never be used for efficiency: at high line it
+                # understates core loss by an order of magnitude (D at the crest collapses).
+                _extra["core_loss_w"] = _ad.get("Pcore_avg_W") or _ad.get("Pcore_W")
+                _core_by_vac = {}
+                for _r in (_ad.get("loss_table_100C") or []):
+                    _v = _r.get("Vin_rms"); _a = _r.get("Pcore_avg_W")
+                    if _v is not None and _a is not None:
+                        _core_by_vac[round(float(_v))] = float(_a)
+                if _core_by_vac:
+                    _extra["core_loss_by_vac"] = _core_by_vac
                 # Capacitor bank loss comes from the ONE engine that owns it (Chapter 5's ESR(T)
                 # thermal model), per operating point — NOT re-derived here as I_rms^2 * ESR from a
                 # nominal ESR. The old re-derivation used the series-level ESR table and silently fell
