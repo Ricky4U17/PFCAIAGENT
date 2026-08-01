@@ -6542,3 +6542,52 @@ fetched. NOT confirmed as the designer's root cause (cannot drive a browser here
 
 VERIFIED: combined 187 pp, Ch8+9 24 pp, 0 duplicate table numbers, 0 stray "Ccm", 0 unrenderable
 entities, tsc clean, suite 172 passed / 2 skipped.
+
+## C186 — 3d (bridge rd: record corrected, note added) + 3e (one status vocabulary)
+
+### 3d — B3's premise was WRONG; option (a) per the designer
+B3 asked for `to_block` to derive bridge `rd` from the Vf-If slope. **That would double-count.**
+`Bridge.vf()` returns the CURVE value and `pfc_loss_model.py` line 210 then adds `rd*i` on top, so
+`rd` is a term ADDITIONAL to the curve - and `_vf_curve` already synthesises a sloped curve
+(measured implied slope 10.0 / 5.0 / 13.3 mOhm for Vf 1.0V@20A, 1.1V@40A, 0.95V@15A). Populating
+`rd` from that same slope would count the I2R term twice and overstate bridge loss.
+`rd = 0.0` is self-consistent and CORRECT. Paralleling also works through the curve: each device
+carries i/n and sits lower on it. The designer's original "identical 32.7 W" was `share_worst = 1.0`.
+
+THE ACTUAL DEFECT is the temperature model, and the engine already has the mechanism:
+`Bridge.vf()` supports `vf_curve_hot` and interpolates per current point (its own comment: "captures
+the NTC threshold AND the PTC series resistance, which a single vf_tco scalar cannot"). DB bridges
+never get a hot curve, so they fall back to `vf_tco = -0.002 V/degC` at EVERY current. Real Si
+tempco is negative only below the crossover (~rated current) and positive above, so a constant
+negative tempco makes a cooler device look worse - which is why B3 measured paralleling INCREASING
+loss on 54 of 70 sampled parts. Artifact, not physics.
+
+DESIGNER CHOSE OPTION (a): correct the record, warn against the double-count, document the
+limitation. No loss numbers changed. New Section 7.3 annotation "BASIS - HOW THE BRIDGE FORWARD DROP
+IS MODELLED" reads r_d and vf_tco from the LIVE block so it cannot go stale. Real fix stays a DATA
+task (vf_hot / vf_if_hot columns in the bridge workbook). Rejected: synthesising a hot curve with an
+assumed crossover - still a guess, and it would silently move every bridge loss figure.
+
+### 3e — one status vocabulary
+Canonical: **PASS / FAIL / CONDITIONAL / DATA MISSING / OPTIONAL / BLOCKED** (`STATUS_WORDS`).
+CONDITIONAL kept because it is load-bearing - it is the mechanism behind convention D0b (a gate stops
+release sign-off WITHOUT blocking part selection). REVIEW folds into it; OPEN -> DATA MISSING;
+CHECK -> CONDITIONAL; "NOT PROVEN" and "DATA MISSING / OPEN ITEM" retired.
+
+IMPLEMENTED AT THE RENDER BOUNDARY - `norm_status()` inside `data_table` and `verdict_row` - not at
+~60 emission sites. Only a cell whose WHOLE value is a legacy word is rewritten, so prose is safe.
+Verified: "gates 3, 5 OPEN" and "OPEN (path R)" pass through untouched, " CHECK " normalises,
+non-strings pass through. Ch8/9 emits zero legacy status words as cells.
+Also: legend rewritten to describe the six (and why CONDITIONAL exists); 6 prose sites that used
+"OPEN" to mean "not supplied" reworded; GUI `vColor` covers all six and still maps legacy words for
+cached payloads.
+
+REGRESSION MADE AND CAUGHT: renaming `gate_summary()`'s per-gate status from OPEN to DATA MISSING
+broke `adapter.py:367`, which counts gates by `status == "OPEN"` - `_open` would have been
+permanently empty and `gate_status` would never report it. Producer and consumer fixed together;
+verified end to end (gates 4/5/6 -> DATA MISSING, gates_open [4,5,6], gate_status DATA MISSING).
+NOT DONE, deliberately: the internal `st{}` enums in ntc_bypass_select.py still hold OPEN/CHECK.
+They render correctly through the boundary; renaming them means moving several comparisons in the
+same commit. Logged as the residual half of PENDING B4.
+
+VERIFIED: combined 187 pp (204 pp with Ch7), Ch8+9 25 pp, tsc clean, suite 172 passed / 2 skipped.

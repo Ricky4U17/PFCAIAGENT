@@ -814,7 +814,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
             i2t_ok = None; conditional = True   # DATA MISSING -> CONDITIONAL (selectable), not a hard FAIL
             reasons.append("[3] melting I2t DATA MISSING — CONDITIONAL: cannot confirm no-nuisance-blow vs startup I2t")
         elif req["i2t_min"] is None:
-            i2t_ok = None; reasons.append(f"[3] melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush OPEN)")
+            i2t_ok = None; reasons.append(f"[3] melting I2t {i2t:g} A2s (startup I2t not given -> ride-inrush DATA MISSING)")
         else:
             i2t_ok = i2t > req["i2t_min"]
             if not i2t_ok:
@@ -823,7 +823,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
                            + (f"; rides inrush peak {_inr:.0f}A" if (i2t_ok and _inr) else ""))
         # ── gate 4: breaking capacity vs available fault current ─────────────
         if req["bc_min"] is None:
-            bc_ok = None; conditional = True; reasons.append("[4] breaking-capacity check OPEN (available fault current not given)")
+            bc_ok = None; conditional = True; reasons.append("[4] breaking-capacity check DATA MISSING (available fault current not given)")
         elif bc is None:
             bc_ok = None; conditional = True; reasons.append("[4] breaking capacity DATA MISSING")
         else:
@@ -834,7 +834,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         # ── gate 5: fault coordination (MOV/GDT fail-short, stuck bypass relay) ──
         if not _co["known"]:
             coord_ok = None; conditional = True
-            reasons.append("[5] fault coordination OPEN — " + _co["note"])
+            reasons.append("[5] fault coordination DATA MISSING — " + _co["note"])
         elif bc is None:
             coord_ok = None; conditional = True
             reasons.append("[5] fault coordination CONDITIONAL — breaking capacity DATA MISSING")
@@ -847,7 +847,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         t_max = _op_temp_max_C(rec)
         if not _th["known"]:
             thermal_ok = None; conditional = True
-            reasons.append("[6] thermal implementation OPEN — " + _th["note"])
+            reasons.append("[6] thermal implementation DATA MISSING — " + _th["note"])
         elif t_max is None:
             thermal_ok = None; conditional = True
             reasons.append(f"[6] de-rated k={req['k_thermal']:.2f}; part temperature limit DATA MISSING")

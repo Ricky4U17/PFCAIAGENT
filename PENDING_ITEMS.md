@@ -106,7 +106,39 @@ so the report cannot draw B(t)/L(t)/P(t) families over the cycle for all 9 input
 re-deriving them (which would break the one-engine rule). Needs the engine to export the per-Vin time
 series into the approved payload.
 
-### B3. Bridge rectifier: DB parts have no dynamic resistance `rd`  ⭐ affects paralleling
+### B3. Bridge rectifier tempco is a scalar — `rd = 0` is NOT the defect  `CORRECTED 2026-08-01`
+
+> **PREMISE CORRECTED.** This entry previously said `to_block` should derive `rd` from the Vf–If
+> slope. **Do not do that — it double-counts.** `Bridge.vf()` returns the curve value and the model
+> then adds `rd·i` on top (`pfc_loss_model.py` line 210), so `rd` is a term ADDITIONAL to the curve.
+> `_vf_curve` already synthesises a sloped curve — measured implied slope 10.0 / 5.0 / 13.3 mΩ for
+> Vf 1.0 V@20 A, 1.1 V@40 A, 0.95 V@15 A. Populating `rd` from that same slope would count the I²R
+> term twice and overstate bridge loss. **`rd = 0.0` is self-consistent and correct.**
+>
+> Paralleling is also modelled correctly through the curve: each device carries i/n and sits lower
+> on its own curve. The designer's original "identical 32.7 W" was the `share_worst = 1.0` case
+> (see the note below), not a missing `rd`.
+
+**The actual defect** is the temperature model, and the engine already has the right mechanism for
+it. `Bridge.vf()` supports `vf_curve_hot` (a second, hot V–I curve) and interpolates per current
+point — its own comment says this "captures the NTC threshold AND the PTC series resistance, which a
+single vf_tco scalar cannot (the curves converge/cross at high current)". DB-selected bridges never
+get a hot curve, so they fall back to `vf_tco = −0.002 V/°C` applied at EVERY current. A real Si
+rectifier's tempco is negative only below its crossover (≈ rated current) and positive above it, so a
+constant negative tempco makes a cooler device look worse — which is why paralleling measured as a
+LOSS INCREASE on 54 of 70 sampled parts. That is an artifact of the scalar, not physics.
+
+- **Designer decision 2026-08-01: option (a)** — correct the record, warn against the `rd`
+  double-count, and document the limitation in the report (done: Section 7.3 "BASIS — HOW THE BRIDGE
+  FORWARD DROP IS MODELLED"). No loss numbers changed.
+- **Real fix (DATA):** add `vf_hot` / `vf_if_hot` columns to the bridge workbook and pass a hot
+  curve through `to_block`. Then the approximation disappears entirely.
+- **Rejected:** synthesising a hot curve with an assumed crossover — it is still a guess and would
+  silently move every bridge loss figure.
+
+<details><summary>Original entry (superseded — kept for the measurements)</summary>
+
+### B3-orig. Bridge rectifier: DB parts have no dynamic resistance `rd`
 `database.to_block(rec, "bridge")` sets `topology / vf_curve / vf_tco / n_parallel / rth_jc / rth_cs`
 but **never `rd`**, so every DB-selected bridge runs with the engine default `rd = 0.0`
 (`pfc_loss_model.Bridge.rd`).
@@ -138,7 +170,31 @@ for 16 — the sign is dominated by the temperature effect rather than by curren
   but it does mean the loss will not move at all when paralleling is changed.
 - Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
 
-### B4. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
+</details>
+
+### B4. Status vocabulary  `DONE 2026-08-01 (3e)` — one residual item
+Canonical set is now **PASS / FAIL / CONDITIONAL / DATA MISSING / OPTIONAL / BLOCKED**, defined in
+`doc_report_builder.STATUS_WORDS` with `norm_status()` applied at the RENDER BOUNDARY (inside
+`data_table` and `verdict_row`). Only a cell whose whole value is a legacy word is rewritten, so
+prose such as "gates 3, 5 OPEN" is never touched. Legend rewritten; "NOT PROVEN" and
+"DATA MISSING / OPEN ITEM" retired; GUI `vColor` covers all six and still maps the legacy words.
+
+**Residual — internal enums not renamed (deliberate).** `inputprotection/ntc_bypass_select.py` still
+stores `OPEN` / `CHECK` in its `st{}` status dict, and `adapter.py` compares against them
+(e.g. `any(v in ("OPEN","CHECK") for v in st.values())`). These render correctly through the
+boundary and the GUI maps them, so nothing is user-visible.
+
+Renaming them means moving producer AND consumer together — during 3e exactly that coupling bit:
+renaming `gate_summary()`'s per-gate status broke `adapter.py`'s `status == "OPEN"` counter, which
+would have left `gates_open` permanently empty. Caught and fixed, but it is the reason this half is
+a separate task rather than a tail-end of the same edit.
+
+- **Done when:** the internal dicts use `STATUS_WORDS` values and every comparison is updated in the
+  same commit, with a fuse/NTC gate round-trip test asserting `gates_open` is still populated.
+
+<details><summary>Original entry (superseded)</summary>
+
+### B4-orig. Status vocabulary is not consistent across chapters  *(parked by the designer, 2026-07-30)*
 The MOV review asks for exactly six status words: **PASS / FAIL / DATA MISSING / REVIEW / OPTIONAL /
 BLOCKED**. Today two different sets are in use:
 
@@ -158,6 +214,8 @@ it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, 
 - **Done when:** one vocabulary is defined in a single module-level constant set, every chapter emits
   only those words, and the GUI badge mapping covers all of them.
 - Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
+
+</details>
 
 ### B5. Audit remaining bare `onClick={fn}` handlers when adding new ones  *(FIXED for today's sites — C174)*
 Not an open defect: all current sites are clean. This entry exists because the **failure mode is easy to
@@ -269,7 +327,13 @@ Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
 ### C2. Report download fails intermittently — PARTIAL FIX APPLIED, needs designer confirmation
 **Symptom (designer, 2026-08-01):** happens on *all* report screens, *intermittently* — sometimes the
 PDF downloads, sometimes nothing arrives. Spinner completes normally. **No red error banner.**
-Browser console "says many things" — **console text not yet captured; this is the missing evidence.**
+**Console captured** (`specs/GUI Report downloading error.docx`, 2026-08-01) — and it is
+*negative* evidence that supports the diagnosis. Four messages, ALL benign: React DevTools notice;
+an iframe sandbox warning plus `[inject] N=40 stacks=2 Pcore=2.132W L0=179.2uH` from the simulation
+agent iframe; a CSS `@import` ordering warning; and two accessibility warnings (form fields lacking
+id/name/label). **There is NO fetch failure, NO HTTP error and NO exception.** If the request had
+failed, the client would have thrown and every screen renders its error state — so the failure is
+after the PDF arrives, in the save path. That is exactly where the two mechanisms below sit.
 
 **Ruled out:**
 - Not a timeout. `/mode-b/documentation/generate-report` returns in ~111 s (measured), HTTP 200,

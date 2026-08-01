@@ -527,6 +527,10 @@ def data_table(story, ref, title, intro, headers, rows_data,
                col_widths, interpretation="", worst_rows=None, ch=1):
     S  = _S(ch); cc = CH_COLORS[ch]
     worst_rows = worst_rows or []
+    # 3e — one status vocabulary. Normalising HERE (the single point every chapter's tables pass
+    # through) rather than at ~60 emission sites means prose is untouched: only a cell whose whole
+    # value is a legacy status word is rewritten.
+    rows_data = [[norm_status(c) for c in row] for row in rows_data]
     # Title + intro + table are kept as one atomic block so the table never
     # splits across a page boundary — if it can't fit, the whole block
     # (heading included) restarts cleanly at the top of the next page.
@@ -566,7 +570,33 @@ def fig_caption(story, text, ch=1):
     story.append(Spacer(1, 3*mm))
 
 
+# ── 3e: ONE status vocabulary across Chapters 7-10 ────────────────────────────
+# The MOV review asked for a single set of status words; two were in use (Ch8 emitted
+# PASS/OPEN/CHECK/BLOCKED/CONDITIONAL, Ch9 added FAIL/DATA MISSING/REVIEW/OPTIONAL plus strays).
+# CONDITIONAL is kept because it is load-bearing: it is the mechanism behind convention D0b, where
+# a gate stops release sign-off WITHOUT blocking part selection. REVIEW folds into it.
+STATUS_WORDS = ("PASS", "FAIL", "CONDITIONAL", "DATA MISSING", "OPTIONAL", "BLOCKED")
+
+# Legacy word -> canonical. Applied ONLY on an exact, whole-cell match, so prose that merely
+# contains one of these words (e.g. "gates 3, 5 OPEN" or "OPEN (path R)") is never rewritten.
+_STATUS_MAP = {
+    "OPEN":       "DATA MISSING",   # an absent datasheet/site value, not a judgement
+    "CHECK":      "CONDITIONAL",    # a known risk needing design judgement
+    "REVIEW":     "CONDITIONAL",
+    "NOT PROVEN": "CONDITIONAL",
+}
+
+
+def norm_status(v):
+    """Canonicalise a status cell. Non-strings and anything that is not an exact legacy
+    status word are returned untouched."""
+    if not isinstance(v, str):
+        return v
+    return _STATUS_MAP.get(v.strip(), v)
+
+
 def verdict_row(story, label, value, vtext, ch=1):
+    vtext = norm_status(vtext)
     S = _S(ch)
     ok  = "pass" in vtext.lower() or "ok" in vtext.lower()
     vc  = PASS_GRN if ok else FAIL_RED

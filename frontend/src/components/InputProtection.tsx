@@ -161,8 +161,19 @@ export const InputProtection: React.FC<Props> = ({
   const selectMov = (pn: string) => { const o = { ...movOpts, selected_part: pn }; setMovOpts(o); calcMov(o) }
   // verdict → badge colour (PASS green / CONDITIONAL amber / FAIL red)
   // OPEN/CHECK are "not yet proven", not failures — they must not read as red (see the fuse six-gate table)
-  const vColor = (v?: string) => v === 'PASS' ? 'green' : v === 'CONDITIONAL' ? 'amber'
-    : (v === 'OPEN' || v === 'CHECK') ? 'gray' : 'red'
+  // 3e — one status vocabulary across Chapters 7-10: PASS / FAIL / CONDITIONAL / DATA MISSING /
+  // OPTIONAL / BLOCKED. The legacy words are still mapped because the backend may return them
+  // from a cached or older payload; they colour the same as the word they normalise to.
+  const vColor = (v?: string) => {
+    switch ((v ?? '').trim()) {
+      case 'PASS':                                    return 'green'
+      case 'CONDITIONAL': case 'CHECK': case 'REVIEW': return 'amber'
+      case 'DATA MISSING': case 'OPEN':               return 'gray'
+      case 'OPTIONAL':                                return 'gray'
+      case 'BLOCKED': case 'FAIL':                    return 'red'
+      default:                                        return 'red'
+    }
+  }
   // Effective architecture = recommendation unless the designer overrode it.
   const useGdt = movArch === 'movgdt' || (movArch === 'auto' && !!gdtRes?.required.required)
 

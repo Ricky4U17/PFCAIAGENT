@@ -364,7 +364,7 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
     selected = (next((c for c in candidates if (c.get("part_number") or "") == sel_pn), None) if sel_pn
                 else next((c for c in candidates if c.get("verdict") in ("PASS", "CONDITIONAL")), None))
     gates = fz.gate_summary(fs, req, selected)
-    _open = [g for g in gates if g["status"] == "OPEN"]
+    _open = [g for g in gates if g["status"] == "DATA MISSING"]
     _fail = [g for g in gates if g["status"] == "FAIL"]
     _cond = [g for g in gates if g["status"] == "CONDITIONAL"]
     return _native({
@@ -372,7 +372,7 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
         "requirements": req, "candidates": candidates, "selected": selected,
         "selected_i2t": (selected or {}).get("melting_i2t") if selected else None,
         "gates": gates,
-        "gate_status": ("FAIL" if _fail else ("OPEN" if _open else ("CONDITIONAL" if _cond else "PASS"))),
+        "gate_status": ("FAIL" if _fail else ("DATA MISSING" if _open else ("CONDITIONAL" if _cond else "PASS"))),
         "gates_open": [g["n"] for g in _open], "gates_conditional": [g["n"] for g in _cond],
         "fast_blow_only": all((c.get("response_time") or "").lower().startswith("fast") for c in candidates) if candidates else None,
     })

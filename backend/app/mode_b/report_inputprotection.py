@@ -696,7 +696,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
               (_f(wc['i2t_warm'],1) if wc.get('i2t_warm') else "OPEN"),
               _vs(wc.get('i2t_warm'), must_ride=True)],
              ["3", "Fault — stuck / bypassed relay", "fuse SHOULD clear this fault",
-              (_f(_i2t_bp,1) if _i2t_bp else "OPEN (startup-path R)"),
+              (_f(_i2t_bp,1) if _i2t_bp else "DATA MISSING (startup-path R)"),
               _vs(_i2t_bp, must_ride=False)],
              ["4", "Fault — MOV/GDT fail-short", "fuse must interrupt safely (Ch 9, gate 5 of Section 8.11)",
               "see breaking capacity",
@@ -737,7 +737,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
             return ("&#10003;" if v else ("&#10007;" if v is False else "IFSM TBD"))
         data_table(story, "8.12", "Startup-Path Stress — Cold / Hot-Restart / Bypass",
             f"Peak current and I²t per case; bridge IFSM = "
-            + (f"{_f(wc['bridge_ifsm_a'],0)} A" if wc.get("bridge_ifsm_a") else "OPEN (enter bridge datasheet IFSM)") + ".",
+            + (f"{_f(wc['bridge_ifsm_a'],0)} A" if wc.get("bridge_ifsm_a") else "DATA MISSING (bridge datasheet I<sub>FSM</sub>)") + ".",
             ["Case", "Inrush (A)", "I²t (A²s)", "vs bridge I<sub>FSM</sub>"],
             [[c["case"], (_f(c["i_A"],0) if c.get("i_A") is not None else "OPEN"),
               (_f(c["i2t"],1) if c.get("i2t") is not None else "OPEN"), _ifsm_cell(c)] for c in _sc]
@@ -772,8 +772,12 @@ def build_ntc_story(story, design, cap=None, opts=None):
         def _mrg(val):
             return f"{100.0*(_tgt-val)/_tgt:+.1f}%" if val else "&#8212;"
         annotation(story, "STATUS LEGEND",
-            "<b>PASS</b> — closed calculation against a confirmed limit. <b>CHECK</b> — known risk needing "
-            "design judgment. <b>OPEN</b> — missing datasheet/layout value. <b>BLOCKED</b> — prevents release. "
+            "One vocabulary is used across Chapters 7&#8211;10. <b>PASS</b> — closed calculation against a "
+            "confirmed limit. <b>FAIL</b> — the limit is exceeded. <b>CONDITIONAL</b> — a known risk needing "
+            "design judgement, or a value that is estimated rather than datasheet-backed; it gates release "
+            "sign-off but never blocks part selection. <b>DATA MISSING</b> — a datasheet, layout or site "
+            "value that has not been supplied. <b>OPTIONAL</b> — not required for this design. "
+            "<b>BLOCKED</b> — prevents release. "
             f"Overall NTC status: <b>{_overall}</b>.", CH)
         data_table(story, "8.14a", "Table A — Final NTC Design Margin Summary",
             "Each check with its release status (PASS / CHECK / OPEN / BLOCKED).",
@@ -800,7 +804,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
               fuse.get("gate_status", "OPEN")],
              ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Section 7.3.1"),
               _stat.get("bridge_surge", "OPEN")],
-             ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "OPEN (path R)"),
+             ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "DATA MISSING (path R)"),
               _stat.get("bypass_stuck", "OPEN")],
              ["Phase-angle sweep", "worst at 90&#176;", "included", _stat.get("phase_angle", "PASS")]],
             col_widths=[CW*0.26, CW*0.24, CW*0.30, CW*0.20], ch=CH)
@@ -1229,7 +1233,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
     if fz.get("ok"):
         annotation(story, "COORDINATION OK", fz.get("note", ""), CH)
     else:
-        annotation(story, "DATA MISSING / OPEN ITEM",
+        annotation(story, "DATA MISSING",
             fz.get("note", "Provide the available fault current and the upstream fuse I&#178;t to prove "
                    "the fail-short path is cleared safely."), CH)
 

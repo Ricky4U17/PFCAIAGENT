@@ -511,6 +511,34 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             f"{max(r.get('P_BRIDGE_bottom_bd', 0) for r in rows):.2f} W. A lower hot "
             "R<sub>DS(on)</sub> restores full FET conduction.", CH)
 
+    # 3d option (a) — a reviewer looking at the block will see rd = 0 and read it as a missing
+    # parameter. It is not: the resistive term lives in the V-I curve. Say so on the page, and be
+    # explicit about the one real limitation (the scalar tempco) so it is not mistaken for an error.
+    _rd_br = float(getattr(_br, "rd", 0.0) or 0.0)
+    _tco_br = float(getattr(_br, "vf_tco", 0.0) or 0.0)
+    _hot_br = getattr(_br, "vf_curve_hot", None) is not None
+    annotation(story, "BASIS — HOW THE BRIDGE FORWARD DROP IS MODELLED",
+        "The conduction loss is <b>V<sub>f</sub>(i)&#183;i</b> with V<sub>f</sub>(i) read from the "
+        "part's forward V-I curve, plus a separate series term <b>r<sub>d</sub>&#183;i&#178;</b>. "
+        + (f"For this part <b>r<sub>d</sub> = {_rd_br*1e3:.1f} m&#8486;</b>. " if _rd_br else
+           "<b>For this part r<sub>d</sub> = 0, and that is correct — not a missing parameter.</b> "
+           "The resistive behaviour is already carried by the slope of the V-I curve itself "
+           "(typically 5&#8211;15 m&#8486; in the region above the knee), so the two must not both "
+           "be populated from the same datasheet slope: doing so would count the I&#178;R term "
+           "twice and overstate bridge loss. ")
+        + "Because the curve carries the slope, <b>paralleling is modelled correctly</b>: each "
+        "device carries i/n and therefore sits lower on its own curve, which is where the benefit "
+        "of a second package comes from."
+        + ("" if _hot_br else
+           " <b>Known limitation.</b> With no hot datasheet curve available for this part, the "
+           f"temperature dependence falls back to a single scalar (V<sub>f</sub> tempco = "
+           f"{_tco_br:+.4f} V/&#176;C) applied at ALL currents. A real silicon rectifier's tempco "
+           "is negative only below its crossover current (near the rated value) and turns positive "
+           "above it. A constant negative tempco therefore makes a COOLER device look slightly "
+           "worse, so the benefit of paralleling is understated here and can even invert on some "
+           "parts. Supplying a hot V-I curve removes the approximation entirely &#8212; the engine "
+           "interpolates between the cold and hot curves per current point."), CH)
+
     # ── surge-withstand verification (ties Chapter 7 to Chapter 8's inrush limit) ──
     _ifsm = bridge.get("ifsm_A"); _i2t = bridge.get("i2t_A2s")
     _inr = extra.get("inrush_pk_A"); _tau = extra.get("inrush_tau_ms")

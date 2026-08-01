@@ -100,7 +100,7 @@ def thermal_derating(fs: FuseSpec) -> dict:
             "k_thermal": max(fs.ambient_derate, 1e-3),
             "t_ambient_C": None, "rise_C": fs.fuseholder_rise_C, "t_body_C": None, "dT_C": None,
             "slope_pct_per_C": None,
-            "note": ("maximum ambient at the fuse not given — thermal de-rating OPEN"
+            "note": ("maximum ambient at the fuse not given — thermal de-rating DATA MISSING"
                      + ("" if fs.ambient_derate == 1.0 else f"; explicit de-rate {fs.ambient_derate:g} applied")),
         }
     slope = fs.derate_per_C
@@ -140,7 +140,7 @@ def fault_coordination(fs: FuseSpec) -> dict:
         srcs.append(("MOV/GDT fail-short (bolted line fault)", float(fs.available_fault_current_A)))
     if not srcs:
         return {"known": False, "i_A": None, "source": None,
-                "note": "no MOV/GDT fail-short or stuck-relay fault current given — fault coordination OPEN"}
+                "note": "no MOV/GDT fail-short or stuck-relay fault current given — fault coordination DATA MISSING"}
     source, i_a = max(srcs, key=lambda s: s[1])
     return {"known": True, "i_A": i_a, "source": source,
             "note": f"governing fault path: {source} at {i_a:g} A"}
@@ -202,7 +202,7 @@ def gate_summary(fs: FuseSpec, req: dict, part: dict = None) -> list:
     lf_pct = req["load_factor"] * 100.0
 
     def st(ok, cond=False):
-        return "OPEN" if ok is None else ("CONDITIONAL" if (ok and cond) else ("PASS" if ok else "FAIL"))
+        return "DATA MISSING" if ok is None else ("CONDITIONAL" if (ok and cond) else ("PASS" if ok else "FAIL"))
 
     rows = []
     # 1 voltage
