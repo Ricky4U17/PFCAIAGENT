@@ -14,7 +14,7 @@ passed.
 `OPEN`, `CONDITIONAL` or `DATA MISSING` — never as a silent PASS, and never as something that blocks
 the designer from selecting a part.
 
-Last updated 2026-07-30 (after C172).
+Last updated 2026-07-31 (after C174).
 
 ---
 
@@ -162,12 +162,35 @@ a designer report and a full trace to find the first time.
   its `ESR_basis` (display) — never the `or` chain.
 - Left deliberately out of scope in C172 to keep that diff tight. Raised 2026-07-30.
 
-### B6. EMI Phase D
+### B6. Audit remaining bare `onClick={fn}` handlers when adding new ones  *(FIXED for today's sites — C174)*
+Not an open defect: all current sites are clean. This entry exists because the **failure mode is easy to
+reintroduce and expensive to diagnose**, so the rule should be visible.
+
+**What happened (C174):** `onClick={calcNtc}` passes the handler bare, so React calls it with the click
+event. Where the handler's first parameter is an *optional override* — `calcNtc(override?: Opts)` — the
+SyntheticEvent silently became that override and went into the request body, producing
+`Converting circular structure to JSON … HTMLButtonElement … FiberNode … stateNode`. Three buttons were
+affected (Re-size NTC, Re-size surge, Re-select fuse) and the designer's knob values were never reaching
+the backend on any of them.
+
+**Why `tsc` never saw it:** `Btn` declared `onClick?: () => void`, and TypeScript accepts a function whose
+only parameter is optional as a zero-arg function. The type asserted "no arguments" while React passed one.
+
+**The rule:** any handler that takes parameters must be wrapped — `onClick={() => fn()}` — never passed
+bare. `Btn.onClick` is now typed `(e: React.MouseEvent<HTMLButtonElement>) => void`, so `strictFunctionTypes`
+rejects the bare form at compile time (verified: reverting one site reproduces TS2322). Zero-argument
+handlers (`onBack`, `onRestart`, …) still assign fine and need no wrapper.
+
+- All ~25 other bare `onClick={fn}` sites in the frontend were swept at C174 and take no parameters.
+- `client.ts::assertSerialisable` now rejects a DOM element / DOM event / React synthetic event in a
+  request body with a message naming the field and the likely cause, instead of a circular-structure trace.
+
+### B7. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B7. EMI filter — Rev J methodology
+### B8. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
@@ -237,6 +260,7 @@ workflow path only. Found during C117.
 | Ch9 clamp result had no engineering decision beside it | C170 |
 | Ch5 vs Ch7 capacitor loss disagreed (different ESR, re-derived not carried) | C171 |
 | `verify_configuration` returned no ESR when the curated series table lacked the series | C172 |
+| Re-size/Re-select buttons sent React's click event as their options (circular-JSON error) | C174 |
 | Backend test suite red (33 failures) | C107–C120, now 172 passed / 2 skipped |
 | Printed TOC covered only Ch1–5 | `_rebuild_printed_toc` |
 | MOV vendor workbook not wired | C149 |

@@ -263,7 +263,7 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Pulse V_ref" unit="V" value={ntcOpts.vref_pulse} onChange={v => setN('vref_pulse', v)} />
               <Knob label="Bypass delay" unit="×τ" value={ntcOpts.tau_multiple} onChange={v => setN('tau_multiple', v)} />
               <Knob label="Loop R (line+EMI+ESR)" unit="Ω" value={ntcOpts.r_emi} onChange={v => setN('r_emi', v)} />
-              <Btn variant="primary" disabled={ntcBusy} onClick={calcNtc}>{ntcBusy ? '⏳ Sizing…' : '↻ Re-size NTC'}</Btn>
+              <Btn variant="primary" disabled={ntcBusy} onClick={() => calcNtc()}>{ntcBusy ? '⏳ Sizing…' : '↻ Re-size NTC'}</Btn>
             </div>
             {/* Worst-case / coordination inputs (datasheet + layout). Blank ⇒ shown as an open item. */}
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
@@ -457,7 +457,7 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Device V_ds" unit="V" value={movOpts.device_vds} onChange={v => setM('device_vds', v)} />
               <Knob label="Device abs-max" unit="V" value={movOpts.device_absmax} onChange={v => setM('device_absmax', v)} />
               <Knob label="I_max margin" unit="×" value={movOpts.imax_margin} onChange={v => setM('imax_margin', v)} />
-              <Btn variant="primary" disabled={movBusy} onClick={calcMov}>{movBusy ? '⏳ Sizing…' : '↻ Re-size surge'}</Btn>
+              <Btn variant="primary" disabled={movBusy} onClick={() => calcMov()}>{movBusy ? '⏳ Sizing…' : '↻ Re-size surge'}</Btn>
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
               <Knob label="Lead inductance" unit="nH" value={movOpts.lead_inductance_nH} onChange={v => setM('lead_inductance_nH', v)} />
@@ -691,7 +691,7 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Load factor" unit="× rating" value={fuseOpts.fuse_load_factor} onChange={v => setF('fuse_load_factor', v)} />
               <Knob label="I²t margin" unit="×startup" value={fuseOpts.fuse_i2t_margin} onChange={v => setF('fuse_i2t_margin', v)} />
               <Knob label="Ambient derate" unit="×" value={fuseOpts.fuse_ambient_derate} onChange={v => setF('fuse_ambient_derate', v)} />
-              <Btn variant="primary" disabled={fuseBusy} onClick={calcFuse}>{fuseBusy ? '⏳ Selecting…' : '↻ Re-select fuse'}</Btn>
+              <Btn variant="primary" disabled={fuseBusy} onClick={() => calcFuse()}>{fuseBusy ? '⏳ Selecting…' : '↻ Re-select fuse'}</Btn>
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
               <Knob label="Max ambient at fuse" unit="°C" value={fuseOpts.fuse_ambient_C} onChange={v => setF('fuse_ambient_C', v)} />

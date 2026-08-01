@@ -60,7 +60,14 @@ export const Sel:React.FC<{value:string|number;onChange:(v:string)=>void;options
 )
 
 type BV='primary'|'ghost'|'success'
-export const Btn:React.FC<{children:React.ReactNode;onClick?:()=>void;variant?:BV;disabled?:boolean;style?:React.CSSProperties}> =
+// onClick is typed with the event React ACTUALLY passes, not `() => void`. The old zero-arg type was
+// a lie the compiler could not see through: a handler whose only parameter is optional — e.g.
+// `calcNtc(override?: Opts)` — is assignable to `() => void`, so `onClick={calcNtc}` type-checked while
+// React handed the SyntheticEvent in as `override`. That event then went into a request body and blew
+// up with "Converting circular structure to JSON" (button → __reactFiber → FiberNode → stateNode).
+// Declaring the parameter makes strictFunctionTypes reject the bare reference at compile time; pass
+// `onClick={() => calcNtc()}` instead. Zero-arg handlers (onBack, onRestart, …) still assign fine.
+export const Btn:React.FC<{children:React.ReactNode;onClick?:(e:React.MouseEvent<HTMLButtonElement>)=>void;variant?:BV;disabled?:boolean;style?:React.CSSProperties}> =
   ({children,onClick,variant='primary',disabled,style}) => {
   const vs:Record<BV,React.CSSProperties>={
     primary:{background:C.accent,color:'#fff'},

@@ -6033,3 +6033,42 @@ Frontend typecheck clean.
 NOTE (separate, still open as PENDING_ITEMS B3): even with n_parallel working, the benefit is understated
 because to_block never sets `rd` for DB bridges — paralleling shows ~1 W instead of ~4-5 W, and for 54 of
 70 sampled parts it makes worst-case loss slightly WORSE (cooler dies -> higher Vf via vf_tco = -0.002).
+
+## C174 — 2026-07-31 — Re-size/Re-select buttons sent React's click event as their options
+
+Designer: "I cannot click Re-size NTC" and "Re-select fuse gives ⚠ Converting circular structure to JSON
+--> HTMLButtonElement | property '__reactFiber$…' -> FiberNode --- property 'stateNode' closes the circle".
+ONE defect, not two.
+
+ROOT CAUSE: three handlers were passed BARE to onClick, so React called them with the click event, which
+landed in their optional override parameter:
+    <Btn onClick={calcNtc}>            ->  calcNtc(SyntheticEvent)
+    const calcNtc = async (optsOverride?: Record<string,string>) => {
+        const opts = optsOverride ?? ntcOpts        // opts IS the event
+        await inputProtectionNtc({ design, cap, opts })   // JSON.stringify -> circular
+The event carries target -> the button -> __reactFiber -> FiberNode -> stateNode -> back to the button,
+which is the designer's error string verbatim. calcFuse spread the event (`{...ntcOpts, ...fo}`) so the
+same properties landed inline; calcMov's Object.entries walk did the same. Reproduced both shapes in node.
+CONSEQUENCE beyond the error: the designer's knob values were NEVER reaching the backend on those three
+buttons. The first render was unaffected — the mount effect calls calcNtc() with no argument — which is
+why the page looked correct until a re-run button was pressed.
+Affected: Re-size NTC (line 266), Re-size surge (460), Re-select fuse (694), all in InputProtection.tsx.
+Swept the other ~25 bare `onClick={fn}` sites in the frontend: ALL take zero parameters, all safe.
+
+WHY tsc NEVER CAUGHT IT: Btn declared `onClick?: () => void`. TypeScript accepts a function whose only
+parameter is OPTIONAL as a zero-arg function, so `onClick={calcNtc}` type-checked while React passed an
+argument the type said could not exist.
+
+FIX (4 parts):
+1. `onClick={() => calcNtc()}` at all three sites.
+2. Btn.onClick retyped `(e: React.MouseEvent<HTMLButtonElement>) => void`. PROVEN to catch the regression:
+   reverting one site to the bare form now fails with TS2322 "Type '(optsOverride?: Record<string,string>)
+   => Promise<void>' is not assignable to type '(e: MouseEvent<HTMLButtonElement…>) => void'". Zero-arg
+   handlers (onBack, onRestart, …) still assign fine, so no other call site changed.
+3. client.ts `assertSerialisable()` runs before every POST and rejects a DOM element / DOM event / React
+   synthetic event in the body, naming the field and the likely cause, instead of a circular-structure
+   trace. Verified: catches both the assigned-event and spread-event shapes; no false positives on real
+   payloads, arrays or nulls.
+4. PENDING_ITEMS B6 records the rule (wrap any handler that takes parameters) so it stays visible.
+
+Frontend typecheck clean. Backend untouched — no suite impact.

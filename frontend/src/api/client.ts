@@ -5,7 +5,38 @@ async function get<T>(path: string): Promise<T> {
   if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t}`) }
   return res.json() as Promise<T>
 }
+// A DOM node or React SyntheticEvent that leaks into a request body serialises to
+// "Converting circular structure to JSON …" — a stack trace that says nothing about which control
+// sent it. This happened for real: three buttons passed a handler bare to onClick, so React's click
+// event arrived as the handler's optional `opts` argument and went straight into the payload.
+// Fail early and name the offender instead.
+function assertSerialisable(path: string, body: unknown): void {
+  const bad = (v: unknown): string | null => {
+    if (v === null || typeof v !== 'object') return null
+    if (typeof Element !== 'undefined' && v instanceof Element) return 'a DOM element'
+    if (typeof Event !== 'undefined' && v instanceof Event) return 'a DOM event'
+    const o = v as Record<string, unknown>
+    // React SyntheticEvent: not an Event instance, but always carries these two
+    if ('nativeEvent' in o && '_reactName' in o) return 'a React synthetic event'
+    return null
+  }
+  const seen = (body ?? {}) as Record<string, unknown>
+  for (const [k, v] of Object.entries(seen)) {
+    const why = bad(v)
+    if (why) throw new Error(`${path}: field "${k}" is ${why}, not data. This usually means a click ` +
+      `handler was passed bare to onClick (use onClick={() => fn()}), so React's event became its argument.`)
+    if (v && typeof v === 'object') {
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+        const why2 = bad(v2)
+        if (why2) throw new Error(`${path}: field "${k}.${k2}" is ${why2}, not data. This usually means ` +
+          `a click handler was passed bare to onClick (use onClick={() => fn()}).`)
+      }
+    }
+  }
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
+  assertSerialisable(path, body)
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
