@@ -17,6 +17,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
 import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, inputProtectionFuse, docGenerateReport, inrushSchematicUrl,
          type NtcResult, type MovResult, type GdtResult, type FuseResult, type CatalogRow, type NtcCandidate } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 import type { CapacitorResult } from './Step15Capacitor'
 
 interface Props {
@@ -218,10 +219,7 @@ export const InputProtection: React.FC<Props> = ({
         ...(approvedSemiconductor ? { semiconductor: approvedSemiconductor } : {}),
         input_protection: ipReportPayload(),
       })
-      const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = `PFC_Report_${(confirmedState as any)?.project_id ?? 'design'}_incl_InputProtection.pdf`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'incl_InputProtection'))
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 

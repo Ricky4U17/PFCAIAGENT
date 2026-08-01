@@ -1636,7 +1636,7 @@ def _sec_14_8_design_review(story, D, S):
         f'{Ku*100:.1f}%' if Ku > 0 else '—',
         '≤ 75% (practical winding limit)',
         Ku <= 0.75 if Ku > 0 else True))
-    rows.append(_row('Saturation margin',
+    rows.append(_row('Saturation margin (mean path, gate basis)',
         f'{sat_pct:.1f}%',
         '≥ 15%',
         sat_pct >= 15.0))
@@ -1681,7 +1681,7 @@ def _sec_14_8_design_review(story, D, S):
 
         f'<b>Flux:</b> B_ac,pk = {D["Bac_pk_T"]*1000:.2f} mT at 90 Vac crest, '
         f'B_max ≈ {D.get("Bmax_FL_T",0)*1000:.1f} mT, '
-        f'saturation margin {sat_pct:.0f}%.',
+        f'saturation margin {sat_pct:.0f}% (mean-path basis).',
 
         f'<b>Losses @ 100°C:</b> P_core ≈ {Pcore_ref:.3f} W (half-cycle avg, iGSE), '
         f'P_cu ≈ {D.get("Pcu_100C_W",0):.3f} W, '
@@ -1811,7 +1811,7 @@ def _sec_14_9_2_winding_views(story, approved_design, S):
             "Ring views of the wound core rendered from the approved design's field data: "
             "flux-density crowding B(r) &prop; 1/r (left) and the radial temperature field "
             "from the interior hotspot to the cooled surface (right), overlaid with the exact "
-            "per-layer winding turns (&otimes; bore / &#9679; outer). Opening the Simulation "
+            "per-layer winding turns (&otimes; bore / &#8226; outer). Opening the Simulation "
             "page before generating the report replaces this render with the live GUI captures "
             "(including the 3D view).", S['body']))
         story.append(Spacer(1, 2*mm))

@@ -17,6 +17,7 @@ import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { C, Btn } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { docGenerateReport } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 import { PowerPlantReview } from './PowerPlantReview'
 import { ComponentsSelect, type ComponentSelections } from './ComponentsSelect'
 import { CoreReview } from './CoreReview'
@@ -201,12 +202,7 @@ export const ControlDesign: React.FC<Props> = ({
                            : {},
         step16_params: { ...step16_params, js_design_state: jsState, s2: s2sel ?? undefined },
       })
-      const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href     = url
-      a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_16.pdf`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'Steps1_16'))
       setReportGen(true)   // enable "Approve & go to Semiconductors"
     } catch(e) {
       setRptError((e as Error).message ?? String(e))

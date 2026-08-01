@@ -916,8 +916,18 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
             <b style={{color:C.teal}}>Sizing basis.</b> The worst-case input ripple ratio for this
             design occurs at <b>{Number(tsi.governing_vac).toFixed(0)} Vac /
             {' '}{Number(tsi.governing_pout ?? 0).toFixed(0)} W</b> — not at the minimum input
-            voltage shown on the earlier pages — and requires <b>L<sub>φ</sub> = {L_uH} µH</b> to
-            meet the selected ripple ratio there. All candidates below are sized to that target.
+            voltage shown on the earlier pages — and requires{' '}
+            {/* Item 29: candidates are sized against the per-point REQUIREMENT L_req, not against
+                the designer's confirmed L_target. Quoting L_target here (as this note used to)
+                claimed a sizing basis the engine does not use, and disagreed with the governing
+                -point figure computed from L_req further down this same screen. */}
+            <b>L<sub>φ,req</sub> = {(() => {
+              const wr = ((result?.L_vs_Vin_table ?? []) as any[]).filter(r => r.L_req_uH != null)
+              return wr.length ? Math.round(wr.reduce((a, b) => (b.L_req_uH > a.L_req_uH ? b : a)).L_req_uH)
+                               : L_uH
+            })()} µH</b> to
+            meet the selected ripple ratio there. All candidates below are sized to that
+            requirement (the confirmed target L<sub>φ</sub> = {L_uH} µH is the starting estimate).
           </div>
         ) : null}
         <div style={{display:'grid',gridTemplateColumns:'360px 1fr',gap:16,alignItems:'start'}}>
@@ -1040,8 +1050,18 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   ['Installed height ('+( result.mounting??mountDir)+')', result.installed_height_mm?.toFixed(1)+' mm'],
                   ['Wound HT (horizontal)',  result.wound_HT_actual_mm?.toFixed(1)+' mm'],
                   ['Wound OD (vertical)',    result.wound_OD_actual_mm?.toFixed(1)+' mm'],
-                  ['Bmax T',                 result.Bmax_FL_T?.toFixed(4)],
-                  ['Bsat margin',            result.sat_margin_pct?.toFixed(0)+'%'],
+                  ['Bmax T (mean path)',     result.Bmax_FL_T?.toFixed(4)],
+                  ['Bmax T (inner bore)',    result.Bmax_inner_FL_T?.toFixed(4)],
+                  // Headline saturation margin = inner-bore headroom, the ONE convention the
+                  // report uses (Section 4.3 / 3.7.2). The mean-path figure is kept alongside
+                  // because it is what the engine's >=15% accept/reject gate runs on — showing
+                  // only one of them is what made report and GUI look contradictory.
+                  // One decimal, matching the report's derivation in Section 4.3 exactly —
+                  // rounding to integer here made the GUI read 63% against the report's 62.7%.
+                  ['Bsat margin (inner bore)',
+                     (result.sat_margin_inner_pct ?? result.sat_margin_pct)?.toFixed(1)+'%'],
+                  ['Bsat margin (mean path, gate basis)',
+                     result.sat_margin_pct?.toFixed(1)+'%'],
                 ].map(([k,v])=>(
                   <div key={k} className="kv">
                     <span style={{color:C.muted}}>{k}</span>
@@ -1065,13 +1085,19 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   // there; largest at the governing corner, wherever the spec puts it).
                   // Comparing every row against the single worst-case target made the
                   // delivered value at light-bias points look disconnected from §3.1.1.
+                  // Margin must be computed from the UNROUNDED values and formatted exactly as
+                  // report Table 3.4.4 does — rounding first turned the binding corner's +1.5%
+                  // into +2% and made GUI and report disagree at the one point that matters.
                   ...((result.L_vs_Vin_table ?? []) as any[]).map((r:any) => {
-                    const Lnom = Math.round(r.L_full_nom_uH ?? 0)
-                    const req  = r.L_req_uH != null ? Math.round(r.L_req_uH) : L_uH
+                    const Lnom = Number(r.L_full_nom_uH ?? 0)
+                    const req  = r.L_req_uH != null ? Number(r.L_req_uH) : Number(L_uH)
                     const diff = Lnom - req
-                    const pct  = req > 0 ? ((Lnom / req - 1) * 100).toFixed(0) : '—'
+                    const mg   = req > 0 ? (Lnom / req - 1) * 100 : null
+                    const pct  = mg == null ? '—'
+                               : (Math.abs(mg) >= 100 ? mg.toFixed(0) : mg.toFixed(1))
                     const col  = diff >= 0 ? 'L_full@'+r.Vin_rms+'Vac ✓' : 'L_full@'+r.Vin_rms+'Vac'
-                    const val  = `${Lnom} µH ≥ req ${req} µH  (${diff >= 0 ? '+' : ''}${pct}%)`
+                    const val  = `${Lnom.toFixed(1)} µH ≥ req ${req.toFixed(1)} µH  `
+                               + `(${mg != null && mg >= 0 ? '+' : ''}${pct}%)`
                     return [col, val] as [string, string]
                   }),
                   ['L variation (no-load→full-load)', `−${result.L_variation_pct ?? '—'}%`],

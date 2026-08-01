@@ -84,7 +84,7 @@ def build_step9(story, data: dict):
     # ── 9.2 ───────────────────────────────────────────────────────────────────
     sub_h(story, "6.9.2", "Design Targets and Constraint Analysis", CH)
     body(story, "Three requirements must be satisfied simultaneously:", CH)
-    data_table(story, "6.9.2", "BIBO Design Requirements",
+    data_table(story, "6.9.2a", "BIBO Design Requirements",
         "The binding constraints that drive the divider design.",
         ["Requirement", "Target", "Drives Design?"],
         [[f"PFC starts at or before {_bi:.0f} Vac ({_sm-_bi:.0f} V margin below {_sm:.0f} Vac spec minimum)",
@@ -212,7 +212,7 @@ def build_step9(story, data: dict):
 
     # ── interim component summary (doc: "Scorecard and Verdict") ──────────────
     body(story, "<b>Scorecard and Verdict</b>", CH)
-    data_table(story, "6.9.5b", "BIBO Component Summary",
+    data_table(story, "6.9.5", "BIBO Component Summary",
         "Selected divider and filter components.",
         ["Component", "Value", "Function"],
         [["RB1 / RB2", "560 kΩ / 560 kΩ", "HV-rated series sense"],

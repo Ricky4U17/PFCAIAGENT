@@ -6,6 +6,7 @@ import {
   step15HvcapFilterOptions, step15HvcapFilterCaps, step15HvcapCapTable,
   step15CapLifetime, step15CapTempSweep,
 } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 export interface ThermalRow {
@@ -275,14 +276,7 @@ export const Step15Capacitor: React.FC<Props> = ({
           ...(lifetime         ? { lifetime }                         : {}),
         },
       })
-      const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url
-      a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_15.pdf`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'Steps1_15'))
     } catch(e) {
       const msg = (e as Error).message ?? String(e)
       console.error('Report generation failed', e)

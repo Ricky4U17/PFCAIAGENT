@@ -47,6 +47,155 @@ TM = BM = 18 * mm
 CW = PAGE_W - LM - RM
 
 
+def _material_supplier(material_key: str) -> str:
+    """Supplier name for a material key, straight from the magnetics database.
+
+    Item 26: the sizing payload carries `supplier` as an empty string, so the report printed
+    "Supplier: ." with nothing between. The database DOES know the vendor (every material JSON
+    lives under data/magnetic_materials/<supplier>/ and carries a `supplier` field), so resolve
+    it here rather than showing a dash for information we actually hold.
+
+    Defensive: any lookup failure returns "" so the caller falls through to its own default —
+    a missing supplier name must never cost the reader a chapter.
+    """
+    if not material_key or material_key == "—":
+        return ""
+    try:
+        from app.magnetics.db import get_db
+        return str(get_db().get_material(material_key).get("supplier") or "")
+    except Exception:
+        return ""
+
+
+_ACRONYMS = {"ccm": "CCM", "crcm": "CrCM", "dcm": "DCM", "pfc": "PFC", "llc": "LLC",
+             "psfb": "PSFB", "ttp": "TTP", "ac": "AC", "dc": "DC", "emi": "EMI",
+             "hf": "HF", "lf": "LF", "rms": "RMS", "igbt": "IGBT", "sic": "SiC", "gan": "GaN"}
+
+
+def _pretty_key(raw) -> str:
+    """Human label for a snake_case enum, with acronyms kept in their proper case.
+
+    `str.title()` alone turns "interleaved_boost_ccm" into "Interleaved Boost Ccm" — the
+    designer flagged that lowercase "Ccm" on both the cover and the Chapter 1 table.
+    """
+    if not raw:
+        return "—"
+    return " ".join(_ACRONYMS.get(w.lower(), w.capitalize())
+                    for w in str(raw).replace("_", " ").split())
+
+
+def _thermal_provenance(state) -> dict:
+    """Where the temperature-rise model comes from (item 28).
+
+    Copilot's three questions, answered from the engine rather than from prose: how ΔT is
+    computed from loss, what thermal resistance or empirical curve is used, and whether forced
+    air is assumed.
+
+    The last one matters most. The toroid path uses an empirical NATURAL-CONVECTION surface-area
+    correlation with no airflow term at all, while the intake spec commonly says "fan cooled".
+    Those two facts sit in different chapters and have never been reconciled on the page. The
+    model is the conservative one (natural convection predicts a higher rise than forced air), so
+    the answer is to SAY so, not to change it.
+    """
+    try:
+        from app.mode_b import step7_magnetic_calc as _s7
+        sC   = getattr(_s7, "_THERM_sC", None)
+        sW   = getattr(_s7, "_THERM_sW", None)
+        cpl  = getattr(_s7, "_THERM_couple", None)
+        hot  = getattr(_s7, "_THERM_hotspot", None)
+    except Exception:
+        sC = sW = cpl = hot = None
+    cooling_raw = ""
+    try:
+        cooling_raw = str(((state or {}).get("intake", {}) or {})
+                          .get("thermal", {}).get("cooling_type", "") or "")
+    except Exception:
+        pass
+    return {
+        "cooling_spec": cooling_raw.replace("_", " ").title(),
+        "forced_air":   bool(cooling_raw and "fan" in cooling_raw.lower()
+                             or "forced" in cooling_raw.lower()),
+        "sC": sC, "sW": sW, "couple": cpl, "hotspot": hot,
+    }
+
+
+def _material_provenance(material_key: str) -> dict:
+    """Where every material number in Chapter 3 came from (item 27).
+
+    Answers the five questions a reviewer asks of any material model: who supplied it, which
+    revision, where the loss curve came from, where the DC-bias curve came from, and at what
+    temperature each is valid. Everything is read from the material record — nothing is invented;
+    anything genuinely absent comes back as "" so the caller can print DATA MISSING rather than a
+    plausible-looking guess.
+
+    Powder and ferrite store these under different keys (powder nests the source under `basic`,
+    which is also why the loader logs "Missing required field: data_source" for every powder
+    material — a schema mismatch, not absent data), so both layouts are handled here.
+    """
+    out = {k: "" for k in ("supplier", "grade", "data_source", "data_quality", "loss_source",
+                           "loss_note", "loss_temp_basis", "bias_design_model", "bias_catalog_source",
+                           "bias_catalog_use", "bsat_temp_basis", "validation")}
+    if not material_key or material_key == "—":
+        return out
+    try:
+        from app.magnetics.db import get_db
+        m = get_db().get_material(material_key)
+    except Exception:
+        return out
+
+    basic = m.get("basic") or {}
+    out["supplier"] = str(m.get("supplier") or "")
+    out["grade"]    = str(m.get("grade") or m.get("material_line") or material_key)
+    out["data_source"]  = str(m.get("data_source") or basic.get("data_source") or "")
+    out["data_quality"] = str(m.get("data_quality") or "")
+
+    is_powder = (m.get("type") == "powder")
+    s25 = m.get("steinmetz_25C") or {}
+    out["loss_source"] = str(s25.get("catalog_source") or s25.get("note") or "")
+    out["loss_note"]   = str((m.get("core_loss_surface_25C") or {}).get("note") or "")
+    if m.get("core_loss_surface_100C"):
+        # Ferrite: two measured surfaces, interpolated by get_core_loss().
+        out["loss_temp_basis"] = ("25 °C and 100 °C loss surfaces, interpolated linearly to the "
+                                  "converged core temperature")
+    elif is_powder:
+        # Powder: ONE curve, and that is correct — powder core loss is only weakly temperature
+        # dependent, unlike ferrite. Say so, so no reader assumes a correction that is not applied.
+        out["loss_temp_basis"] = ("single catalog loss curve, applied at all temperatures — powder "
+                                  "core loss is only weakly temperature dependent (unlike ferrite), "
+                                  "so no temperature correction is applied")
+    if is_powder:
+        pts = [(t, m.get(k)) for t, k in ((25, "Bsat_25C_T"), (100, "Bsat_100C_T"),
+                                          (150, "Bsat_150C_T")) if m.get(k)]
+        if len(pts) >= 2:
+            out["bsat_temp_basis"] = (", ".join(f"{v:.3f} T at {t} °C" for t, v in pts)
+                                      + " — interpolated to the converged core temperature")
+        elif m.get("Bsat_Tcoeff"):
+            out["bsat_temp_basis"] = (f"{basic.get('Bsat_T')} T at 25 °C with temperature "
+                                      f"coefficient {m.get('Bsat_Tcoeff')}/°C")
+        else:
+            out["bsat_temp_basis"] = (f"{basic.get('Bsat_T')} T, single value — this material "
+                                      "carries no temperature data")
+        out["bias_design_model"] = ("tabulated dc_bias_rolloff curve k(H), interpolated by the "
+                                    "sizing engine at each operating point")
+        dbc = m.get("dc_bias_catalog") or {}
+        out["bias_catalog_source"] = str(dbc.get("source") or "")
+        out["bias_catalog_use"]    = str(dbc.get("use") or "")
+    else:
+        bv = m.get("Bsat_vs_T") or {}
+        if bv.get("T_C"):
+            out["bsat_temp_basis"] = (f"measured Bsat vs temperature ({min(bv['T_C'])}–"
+                                      f"{max(bv['T_C'])} °C), interpolated to the core temperature")
+        out["bias_design_model"] = "ferrite — gapped design, no powder DC-bias rolloff model"
+
+    va = m.get("validation_anchor") or {}
+    if va:
+        _exp, _tol = va.get("expected_Pcore_W"), va.get("tolerance_pct")
+        out["validation"] = (f"{va.get('description','')} — {va.get('reference_doc','')}"
+                             + (f"; expected P_core {_exp} W" if _exp else "")
+                             + (f", tolerance ±{_tol}%" if _tol else ""))
+    return out
+
+
 def fhz(v) -> str:
     """Frequency as text with just enough precision to be faithful to the designer's input.
 
@@ -174,7 +323,7 @@ def _S(ch: int = 1):
         "body": s("body", fontName="Helvetica", fontSize=9.5,
                   textColor=BLACK, leading=14, spaceAfter=3, alignment=TA_JUSTIFY),
         "bl":   s("bl",   fontName="Helvetica", fontSize=9.5,
-                  textColor=BLACK, leading=14, spaceAfter=2),
+                  textColor=BLACK, leading=14, spaceAfter=2, alignment=TA_JUSTIFY),
         # Centered serif equation style — matches Word doc pale-blue equation boxes
         "eq":   s("eq",   fontName="Times-Roman", fontSize=9.5,
                   textColor=colors.HexColor("#1E3A5F"), leading=14,
@@ -200,7 +349,7 @@ def _S(ch: int = 1):
         "ann_l":s("ann_l",fontName="Helvetica-Bold", fontSize=8.5,
                   textColor=WHITE, leading=12),
         "sm":   s("sm",   fontName="Helvetica", fontSize=8,
-                  textColor=MUTED, leading=11),
+                  textColor=MUTED, leading=11, alignment=TA_JUSTIFY),
         "cover_t": s("ct", fontName="Helvetica-Bold", fontSize=26,
                      textColor=CH_COLORS[1], leading=32, alignment=TA_CENTER),
         "cover_s": s("cs", fontName="Helvetica", fontSize=12,
@@ -916,7 +1065,7 @@ def _ops(vout, pout_lo, pout_hi, n_ph, fsw, vin_min=VAC_LIST[0], vin_max=VAC_LIS
     # Per-phase RMS through the SAME step2 -> step4 -> step5 chain that produces
     # Table 3.2.2b / Table 3.4.1's "accurate" Iφ,rms — replaces the old sinusoidal
     # "PFC approximation" (ipk_l/nph/√2 · √(π/2) · 0.98) that diverged from the
-    # rigorous figures by ~20% and was the root of the Table 3.1.1 vs 3.2.x mismatch.
+    # rigorous figures by ~20% and was the root of the Table 3.1.1a vs 3.2.x mismatch.
     ops_design, _ = build_design_ops_table(vin_min, vin_max, pout_lo, pout_hi, vout, fsw, r_input,
                                            eta_target, pf_target)
     rows = []
@@ -984,21 +1133,23 @@ def _ch1(story, state):
         "What must this design achieve?",
         ["Input / output electrical requirements — voltage, power, ripple, hold-up",
          "Efficiency and power factor reference table — nine operating points "
-         "(estimated based on available design data) used in every later chapter",
+         "used in every later chapter",
          "Compliance and standards — EMI, harmonics, surge, EFT, voltage dips",
          "Thermal and mechanical constraints"])
 
     # ── 1.1 Project Identification ────────────────────────────────────────────
     step_h(story, "1.1", "Project Identification", 1)
-    pid = state.get("project_id","—")
+    pid   = state.get("project_id", "—")
+    pname = (state.get("project_name") or "").strip()
     data_table(story, "1.1.1", "Project Header",
         "Project identification data locked at design start.",
         ["Field", "Value"],
         [
+            *([["Project name", pname]] if pname else []),
             ["Project ID",       pid],
             ["Tool version",     "PFC Design Suite v2.4"],
             ["Application class",app_cls],
-            ["Topology",         (ds.selected_topology or "—").replace("_"," ").title()],
+            ["Topology",         _pretty_key(ds.selected_topology)],
             ["Controller mode",  (ds.selected_controller_mode or "—").replace("_"," ").upper()],
         ],
         col_widths=[CW*0.38, CW*0.62], ch=1)
@@ -1237,7 +1388,7 @@ def _ch2(story, state):
         col_widths=[CW*0.22, CW*0.05, CW*0.04, CW*0.08, CW*0.07, CW*0.09, CW*0.06, CW*0.39],
         worst_rows=[sel_idx], ch=2,
         interpretation=(
-            f"<b>{topo.replace('_',' ').title()}</b> selected. "
+            f"<b>{_pretty_key(topo)}</b> selected. "
             "Advantages vs Single Boost: (1) 2-phase interleaving reduces effective input "
             "current ripple — up to 100% cancellation at D=0.5; (2) each inductor carries "
             "half the total current → smaller core per phase; (3) effective ripple frequency "
@@ -1245,7 +1396,7 @@ def _ch2(story, state):
             "complexity add cost not justified at this power/cost target."
         ))
     annotation(story, "DECISION",
-        f"Topology confirmed: <b>{topo.replace('_',' ').title()}</b>  |  "
+        f"Topology confirmed: <b>{_pretty_key(topo)}</b>  |  "
         f"Mode: <b>{mode.upper()}</b>  |  Phases: <b>{n_ph}</b>. "
         "This selection is locked. All subsequent calculations use this topology.", 2)
 
@@ -1313,8 +1464,11 @@ def _ch2(story, state):
         worst_rows=[{"analog":0,"digital":1,"digital_arm":2}.get(ctrl, 1)], ch=2)
 
     sub_h(story, "2.3.2", "Selected controller and key features", 2)
-    ctrl_ic = {"analog":"FAN9672 / UCC28070 / NCP1631",
-               "digital":"TMS320F280x / dsPIC33",
+    # 7.6 — the selected row must name the ONE part the design uses; listing alternates here
+    # made the selection ambiguous (Copilot: "lock selected controller as FAN9672 only").
+    # The alternates remain in the Section 2.3.1 comparison table as candidate examples.
+    ctrl_ic = {"analog":"FAN9672",
+               "digital":"TMS320F280x",
                "digital_arm":"UCD3138"}.get(ctrl,"FAN9672")
     if reasons:
         for r in reasons:
@@ -1436,7 +1590,7 @@ def _ch2(story, state):
         "downstream chapter (magnetics, capacitor, control) builds upon.", 2)
 
     sub_h(story, "2.7.1", "Final design specification summary", 2)
-    data_table(story, "2.7.1", "Confirmed Design Specification",
+    data_table(story, "2.7.1a", "Confirmed Design Specification",
         "Design targets confirmed and locked — referenced by all downstream chapters.",
         ["Parameter", "Value"],
         [
@@ -1463,10 +1617,9 @@ def _ch2(story, state):
     n2 = len(Vin_rms)
 
     body(story, "Operating points — efficiency and power factor reproduced from the "
-                "Section 1.2.4 reference table (estimated based on available design data):", 2)
+                "Section 1.2.4 reference table:", 2)
     data_table(story, "2.7.1b", "Nine Confirmed Operating Points",
-        "Carried forward verbatim from Table 1.2.2 (Section 1.2.4) — estimated based "
-        "on available design data.",
+        "Carried forward verbatim from Table 1.2.2 (Section 1.2.4).",
         ["V<sub>in,rms</sub> (Vac)", "P<sub>out</sub> (W)", "η", "PF"],
         [[f"{int(Vin_rms[i])}", f"{int(Pout[i])}", f"{eta[i]:.3f}", f"{PF[i]:.4f}"] for i in range(n2)],
         col_widths=[CW*0.25]*4, ch=2)
@@ -1526,8 +1679,7 @@ def _ch2(story, state):
         "Figure 2.1 — D<sub>pk</sub> falls monotonically as V<sub>in,rms</sub> rises: "
         f"from {Dpk[0]:.4f} at {int(Vin_rms[0])} V<sub>rms</sub> to "
         f"{Dpk[-1]:.4f} at {int(Vin_rms[-1])} V<sub>rms</sub>. "
-        f"The {vin_min:.0f} V<sub>rms</sub> corner has the highest duty cycle and dominates "
-        "magnetics sizing.", 2)
+        f"The {vin_min:.0f} V<sub>rms</sub> corner has the highest duty cycle.", 2)
 
     sub_h(story, "2.7.3", "Ripple Cancellation Factor K(D) at Crest", 2)
     annotation(story, "THEORY",
@@ -1772,7 +1924,11 @@ def _ch3(story, state, d):
     stacks   = int(d.get("stacks", 1))
     mat_key  = d.get("material_key","—")
     core_t   = d.get("core_type","powder")
-    supplier = d.get("supplier","—")
+    # Item 26 — the report printed a literally blank "Supplier: ." because the sizing payload
+    # carries the key with an EMPTY STRING, and dict.get() only returns its default when the key
+    # is ABSENT. Fall back through `or` (catches "" and None), then ask the material database,
+    # which does know the supplier — so the report names the real vendor instead of a dash.
+    supplier = d.get("supplier") or _material_supplier(mat_key) or "—"
     OD_mm    = float(d.get("OD_mm", 0))
     ID_mm    = float(d.get("ID_mm", 0))
     HT_mm    = float(d.get("HT_mm", 0))
@@ -1812,7 +1968,14 @@ def _ch3(story, state, d):
     Bac_pk   = float(d.get("Bac_pk_T", 0))
     Bmax     = float(d.get("Bmax_FL_T", 0))
     Bsat     = float(d.get("Bsat_at_Tcore", 0))
-    sat_m    = float(d.get("sat_margin_pct", 0))
+    # Item 24 — ONE flux-margin convention across the whole document: headroom percent,
+    #   margin = (Bsat - B_used) / Bsat x 100,
+    # evaluated at the INNER BORE (B_inner = Bmax x crowd), which is the worst point in a
+    # toroid. sat_m (mean-path Bmax) is retained only to state the basis of the engine's
+    # >=15% accept/reject gate, which still runs on Bmax — see PENDING_ITEMS (gate basis).
+    sat_m       = float(d.get("sat_margin_pct", 0))
+    Bmax_inner  = float(d.get("Bmax_inner_FL_T", 0))
+    sat_m_inner = float(d.get("sat_margin_inner_pct", 0)) or sat_m
     L0_nom   = float(d.get("L0_nom_uH", 0)) or round(N**2*AL_nom*1e-9*1e6,1)
     L0_min   = float(d.get("L0_min_uH", 0)) or round(N**2*AL_min*1e-9*1e6,1)
     L0_max   = float(d.get("L0_max_uH", 0)) or round(N**2*AL_max*1e-9*1e6,1)
@@ -1924,10 +2087,10 @@ def _ch3(story, state, d):
         "although the volt-second product V<sub>in,pk</sub>·D peaks at low line, the "
         f"{n_ph}-phase interleaving cancellation K(D) is weakest at the low duty of the "
         "high-line points, so more of the per-phase ripple reaches the input there. "
-        "Table 3.1.1a evaluates the requirement at every point; Steps 1–6 below then "
+        "Table 3.1.1b evaluates the requirement at every point; Steps 1–6 below then "
         "walk the governing row in full.", 3)
 
-    # Table 3.1.1a — the requirement at ALL nine points (report notes #5): shows
+    # Table 3.1.1b — the requirement at ALL nine points (report notes #5): shows
     # WHY the governing corner is what it is before the step-by-step derivation.
     _Lpp9 = _s4g.get("L_per_point_uH") or []
     if len(_Lpp9) == len(_s2g["Vin_rms"]):
@@ -1939,7 +2102,7 @@ def _ch3(story, state, d):
                 f"{float(_s2g['KDpk'][i]):.4f}", f"{float(_s2g['Iin_pk'][i]):.3f}",
                 f"{r_input * float(_s2g['Iin_pk'][i]):.3f}", f"{float(_Lpp9[i]):.1f}",
             ])
-        data_table(story, "3.1.1a",
+        data_table(story, "3.1.1b",
             "Per-Point Inductance Requirement — All Nine Operating Points",
             f"For each point: duty and cancellation K(D) at the crest, allowed input ripple "
             f"ΔI<sub>in,allow</sub> = r·I<sub>in,pk</sub> (r = {r_input*100:.1f}%), and the "
@@ -2014,7 +2177,7 @@ def _ch3(story, state, d):
             f"{float(_s2g['Vin_pk'][i]):.3f}", f"{float(_s2g['Dpk'][i]):.4f}",
             f"{_iinr_i:.4f}", f"{_iinr_i/n_ph:.4f}", f"{_iinp_i/(2*n_ph):.4f}",
         ])
-    data_table(story, "3.1.1", "Per-Phase Operating Currents — All 9 Input Voltages",
+    data_table(story, "3.1.1a", "Per-Phase Operating Currents — All 9 Input Voltages",
         f"Amber row = {vin_min:.0f} V<sub>rms</sub> maximum-current corner. Every row uses its own "
         "point's η/PF from Table 1.2.2 — same canonical chain as Tables 2.7.2/2.8.2. "
         "I<sub>φ,LF</sub> = I<sub>in,rms</sub>/N<sub>ph</sub>; "
@@ -2175,13 +2338,54 @@ def _ch3(story, state, d):
         f"For {mat_key}: loss model validated at the reference operating point in Section 3.6.2.", 3)
 
     sub_h(story, "3.2.5", "Permeability vs DC bias model", 3)
+    _prov = _material_provenance(mat_key)
     body(story,
         "The inductance retention model k<sub>bias</sub>(H) is extracted from the "
         "material database. H (oersteds) = N × I<sub>φ,avg@crest</sub> / "
         "(L<sub>e</sub> × 79.577). "
         "k<sub>bias</sub> = µ(H) / µ<sub>0</sub> is the fractional permeability at the "
         "operating ampere-turn level. This model is used in Section 3.4.3 to compute "
-        "L<sub>full</sub> at each operating voltage.", 3)
+        "L<sub>full</sub> at each operating voltage."
+        + (f" The model actually used for the design calculation is the "
+           f"<b>{_prov['bias_design_model']}</b>." if _prov["bias_design_model"] else ""), 3)
+    # Item 27 — the material files carry TWO DC-bias models and only one of them is a design
+    # model. Citing the catalog fit next to the design numbers would credit the wrong source.
+    if _prov["bias_catalog_use"] and "ranking" in _prov["bias_catalog_use"]:
+        annotation(story, "PITFALL",
+            "The material record also carries a closed-form catalog DC-bias fit "
+            "(µ% = 1/(a + b·H<sup>c</sup>)"
+            + (f", from {_prov['bias_catalog_source']}" if _prov["bias_catalog_source"] else "")
+            + "). That fit is flagged <b>ranking-only</b> in the database and is <b>NOT</b> what "
+            "sizes this inductor — it is a small-signal differential permeability, useful for "
+            "comparing materials against each other but not for computing a delivered "
+            "inductance. Every k<sub>bias</sub> value in Section 3.4.3 and Table 3.4.4 comes from "
+            "the tabulated rolloff curve instead. The two are quoted separately in the "
+            "provenance table below so neither is mistaken for the other.", 3)
+
+    # ── 3.2.6 Material data provenance (item 27) ─────────────────────────────
+    sub_h(story, "3.2.6", "Material data provenance", 3)
+    _DM = "<i>DATA MISSING</i>"
+    _prov_rows = [
+        ["Supplier",                 _prov["supplier"]    or _DM],
+        ["Material / grade",         _prov["grade"]       or _DM],
+        ["Data source (revision)",   _prov["data_source"] or _DM],
+        ["Data quality flag",        (_prov["data_quality"] or "").replace("_", " ") or _DM],
+        ["Loss-curve source",        _prov["loss_source"] or _DM],
+        ["Loss-curve temperature basis", _prov["loss_temp_basis"] or _DM],
+        ["B<sub>sat</sub> temperature basis", _prov["bsat_temp_basis"] or _DM],
+        ["DC-bias model used for design",     _prov["bias_design_model"] or _DM],
+        ["DC-bias catalog fit (ranking only)",
+         (_prov["bias_catalog_source"] + " — not used for design")
+         if _prov["bias_catalog_source"] else _DM],
+        ["Loss-model validation anchor",      _prov["validation"] or _DM],
+    ]
+    data_table(story, "3.2.6", "Material Data Provenance — Where Every Material Number Comes From",
+        "Traceability for the material model behind this design: supplier, catalog revision and "
+        "page, the temperature each curve is valid at, and which of the two DC-bias models is the "
+        "design model. Rows marked DATA MISSING are genuinely absent from the material record and "
+        "are not substituted with defaults.",
+        ["Item", "Source / basis"], _prov_rows,
+        col_widths=[CW*0.30, CW*0.70], ch=3)
 
     # ════════════════════════════════════════════════════════
     # 3.3 CORE GEOMETRY SELECTION
@@ -2189,8 +2393,28 @@ def _ch3(story, state, d):
     step_h(story, "3.3", "Core Geometry Selection", 3)
 
     sub_h(story, "3.3.1", "Sizing engine inputs", 3)
+    # Item 29 — THREE inductance bases exist and two of them were both printed as "ΔI_L,pp":
+    #   1. L_target      — the designer's confirmed value (this table). The modern sizing path
+    #                      uses it only as the initial turns estimate and a legacy fallback.
+    #   2. L_req(V)      — the per-point requirement from the crest ripple ratio. This is what
+    #                      the turns loop actually converges against (Section 3.4.3).
+    #   3. L_as-built(V) — what the built part delivers (Sections 3.5/3.6, Chapter 4, Ch6/Ch7).
+    # This table used to derive a ripple from basis 1, which nothing else in the report uses, and
+    # print it under the same symbol Section 3.5 uses for basis 3. Report the governing REQUIREMENT
+    # instead, and label the basis explicitly wherever a ripple current is quoted.
+    _lvt31 = [r for r in (d.get("L_vs_Vin_table") or []) if r.get("L_req_uH") is not None]
+    _gov31 = max(_lvt31, key=lambda r: float(r["L_req_uH"])) if _lvt31 else None
+    _Lreq_max = float(_gov31["L_req_uH"]) if _gov31 else 0.0
+    _gov_vac  = float(_gov31["Vin_rms"]) if _gov31 else 0.0
+    _dIL_req  = (vin_pk_90 * D_90 / (_Lreq_max * 1e-6 * fsw)) if _Lreq_max else 0.0
+
     data_table(story, "3.3.1", "Sizing Engine Inputs — Reference Operating Point",
-        "Values passed to the sizing engine.",
+        "Values passed to the sizing engine. Note the engine converges the turns count against "
+        "the per-point requirement L<sub>req</sub>(V) — <b>not</b> against L<sub>φ,target</sub>, "
+        "which serves as the starting estimate only (Section 3.4.3). Any ripple current quoted "
+        "here is therefore on the REQUIREMENT basis; the as-built ripple the finished part "
+        "actually draws is in Section 3.5 and differs whenever the delivered inductance differs "
+        "from the requirement.",
         ["Parameter", "Symbol", "Value", "Unit"],
         [
             ["DC bus voltage",             "V<sub>out</sub>",       f"{vout:.0f}",       "V<sub>dc</sub>"],
@@ -2200,14 +2424,46 @@ def _ch3(story, state, d):
                                                                      f"{vin_pk_90:.4f}",  "V"],
             ["Duty cycle at crest",        "D<sub>pk</sub> = 1−V<sub>in,pk</sub>/V<sub>out</sub>",
                                                                      f"{D_90:.4f}",       "—"],
-            ["Target inductance",          "L<sub>φ,target</sub>",  f"{L_tgt:.0f}",      "µH"],
+            ["Target inductance (starting estimate only)",
+                                           "L<sub>φ,target</sub>",  f"{L_tgt:.0f}",      "µH"],
+            ["Required inductance at the governing point",
+                                           "L<sub>req,max</sub>",
+             (f"{_Lreq_max:.1f}" if _Lreq_max else "—"),
+             (f"µH @ {_gov_vac:.0f} V<sub>ac</sub>" if _Lreq_max else "µH")],
             ["Per-phase avg current@crest","I<sub>φ,avg@crest</sub> = I<sub>pk,line</sub>/2",
                                                                      f"{iavg_90:.4f}",    "A"],
             ["Per-phase RMS current",      "I<sub>φ,rms</sub>",     f"{Iph_rms:.4f}",    "A"],
-            ["Ripple current pk-pk@crest", "ΔI<sub>L,pp</sub>",
-                                                                     f"{vin_pk_90*D_90/(L_tgt*1e-6*fsw):.4f}", "A"],
+            ["Ripple pk-pk@crest — REQUIREMENT basis",
+                                           "ΔI<sub>L,pp</sub> @ L<sub>req,max</sub>",
+             (f"{_dIL_req:.4f}" if _dIL_req else "—"), "A"],
         ],
         col_widths=[CW*0.36,CW*0.24,CW*0.18,CW*0.22], ch=3)
+
+    # Item 29, Option C — advisory divergence check between the designer's confirmed inductance
+    # and what the selected crest ripple ratio actually demands. REPORTING ONLY: it never filters
+    # candidates and never changes a verdict (project convention D0b — gates release, not
+    # selection). It exists because the two inputs can silently disagree, and only the designer
+    # can say which one is wrong.
+    if _Lreq_max and L_tgt:
+        _div = (L_tgt - _Lreq_max) / _Lreq_max
+        if abs(_div) > 0.10:
+            annotation(story, "PITFALL",
+                f"<b>Design-intent check — L<sub>φ,target</sub> and the crest ripple ratio are "
+                f"asking for different inductances.</b> The confirmed target is "
+                f"<b>{L_tgt:.0f} µH</b>, but the selected ripple ratio only requires "
+                f"<b>{_Lreq_max:.1f} µH</b> at its governing point ({_gov_vac:.0f} V<sub>ac</sub>) "
+                f"— a difference of <b>{_div*100:+.0f}%</b>. "
+                + ("The target is well ABOVE the requirement, so the ripple ratio is not the "
+                   "binding constraint the target implies: the part will be sized by the "
+                   "requirement curve and will run at the selected ripple ratio, not at the "
+                   "lower ripple the target suggests. "
+                   if _div > 0 else
+                   "The target is BELOW the requirement, so meeting the target alone would NOT "
+                   "hold the selected ripple ratio at the governing corner. ")
+                + "This is advisory only — it does not affect core selection, turns, or any "
+                "verdict in this report, all of which are driven by L<sub>req</sub>. It is "
+                "flagged so the inconsistency between the two designer inputs is visible and can "
+                "be resolved deliberately rather than by accident.", 3)
 
     sub_h(story, "3.3.2", "Top candidates table — all metrics side by side", 3)
     cands = d.get("all_candidates",[])
@@ -2454,6 +2710,36 @@ def _ch3(story, state, d):
            if _b43 is not None and all(r.get("meets_req") for r in _lvt43)
            else ". See the L-vs-V<sub>in</sub> table below."), 3)
 
+    # Item 22 — A_L-min basis is REPORTED, not selected on. Designer decision: turns stay on
+    # nominal A_L (the inductance calculation is correct as-is); this note quantifies what the
+    # worst-case tolerance corner would cost, so the reader can judge it. Everything below is
+    # derived from the live binding row and the part's own A_L tolerance — nothing hardcoded.
+    if _b43 is not None and AL_nom:
+        _k_altol   = AL_min / AL_nom                       # = 1 - tol/100
+        _Lb_nom    = float(_b43["L_full_nom_uH"])
+        _Lb_req    = float(_b43["L_req_uH"])
+        _Lb_almin  = _Lb_nom * _k_altol
+        _N_almin   = math.ceil(N / math.sqrt(_k_altol)) if _k_altol > 0 else N
+        _meets_min = _Lb_almin >= _Lb_req
+        annotation(story, "INSIGHT",
+            f"<b>Basis note — N is sized on NOMINAL A<sub>L</sub>, not A<sub>L,min</sub>.</b> "
+            f"The convergence above uses A<sub>L,nom</sub> = {AL_nom:.0f} nH/T², so the "
+            f"inductance it guarantees is the <i>expected</i> value, not the worst-case one. "
+            f"At the binding point ({float(_b43['Vin_rms']):.0f} V<sub>ac</sub>) a core landing "
+            f"on the low edge of the ±{AL_tol:.0f}% A<sub>L</sub> tolerance would give "
+            f"L = {_Lb_nom:.1f} × {_k_altol:.2f} = <b>{_Lb_almin:.1f} µH</b> against "
+            f"L<sub>req</sub> = {_Lb_req:.1f} µH"
+            + (" — still meeting the requirement, so the nominal basis is safe across the "
+               "whole tolerance band." if _meets_min else
+               f" — a shortfall of {_Lb_req - _Lb_almin:.1f} µH. Sizing on A<sub>L,min</sub> "
+               f"instead would require N = {_N_almin} turns (vs {N}), raising copper loss and "
+               f"window fill. The consequence of NOT doing so is bounded and benign: a low-A"
+               f"<sub>L</sub> core runs a proportionally larger ripple ratio at this corner, "
+               f"which the loss and ΔT tables below already cover through the A<sub>L</sub> "
+               f"band. This is a deliberate design choice, not an oversight.")
+            + f" The full band (L<sub>0,min</sub>/nom/max) is in Section 3.4.4 and the "
+              f"loss-vs-band sweep in Section 3.6.4.", 3)
+
     # Convergence trace — the engine's ACTUAL iterations (report notes #6: show the
     # steps). Each row is one candidate N with the as-built nominal inductance at the
     # tightest (binding) operating point versus that point's requirement.
@@ -2508,7 +2794,7 @@ def _ch3(story, state, d):
                f"Every point stays above 95% of the {L_tgt:.0f} µH target."), 3)
         _lr, _wi = [], lvt.index(wrow)
         for r in lvt:
-            _lr.append([
+            _row = [
                 f"{float(r.get('Vin_rms',0)):.0f}",
                 f"{float(r.get('Iavg_crest',0)):.3f}",
                 f"{float(r.get('H_Oe',0)):.1f}",
@@ -2516,21 +2802,41 @@ def _ch3(story, state, d):
                 f"{float(r.get('L_full_min_uH',0)):.1f}",
                 f"{float(r.get('L_full_nom_uH',0)):.1f}",
                 f"{float(r.get('L_full_max_uH',0)):.1f}",
-            ] + ([f"{float(r.get('L_req_uH',0)):.1f}",
-                  "PASS" if r.get("meets_req") else "FAIL"] if _has_req3 else []))
+            ]
+            if _has_req3:
+                # Item 23 — margin percent, nominal basis, denominator L_req (designer's chosen
+                # convention): how much more inductance the design delivers than the point needs.
+                # It is small by construction — Section 3.4.3 sizes N with zero added margin, so
+                # the binding point lands just above the line and the residue is integer-turns
+                # quantization. Printing it stops a bare "PASS" from reading as comfortable
+                # headroom. The A_L-tolerance consequence is quantified in the Section 3.4.3 note.
+                _lreq3 = float(r.get("L_req_uH", 0))
+                _lnom3 = float(r.get("L_full_nom_uH", 0))
+                _mg3   = ((_lnom3 - _lreq3) / _lreq3 * 100) if _lreq3 else None
+                # Tenths matter only where the margin is tight (the binding corner); at high
+                # line it runs to hundreds of percent and the decimal just overflows the column.
+                _row += [f"{_lreq3:.1f}",
+                         "—" if _mg3 is None else
+                         (f"{_mg3:+.0f}%" if abs(_mg3) >= 100 else f"{_mg3:+.1f}%"),
+                         "PASS" if r.get("meets_req") else "FAIL"]
+            _lr.append(_row)
         data_table(story, "3.4.4", "Full-Load Inductance vs Input Voltage — All 9 Operating Points",
             "DC-bias-derated inductance at each operating point, across the A<sub>L</sub> "
             "min/nom/max band"
             + ("; L<sub>req</sub> = inductance required at that point to hold the selected "
                "crest ripple ratio (largest at the governing corner); verdict = "
-               "L<sub>full,nom</sub> ≥ L<sub>req</sub>." if _has_req3 else ".")
+               "L<sub>full,nom</sub> ≥ L<sub>req</sub>. <b>Margin = (L<sub>full,nom</sub> − "
+               "L<sub>req</sub>) / L<sub>req</sub></b> — this is a design-stage pass on the "
+               "NOMINAL A<sub>L</sub> basis; production tolerance is not closed here (see the "
+               "basis note in Section 3.4.3)." if _has_req3 else ".")
             + " Amber row = worst case (lowest retained inductance).",
             ["V<sub>in</sub> (V)", "I<sub>φ,crest</sub> (A)", "H (Oe)", "k(H)",
              "L<sub>full,min</sub> (µH)", "L<sub>full,nom</sub> (µH)", "L<sub>full,max</sub> (µH)"]
-            + (["L<sub>req</sub> (µH)", "L<sub>nom</sub>≥L<sub>req</sub>"] if _has_req3 else []),
+            + (["L<sub>req</sub> (µH)", "Margin", "Verdict"]
+               if _has_req3 else []),
             _lr,
-            col_widths=([CW*0.09, CW*0.12, CW*0.09, CW*0.10, CW*0.13, CW*0.13, CW*0.13,
-                         CW*0.11, CW*0.10] if _has_req3
+            col_widths=([CW*0.08, CW*0.11, CW*0.08, CW*0.09, CW*0.12, CW*0.12, CW*0.11,
+                         CW*0.10, CW*0.09, CW*0.10] if _has_req3
                         else [CW*0.12, CW*0.16, CW*0.12, CW*0.12, CW*0.16, CW*0.16, CW*0.16]),
             worst_rows=[_wi], ch=3)
 
@@ -2578,12 +2884,16 @@ def _ch3(story, state, d):
         + (f"The designer's GUI target for wire selection is J ≤ {_Jtgt:.1f} A/mm²."
            if _Jtgt else "Fan-cooled magnet wire is typically held to ≈ 4–7 A/mm²."), 3)
     _Acu_cond = n_par * Cu_area_one
-    _Jcalc = (Iph_rms / _Acu_cond) if _Acu_cond else 0.0
+    # J must be shown from the SAME current the engine divided by, otherwise the worked equation
+    # and the verdict below print two different densities (the equation used the analytic OPS
+    # per-phase RMS; the engine uses the half-cycle waveform-integrated RMS — ~2% apart).
+    _Irms_J = float(d.get("I_phi_rms_A", 0) or 0) or Iph_rms
+    _Jcalc = (_Irms_J / _Acu_cond) if _Acu_cond else 0.0
     eq_box(story, [
         r"A_{cu,total} = n_{par}\, A_{cu,1}\ ,\qquad J = \dfrac{I_{\varphi,rms}}{A_{cu,total}}"
         r" = \dfrac{I_{\varphi,rms}/n_{par}}{A_{cu,1}}",
         rf"A_{{cu,total}} = {n_par} \times {Cu_area_one:.4f} = {_Acu_cond:.4f}\ \mathrm{{mm^2}}",
-        rf"J = \dfrac{{{Iph_rms:.4f}}}{{{_Acu_cond:.4f}}} = {_Jcalc:.2f}\ \mathrm{{A/mm^2}}",
+        rf"J = \dfrac{{{_Irms_J:.4f}}}{{{_Acu_cond:.4f}}} = {_Jcalc:.2f}\ \mathrm{{A/mm^2}}",
     ], heading="Copper current density at rated per-phase RMS current", ch=3)
     # Engine value (same convention as the equation above and the GUI wire table);
     # the equation-box figure is the fallback for legacy payloads.
@@ -2598,7 +2908,7 @@ def _ch3(story, state, d):
     annotation(story, "DECISION",
         f"Wire confirmed: <b>{wire}</b>, N = <b>{N} turns</b>, "
         f"n<sub>par</sub> = {n_par}, FF<sub>cu</sub> = {FFcu*100:.1f}%. "
-        f"Current density J = {_Jrep:.2f} A/mm² at rated I<sub>rms</sub> = {Iph_rms:.4f} A"
+        f"Current density J = {_Jrep:.2f} A/mm² at rated I<sub>rms</sub> = {_Irms_J:.4f} A"
         + (f" — within the designer's J ≤ {_Jtgt:.1f} A/mm² wire-selection target."
            if _Jtgt and _Jrep <= _Jtgt + 1e-9 else "."), 3)
 
@@ -2648,7 +2958,14 @@ def _ch3(story, state, d):
     sub_h(story, "3.5.2", "Per-phase RMS current and crest ripple", 3)
     body(story, "Numerical integration over the half line cycle, using the "
                 "AS-BUILT per-point inductance of the selected core (nominal A<sub>L</sub>; "
-                "see the L-vs-V<sub>in</sub> table in the winding section)."
+                "see the L-vs-V<sub>in</sub> table in the winding section). "
+                "<b>Basis note (item 29):</b> every ripple current below is on the <b>as-built</b> "
+                "basis — what the finished part draws. Table 3.3.1 quotes the same symbol on the "
+                "<b>requirement</b> basis (the ripple implied by L<sub>req,max</sub>). The two "
+                "differ whenever the delivered inductance differs from the requirement, which is "
+                "normal: integer turns cannot land exactly on the requirement. Both are correct "
+                "for their own purpose; only the as-built figures below feed the loss, thermal "
+                "and control chapters."
                 if L_ab_uH is not None else
                 f"Numerical integration over the half line cycle, L<sub>φ</sub> = "
                 f"{L_phi*1e6:.1f} µH (requirement envelope — engine result pending).", 3)
@@ -2697,8 +3014,7 @@ def _ch3(story, state, d):
         rf"i_{{hf}}(\theta) = \dfrac{{\Delta I_{{L,pp}}(\theta)}}{{2\sqrt{{3}}}},\qquad "
         rf"\Delta I_{{L,pp}}(\theta) = \dfrac{{V_{{in}}(\theta)\,D(\theta)}}{{L_{{as\text{{-}}built}}\,f_{{sw}}}}"
         rf"\quad(L = {(L_pt(_wi5)*1e6):.1f}\ \mu\mathrm{{H}})",
-        rf"I_{{L,\phi,HF}} = \sqrt{{\dfrac{{1}}{{\pi}}\int_0^{{\pi}} i_{{hf}}^2(\theta)\,d\theta}} = {IL_HF[_wi5]:.4f}\ \mathrm{{A}}"
-        rf"\quad(\mathrm{{numerical\ integration,\ 3000\ points}})",
+        rf"I_{{L,\phi,HF}} = \sqrt{{\dfrac{{1}}{{\pi}}\int_0^{{\pi}} i_{{hf}}^2(\theta)\,d\theta}} = {IL_HF[_wi5]:.4f}\ \mathrm{{A}}",
         rf"I_{{L,\phi,rms}} = \sqrt{{I_{{LF}}^2 + I_{{HF}}^2}} = \sqrt{{{IL_LF[_wi5]:.4f}^2 + {IL_HF[_wi5]:.4f}^2}} = {IL_rms[_wi5]:.4f}\ \mathrm{{A}}",
         rf"\Delta I_{{L,pp}}@\mathrm{{crest}} = \dfrac{{{Vin_pk[_wi5]:.3f} \times {Dpk[_wi5]:.4f}}}{{{(L_pt(_wi5)*1e6):.1f}\,\mu\mathrm{{H}} \times {fsw/1e3:.0f}\,\mathrm{{kHz}}}} = {dIL_crest[_wi5]:.4f}\ \mathrm{{A}},\qquad "
         rf"I_{{L,\phi,pk}} = \dfrac{{{Iin_pk[_wi5]:.3f}}}{{{n_ph}}} + \dfrac{{{dIL_crest[_wi5]:.4f}}}{{2}} = {Iph_pk[_wi5]:.4f}\ \mathrm{{A}}",
@@ -3235,7 +3551,7 @@ def _ch3(story, state, d):
 
     sub_h(story, "3.6.4", "Loss vs input voltage — all 9 points, all A_L bands", 3)
     annotation(story, "CONCEPT",
-        "The nine-point loss sweep uses the per-phase I<sub>rms</sub> from Table 3.1.1 "
+        "The nine-point loss sweep uses the per-phase I<sub>rms</sub> from Table 3.1.1a "
         "and the peak-point Steinmetz core loss at the crest of each half cycle. "
         "Copper loss at each point is the DC term I<sub>φ,rms</sub><super>2</super>·DCR "
         "<b>plus</b> the HF skin/proximity term I<sub>hf</sub><super>2</super>·DCR·(R<sub>ac</sub>/R<sub>dc</sub>) "
@@ -3325,7 +3641,8 @@ def _ch3(story, state, d):
     step_h(story, "3.7", "Sizing Summary", 3)
     sub_h(story, "3.7.1", "Approved design parameters — complete table", 3)
 
-    sat_v  = f"PASS +{sat_m:.0f}% margin" if sat_m > 0 else "CHECK"
+    # Item 24 — headline margin is the inner-bore headroom (the one convention).
+    sat_v  = f"PASS +{sat_m_inner:.1f}% margin (inner bore)" if sat_m_inner > 0 else "CHECK"
     fill_v = f"PASS — {FFcu*100:.1f}%" if FFcu<=0.45 else f"FAIL"
     dt_v   = f"PASS — {(dT_bgt-dT)/dT_bgt*100:.0f}% margin" if dT<=dT_bgt else "FAIL"
     l_v    = f"PASS — {L0_min:.1f} µH" if L0_min>=L_tgt else f"FAIL — {L0_min:.1f} µH"
@@ -3352,7 +3669,7 @@ def _ch3(story, state, d):
             [f"B<sub>ac,pk</sub> @ {vin_min:.0f} V<sub>rms</sub>",
                                        f"{Bac_val:.6f} T",                                              "—"],
             ["B<sub>max,FL</sub> / B<sub>sat</sub>",
-                                       f"{Bmax:.4f} T / {Bsat:.2f} T",                                 sat_v],
+                                       f"{Bmax:.4f} T / {Bsat:.3f} T",                                 sat_v],
             [f"ΔT @ {vin_min:.0f} V<sub>rms</sub>",f"{dT:.1f}°C / {dT_bgt:.0f}°C budget",                         dt_v],
             ["P<sub>total</sub> (100°C)",f"{Ptot100:.3f} W",                                           "First-pass estimate"],
             ["Assembled OD × height",  f"{wound_OD:.1f} × {wound_HT:.1f} mm",                          "—"],
@@ -3370,8 +3687,10 @@ def _ch3(story, state, d):
     sub_h(story, "3.7.2", "Design margins overview", 3)
     annotation(story, "INSIGHT",
         "Three primary margins govern acceptance: "
-        f"(1) Saturation: B<sub>max</sub> = {Bmax:.4f} T vs B<sub>sat</sub> = {Bsat:.2f} T — "
-        f"{sat_m:.0f}% margin. "
+        f"(1) Saturation: B<sub>inner</sub> = "
+        + (f"{Bmax_inner:.4f}" if Bmax_inner else f"{Bmax:.4f}")
+        + f" T vs B<sub>sat</sub> = {Bsat:.3f} T — {sat_m_inner:.1f}% headroom "
+          "(inner bore — the worst point; see the convention note in Section 4.3). "
         f"(2) Fill: FF<sub>cu</sub> = {FFcu*100:.1f}% vs 45% limit — "
         f"{(0.45-FFcu)/0.45*100:.0f}% headroom. "
         f"(3) Thermal: ΔT = {dT:.1f}°C vs {dT_bgt:.0f}°C budget — "
@@ -3556,7 +3875,7 @@ def _ch4(story, state, d):
         "brightest at the inner bore (smallest radius) where the flux crowds and saturation risk "
         "is greatest, fading toward the outer edge. RIGHT is the temperature field: hottest at "
         "the interior winding hotspot, cooling toward the outer surface. The &otimes; marks are "
-        "the winding turns entering the bore, &#9679; the turns on the outer wall. The two "
+        "the winding turns entering the bore, &#8226; the turns on the outer wall. The two "
         "corners share the same geometry and 1/r pattern; the flux magnitude and temperature "
         "differ modestly between them (labelled in each caption).", 4)
 
@@ -3581,7 +3900,7 @@ def _ch4(story, state, d):
             + (f", inner-bore {_bi41:.3f} T" if _bi41 else "")
             + f") across the {stacks}-core stack (left) and the radial temperature field "
             f"(interior hotspot &asymp; {_th41:.0f} °C &rarr; cooled surface, right), both "
-            "overlaid with the exact per-layer winding turns (&otimes; bore / &#9679; outer).", 4)
+            "overlaid with the exact per-layer winding turns (&otimes; bore / &#8226; outer).", 4)
 
     # ── 4.2 Inductance — bias retention at all 9 points ──────────────────
     step_h(story, "4.2", "Inductance Performance — Bias Retention at All 9 Points", 4)
@@ -3705,12 +4024,37 @@ def _ch4(story, state, d):
         r"B_{dc} = \dfrac{L_{full}\,I_{\phi,crest}}{N\,A_e}",
         r"B_{max} = B_{dc} + B_{ac,pk}",
     ], heading="Peak, DC and total flux density", number="4.2", ch=4)
+    # Item 24 — _ch4 has its own scope; these mirror the Ch3 definitions rather than
+    # borrowing them (they are NOT module-level, and referencing _ch3's locals here
+    # raised a NameError that silently cost the whole chapter).
+    crowd_hdr   = float(d.get("crowd_axial", 0) or 0)   # same value as `crowd` in Table 4.3
+    Bmax_inner  = float(d.get("Bmax_inner_FL_T", 0)) or (Bmax * crowd_hdr if crowd_hdr else 0.0)
+    sat_m       = float(d.get("sat_margin_pct", 0))
+    sat_m_inner = float(d.get("sat_margin_inner_pct", 0)) or sat_m
     body(story,
         f"At the {vin_min:.0f} V<sub>rms</sub> crest: B<sub>ac,pk</sub> = {_f(Bac,4)} T, "
         f"B<sub>dc</sub> = {_f(Bdc,4)} T, B<sub>max,FL</sub> = {_f(Bmax,4)} T.  "
-        f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,2)} T  "
-        f"(saturation margin = {((Bsat/max(Bmax,0.001)-1)*100):.0f}%). "
+        f"B<sub>sat</sub>(T<sub>core</sub>) = {_f(Bsat,3)} T. "
+        + (f"Inner-bore peak B<sub>inner</sub> = {_f(Bmax_inner,4)} T, giving a saturation "
+           f"margin of <b>{sat_m_inner:.1f}%</b> "
+           if Bmax_inner else f"Saturation margin = <b>{sat_m_inner:.1f}%</b> ")
+        + "(headroom convention, evaluated at the inner bore — see the convention note below). "
         "The full nine-point flux table follows.", 4)
+    # Item 24 — state the one convention explicitly, and reconcile it with the engine's gate,
+    # so the two numbers a reader can compute (mean-path vs inner-bore) are never a surprise.
+    annotation(story, "BASIS — ONE FLUX-MARGIN CONVENTION",
+        "Every saturation margin in this document uses the <b>headroom</b> convention "
+        "<b>margin = (B<sub>sat</sub> − B<sub>used</sub>) / B<sub>sat</sub> × 100%</b>, and takes "
+        "B<sub>used</sub> = <b>B<sub>inner</sub></b>, the inner-bore peak, because radial crowding "
+        "makes the bore the worst point in a toroid"
+        + (f" (B<sub>inner</sub> = B<sub>max</sub> × {crowd_hdr:.2f})." if crowd_hdr else ".")
+        + " Ratio forms such as \"B<sub>sat</sub>/B<sub>max</sub> = "
+        + (f"{Bsat/Bmax:.2f}×\" " if Bmax else "…×\" ")
+        + "describe the same design but are NOT used, so that one number means one thing "
+        "throughout. Note the accept/reject gate in the sizing engine is a separate, more "
+        f"permissive check run on the mean-path B<sub>max</sub> (margin {sat_m:.1f}% there, "
+        f"threshold ≥ 15%); the inner-bore figure quoted above ({sat_m_inner:.1f}%) is the "
+        "conservative one and is what this report reports.", 4)
     annotation(story, "BASIS — SATURATION USES THE CREST, NOT THE CYCLE AVERAGE",
         "Saturation is an instantaneous limit, so every figure in this section is evaluated at the "
         "LINE CREST, where the flux reaches B<sub>max</sub>. That is deliberately a different basis "
@@ -3721,11 +4065,43 @@ def _ch4(story, state, d):
     # Item 20 / 5 — flux density at all 9 points incl. inner-bore radial crowding.
     crowd = float(d.get("crowd_axial", 0) or 0)
     if crowd:
+        # Item 25 — show the calculation, not just the answer. Geometry is re-read from `d`
+        # (each chapter builder owns its own locals — see PENDING_ITEMS E2).
+        _ID4 = float(d.get("ID_mm", 0) or 0)
+        _OD4 = float(d.get("OD_mm", 0) or 0)
+        _rows25 = [r"\mathrm{crowd}_{ax} = \dfrac{r_{mean}}{r_{in}}"
+                   r" = \dfrac{(ID/2 + OD/2)/2}{ID/2}"]
+        if _ID4 and _OD4:
+            _rows25.append(
+                rf"\mathrm{{crowd}}_{{ax}} = \dfrac{{({_ID4:.2f}/2 + {_OD4:.2f}/2)/2}}"
+                rf"{{{_ID4:.2f}/2}} = {crowd:.3f}")
+        _rows25.append(rf"B_{{inner}} = B_{{max}}\cdot \mathrm{{crowd}}_{{ax}}"
+                       rf" = {Bmax:.4f} \times {crowd:.3f} = {Bmax*crowd:.4f}\ \mathrm{{T}}")
+        eq_box(story, _rows25,
+               heading="Inner-bore radial crowding (1/r flux concentration on a toroid)", ch=4)
+
+    # Item 25 — the saturation-margin arithmetic, spelled out in the one settled convention.
+    # The designer asked "how come the margin is X%? show the calculation" — this is that.
+    if Bsat and Bmax_inner:
         eq_box(story, [
-            r"\mathrm{crowd}_{ax} = \dfrac{r_{mean}}{r_{in}} = \dfrac{(ID/2 + OD/2)/2}{ID/2}",
-            rf"\mathrm{{crowd}}_{{ax}} = {crowd:.3f}\ \Rightarrow\ "
-            rf"B_{{inner}} = B_{{max}}\cdot \mathrm{{crowd}}_{{ax}}",
-        ], heading="Inner-bore radial crowding (1/r flux concentration on a toroid)", ch=4)
+            r"\mathrm{margin} = \dfrac{B_{sat} - B_{inner}}{B_{sat}} \times 100\%",
+            rf"\mathrm{{margin}} = \dfrac{{{Bsat:.3f} - {Bmax_inner:.4f}}}{{{Bsat:.3f}}}"
+            rf" \times 100\% = {sat_m_inner:.1f}\%",
+        ], heading="Saturation margin at the worst point (inner bore)", ch=4)
+        annotation(story, "THEORY",
+            f"Term by term: B<sub>sat</sub> = {Bsat:.3f} T is the saturation flux density of the "
+            "core material read at the converged core temperature — it falls as the core heats, so "
+            "a room-temperature figure would flatter the design. The engine interpolates the "
+            "material's own measured Bsat-vs-temperature points to get this number; the exact "
+            "points and their temperatures are listed in Section 3.2.6. "
+            f"B<sub>inner</sub> = {Bmax_inner:.4f} T is the crest flux at the inner bore, i.e. "
+            f"B<sub>max</sub> = {Bmax:.4f} T scaled by the {crowd:.3f}× radial-crowding factor "
+            "above. The difference is the unused flux capacity, and dividing by B<sub>sat</sub> "
+            f"expresses it as a fraction of the total: <b>{sat_m_inner:.1f}%</b> of the core's "
+            "flux capability is still in hand at the worst point of the worst operating corner. "
+            f"For reference the same arithmetic on the mean-path B<sub>max</sub> gives "
+            f"{sat_m:.1f}% — that is the more permissive number the sizing engine's ≥ 15% gate "
+            "uses, and it is why the two figures differ.", 4)
     Ae_tot_mm2 = float(d.get("Ae_total_mm2", 0) or (Ae_s * stacks))
     Ae_m2 = Ae_tot_mm2 * 1e-6
     if lt100 and lvt and N and Ae_m2:
@@ -3745,15 +4121,19 @@ def _ch4(story, state, d):
             if binner > wB:
                 wB, wi = binner, i
             frows.append([f"{vin:.0f}", f"{bac:.4f}", f"{bdc:.4f}", f"{bmx:.4f}",
-                          f"{binner:.4f}", f"{mar:.0f}%"])
+                          f"{binner:.4f}", f"{mar:.1f}%"])
             _fvx.append(vin); _fbac.append(bac); _fbdc.append(bdc); _fbmx.append(bmx); _fbin.append(binner)
         data_table(story, "4.3", "Flux Density vs Input Voltage — All 9 Operating Points",
             f"AC peak, DC, mean-path total and inner-bore flux density against B<sub>sat</sub> = "
-            f"{_f(Bsat,2)} T (EDGE material at core temperature). B<sub>inner</sub> = "
-            f"B<sub>max</sub> × {crowd:.2f}; saturation margin is taken against the inner-bore peak "
-            "(the worst point). Amber row = highest B<sub>inner</sub>.",
+            f"{_f(Bsat,3)} T — the material's saturation flux density interpolated to the "
+            f"converged core temperature, NOT its 25 °C value (see Section 3.2.6 for the "
+            f"temperature basis). B<sub>inner</sub> = "
+            f"B<sub>max</sub> × {crowd:.2f}. Saturation margin uses the one convention defined in "
+            "Section 4.3 — headroom (B<sub>sat</sub> − B<sub>inner</sub>) / B<sub>sat</sub>, taken "
+            "against the inner-bore peak (the worst point). Amber row = highest B<sub>inner</sub>.",
             ["V<sub>in</sub> (V)", "B<sub>ac,pk</sub> (T)", "B<sub>dc</sub> (T)",
-             "B<sub>max</sub> (T)", "B<sub>inner</sub> (T)", "Sat. margin"],
+             "B<sub>max</sub> (T)", "B<sub>inner</sub> (T)",
+             "Headroom vs B<sub>inner</sub>"],
             frows, col_widths=[CW*0.14, CW*0.17, CW*0.17, CW*0.17, CW*0.17, CW*0.18],
             worst_rows=[wi], ch=4)
         # 9-voltage flux overlay (report notes #2) — same values as the table above.
@@ -3768,7 +4148,7 @@ def _ch4(story, state, d):
             story.append(_fov)
             fig_caption(story,
                 f"Figure 4.3a — Flux density across the nine operating voltages (same values as "
-                f"Table 4.3), against B<sub>sat</sub> = {_f(Bsat,2)} T. B<sub>max</sub> is highest "
+                f"Table 4.3), against B<sub>sat</sub> = {_f(Bsat,3)} T. B<sub>max</sub> is highest "
                 "at the low-line corner where the DC bias peaks; the margin to saturation is "
                 "smallest there.", 4)
 
@@ -4148,6 +4528,66 @@ def _ch4(story, state, d):
             rf"= {dT:.1f}\ ^\circ\mathrm{{C}}",
         ], heading="Surface-area natural-convection temperature rise (converged)", number="4.6", ch=4)
 
+        # Item 28 — thermal-model provenance. Answers the three questions a reviewer asks of any
+        # thermal number: where the curve came from, what it assumes about airflow, and which ΔT
+        # is the acceptance criterion. The fan-cooled-vs-natural-convection reconciliation is the
+        # substance here: the spec page and this model disagree, deliberately and conservatively.
+        _tp = _thermal_provenance(state)
+        _DMT = "<i>DATA MISSING</i>"
+        _sC, _sW, _cpl, _hot = _tp["sC"], _tp["sW"], _tp["couple"], _tp["hotspot"]
+        _thermal_rows = [
+            ["Model form",
+             "Empirical wound-surface-area power law ΔT = (P<sub>total</sub>·1000 / SA)<sup>0.833</sup> "
+             "— <b>not</b> a lumped thermal resistance. This is the standard powder-toroid "
+             "temperature-rise correlation published by the core suppliers."],
+            ["Surface area SA",
+             "Wound envelope, computed from the AS-BUILT dimensions (wound OD and height after the "
+             "winding build), not the bare core: SA = [π·OD<sub>w</sub>·OH + (π/2)(OD<sub>w</sub>² "
+             "− hole²) + π·hole·OH] / 100 cm²."],
+            ["Convection regime",
+             "<b>Natural convection.</b> The correlation contains no airflow term — no velocity, "
+             "no forced-convection coefficient enters the toroid ΔT at any point."],
+            ["Airflow assumed?",
+             ("<b>No — and this is deliberately conservative.</b> The specification says cooling = "
+              f"<b>{_tp['cooling_spec']}</b> (Chapter 2), but the temperature rise above is computed "
+              "with the natural-convection law and takes no credit for the fan. Forced air can only "
+              "REDUCE the rise, so every ΔT and thermal margin in this report is a lower bound on "
+              "performance. Taking fan credit would need a qualified airflow velocity at the "
+              "inductor, which is a system-integration input this design stage does not have."
+              if _tp["forced_air"] else
+              "No airflow credit is taken; the natural-convection law is used throughout.")],
+            ["Loss basis driving ΔT",
+             "CYCLE-AVERAGED core loss plus copper loss (Section 4.6) — the heat actually "
+             "generated. The crest-point core loss is the saturation reference only and is never "
+             "used for temperature rise."],
+            ["Convergence",
+             "Loss and temperature are iterated: copper resistivity and core loss are re-evaluated "
+             "at the current temperature until ΔT settles (0.2 °C tolerance)."],
+            ["Two-node split constants",
+             (f"s<sub>C</sub> = {_sC}, s<sub>W</sub> = {_sW}, couple = {_cpl}, hotspot factor = "
+              f"{_hot}. θ<sub>total</sub> is taken from the same SA power law and split into "
+              "R<sub>ca</sub>/R<sub>wa</sub>/R<sub>cw</sub> by these calibrated fractions, so the "
+              "two-node result stays anchored to the empirical baseline."
+              if None not in (_sC, _sW, _cpl, _hot) else _DMT)],
+            ["Acceptance criterion",
+             "The pass/fail ΔT is the <b>single-node surface rise</b> from the power law above. "
+             "The two-node core/winding split and the interior hotspot are reported alongside it "
+             "as additional information, not as the gate."],
+        ]
+        data_table(story, "4.6b", "Thermal Model Provenance — How the Temperature Rise Is Obtained",
+            "Traceability for every temperature in this chapter: the form of the model, what it "
+            "assumes about airflow, which losses drive it, and which rise is the acceptance "
+            "criterion.",
+            ["Item", "Basis"], _thermal_rows,
+            col_widths=[CW*0.26, CW*0.74], ch=4)
+        if _tp["forced_air"]:
+            annotation(story, "PITFALL",
+                f"Do not read the Chapter 2 specification row <b>Cooling: {_tp['cooling_spec']}</b> "
+                "as an input to the temperature rise above — it is not. The inductor thermal model "
+                "is natural-convection only. The two statements are consistent because the thermal "
+                "result is the conservative one; but if a later revision ever takes fan credit, "
+                "this table and the ΔT budget must be revisited together.", 4)
+
         # Items 10 / 9 — two-node core/winding split, interior hotspot, and the convergence loop.
         _dtc = float(d.get("dT_core_C", 0) or 0); _dtw = float(d.get("dT_wdg_C", 0) or 0)
         _dth = float(d.get("dT_hotspot_C", 0) or 0)
@@ -4200,7 +4640,7 @@ def _ch4(story, state, d):
                 "<br/><b>&#916;T = (P<sub>total</sub>,avg / A<sub>surface</sub>)<sup>0.833</sup></b>, "
                 "a single-node estimate per operating point. Use the converged two-node &#916;T in the "
                 "design summary for the pass/fail verdict; use this table for the shape across line.", 4)
-            data_table(story, "4.6", "Temperature Rise vs Input Voltage — All 9 Operating Points",
+            data_table(story, "4.6a", "Temperature Rise vs Input Voltage — All 9 Operating Points",
                 "Every loss column is the CYCLE-AVERAGED value; P<sub>total</sub>,avg = "
                 "P<sub>core</sub>,avg + P<sub>cu</sub>,avg is what drives the surface rise, and it "
                 "equals the design summary's P<sub>total,100&#176;C</sub> at the design corner. "
@@ -5417,8 +5857,9 @@ def build_full_report(state, approved_design=None, step15_result=None, step16_pa
 
     from app.design_state import DesignState
     ds  = DesignState.model_validate(state)
-    pid = ds.project_id or "design"
-    topo = (ds.selected_topology or "—").replace("_"," ").title()
+    # Cover: prefer the human-readable name; fall back to the generated id.
+    pid = (getattr(ds, "project_name", None) or "").strip() or ds.project_id or "design"
+    topo = _pretty_key(ds.selected_topology)
     S = _S(1)
     story.append(Spacer(1, 40*mm))
     story.append(Paragraph("Power Factor Correction Converter", S["cover_t"]))

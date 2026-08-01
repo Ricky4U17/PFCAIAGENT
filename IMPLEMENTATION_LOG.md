@@ -6445,3 +6445,100 @@ the approved inductor (Ch 3); the GUI supplies the 100 C (hot) value…" and "Ou
 
 ### 3a COMPLETE (C179-C183): f_cv precision · R_CS/V_RAMP precision + V_RAMP de-hardcode ·
 ### per-phase L precision + basis · E-series decade wrap · r_L/r_C provenance.
+
+## C184 — Group 4 (items 21-29): Ch3/Ch4 consistency and provenance
+
+**21 — current density 4.17 vs 4.12.** Two different RMS currents under one symbol: the §3.4.7
+worked equation printed the analytic OPS per-phase RMS while `J_A_mm2` was computed from the
+360-point waveform-integrated RMS. Exposed `DesignResult.I_phi_rms_A` (the current the engine
+actually divides by) and pointed the equation, verdict and DECISION line at it. Verified: J = 4.81
+A/mm2 at I_rms = 10.0071 A everywhere. GUI already read `J_A_mm2` in all three places.
+
+**22 — A_L-min basis.** DESIGNER DECISION: note only, do NOT change turns selection. INSIGHT box in
+3.4.3 quantifies the tolerance corner from live data (binding point, part tolerance, N_almin from
+ceil(N/sqrt(1-tol))). Self-adjusting: if the min corner still clears L_req the text says so instead.
+
+**23 — margin percent.** Denominator L_req (designer's choice). Table 3.4.4 gained a Margin column;
+220 Vac reads +1.5% where a bare PASS used to imply comfort. Layout option C. Two render fixes found
+by reading the PDF: verdict header wrapped ("Lnom>=Lr / eq") -> renamed "Verdict"; +333.4% overflowed
+-> drop the decimal at >=100%.
+
+**24 — flux-margin convention (Package 2).** It was TWO axes crossed, not one: formula (headroom vs
+ratio-excess) AND flux point (B_max vs B_inner). ONE convention now: headroom
+(Bsat-B_used)/Bsat at the INNER BORE. New "BASIS - ONE FLUX-MARGIN CONVENTION" note reconciles the
+report figure (62.7%) with the engine's >=15% gate, which still runs on mean-path B_max (72.6%) -
+stated, not hidden. GATE DELIBERATELY NOT MOVED (would change selection; logged as D3).
+
+**25 — show the calculation.** Two eq_boxes in 4.3: crowding factor substituted from real ID/OD, and
+margin = (Bsat - B_inner)/Bsat x 100 with numbers, plus a THEORY box reading the terms out.
+
+**26 — "Supplier: ." printed blank.** `dict.get(k, default)` only fires when the key is ABSENT; the
+payload carries `supplier` as an EMPTY STRING. Added `_material_supplier()` which resolves the vendor
+from the material DB rather than printing a dash. Now "Supplier: Magnetics Inc".
+
+**27c — material provenance + powder Bsat vs temperature.** `get_Bsat()` returned the constant 25 C
+value for powder and ignored T_C, while the report claimed Bsat was read at core temperature. Now
+interpolates the material's own 25/100/150 C points (np.interp clamps; falls back to Bsat_Tcoeff,
+then to the old constant for 3 materials with no data). Effect at T_core 92.8 C: Bsat 1.500 -> 1.434,
+gate margin 72.6 -> 71.4%, reported 62.7 -> 60.9%. 15 candidates, 0 newly failing.
+New Section 3.2.6 Material Data Provenance (supplier, catalog revision + page, loss-curve source and
+temperature basis, Bsat temperature basis, WHICH of the two DC-bias models is the design model,
+validation anchor). Absent fields print DATA MISSING.
+
+**28 — thermal-model provenance.** Chapter 2 said "Cooling: Fan Cooled"; Chapter 4's model is
+natural-convection with no airflow term anywhere (h_conv=17.5 only reaches the ETD/ferrite path).
+Nothing reconciled them. New Table 4.6b answers all three of Copilot's questions and states the
+fan-credit position explicitly: conservative, deliberate, and revisit only with a qualified airflow
+velocity at the inductor. Two-node constants read live from the engine.
+
+**29 — target-L vs as-built-L ripple (Option C).** THREE inductance bases exist and only one sizes
+anything: L_target (initial estimate + legacy fallback ONLY), L_req(V) (what the turns loop converges
+against), L_as-built(V) (drives 3.5/3.6, Ch4, Ch6/Ch7). Table 3.3.1 quoted ripple on the L_target
+basis - a number nothing else uses. Now on the REQUIREMENT basis, with an L_req,max row; 3.5.2 states
+its figures are as-built. Advisory divergence check fires at >10% (reference state: +67%, 235 vs
+140.4 uH). REPORTING ONLY, never filters candidates (convention D0b).
+GUI disconnect fixed: Step7Wizard claimed "sized to that target" quoting L_target while the same
+screen derived the governing point from L_req.
+
+VERIFIED: engine output diffed against a pre-change baseline (22 scalars, 9 op-points, candidate
+count and ordering) - NO CHANGE. 187 pp, suite 172 passed / 2 skipped.
+
+## C185 — 3c: Groups 6 & 7 (rendering + identity/wording)
+
+**7.1** `"interleaved_boost_ccm".title()` -> "Interleaved Boost Ccm" on the cover AND Ch1 table. New
+`_pretty_key()` keeps acronyms upright. NOTE: the first pass missed two more Ch2 sites plus one in
+generate_full_report.py - only caught by counting stray "Ccm" in the BUILT pdf. Now 0.
+**7.3/7.4/7.5** removed "(estimated based on available design data)" x3, "dominates magnetics sizing"
+(also factually wrong - 3.4.3 shows the governing ripple corner sets turns), "(numerical integration,
+3000 points)".
+**7.6** selected controller row = FAN9672 alone; alternates stay in the 2.3.1 comparison table.
+**6.1** `body`/`ann` were already justified; `bl` (bullets) and `sm` fell back to TA_LEFT - that was
+the p28 complaint. Both justified; every chapter imports these styles so it applies document-wide.
+**6.5** six fuse gates: one bullet per line.
+**6.4** Tables 8.6a/8.6b no longer list 10 candidates. CONFLICT with C164 (Section 8.7 is deliberately
+"the first place the part is named"): resolved by making 8.6a/8.6b screen-outcome summaries (verdict
+counts, no part names) and moving the selected part's two rows to 8.7b/8.7c.
+**6.2** numbering uniformity, option (b): a letter series always starts at 'a'; a single table carries
+no letter. 16 labels remapped.
+  ERROR MADE AND FIXED: the first pass renamed lone "8.1b" -> "8.1" where a bare "8.1" already
+  existed, creating DUPLICATE table numbers in 9 places. The audit rule could not see it (it only
+  checked "does a series start at a"). Caught by listing RENDERED captions from a built Ch8/9 pdf and
+  spotting "8.1" twice. Repaired by recovering original labels via `git show HEAD:` and reassigning by
+  TITLE. Table 7.8b (cited in the designer's own comment) keeps its number.
+**6.3** black squares: inspected p206 of the annotated pdf directly - extracted as "60IA", a U+0049
+where an unmapped glyph box sits. Cause: `&#8209;` (U+2011 nb-hyphen) and `&#9679;` (U+25CF) have no
+WinAnsi glyph AND are absent from reportlab paraparser.greeks, so ReportLab draws a filled box. Both
+replaced. Full scan of that entity class now reports NONE (see PENDING B12 for the scan rule).
+**7.2** project name, option (i): DesignState -> StartReq -> /mode-a/start -> cover + Table 1.1.1,
+plus an intake-form field. Every hop optional with a fallback; verified both ways (present -> round
+-trips; absent -> key not in state, cover falls back to project_id).
+
+ALSO: report download was failing intermittently on all screens with no error banner. Two silent
+mechanisms, both in all 7 copies: `URL.revokeObjectURL` fired 150 ms after click (aborts a ~13 MB
+download, throws nothing) and `removeChild` ran synchronously after click (Firefox). New
+`frontend/src/api/download.ts` holds both for 10 minutes; all 7 sites use it. Also fixed 4 of 7
+reading `confirmedState.project_id` with no optional chaining - a TypeError AFTER the pdf was
+fetched. NOT confirmed as the designer's root cause (cannot drive a browser here) - logged as C2.
+
+VERIFIED: combined 187 pp, Ch8+9 24 pp, 0 duplicate table numbers, 0 stray "Ccm", 0 unrenderable
+entities, tsc clean, suite 172 passed / 2 skipped.

@@ -70,6 +70,26 @@ If the capacitor DB gains a `Z(−25 °C) / Z(+20 °C)` ratio column, `cap_esr_m
 Designer's HXK datasheet says **1.69 A** ripple; the DB says **2.09 A**. Which variant is correct is
 still unknown — resolve before trusting either for a release calculation.
 
+### A9. Powder material files: `data_source` at the wrong nesting level + 3 with no Bsat-vs-T
+Two separate, small data issues found while adding material provenance (item 27):
+
+**(a) Schema mismatch — cosmetic but noisy.** All 67 powder materials log
+`[DB] <key>: Missing required field: data_source` at every DB load. The information is NOT
+missing: powder files carry it at `basic.data_source`, ferrite files at top level, and the loader
+checks top level only. Either move the powder key up or teach the loader to accept both. Until
+then the warning is false and trains people to ignore load warnings.
+
+**(b) Real gap — 3 materials have no Bsat temperature data.** `xflux_hdc_26`, `xflux_hdc_40`,
+`xflux_hdc_60` carry only `Bsat_25C_T` (no 100 °C/150 °C points, no `Bsat_Tcoeff`), so
+`get_Bsat()` falls back to the constant 25 °C value for them and the report's provenance table
+says so explicitly ("single value — this material carries no temperature data"). The other 71
+powder materials have the full 25/100/150 °C set. Add the missing points from the Magnetics High
+DC Bias XFlux Bulletin.
+
+**(c) Contradictory field.** `edge_60.basic.temp_coeff_ppm_per_C = 0` contradicts top-level
+`Bsat_Tcoeff = -0.00065`. The explicit 25/100/150 °C points are used in preference to either, so
+nothing is currently wrong, but one of the two fields is dead and misleading.
+
 ---
 
 ## B. Report & calculation  `CODE`
@@ -171,6 +191,73 @@ treating CM leakage as differential-mode L.
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
+### B8. Fan credit is never taken on the inductor thermal model  `DECISION-ADJACENT`
+The intake spec commonly says cooling = fan cooled, but the toroid temperature rise uses an
+empirical NATURAL-CONVECTION surface-area law with no airflow term. This is conservative (forced
+air only reduces the rise) and is now stated explicitly in report Table 4.6b + a PITFALL box
+(item 28), so the two chapters no longer appear to contradict each other.
+
+**Open if ever revisited:** taking fan credit needs a qualified airflow velocity AT THE INDUCTOR,
+which is a system-integration input this design stage does not collect. If that input is ever
+added, Table 4.6b, the ΔT budget and the ΔT pass/fail gate must change together.
+
+Related dead path: `step7_magnetic_calc._thermal_Rth()` takes `h_forced = 17.5 W/m²·K` (a
+forced-air coefficient) but is only reachable for ETD/ferrite cores — it never runs for toroids.
+Anyone reading that default could reasonably assume airflow is modelled for toroids. It is not.
+
+### B9. `L_target` vs `L_req` — designer inputs can disagree (advisory check now live)
+Item 29 surfaced that the design carries THREE inductance bases and only one of them sizes
+anything:
+- `L_target` — the designer's confirmed value. Used ONLY as the initial turns estimate and as a
+  legacy `<95%` fallback when no requirement curve exists. It sizes nothing in the modern path.
+- `L_req(V)` — per-point requirement from the crest ripple ratio. **This is what the turns loop
+  converges against.**
+- `L_as-built(V)` — what the built part delivers; drives Sections 3.5/3.6, Ch4, and Ch6/Ch7.
+
+Report Table 3.3.1 now quotes ripple on the REQUIREMENT basis (was: on the `L_target` basis, a
+number nothing else used), Section 3.5.2 states it is on the AS-BUILT basis, and an advisory
+PITFALL fires when `|L_target - max(L_req)| / max(L_req) > 10%`.
+
+**Open — designer decision, not a code bug:** on the reference state the check fires at **+67%**
+(`L_target` 235 µH vs `max(L_req)` 140.4 µH). Either the confirmed inductance or the crest ripple
+ratio is not what was intended. Harmless today because sizing follows `L_req`, but the two intake
+inputs should be reconciled. NOTE the 235 µH may be a test-fixture artifact — check against a real
+designer state before concluding anything about production designs.
+
+The check is REPORTING ONLY by design (convention D0b): it never filters candidates and never
+changes a verdict.
+
+### B12. Guard against unrenderable entities (black squares)
+Item 6.3 traced the designer's "black square" comments to two numeric entities whose codepoints
+have NO glyph in Helvetica's WinAnsi encoding AND are absent from ReportLab's symbol-substitution
+table, so ReportLab draws a filled box: `&#8209;` (U+2011 non-breaking hyphen) and `&#9679;`
+(U+25CF black circle). Both replaced with renderable equivalents (`-` and `&#8226;`).
+
+**Worth automating:** the one-line scan below currently reports NONE and would catch a
+regression the moment someone adds another exotic entity. Consider adding it as a test.
+
+```
+for every &#NNNN; in app/mode_b/*.py:  cp >= 256, not cp1252-encodable,
+and chr(cp) not in reportlab.platypus.paraparser.greeks.values()  ->  will render as a box
+```
+
+### B10. Pre-existing duplicate table numbers (13 remain)
+Found while doing the item-26 numbering sweep. Three kinds, none introduced by that sweep:
+- **if/else pairs** — 6.11.6, 6.11.7, 6.11.9, 8.6a, 9.6. Two `data_table` calls share a number but
+  only one branch ever renders (Type-II vs Type-III, vendor-DB present vs absent). Harmless.
+- **cross-module** — 6.2.1, 6.3.1, 6.3.2, 6.4.1, 6.6.1, 6.7.1, 6.9.1. `doc_report_builder`'s Ch6
+  PLACEHOLDER reuses numbers that `report_steps1_8` / `report_step9` also use. The placeholder is
+  skipped in the combined report (`include_ch6=False`), so only one renders there — but a
+  Ch1–5-only build would show both.
+- **genuine** — **9.7** ("Selected Part — Recalculated Design Values" and "Selected Part —
+  Gate-by-Gate Verdict" in `report_inputprotection.py`). Both render. Should become 9.7a / 9.7b.
+
+### B11. Dangling table cross-references in prose
+A scan for `Table X.Y` mentions with no matching `data_table` call found ~17, e.g. 3.2.4, 3.4.1,
+5.1, 5.2, 14.1, 14.6, 14.7, 3.2.2b, 3.2.4a. Pre-existing (verified against HEAD — the numbering
+sweep created none). Some may point at equations or figures rather than tables; each needs
+checking individually before any renumbering work touches them.
+
 ---
 
 ## C. GUI  `CODE`
@@ -178,6 +265,37 @@ configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate a
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
+
+### C2. Report download fails intermittently — PARTIAL FIX APPLIED, needs designer confirmation
+**Symptom (designer, 2026-08-01):** happens on *all* report screens, *intermittently* — sometimes the
+PDF downloads, sometimes nothing arrives. Spinner completes normally. **No red error banner.**
+Browser console "says many things" — **console text not yet captured; this is the missing evidence.**
+
+**Ruled out:**
+- Not a timeout. `/mode-b/documentation/generate-report` returns in ~111 s (measured), HTTP 200,
+  13.0 MB. Earlier 5-9 min figures were whole-script overhead, not the endpoint.
+- Not a backend 500. Every screen DOES render its error state, so a non-OK response would have
+  shown a banner. Silence points past the fetch, at the save path.
+- Not the EMI payload. A 500 on `KeyError: 'pout_lo'` came from a hand-built test payload; the
+  InputFilter screen's own `design` object does include `pout_lo`/`pout_hi`.
+
+**Two silent-failure mechanisms found and fixed** (all 7 sites, now via `src/api/download.ts`):
+1. `URL.revokeObjectURL(url)` fired **150 ms** after `a.click()`. Revoking a ~13 MB blob URL while
+   the browser is still reading it aborts the download and throws nothing. Now held 10 minutes.
+2. `document.body.removeChild(a)` ran synchronously after `click()`; Firefox needs the anchor to
+   stay in the document until the download starts. Now removed on the same 10-minute timer.
+
+The **intermittency is what makes the revoke race the prime suspect** — a fixed 150 ms budget wins
+or loses depending on machine load and PDF size.
+
+Also fixed in passing: 4 of the 7 screens read `(confirmedState as any).project_id` with NO optional
+chaining, which throws a TypeError *after* the PDF is fetched — discarding a report that had been
+generated, and on ControlDesign also skipping `setReportGen(true)` (the approve-gate flag).
+
+**Still open / next step:** designer to retest. If it still fails, capture (a) screen, (b) whether a
+red banner now appears, (c) the console text. A visible "download didn't start? click here"
+fallback link is designed but NOT wired — `downloadBlob()` already returns the still-valid object
+URL for exactly that, it just needs UI in the 7 screens.
 
 ---
 
@@ -202,6 +320,27 @@ NTC part selection.
 
 Report §8.10 + Table 8.10b. Settled — consistent with D0b.
 
+### D3. Saturation-margin GATE basis — mean-path B_max vs inner-bore B_inner
+**Settled for reporting (2026-08-01, item 24 "Package 2"); the GATE is deliberately left open.**
+
+The report now uses ONE flux-margin convention everywhere: headroom
+`margin = (B_sat - B_used) / B_sat x 100`, with `B_used = B_inner` (inner-bore peak, the worst point
+in a toroid). Ratio forms such as `B_sat/B_max = 3.66x` are gone.
+
+**Still open:** the engine's accept/reject gate (`step7_magnetic_calc.py` ~line 1060, threshold
+>= 15%) still runs on the MEAN-PATH `sat_margin_pct`, not on `sat_margin_inner_pct`. So the report
+quotes the conservative number (63% on the reference design) while the gate judges the permissive
+one (73%). The report states this explicitly rather than hiding it, and the GUI now shows both
+figures side by side, labelled.
+
+Moving the gate to `B_inner` ("Package 3") is the physically consistent end state, but it CHANGES
+SELECTION: with crowding ~1.36x the inner margin runs ~10 points below mean-path, so cores that
+pass today at 15-27% mean-path margin would newly fail. Deliberately deferred so it is decided on
+its own merits and not as a side effect of a wording fix.
+
+Also update alongside it: `generate_full_report.py` (2 gate labels) and
+`generate_steps13_14.py` (2 labels) — all currently say "(mean path, gate basis)".
+
 ### D2. Max-stacks 3-stack sighting
 A designer once saw a 3-stack candidate when max_stacks should have excluded it. The chain was verified
 to honour the setting and a defensive client-side filter was added (C87), but the original sighting was
@@ -220,6 +359,19 @@ advisory-only split, ~6 phase-advisory tests can never reach `final`.
 **Not a production issue** — the production Step-16 path is stable at ~17 Hz. This is the LangGraph
 workflow path only. Found during C117.
 
+### E2. Chapter builders can vanish silently — always check the page count
+`doc_report_builder._ch3` / `_ch4` are called under `if approved_design:` in one try-tolerant
+path, so an exception inside `_ch4` dropped BOTH chapters (~90 pages) while the endpoint still
+returned HTTP 200 and `ast.parse` stayed clean. The build looked fine; the content was gone.
+
+Cause on 2026-08-01: `_ch4` referenced `Bmax_inner` / `sat_m_inner` / `sat_m`, which are `_ch3`
+LOCALS, not module-level. `_ch3` and `_ch4` have separate scopes and each must re-derive what it
+needs from `d`.
+
+**Habit:** after editing any chapter builder, run `python verify_combined_report.py` (not just
+`build_combined()`), because only `main()` asserts the 178-190 page range. A partial-content PDF
+is otherwise indistinguishable from a good one.
+
 ---
 
 ## Recently closed (kept briefly for context)
@@ -230,6 +382,27 @@ workflow path only. Found during C117.
 | Fuse screened on only 4 gates | C165 |
 | Fuse inrush peak wrongly gated the continuous rating → nothing selectable | C165 |
 | Ch8 Table B practical filter was prose, not a table | C166 |
+| Current density printed 4.17 in the equation but 4.12 in text/table (two different RMS currents) | item 21 |
+| A_L-min vs nominal basis was never stated in the report | item 22 (note only, by designer decision) |
+| Table 3.4.4 printed a bare PASS with no margin — binding corner is only +1.5% | item 23 |
+| GUI L_full margin rounded before dividing, so it showed +2% where the report showed +1.5% | item 23 |
+| Flux margin mixed two conventions AND two flux points (229% vs 59%) | item 24 |
+| Saturation margin shown without its calculation | item 25 |
+| "Supplier: ." printed blank (dict.get default never fires on an empty string) | item 26 |
+| Powder Bsat ignored temperature while the report claimed it did not | item 27c |
+| Material provenance absent — supplier/revision/loss+bias source/temperature basis | item 27 (Section 3.2.6) |
+| Thermal-model provenance absent; fan-cooled spec vs natural-convection model unreconciled | item 28 (Table 4.6b) |
+| Ripple quoted on target-L and as-built-L bases under one symbol, unlabelled | item 29 |
+| GUI "sized to that target" note quoted L_target, not the L_req the engine uses | item 29 |
+| "Ccm" instead of "CCM" on the cover and Ch1 table (str.title() on a snake_case enum) | 3c/7.1 |
+| "(estimated based on available design data)" x3, "dominates magnetics sizing", "(numerical integration, 3000 points)" | 3c/7.3-7.5 |
+| Selected controller row listed 3 alternate ICs instead of the one selected | 3c/7.6 |
+| Fuse six gates were one dense paragraph | 3c/6.5 |
+| Tables 8.6a/8.6b printed 10 PASS candidates | 3c/6.4 (now screen-outcome summaries + selected row in 8.7b/8.7c) |
+| Bullet-list and small-note styles were left-aligned, not justified | 3c/6.1 |
+| 14 table numbers broke the "letter series starts at a" rule | 3c/6.2 |
+| Black squares in the PDF: `&#8209;` (nb-hyphen) and `&#9679;` (black circle) have no WinAnsi glyph and are not in ReportLab's symbol table | 3c/6.3 |
+| No project NAME field — cover and Ch1 showed the generated project_id handle | 3c/7.2 |
 | Fuse I²t collapsed 4 different events into one worst case | C166 |
 | Ch8 section order / full 8.1→8.14 renumber | C166 |
 | Three section-reference conventions (`§` / "Sec." / "Section") | C167 |

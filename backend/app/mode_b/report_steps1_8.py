@@ -379,7 +379,7 @@ def _build_step6(story, data):
               "nch": _nch, "r_input": p.get("r_input", 0.20),
               # Use the SAME as-built inductance (scalar + per-point bias curve) that Chapter 7's
               # §7.8b R_CS budget uses, so the per-phase RMS current — and hence R_CS loss — matches
-              # Table 7.8b exactly instead of drifting on a different default L.
+              # Table 7.8 exactly instead of drifting on a different default L.
               "L_phi_uH": p.get("lphi_uH"), "L_phi_curve": p.get("l_curve")}
         _ops, _s2, _Lp, _iph, _Lpts = build_design_ops(_d)
         _rows = []

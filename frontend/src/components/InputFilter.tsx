@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { inputFilterOptions, inputFilterDesign, inputFilterSchematic, docGenerateReport, type EmiDesign } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -127,10 +128,7 @@ export const InputFilter: React.FC<Props> = ({
         input_filter: { design, cap, protection: { committed_y_cap_nf: Number(opts.committed_y_cap_nf) },
           opts: buildOpts() },
       })
-      const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = `PFC_Report_${(confirmedState as any)?.project_id ?? 'design'}_incl_EMI.pdf`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'incl_EMI'))
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 

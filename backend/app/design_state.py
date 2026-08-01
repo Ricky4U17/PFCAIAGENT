@@ -118,6 +118,11 @@ class DesignState(BaseModel):
 
     # ── Set by /mode-a/start ────────────────────────────────────────────────
     project_id: Optional[str]    = None
+    # Human-readable project name for the report cover and Chapter 1 (e.g. "HPB3K0 PFC
+    # Design"). project_id is a generated handle like "pfc-1785501331228" and is not
+    # presentable; every report site falls back to it when this is not supplied, so the
+    # field is safe to leave unset on existing designs.
+    project_name: Optional[str]  = None
     intake:     Optional[Intake] = None
 
     # ── Set by /mode-a/approve-topology ─────────────────────────────────────

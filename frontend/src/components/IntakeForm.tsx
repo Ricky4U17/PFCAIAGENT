@@ -70,10 +70,13 @@ function setDeep(obj: IntakeData, path: string, val: unknown): IntakeData {
   return n
 }
 
-interface Props { onSubmit: (d: IntakeData) => void; loading: boolean }
+interface Props { onSubmit: (d: IntakeData, projectName: string) => void; loading: boolean }
 
 export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
   const [d, setD] = useState<IntakeData>(DEFAULT)
+  // Human-readable project name for the report cover and Chapter 1 (the project_id is a
+  // generated handle like "pfc-1785501331228" and is not presentable). Optional.
+  const [projectName, setProjectName] = useState('')
   const [lineFreq, setLineFreq] = useState<'50'|'60'|'400'|'univ'>('univ')
 
   const set = (path: string, val: unknown) => setD(prev => setDeep(prev, path, val))
@@ -131,6 +134,19 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
   return (
     <div>
       <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 24 }}>Design intake</div>
+
+      {/* ── Section 0: Project identification ── */}
+      <Card>
+        <SecHead icon="📁" label="Project" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '0 24px' }}>
+          <Field label="Project name (appears on the report cover)">
+            <input value={projectName} onChange={e => setProjectName(e.target.value)}
+              placeholder="e.g. HPB3K0 PFC Design"
+              style={{ width:'100%', padding:'8px 10px', borderRadius:6, border:`1px solid ${C.border}`,
+                       background:C.bg4, color:C.text, fontSize:13, fontFamily:'inherit' }} />
+          </Field>
+        </div>
+      </Card>
 
       {/* ── Section 1: Electrical ── */}
       <Card>
@@ -342,7 +358,7 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
       </Card>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8 }}>
-        <Btn onClick={() => onSubmit(d)} disabled={loading}>
+        <Btn onClick={() => onSubmit(d, projectName.trim())} disabled={loading}>
           {loading
             ? <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ display:'inline-block',width:14,height:14,border:`2px solid ${C.border2}`,

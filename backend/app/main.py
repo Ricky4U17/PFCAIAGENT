@@ -110,6 +110,9 @@ def _ctrl_strategy(state):
 class StartReq(BaseModel):
     project_id: str
     intake: Dict[str, Any]
+    # 7.2 — human-readable name for the report cover / Chapter 1. Optional: existing
+    # clients that do not send it keep working, and every report site falls back to project_id.
+    project_name: Optional[str] = None
 
 class FbReq(BaseModel):
     state: Dict[str, Any]
@@ -173,6 +176,7 @@ def start(req: StartReq):
         _clamp_input_voltage(intake.get("application"))   # hard [85, 264] Vac limit (designer 2026-07-23)
         res = select_topology(intake)
         state = {"intake": intake, "project_id": req.project_id,
+                 **({"project_name": req.project_name} if req.project_name else {}),
                  "topology_recommendation": {"recommended_topology": res["recommended_topology"], "recommended_mode": res["recommended_mode"]}}
         return {"status":"wait_topology","ranking":res["ranking"],"mode_scores":res["mode_scores"],
                 "recommended_topology":res["recommended_topology"],"recommended_mode":res["recommended_mode"],"state":state}

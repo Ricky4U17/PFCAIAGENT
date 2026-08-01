@@ -453,7 +453,7 @@ def build_inputfilter_story(story, design, cap=None, protection=None, ntc=None, 
         "reactive current, Y-cap earth leakage, and the mode expected to dominate emissions (DM at low line, "
         "CM at high line). Reactive and leakage currents are evaluated at the line frequency.", CH)
     if r.get("per_point"):
-        data_table(story, "10.12", "Operating-Point Sweep",
+        data_table(story, "10.12a", "Operating-Point Sweep",
             "One row per grid point; the dominant mode flips from DM to CM across the 132&#8211;180 V band.",
             ["V_ac", "I_in (A)", "Cu loss (W)", "I_Cx (mA)", "I_leak (µA)", "Mode"],
             [[_f(d["vac"], 0), _f(d["i_in"], 2), _f(d["cu_loss_w"], 2),

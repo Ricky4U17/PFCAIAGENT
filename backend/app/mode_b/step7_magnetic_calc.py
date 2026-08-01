@@ -211,6 +211,10 @@ class DesignResult:
     Ihf_rms_A:      float = 0.0
     Pac_W:          float = 0.0
     J_A_mm2:        float = 0.0
+    # The per-phase RMS current the engine ACTUALLY builds J and Pcu from: the half-cycle
+    # waveform-integrated RMS, not the analytic OPS row value. Exposed so the report's worked
+    # equation can show the same numerator the verdict is computed from (they used to differ).
+    I_phi_rms_A:    float = 0.0
     J_target_A_mm2: float = 0.0   # designer-selected current-density target (GUI)
     P_unc_lo_W:     float = 0.0
     P_unc_hi_W:     float = 0.0
@@ -938,6 +942,7 @@ def design_one_core(
     # so J = (Irms/n_par)/A_single = Irms/A_total. The old code divided the area
     # per conductor but not the current — overstating J by exactly n_parallel
     # (x2 bifilar, x3 trifilar; single wire was coincidentally correct).
+    res.I_phi_rms_A = round(wf["Irms_A"], 4)
     res.J_A_mm2 = round(wf["Irms_A"] / max(float(wire.get("Cu_area_mm2", 1.0)), 0.001), 3)
     res.J_target_A_mm2 = round(float(J_target), 2)   # designer's GUI target, for the report verdict
 

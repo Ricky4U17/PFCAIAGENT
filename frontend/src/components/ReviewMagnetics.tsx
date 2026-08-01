@@ -28,6 +28,7 @@ import { C, Btn } from './ui'
 import { type SimViews } from './SimulationAgent'
 import { docGenerateReport, simulateCrossCheck, getViewContract,
          type SimCrossCheck, type ViewContract } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 
 // OPS table: [Vin_rms, eta, PF] — standard 9-point operating matrix
 // Low-line rows use Pout_low; high-line rows use Pout_high
@@ -907,12 +908,7 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
           ...(simViews && (simViews.ring || simViews.threeD) ? { sim_views: simViews } : {}),
         },
       })
-      const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url
-      a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_14.pdf`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'Steps1_14'))
     } catch (e) {
       setRptError((e as Error).message ?? String(e))
       console.error('Report generation failed', e)

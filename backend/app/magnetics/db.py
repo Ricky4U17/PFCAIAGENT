@@ -553,9 +553,30 @@ class MagneticsDB:
         return self._bilinear_loglog(d["core_loss_surface_25C"], f_kHz, Bac_pk_T)
 
     def get_Bsat(self, material_key: str, T_C: float) -> float:
-        """Returns Bsat (T) at temperature T_C."""
+        """Returns Bsat (T) at temperature T_C.
+
+        Powder (item 27c): this used to return the constant `basic.Bsat_T` — the 25 °C value —
+        and silently ignore T_C, while the report stated Bsat was read AT THE CORE TEMPERATURE.
+        Powder Bsat does fall with temperature (EDGE: 1.500 T at 25 °C → 1.427 T at 100 °C) and
+        the figures are already in the material files, so honour them.
+
+        Order of preference, most specific first:
+          1. the explicit Bsat_25C_T / Bsat_100C_T / Bsat_150C_T points, linearly interpolated
+             (np.interp CLAMPS outside the range — deliberately no extrapolation past 150 °C);
+          2. Bsat_25C_T with the fractional Bsat_Tcoeff (per °C, referenced to 25 °C);
+          3. basic.Bsat_T — the old constant, for the few materials carrying no temperature data.
+        """
         d = self.get_material(material_key)
         if d["type"] == "powder":
+            pts = [(t, d[k]) for t, k in ((25.0, "Bsat_25C_T"), (100.0, "Bsat_100C_T"),
+                                          (150.0, "Bsat_150C_T")) if d.get(k)]
+            if len(pts) >= 2:
+                return float(np.interp(T_C, [p[0] for p in pts], [p[1] for p in pts]))
+            b25 = d.get("Bsat_25C_T") or d.get("basic", {}).get("Bsat_T")
+            tc  = d.get("Bsat_Tcoeff")
+            if b25 and tc:
+                # Guard the linear model against absurd extrapolation at extreme T.
+                return float(max(0.1, b25 * (1.0 + float(tc) * (T_C - 25.0))))
             return float(d.get("basic", {}).get("Bsat_T", 1.0))
         bv = d["Bsat_vs_T"]
         return float(np.interp(T_C, bv["T_C"], bv["Bsat"]))

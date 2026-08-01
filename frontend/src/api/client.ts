@@ -81,10 +81,11 @@ export interface FullIntake {
 export const api = {
   health: () => fetch(`${BASE}/health`).then(r => r.json()),
 
-  start: (project_id: string, intake: unknown) =>
+  start: (project_id: string, intake: unknown, project_name?: string) =>
     post<{status:string;ranking:Candidate[];mode_scores:ModeScore[];
           recommended_topology:string;recommended_mode:string;state:Record<string,unknown>}>
-    ('/mode-a/start', { project_id, intake }),
+    // project_name is omitted entirely when blank, so the backend keeps its default.
+    ('/mode-a/start', { project_id, intake, ...(project_name ? { project_name } : {}) }),
 
   approveTopology: (state: unknown, feedback: unknown) =>
     post<{status:string;selected_topology:string;selected_mode:string;

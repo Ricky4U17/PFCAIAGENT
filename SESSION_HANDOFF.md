@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-07-31**, head = `7e89c39` (C174).
+**Start here after a restart.** Last updated **2026-08-01**, head = C185 (see git log).
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -15,7 +15,33 @@
 
 ---
 
-## Where we are (2026-07-30)
+## Where we are (2026-08-01)
+
+**Just finished:** the designer's two-PDF review (32 in-PDF annotations + a Copilot Ch1-4 review).
+Groups 1, 3a, 4 (items 21-29) and 3c (Groups 6+7) are all done — C175 to C185.
+
+### Next up, in order
+1. **3d** — bridge rectifier `rd` (item B3 in PENDING_ITEMS).
+2. **3e** — status-vocabulary unification (item B4).
+3. Then: **C2** (report download — designer to retest and report browser/console), **D3**
+   (saturation gate on B_inner — changes selection, decide on its own merits), **B9**
+   (L_target vs L_req: the reference state diverges +67%, a designer decision), **A9** (3 xflux_hdc
+   materials with no Bsat-vs-T; `data_source` at the wrong nesting level in 67 powder files).
+
+### Traps this stretch re-taught
+- **A scripted renumbering can create DUPLICATES that a "does the series start at 'a'" audit cannot
+  see.** Always list the RENDERED table captions from a built PDF and check for repeats.
+- **`ast.parse` + the suite are not enough.** Three defects this stretch (the `_ch4` NameError that
+  silently dropped ~90 pages, the `%`-format `TypeError`, the leftover "Ccm") were only visible in a
+  BUILT PDF. Run `verify_combined_report.py` (its 178-190 page assertion is the guard), and for
+  Ch7-10 build the standalone endpoints — the combined verify does NOT cover them.
+- **`dict.get(k, default)` does not fire on an empty string.** That was the blank "Supplier: .".
+- **Report and GUI drift when they compute the same thing twice.** Diff engine output against a
+  pre-change baseline before/after any presentation-layer edit.
+
+---
+
+## Where we were (2026-07-30)
 
 Four designer review areas are complete and committed: **EMI**, **MOV+GDT**, **NTC**, **Fuse**.
 The last stretch of work reorganised Chapters 8 and 9 around a *requirement → screen → select → verify*

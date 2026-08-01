@@ -14,6 +14,7 @@ import type { CapacitorResult } from './Step15Capacitor'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
+import { downloadBlob, reportFilename } from '../api/download'
 
 interface Props {
   confirmedState:          Record<string, unknown>
@@ -332,10 +333,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         semiconductor: { design: b.design, mosfet: b.mosfet, diode: b.diode, bridge: b.bridge,
           thermal: b.thermal, tj_limit: b.tj_limit },
       })
-      const url = URL.createObjectURL(blob); const a = document.createElement('a')
-      a.href = url; a.download = `PFC_Report_${(confirmedState as any).project_id ?? 'design'}_Steps1_17.pdf`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 150)
+      downloadBlob(blob, reportFilename(confirmedState, 'Steps1_17'))
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 

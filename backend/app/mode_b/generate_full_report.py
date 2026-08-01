@@ -50,6 +50,15 @@ MARGIN = 20 * mm
 
 
 # ── Style sheet ───────────────────────────────────────────────────────────────
+def _pretty_topology(raw) -> str:
+    """Topology label with acronyms kept upright (str.title() gives "Ccm")."""
+    _A = {"ccm":"CCM","crcm":"CrCM","dcm":"DCM","pfc":"PFC","ttp":"TTP"}
+    if not raw:
+        return "—"
+    return " ".join(_A.get(w.lower(), w.capitalize())
+                    for w in str(raw).replace("_", " ").split())
+
+
 def _styles():
     base = getSampleStyleSheet()
     s = {}
@@ -234,7 +243,7 @@ def _cover(story, state, d, s):
         ("Output power (high-line)",   f"{ap.get('output_power_w_high_line', '—')} W"),
         ("Vin range",                  f"{ap.get('vin_rms_min', '—')} – {ap.get('vin_rms_max', '—')} Vac"),
         ("Output bus voltage",         f"{ap.get('output_bus_voltage_v', '—')} Vdc"),
-        ("Topology",                   state.get("selected_topology", "—").replace("_", " ").title()),
+        ("Topology",                   _pretty_topology(state.get("selected_topology"))),
         ("Phases",                     str(state.get("selected_channels", 1))),
         ("Switching frequency",        f"{float(state.get('topology_specific_inputs',{}).get('recommended_frequency_hz', 70000))/1e3:.0f} kHz"),
     ]
@@ -555,7 +564,8 @@ def _step13(story, d, s):
         ("Bmin @ full-load",    f"{d.get('Bmin_FL_T', 0)*1000:.2f} mT"),
         ("Bmax @ full-load",    f"{d.get('Bmax_FL_T', 0)*1000:.2f} mT"),
         ("Bsat @ T_core",       f"{d.get('Bsat_at_Tcore', 0)*1000:.0f} mT"),
-        ("Saturation margin",   f"{d.get('sat_margin_pct', 0):.1f}%  {'✓' if d.get('sat_margin_pct',0)>=15 else '⚠'}"),
+        ("Saturation margin (mean path, gate basis)",
+         f"{d.get('sat_margin_pct', 0):.1f}%  {'✓' if d.get('sat_margin_pct',0)>=15 else '⚠'}"),
     ]
     story.append(_kv_table(rows, s=s))
 
@@ -639,13 +649,13 @@ def _step13(story, d, s):
 
     checks = [
         ("FFcu ≤ 40%",          d.get("FFcu",0) <= 0.40),
-        ("Saturation margin ≥ 15%", d.get("sat_margin_pct",0) >= 15.0),
+        ("Saturation margin ≥ 15% (mean path)", d.get("sat_margin_pct",0) >= 15.0),
         ("ΔT ≤ budget",         d.get("dT_rise_C",0) <= d.get("dT_budget_C",60)),
     ]
     check_data = [["Check", "Result", "Actual"]]
     check_labels = {
         "FFcu ≤ 40%":           f"{d.get('FFcu',0)*100:.2f}%",
-        "Saturation margin ≥ 15%": f"{d.get('sat_margin_pct',0):.1f}%",
+        "Saturation margin ≥ 15% (mean path)": f"{d.get('sat_margin_pct',0):.1f}%",
         "ΔT ≤ budget":          f"{d.get('dT_rise_C',0):.1f}°C vs {d.get('dT_budget_C',60):.0f}°C",
     }
     for label, ok in checks:

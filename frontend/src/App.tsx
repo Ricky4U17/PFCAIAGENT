@@ -114,10 +114,10 @@ export default function App() {
   const appClass = s.intakeData?.compliance?.application_class as string|undefined
   const leakage  = s.intakeData?.compliance?.leakage_current_limit_ua as number|undefined
 
-  const handleIntake = async (intake: IntakeData) => {
+  const handleIntake = async (intake: IntakeData, projectName = '') => {
     setLoading(true); setError(null)
     try {
-      const r = await api.start('pfc-'+Date.now(), intake)
+      const r = await api.start('pfc-'+Date.now(), intake, projectName)
       setS(p=>({...p,loading:false,step:'topology',graphState:r.state,intakeData:intake,
         ranking:r.ranking,modeScores:r.mode_scores,
         recommendedTopology:r.recommended_topology,recommendedMode:r.recommended_mode}))

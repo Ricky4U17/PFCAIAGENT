@@ -400,7 +400,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         m = meta.get(kind, {}); p = cfg[kind]
         return [label, m.get("manufacturer", "—") or "—", m.get("part_number", "—") or "—",
                 p.get("tech") or p.get("topology") or ("SiC" if p.get("is_sic") else "Si")]
-    data_table(story, "7.2", "Confirmed Power Semiconductors",
+    data_table(story, "7.2a", "Confirmed Power Semiconductors",
         "Manufacturer / part number and the technology selected for each block.",
         ["Block", "Manufacturer", "Part number", "Type"],
         [_part("bridge", "Bridge rectifier"), _part("mosfet", "Boost MOSFET"), _part("diode", "Boost diode")],
@@ -609,7 +609,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     # ── 7.8 Summary + cross-check ────────────────────────────────────────────
     sub_h(story, "7.8", "Summary and Efficiency Cross-Check", CH)
     wr = max(rows, key=lambda r: r["P_SEMI_total"])   # worst-case operating point
-    data_table(story, "7.8", "Worst-Case Semiconductor Loss and Margin",
+    data_table(story, "7.8a", "Worst-Case Semiconductor Loss and Margin",
         f"Worst semiconductor dissipation occurs at {wr['Vac']:.0f} Vac.",
         ["Quantity", "Worst-case value", "Limit / margin"],
         [["MOSFET loss (all ch)", f"{_f(summ['P_FET_max'])} W", "—"],
@@ -743,7 +743,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             "Balance update consistently. This closes the loop between the assumed efficiency and the "
             "physics-based loss model.", CH)
     else:
-        data_table(story, "7.8b", "Loss Budget Cross-Check vs Line Voltage",
+        data_table(story, "7.8c", "Loss Budget Cross-Check vs Line Voltage",
             "System loss from the supplied efficiency, the semiconductor share, and the implied remainder "
             "(inductor + capacitor + control — see Chapters 3&#8211;6).",
             ["V_AC", "System loss", "Semiconductor", "Implied other"],

@@ -1,4 +1,5 @@
 import React from 'react'
+import { downloadBlob } from '../api/download'
 import { Card, SecHead, Btn, C } from './ui'
 import type { DocReportStatus } from '../api/client'
 
@@ -35,14 +36,7 @@ export const DonePanel: React.FC<Props> = ({summary, onRestart, onGenerateReport
   const downloadReport = () => {
     if (!reportBytes) return
     const blob = new Blob([reportBytes], { type: 'application/pdf' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url
-    a.download = 'PFC_Design_Report_Steps1_12.pdf'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 150)
+    downloadBlob(blob, 'PFC_Design_Report_Steps1_12.pdf')
   }
 
   return (
