@@ -6342,3 +6342,35 @@ from a PDF text extract — the check above is on the formatter and the call sit
 STILL OPEN (flagged, not fixed — outside this step): `appendices.py` also hardcodes V_RAMP = 5.0 inside
 the `gmod_lo` / `gmod_hi` modulator-gain expressions. Same class, different quantity; folding it in
 would have widened a precision fix into a modulator-gain change.
+
+## C181 — 2026-08-01 — 3a step 3: per-phase L precision + "which L is used, and why" stated where asked
+
+Designer (report p.120, Section 6.8.2): "Which value of inductor per phase is selected in 6.8.2? Table
+4.1 shows different inductance at different input voltage. At 90 Vac it is 101.6 uH and not 102 uH."
+Copilot made the same point: do not feed Chapter 6 a rounded L if the control chapter depends on it.
+
+FIRST, WHAT WAS *NOT* WRONG — worth recording because it was the designer's actual worry: the CONTROL
+LOOP IS NOT COMPUTED FROM A ROUNDED VALUE. main.py sets `_ci["lphi_uH"] = _asb_min_uH`, the exact
+minimum of the approved inductor's per-point L_vs_Vin_table, and step16_steps1_8 computes
+`r_ls = lphi_uH*1e-6 / (1.5e-9 * rcs_sel * ratio)` from that exact float. Only the DISPLAY rounded.
+
+FIXED (display):
+  * step16_steps1_8.py Step-1 parameter table — the L row was `%.0f`, so 101.6 printed as 102 and could
+    not be reconciled against Chapter 4 Table 4.1. Now `%.4g` (101.6 -> "101.6", 235 -> "235", no
+    trailing ".0" noise), and the row is relabelled "Per-Phase Inductance (min as-built)".
+  * report_steps1_8.py Section 6.8.2 R_LS equation — same `%.0f` -> `%.4g`.
+  Swept for other lphi displays: none left at 0 decimals.
+
+FIXED (the real gap): the report never said WHICH inductance Chapter 6 designs at. Section 6.10.14 does
+explain the minimum-as-built basis, but that is ~30 pages after Section 6.8.2 where the designer was
+reading, so the question was unanswerable at the point it arises. Section 6.8.2 now opens with a
+"Which L_phi is used here" paragraph: the minimum as-built full-load inductance across the nine points,
+read from the approved inductor's per-point curve (Chapter 4 Table 4.1), why the minimum is the worst
+case for the loop (lowest L -> highest plant gain -> highest crossover, so stability there implies
+stability everywhere), and a forward reference to the nine-point verification in Section 6.10.14.
+
+VERIFIED on a built report: Section 6.8.2 now reads "L_phi = 130.3 uH, read from the approved
+inductor's per-point curve (Chapter 4, Table 4.1), not a rounded or nameplate value" and the Step-1 row
+reads "Per-Phase Inductance (min as-built)  L_phi  130.3  130.3  uH" — the harness design's min
+as-built L, which the old %.0f would have shown as "130". 185 pp, 0 glyph boxes.
+Suite 172 passed / 2 skipped.

@@ -89,7 +89,9 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         ["Rated Output Power", "Pout", f"{p['pout_lo']:.0f}", f"{p['pout_hi']:.0f}", "W"],
         ["Regulated DC Bus", "Vout", f"{p['vout']:.1f}", f"{p['vout']:.1f}", "V"],
         ["Switching Frequency", "fsw", f"{p['fsw']/1e3:.0f}", f"{p['fsw']/1e3:.0f}", "kHz"],
-        ["Per-Phase Inductance", "Lφ", f"{p['lphi_uH']:.0f}", f"{p['lphi_uH']:.0f}", "µH"],
+        # 4 significant digits: the as-built L is 101.6 uH, not the 102 uH a %.0f implied, and the
+        # designer compares this row against Chapter 4 Table 4.1 directly.
+        ["Per-Phase Inductance (min as-built)", "Lφ", f"{p['lphi_uH']:.4g}", f"{p['lphi_uH']:.4g}", "µH"],
         ["Number of Channels", "Nch", f"{p['nch']}", f"{p['nch']}", "—"],
         ["Output Capacitor", "Cout", f"{p['cout_uF']:.0f}", f"{p['cout_uF']:.0f}", "µF"],
         ["Worst-Case Efficiency", "η", f"{p['eta_lo']*100:.1f}%", f"{p['eta_hi']*100:.1f}%", "—"],

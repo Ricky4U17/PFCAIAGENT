@@ -627,8 +627,16 @@ def _build_step8(story, data):
         "The LS pin sets the emulated inductance the LPT predictor uses to anticipate inductor "
         "current within a switching cycle. It scales with the real inductance, inversely with "
         "R<sub>CS</sub>, and with the divider ratio; AN4165-D bounds it to 12–87 kΩ.", C6)
+    body(story,
+        "<b>Which L<sub>&#966;</sub> is used here.</b> The whole of Chapter 6 is designed at the "
+        "<b>minimum as-built full-load inductance</b> across the nine operating points &#8212; "
+        f"L<sub>&#966;</sub> = {p['lphi_uH']:.4g} &#181;H, read from the approved inductor's per-point "
+        "curve (Chapter 4, Table 4.1), not a rounded or nameplate value. The minimum is the worst case "
+        "for the loop: the lowest inductance gives the highest plant gain and therefore the highest "
+        "crossover, so a design that is stable there is stable at every other point. Section 6.10.14 "
+        "verifies that explicitly at all nine points.", C6)
     eq_box(story, [r"R_{LS}=\dfrac{L_\phi}{1.5\times10^{-9}\,R_{CS}\,\mathrm{ratio}}"
-                   r"=\dfrac{%.0f\,\mu H}{1.5\times10^{-9}\times%g\,\mathrm{m\Omega}\times%.2f}=%.3f\ \mathrm{k\Omega}"
+                   r"=\dfrac{%.4g\,\mu H}{1.5\times10^{-9}\times%g\,\mathrm{m\Omega}\times%.2f}=%.3f\ \mathrm{k\Omega}"
                    % (p["lphi_uH"], s6["rcs_sel"]*1e3, s8["ratio"], s8["r_ls"]/1e3)], ch=C6)
     body(story, "Decision: R<sub>LS</sub> = %.1f kΩ (E96) — inside 12–87 kΩ (PASS). C<sub>LS</sub> "
                 "= %.0f pF → pin-filter pole %.3f kHz."
