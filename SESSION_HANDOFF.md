@@ -21,7 +21,7 @@ Four designer review areas are complete and committed: **EMI**, **MOV+GDT**, **N
 The last stretch of work reorganised Chapters 8 and 9 around a *requirement → screen → select → verify*
 flow and fixed several real calculation defects found along the way.
 
-### Recent arc — C162 → C174
+### Recent arc — C162 → C177
 
 | C | Commit | What |
 |---|---|---|
@@ -35,6 +35,7 @@ flow and fixed several real calculation defects found along the way.
 | C172 | `b103437` | `verify_configuration` resolves ESR from the **part record**, not the curated series table |
 | C173 | `94c5ee8` | Top-10 "Devices in parallel" box showed a misleading placeholder — blank meant 2, not 1 |
 | C174 | `7e89c39` | Re-run buttons passed React's click event as their options — knob values never reached the backend |
+| C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build
 - Backend suite: **172 passed / 2 skipped** (the standing baseline — anything else is a regression).
@@ -49,6 +50,8 @@ Nothing is half-finished. Suggested order:
 
 1. **`PENDING_ITEMS.md` B5** — delete the dead `_extra["esr_mohm"]` in `main.py`. Small, and it still
    carries the `or`-chain pattern that caused C171.
+   *(Group 2 of the designer review — report shows the ranking default instead of the selected part —
+   is the other natural next step; see the review findings list.)*
 2. **Chapter 9 M4 (data)** — `PENDING_ITEMS.md` A2/A3. MOV `Vc @ In` is missing on 1140/1140 parts and
    GDT impulse-sparkover + follow-current on 172/172. **Criterion A cannot reach PASS until this lands** —
    M1–M3 made that blocker legible rather than hidden. This is the designer's "improve the database" batch.
