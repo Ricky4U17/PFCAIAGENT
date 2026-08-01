@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-07-30**, head = `94c5ee8` (C173).
+**Start here after a restart.** Last updated **2026-07-31**, head = `7e89c39` (C174).
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -21,7 +21,7 @@ Four designer review areas are complete and committed: **EMI**, **MOV+GDT**, **N
 The last stretch of work reorganised Chapters 8 and 9 around a *requirement → screen → select → verify*
 flow and fixed several real calculation defects found along the way.
 
-### Recent arc — C162 → C173
+### Recent arc — C162 → C174
 
 | C | Commit | What |
 |---|---|---|
@@ -34,6 +34,7 @@ flow and fixed several real calculation defects found along the way.
 | C171 | `d3cd507` | **Capacitor loss: one engine, per line.** Ch7 Table 7.8b was re-deriving from the control-loop ESR → 46 % low. Now == Ch5 Table 5.3.1 row for row |
 | C172 | `b103437` | `verify_configuration` resolves ESR from the **part record**, not the curated series table |
 | C173 | `94c5ee8` | Top-10 "Devices in parallel" box showed a misleading placeholder — blank meant 2, not 1 |
+| C174 | `7e89c39` | Re-run buttons passed React's click event as their options — knob values never reached the backend |
 
 ### State of the build
 - Backend suite: **172 passed / 2 skipped** (the standing baseline — anything else is a regression).
@@ -82,6 +83,9 @@ Nothing is half-finished. Suggested order:
   Not safe: `⌈⌉ ⌊⌋ ⊙ ○` and combining diacritics.
 - **`or` fallback chains silently substitute different physical quantities.** That is the C171 bug in one
   line. A missing value should read DATA MISSING.
+- **Never pass a handler bare to `onClick` if it takes parameters** — React supplies the click event as
+  the first argument. `onClick={() => fn()}`. `Btn.onClick` is now typed to catch this, and the `post`
+  helper rejects an event in a request body. (C174; PENDING_ITEMS B6.)
 
 ---
 
