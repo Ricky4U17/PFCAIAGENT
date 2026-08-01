@@ -300,7 +300,8 @@ def _thermal_section(story, traces, thermal):
 
 def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_limit=None, extra=None):
     """Append the full Chapter-7 content to `story`. `extra` may carry the other-chapter loss
-    parameters (dcr_mohm, rcs_mohm, esr_mohm, …) for the Sec. 7.8 system loss budget."""
+    parameters (dcr_mohm, rcs_mohm, core_loss_by_vac, cap_loss_by_vac, …) for the Section 7.8
+    system loss budget."""
     extra = extra or {}
     tj_limit = tj_limit or {"fet": 150, "diode": 150, "bridge": 130}
     res = calculate_semiconductor_losses(design, mosfet, diode, bridge, thermal, tj_limit)

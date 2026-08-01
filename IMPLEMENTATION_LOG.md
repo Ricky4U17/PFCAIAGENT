@@ -6230,3 +6230,48 @@ both emit 5 columns, and the missing annotation was re-added.
 
 Suite 172 passed / 2 skipped (re-run against the final state); frontend tsc clean; report 184 pp,
 0 glyph boxes. PENDING_ITEMS B5 closed.
+
+## C178 — 2026-08-01 — Dead esr_mohm removed + GROUP 2: the report now names the SELECTED part
+
+Two queued items. (1) PENDING_ITEMS B5. (2) Group 2 of the designer review — "report shows the ranking
+default instead of the designer's selection", the defect class behind C161/C168-C170/C171/C172.
+
+(1) DEAD `_extra["esr_mohm"]` REMOVED (main.py). C171 removed its only consumer; the key survived
+carrying `_s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm")` — an `or` chain that silently
+substitutes the CONTROL-LOOP plant ESR for a DISSIPATIVE ESR. Verified unused before deleting (the
+other `*_esr_mohm` hits are unrelated names). A comment now records why the key must not come back and
+what to call instead. report_semiconductor's stale docstring list corrected.
+
+(2a) Ch3 Table 3.3.2 — star + amber row were HARDCODED to row 0 (`' ★' if i==0`, `sel_row = 0`), so
+whenever the designer picked any candidate other than the engine's rank #1 the table advertised the
+wrong core while Section 3.3.5 and all of Chapter 4 used the real one. Now matched on
+(part_number, stacks, N) against the approved design. Caption rewritten to say the star marks "the
+design THIS REPORT IS BUILT FROM ... not necessarily the engine's rank #1".
+  Plus two guards, so a mismatch is stated rather than mislabelled:
+    - approved design NOT in the candidate list -> no star, explicit annotation explaining why
+      (shortlist regenerated after approval, or manually entered part) and that Ch4 uses the approved one
+    - starred row is not #1 -> annotation explaining ranking-by-score vs designer choice
+  VERIFIED by approving candidate #5 (0059555A2, 3x, N=37) and rebuilding: the star lands on row 5 and
+  the "not the engine's rank #1" note fires. Under the old code this starred row 1.
+
+(2b) Ch8 §8.9.2 precharge timing quoted `r25_pick` (the requirement-derived generic value) even when a
+part was selected — the designer saw 5.08 ohm against a 50 ohm selected NTC, and it disagreed with
+Section 8.8's selected-part recalculation. It now uses the SELECTED part's R25/tau/t_bypass, names the
+basis in the sentence, and prints an explicit note when the selected R25 differs from the derived one
+(the derived figure is the minimum the part had to clear, not the value to time the relay around).
+  VERIFIED: with MF72-010D25 selected the section reads 10.00 ohm / 23.5 ms / 94 ms; with no selection
+  it falls back and says "on the generic R25 pick (no part selected yet)" — 6.84 ohm / 16.1 ms / 64 ms.
+
+(2c) AUDIT of the remaining `r25_pick` uses: Sections 8.3 and 8.4 are correct (they ARE the requirement,
+pre-selection, and the C164 de-circularisation requires §8.1-§8.5 not to name a part). The one leak was
+the Figure 8.1 caption, which quoted generic-pick tau/t_bypass that disagreed with §8.9.2. Relabelled as
+provisional requirement-derived figures with a pointer to §8.9.2 for the built values — fixing the
+inconsistency without re-introducing the circularity C164 removed.
+
+ENVIRONMENT DRIFT FOUND: `svglib==2.0.2` is in requirements.txt but was NOT installed in the venv, so
+`_inrush_schematic_flowable()` returned None and **Figure 8.1 was silently absent from every locally
+built report** (Ch8/9 26 pp instead of 27). Installed the single missing package per the standing
+surgical-install rule. Suite re-run afterwards because TestCombinedReport asserts a page-count range and
+the figure adds pages: still 172 passed / 2 skipped.
+
+Suite 172 passed / 2 skipped (re-run post-install); Ch8/9 27 pp, 0 glyph boxes.

@@ -2569,7 +2569,15 @@ def doc_generate_report(req: _DocReportReq):
                     # so the §7.8 budget always accounts for the shunt loss (matching Chapter 6).
                     "rcs_mohm": (_ctrl.get("rcs") * 1e3) if _ctrl.get("rcs")
                                 else (_sp.get("rcs_mOhm") or 15.0),
-                    "esr_mohm": _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm"),
+                    # NOTE: no "esr_mohm" here. C171 removed its only consumer (the capacitor-loss
+                    # re-derivation) and the key was left behind carrying
+                    #     _s15.get("ESR_parallel_mohm") or _sp.get("ESR_mOhm")
+                    # — an `or` chain that silently substitutes the CONTROL-LOOP plant ESR (which
+                    # sizes the voltage-loop zero) for a DISSIPATIVE ESR when the first term is
+                    # absent. Two different physical quantities; that substitution is exactly the
+                    # 6x error C171 had to trace. Anything needing capacitor ESR should call
+                    # step15_capacitor.bank_loss_table() for loss, or read ESR_parallel_mohm
+                    # together with its ESR_basis for display.
                 }
                 # Total inductor loss = copper (per-line, computed in Ch7) + CORE loss (Ch4), and
                 # total CAPACITOR loss (Ch5) so Table 7.8b accounts for every loss, not just resistive.

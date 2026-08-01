@@ -2176,13 +2176,30 @@ def _ch3(story, state, d):
 
     sub_h(story, "3.3.2", "Top candidates table — all metrics side by side", 3)
     cands = d.get("all_candidates",[])
+    _sel_matched = None          # index of the row that IS the approved design
     if cands:
+        # The star and the amber highlight must mark the design this report was actually built
+        # from — NOT the ranking's #1. They used to be hardcoded to row 0, so whenever the
+        # designer picked any other candidate the table advertised the wrong core while the rest
+        # of Chapter 3 and all of Chapter 4 used the real one.
+        def _same_design(r):
+            try:
+                if str(r.get("part_number", "")).strip() != str(part_no).strip():
+                    return False
+                if int(r.get("stacks", 1) or 1) != int(stacks or 1):
+                    return False
+                _n = int(r.get("N", 0) or 0)
+                return (_n == int(N or 0)) if (_n and N) else True
+            except Exception:
+                return False
         cand_rows = []
         for i, c in enumerate(cands[:15]):
             r = c.get("result", c)
             lbl = c.get("label","")
+            if _sel_matched is None and _same_design(r):
+                _sel_matched = i
             cand_rows.append([
-                f"{i+1}{' ★' if i==0 else ''}",
+                f"{i+1}",                       # star filled in below, once the match is known
                 r.get("part_number","—"),
                 str(r.get("stacks",1)),
                 str(int(r.get("N",0))),
@@ -2191,7 +2208,9 @@ def _ch3(story, state, d):
                 f"{r.get('Ptotal_100C_W',0):.2f}",
                 "PASS" if r.get("passed") else "—",
             ])
-        sel_row = 0
+        sel_row = _sel_matched if _sel_matched is not None else 0
+        if _sel_matched is not None:
+            cand_rows[_sel_matched][0] = f"{_sel_matched+1} ★"
     else:
         cand_rows = [["1 ★", part_no, str(stacks), str(N),
                       f"{FFcu*100:.0f}", f"{dT:.1f}", f"{Ptot100:.2f}", "PASS"]]
@@ -2204,12 +2223,30 @@ def _ch3(story, state, d):
         "and runs the thermal model. Candidates are ranked by composite score.", 3)
 
     data_table(story, "3.3.2", "Top Core Candidates — Sizing Engine Output",
-        "Amber row = selected design (#1). All remaining rows are alternatives. "
-        "",
+        "★ and the amber row mark the design THIS REPORT IS BUILT FROM — the part named in "
+        "Section 3.3.5 and analysed throughout Chapter 4. It is not necessarily the engine's "
+        "rank #1: the ranking orders candidates by composite score, while the designer selects "
+        "the part to build. All other rows are alternatives that were evaluated and not chosen.",
         ["#", "Part number", "Stacks", "N", "FF<sub>cu</sub>%", "ΔT °C", "P<sub>total</sub> W", "Result"],
         cand_rows,
         col_widths=[CW*0.05,CW*0.20,CW*0.08,CW*0.06,CW*0.10,CW*0.10,CW*0.15,CW*0.26],
         worst_rows=[sel_row], ch=3)
+    # Consistency guard: never let the table advertise a different core from the one the rest of
+    # the chapter uses. If the approved design is not among the listed candidates, say so plainly
+    # instead of starring an arbitrary row.
+    if cands and _sel_matched is None:
+        annotation(story, "SELECTED DESIGN NOT IN THE CANDIDATE LIST",
+            f"The design analysed in this report (<b>{part_no}</b>, {stacks}× stack, N = {N}) does "
+            "not appear in the candidate rows above, so no row is starred. This happens when the "
+            "shortlist was regenerated after the design was approved, or when the part was entered "
+            "manually. Section 3.3.5 onward and all of Chapter 4 use the approved design; treat the "
+            "table above as the alternatives that were evaluated, not as the selection record.", 3)
+    elif cands and _sel_matched is not None and _sel_matched != 0:
+        annotation(story, "NOTE — THE SELECTED DESIGN IS NOT THE ENGINE'S RANK #1",
+            f"The starred row is #{_sel_matched+1}, not #1. The ranking sorts by composite score "
+            "(loss, volume, temperature rise, cost, fill); the designer selected a different "
+            "candidate. Section 3.3.3 gives the selection rationale, and every downstream number "
+            "in this report uses the starred design.", 3)
 
     sub_h(story, "3.3.3", "Candidate comparison and selection rationale", 3)
     annotation(story, "THEORY",

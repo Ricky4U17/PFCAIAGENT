@@ -115,10 +115,14 @@ def build_ntc_story(story, design, cap=None, opts=None):
         body(story,
             f"The NTC <b>RT</b> limits the cold-start current into the bulk capacitor <b>C</b> "
             f"(C<sub>out</sub> = {_f(s['cout']*1e6,0)} {_MU}F); once the bus has precharged, the relay "
-            f"contact <b>K</b> shorts RT out so it carries current only during the startup pulse. This "
-            f"design: R<sub>25</sub> &#8776; {_f(r['r25_pick'],2)} {_OHM} (pick), &#964; = "
-            f"{_f(r['tau']*1e3,1)} ms, bypass after {_f(r['t_bypass']*1e3,0)} ms. Power path in black, "
-            "relay-coil drive in blue; the diode <b>D</b> clamps the coil flyback.", CH)
+            f"contact <b>K</b> shorts RT out so it carries current only during the startup pulse. "
+            f"Provisional sizing at this stage: R<sub>25</sub> &#8776; {_f(r['r25_pick'],2)} {_OHM} "
+            f"(the value derived in Section 8.3, before a part is chosen), giving &#964; &#8776; "
+            f"{_f(r['tau']*1e3,1)} ms and a bypass after {_f(r['t_bypass']*1e3,0)} ms. "
+            "<b>These are requirement-derived figures, not the built values</b> — Section 8.9.2 "
+            "recomputes the precharge timing on the R<sub>25</sub> of the part actually selected, and "
+            "that is the number to design the relay delay around. Power path in black, relay-coil "
+            "drive in blue; the diode <b>D</b> clamps the coil flyback.", CH)
 
     # ── 8.2 maximum allowed inrush target — the first real calculation starts HERE ──
     sub_h(story, "8.2", "Maximum Allowed Inrush Target", CH)
@@ -372,12 +376,32 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "it carries current only during the startup pulse. The bus settles with the RC time constant "
         "&#964; = R<sub>25</sub>&#183;C<sub>out</sub>; the bypass is closed after a few time constants.", CH)
     eq_box(story, [r"\tau=R_{25}\,C_{out},\qquad t_{bypass}=N_{\tau}\,\tau"], number="8.9.2", ch=CH)
+    # Precharge timing must be quoted for the SELECTED part once one exists. Using the generic
+    # r25_pick here made the report state an R25 the designer had not chosen (e.g. 5.08 ohm while a
+    # 50 ohm NTC was selected), and it disagreed with the selected-part recalculation in Section 8.8.
+    _sel_ntc = out.get("selected") or {}
+    if _sel_ntc.get("r25_ohm"):
+        _r25_t  = float(_sel_ntc["r25_ohm"])
+        _tau_ms = float(_sel_ntc.get("tau_ms") or (r['tau'] * 1e3))
+        _tb_ms  = float(_sel_ntc.get("t_bypass_ms") or (r['t_bypass'] * 1e3))
+        _basis  = (f"the SELECTED NTC ({_sel_ntc.get('mfr','')} "
+                   f"{_sel_ntc.get('part_number','')})").replace("  ", " ")
+    else:
+        _r25_t, _tau_ms, _tb_ms = float(r['r25_pick']), r['tau'] * 1e3, r['t_bypass'] * 1e3
+        _basis = "the generic R<sub>25</sub> pick (no part selected yet)"
     body(story,
-        f"<b>Worked.</b> &#964; = {_f(r['r25_pick'],2)} {_OHM} &#215; {_f(s['cout']*1e6,0)} {_MU}F = "
-        f"{_f(r['tau']*1e3,1)} ms, so closing the bypass after {_f(s['tau_multiple'],0)}&#183;&#964; = "
-        f"<b>{_f(r['t_bypass']*1e3,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
+        f"<b>Worked — on {_basis}.</b> &#964; = R<sub>25</sub>&#183;C<sub>out</sub> = "
+        f"{_f(_r25_t,2)} {_OHM} &#215; {_f(s['cout']*1e6,0)} {_MU}F = "
+        f"{_f(_tau_ms,1)} ms, so closing the bypass after {_f(s['tau_multiple'],0)}&#183;&#964; = "
+        f"<b>{_f(_tb_ms,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
         f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],1)} V bus) and carry the "
         f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
+    if _sel_ntc.get("r25_ohm") and abs(float(_sel_ntc["r25_ohm"]) - float(r['r25_pick'])) > 0.01:
+        body(story,
+            f"<i>The sizing calculation of Section 8.3 derived a required R<sub>25</sub> of "
+            f"{_f(r['r25_pick'],2)} {_OHM}; the selected part is {_f(_r25_t,2)} {_OHM}. The timing above "
+            f"uses the SELECTED value, which is what the built unit will do — the derived figure is the "
+            f"minimum the part had to clear, not the value to design the relay delay around.</i>", CH)
     if wc:
         _rr = wc.get("r_required_ohm"); _op = wc.get("relay_operate_ms"); _tolm = wc.get("relay_delay_tol_ms")
         _sel_ms = (out.get("selected") or {}).get("t_bypass_ms")
