@@ -6407,3 +6407,41 @@ REGRESSION CHECK on the reference design (its C1 is 330.90 nF, which does not hi
 clean no-change control): report builds 185 pp, every selection still a correct nearest pick —
 R2 160.33 k -> 162 k, R3 8.6336 M -> 8.66 M, C1 330.90 -> 330 nF, C2 1.0815 -> 1.1 nF, C3 21.12 -> 22 nF
 — and the voltage loop still crosses at the designed 17.5 Hz. Suite 172 passed / 2 skipped.
+
+## C183 — 2026-08-01 — 3a step 5: r_L / r_C provenance in Table 6.10.6 (+ a mislabel fixed)
+
+Designer (report p.137): "How are inductor DCR and output capacitor ESR values calculated in Table
+6.10.6 to take into account for next step calculations?" The table's Source column answered the wrong
+question — it gave the SCOPE ("Per phase", "Per capacitor") but never the PROVENANCE or the effect.
+
+MISLABEL FOUND while tracing it: the r_C row said "Per capacitor". It is not. The GUI passes
+`ESR_MOhm = approvedCapacitorDesign.ESR_parallel_mohm` (SemiconductorSelection.tsx:320,
+ControlDesign.tsx:166) — the BANK parallel ESR. The VALUE is correct for this model, because the plant
+puts it in series with the TOTAL C_O (wz = 1/(C_O(R_load/2 + r_C))), but the label described a
+different quantity, and a designer checking the number against a single can's datasheet would find a
+mismatch that is not there.
+
+TRACED AND NOW STATED in the table's Source column:
+  L_phi  — MINIMUM as-built L across the nine points, from the approved inductor's per-point curve
+           (Ch 4 Table 4.1), cross-referenced to Section 6.8.2 (was the bare "Design spec"; now
+           consistent with C181)
+  C_O    — TOTAL installed bank capacitance from the approved capacitor (Ch 5)
+  r_L    — per phase, from the approved inductor (Ch 3); the GUI supplies DCR_100C_mOhm, i.e. the HOT
+           value, which is the worst case for loop damping (SemiconductorSelection.tsx:319)
+  r_C    — BANK ESR, all capacitors in parallel, pairing with the TOTAL C_O above
+Values also switched from %.0f to %.4g so a 12.7 mOhm ESR is not shown as 13.
+
+NEW ANNOTATION "WHERE r_L AND r_C COME FROM, AND WHAT THEY DRIVE" answers the second half of the
+question — what they change downstream: r_C sets the output/ESR zero
+wz = 1/(C_O(R_load/2 + r_C)) and raises the front-end gain by (R_load+2r_C)/(R_load+r_C); r_L enters
+the plant denominator and therefore sets the damping (Q) of the L-C pole pair. Both feed every
+operating point in Section 6.10.7 and the compensator sizing after it, so changing the inductor or the
+capacitor bank moves the loop design with it — which is the point the designer was checking.
+
+VERIFIED on a built report: the table now reads "Inductor DCR r_L 95 mOhm — Per phase, carried in from
+the approved inductor (Ch 3); the GUI supplies the 100 C (hot) value…" and "Output-cap ESR r_C
+12.7 mOhm — BANK ESR, all capacitors in parallel, not per capacitor…", with the annotation following.
+185 pp, 0 glyph boxes. Suite 172 passed / 2 skipped.
+
+### 3a COMPLETE (C179-C183): f_cv precision · R_CS/V_RAMP precision + V_RAMP de-hardcode ·
+### per-phase L precision + basis · E-series decade wrap · r_L/r_C provenance.

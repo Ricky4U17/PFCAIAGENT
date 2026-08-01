@@ -286,10 +286,17 @@ def build_step10(story, data: dict):
         "Sourced from prior steps and the power-stage specification.",
         ["Parameter", "Symbol", "Value", "Source / notes"],
         [["Output voltage", "V_OUT", f"{vout:.1f} V", "Step 5 — feedback divider"],
-         ["Inductance per phase", "Lϕ", f"{lphi*1e6:.0f} µH", "Design spec"],
-         ["Output capacitance", "C_O", f"{co*1e6:.0f} µF", "Total output capacitance"],
-         ["Inductor DCR", "r_L", f"{d['p']['r_l']*1e3:.0f} mΩ", "Per phase"],
-         ["Output-cap ESR", "r_C", f"{d['p']['r_c']*1e3:.0f} mΩ", "Per capacitor"],
+         ["Inductance per phase", "Lϕ", f"{lphi*1e6:.4g} µH",
+          "MINIMUM as-built L across the nine points, from the approved inductor's "
+          "per-point curve (Ch 4, Table 4.1) — see Section 6.8.2"],
+         ["Output capacitance", "C_O", f"{co*1e6:.0f} µF",
+          "TOTAL installed bank capacitance from the approved capacitor (Ch 5)"],
+         ["Inductor DCR", "r_L", f"{d['p']['r_l']*1e3:.4g} mΩ",
+          "Per phase, carried in from the approved inductor (Ch 3); the GUI supplies the "
+          "100 °C (hot) value, the worst case for loop damping"],
+         ["Output-cap ESR", "r_C", f"{d['p']['r_c']*1e3:.4g} mΩ",
+          "BANK ESR — all capacitors in parallel, not per capacitor. It pairs with the "
+          "TOTAL C_O above, so the ESR zero lands at 1/(2π·C_O·r_C)"],
          ["Current-sense resistor", "R_CS", f"{rcs*1e3:.0f} mΩ", "Step 6 — Kelvin shunt"],
          ["PWM ramp voltage", "V_RAMP", f"{d['p']['v_ramp']:.0f} V", "FAN9672-D internal"],
          ["OTA transconductance", "G_MI", f"{d['p']['g_mi']*1e6:.0f} µS", "FAN9672-D spec"],
@@ -300,8 +307,23 @@ def build_step10(story, data: dict):
          ["Compensator zero", "f_z", f"{d['fz']/1e3:.0f} kHz", "One decade below f_ci"],
          ["Compensator HF pole", "f_p", f"{d['fp']/1e3:.0f} kHz", "≈3× above f_ci"]],
         col_widths=[CW*0.30, CW*0.13, CW*0.17, CW*0.40], ch=CH)
+    annotation(story, "WHERE r_L AND r_C COME FROM, AND WHAT THEY DRIVE",
+        "Neither parasitic is assumed or typed in here — both are carried in from the parts already "
+        "approved earlier in this report, so the control design cannot drift from the hardware."
+        "<br/><b>r<sub>L</sub></b> is the approved inductor's winding resistance (Chapter 3), per phase. "
+        "The hot (100 °C) value is used because a warm winding has the higher resistance and is the "
+        "worst case for plant damping."
+        "<br/><b>r<sub>C</sub></b> is the approved capacitor BANK's parallel ESR (Chapter 5) — the "
+        "whole bank, not one can. That is the right pairing for this model, because C<sub>O</sub> above "
+        "is the total installed capacitance and the two appear in series in the plant."
+        "<br/><b>What they change downstream:</b> r<sub>C</sub> sets the output/ESR zero "
+        "ω<sub>z</sub> = 1/(C<sub>O</sub>(R<sub>load</sub>/2 + r<sub>C</sub>)) and slightly raises the "
+        "front-end gain through the ratio (R<sub>load</sub>+2r<sub>C</sub>)/(R<sub>load</sub>+r<sub>C</sub>); "
+        "r<sub>L</sub> enters the plant denominator and therefore sets the damping (Q) of the "
+        "L–C pole pair. Both feed every operating point in Section 6.10.7 and the compensator "
+        "sizing that follows, so a change of inductor or capacitor bank moves the loop design with it.", CH)
 
-    # ── 10.7 ──────────────────────────────────────────────────────────────────
+    # ── 10.7 ─────────────────────────────────────────────────────────
     sub_h(story, "6.10.7", "Operating-Point Parameters — All 8 Conditions", CH)
     body(story,
         "For each of the eight operating points the load resistance, duty cycle, natural frequency, "
