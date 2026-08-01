@@ -199,10 +199,20 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const lossAt90    = loss100.find((r: any) => Math.abs(Number(r.Vin_rms) - 90) < 1) ?? loss100[0]
     const ltPcore90   = lossAt90 ? Number(lossAt90.Pcore_W) : 0
     const ltPcu90     = lossAt90 ? Number(lossAt90.Pcu_W)   : 0
-    const pcoreAnchor = (ltPcore90 > 0 && result.Pcore_W)    ? (result.Pcore_W    / ltPcore90) : 1
+    // Core-loss anchor. When the engine supplies per-point cycle averages the sweep already
+    // carries the authoritative numbers, so NO rescaling is applied (anchor = 1) — rescaling would
+    // reintroduce the very mismatch this removes. The legacy ratio is kept only for older payloads
+    // whose loss table has no Pcore_avg_W.
+    const hasAvgCore  = loss100.some((r: any) => r?.Pcore_avg_W != null)
+    const pcoreAnchor = hasAvgCore ? 1
+                      : ((ltPcore90 > 0 && result.Pcore_W) ? (result.Pcore_W / ltPcore90) : 1)
     const pcuAnchor   = (ltPcu90   > 0 && result.Pcu_100C_W) ? (result.Pcu_100C_W / ltPcu90)   : 1
 
-    const a_effective = a_count > 0 ? +((a_sum / a_count) * pcoreAnchor).toFixed(3) : 86.7
+    // The Steinmetz 'a' is back-computed from the CREST-point relation (Pv vs Bac_pk at the crest
+    // duty), so it keeps its own crest->average calibration ratio. It must NOT follow the sweep
+    // anchor above, which is now 1 because the sweep already carries true per-point averages.
+    const aAnchor = (ltPcore90 > 0 && result.Pcore_W) ? (result.Pcore_W / ltPcore90) : 1
+    const a_effective = a_count > 0 ? +((a_sum / a_count) * aAnchor).toFixed(3) : 86.7
     const a_typ       = +(a_effective * 0.85).toFixed(3)   // ~typical = 85% of calibrated max
 
     // ── Mismatch 1: build k(H) lookup from Python DB (material-specific) ────
@@ -232,9 +242,15 @@ export const ReviewMagnetics: React.FC<Props> = ({
         H:      Number(lvtRow?.H_Oe   ?? 0),     // per-Vin magnetizing force (Python)
         k:      Number(lvtRow?.k_bias ?? 1),     // per-Vin retention k(H)  (Python)
         Bac:    Number(row.Bac_pk   ?? 0),
-        Pcore:  Number(row.Pcore_W  ?? 0),
+        // CYCLE-AVERAGED core loss straight from the engine at this operating point. The row's
+        // Pcore_W is the CREST-POINT value; scaling it by a single design-corner ratio (the old
+        // pcoreAnchor) is only right at that one corner — the true avg/crest ratio runs from ~0.6
+        // at low line to >10 at high line, where the duty at the crest collapses. Falls back to
+        // the crest value only if the engine did not supply an average.
+        Pcore:  Number(row.Pcore_avg_W ?? row.Pcore_W ?? 0),
+        PcoreIsAvg: row.Pcore_avg_W != null,
         Pcu:    Number(row.Pcu_W    ?? 0),
-        Ptot:   Number(row.Ptotal_W ?? 0),
+        Ptot:   Number(row.Ptotal_avg_W ?? row.Ptotal_W ?? 0),
       }
     })
 

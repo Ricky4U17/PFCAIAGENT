@@ -257,6 +257,11 @@ def run_step8_full(
 
         summary_rows.append({
             "Vin_rms":        Vac,
+            # Crest AC flux at this operating point — the same Bac_pk the loss table and the report
+            # quote, taken from the waveform series' own crest so GUI and report cannot diverge.
+            # (The Result-page table has always read this key; it was never emitted, so the column
+            # rendered blank.)
+            "Bac_pk":         round(float(Bac_crest_list[i]), 5),
             "Pcore_avg_W":    round(Pcore_avg, 3),
             "Pcore_pk_W":     round(Pcore_pk,  3),
             "t_pk_ms":        round(t_pk_s * 1000.0, 3),

@@ -3961,19 +3961,25 @@ def _ch4(story, state, d):
         for i, r in enumerate(lt100):
             vin = float(r.get("Vin_rms", 0) or 0)
             bac = float(r.get("Bac_pk", 0) or 0)
-            m1c = Pcore_peak * (bac / _bac90) ** 2.1 if _bac90 else 0.0   # peak-point core (scaled)
-            m2c = float(r.get("Pcore_W", 0) or 0)                          # iGSE core
+            m1c = Pcore_peak * (bac / _bac90) ** 2.1 if _bac90 else 0.0   # crest-point core (scaled)
+            # Method 2 is the CYCLE-AVERAGED iGSE value. It previously read the row's Pcore_W,
+            # which is the crest-point figure — so both columns were the same basis and the
+            # comparison proved nothing. Falls back only if the engine did not supply an average.
+            m2c = float(r.get("Pcore_avg_W") if r.get("Pcore_avg_W") is not None
+                        else r.get("Pcore_W", 0) or 0)
             cu  = float(r.get("Pcu_W", 0) or 0)                            # copper (same both methods)
             m1t, m2t = m1c + cu, m2c + cu
             if m2t > wt45:
                 wt45, w45 = m2t, i
             rows45.append([f"{vin:.0f}", f"{m1c:.3f}", f"{m2c:.3f}", f"{cu:.3f}", f"{m1t:.3f}", f"{m2t:.3f}"])
         data_table(story, "4.5",
-            "Loss Comparison — Method 1 (peak-point) vs Method 2 (iGSE), All 9 Operating Points",
-            "Method 1 = Chapter 3 first-pass peak-point Steinmetz core loss, scaled by "
-            "(B<sub>ac</sub>/B<sub>ac,90</sub>)<sup>2.1</sup>; Method 2 = Chapter 4 cycle-averaged "
-            "iGSE core loss. Copper loss uses the same I²R method in both, so totals differ only by "
-            "the core-loss method. Amber row = highest (worst-case) total.",
+            "Loss Comparison — Method 1 (crest-point) vs Method 2 (cycle-averaged iGSE)",
+            "<b>Method 1</b> = Chapter 3 first-pass Steinmetz core loss evaluated AT THE LINE CREST, "
+            "scaled by (B<sub>ac</sub>/B<sub>ac,ref</sub>)<sup>2.1</sup>. <b>Method 2</b> = the "
+            "cycle-averaged iGSE core loss from Table 4.2 (P<sub>core</sub>,avg column) — the heat "
+            "actually generated, and the basis the thermal design and efficiency budget use. Copper "
+            "loss uses the same I²R method in both, so the totals differ only by the core-loss basis. "
+            "Amber row = highest total on Method 2.",
             ["V<sub>in</sub> (V)", "Core M1 (W)", "Core M2 (W)", "Copper (W)",
              "Total M1 (W)", "Total M2 (W)"],
             rows45,
@@ -4041,14 +4047,24 @@ def _ch4(story, state, d):
         if lt100:
             trows, wti, wtd = [], 0, -1.0
             for i, r in enumerate(lt100):
-                pt = float(r.get("Ptotal_W", 0) or 0)
+                # AVERAGED total: the core is heated by the cycle-averaged loss, and the engine's
+                # own thermal convergence (dT_rise_C) runs on that basis — using the crest total
+                # here would make this table contradict the headline temperature rise.
+                pt = float(r.get("Ptotal_avg_W") if r.get("Ptotal_avg_W") is not None
+                           else r.get("Ptotal_W", 0) or 0)
                 dti = (pt * 1000.0 / _SA) ** 0.833 if _SA else 0.0
                 if dti > wtd:
                     wtd, wti = dti, i
                 trows.append([f"{float(r.get('Vin_rms',0)):.0f}", f"{pt:.3f}", f"{dti:.1f}"])
             data_table(story, "4.6", "Temperature Rise vs Input Voltage — All 9 Operating Points",
                 "Surface temperature rise at each corner from its total loss and the converged "
-                "wound-envelope surface area. Amber row = hottest corner.",
+                "wound-envelope surface area. P<sub>total</sub> uses the CYCLE-AVERAGED core loss "
+                "(Table 4.2, P<sub>core</sub>,avg) — the same LOSS basis as the converged &#916;T "
+                "reported above, because the core is heated by the average and not by the crest. "
+                "Note the &#916;T here is a single-node surface estimate evaluated per operating "
+                "point, so it will not equal the converged two-node &#916;T of the design summary "
+                "digit-for-digit; use the converged value for the pass/fail verdict and this table "
+                "for the shape across line. Amber row = hottest corner.",
                 ["V<sub>in</sub> (V)", "P<sub>total</sub> (W)", "ΔT (°C)"],
                 trows, col_widths=[CW*0.34, CW*0.33, CW*0.33], worst_rows=[wti], ch=4)
 

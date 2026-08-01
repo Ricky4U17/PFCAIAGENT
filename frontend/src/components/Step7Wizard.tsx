@@ -1271,7 +1271,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                     <thead>
                       <tr style={{background:C.bg3,borderBottom:`0.5px solid ${C.border}`}}>
-                        {['Vin rms','Bac pk T','Pcore avg W','Pcore crest W','Avg/Crest'].map(h=>(
+                        {['Vin rms','Bac pk T','Pcore avg W','Pcore crest W','Pcore cycle-max W','Avg/Crest'].map(h=>(
                           <th key={h} style={{padding:'6px 8px',textAlign:'left',color:C.hint,
                             fontFamily:'IBM Plex Mono,monospace',fontWeight:400,fontSize:10}}>{h}</th>
                         ))}
@@ -1279,7 +1279,12 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                     </thead>
                     <tbody>
                       {(step8.summary_table??[]).map((row:any,i:number)=>{
-                        const ratio=row.Pcore_pk_W>0?row.Pcore_avg_W/row.Pcore_pk_W:1
+                        // crest = the value AT the line crest (saturation reference);
+                        // cycle-max = the largest value the loss reaches anywhere in the half cycle.
+                        // They are different quantities and diverge sharply at high line, so the
+                        // ratio quoted against "crest" must use Pcore_crest_W, not Pcore_pk_W.
+                        const crest=row.Pcore_crest_W
+                        const ratio=crest>0?row.Pcore_avg_W/crest:1
                         return (
                           <tr key={i} style={{background:row.Vin_rms===90?C.accentL:i%2===0?C.bg2:C.bg3,
                             borderBottom:`0.5px solid ${C.border}`}}>
@@ -1287,6 +1292,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                               color:row.Vin_rms===90?C.accent:C.text,fontWeight:row.Vin_rms===90?600:400}}>{row.Vin_rms}V</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{row.Bac_pk?.toFixed(5)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.green,fontWeight:600}}>{row.Pcore_avg_W?.toFixed(3)}</td>
+                            <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{crest?.toFixed(3)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{row.Pcore_pk_W?.toFixed(3)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',
                               color:ratio>1.5?C.red:ratio<0.7?C.amber:C.green}}>{(ratio*100).toFixed(0)}%</td>

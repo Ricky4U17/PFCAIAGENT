@@ -6127,3 +6127,55 @@ Suite 172 passed / 2 skipped.
 CONSEQUENCE TO WATCH: dT_rise_C now uses the averaged core loss, so it is LOWER than before
 (shape 0.585 on the reference design). dT is a pass/fail criterion and feeds the ranking score, so
 candidate order and PASS verdicts can shift. Designers should re-check a previously-marginal selection.
+
+## C176 — 2026-07-31 — GROUP 1b: finish the peak/average split (Tables 4.5/4.6, Review page, GUI tables)
+
+Designer follow-up on C175, three points. All confirmed as real; two of them pre-dated C175.
+
+POINT 1 — Table 4.5 was comparing peak against peak (REAL BUG)
+  m1c = Pcore_peak * (Bac/Bac_ref)^2.1     -> crest-point, correctly labelled
+  m2c = row["Pcore_W"]                     -> ALSO the crest value, though captioned
+                                              "Method 2 = cycle-averaged iGSE"
+  Both columns were the same basis, so the Method-1-vs-Method-2 comparison proved nothing. Method 2 now
+  reads `Pcore_avg_W`; caption states each column's basis explicitly. Verified at 90 V: M1 3.666 W
+  (crest) vs M2 2.143 W (average) — genuinely different quantities now.
+POINT 1b — Table 4.6 temperature rise. Designer asked which basis applies: the answer is AVERAGE, and
+  the table was using `Ptotal_W` (crest-based), so it CONTRADICTED the engine's own dT_rise_C after C175
+  switched the thermal loop to the averaged basis. Now uses `Ptotal_avg_W`. Verified: 90 V Ptotal
+  5.685 W == the engine's Ptotal_avg_W exactly.
+  Caption is explicit that the per-point dT here is a single-node surface estimate and will NOT equal
+  the converged two-node dT of the design summary digit-for-digit — same loss basis, different solver.
+
+POINT 2 — Review page showed a third number (REAL BUG, exposed by C175)
+  `pcoreAnchor = result.Pcore_W / lossTable[90V].Pcore_W` = avg/crest AT 90 V = 0.585, and it was
+  applied at EVERY Vin. Exact at the design corner, wrong everywhere else, because the true avg/crest
+  ratio runs 0.58 (90 V) -> 11.4 (264 V). At 264 V the 3D view showed ~0.11 W against a true 2.23 W.
+  The sweep now reads the engine's per-point `Pcore_avg_W` / `Ptotal_avg_W` directly and the anchor is
+  set to 1 when they are present (legacy ratio kept only for older payloads without them).
+  CAUGHT WHILE DOING IT: `a_effective` (the JS chart's Steinmetz coefficient) also consumed that anchor
+  and is back-computed from the CREST relation, so it keeps its own crest->average ratio (`aAnchor`) —
+  otherwise the chart calibration would have silently shifted.
+
+POINT 3 — two PRE-EXISTING GUI bugs, not from C175 (step8_time_domain.py last changed at d5d542e,
+  Step7Wizard.tsx at 3c60245/C95):
+  (a) `Bac_pk` was NEVER emitted in step8's summary_rows, but the Result-page table has always read
+      `row.Bac_pk` -> the column rendered blank. Added, taken from the same Bac_crest_list the loss
+      table and report use, so GUI and report cannot diverge.
+  (b) The "Pcore crest W" column read `Pcore_pk_W` — the MAXIMUM of Pcore(theta) over the half cycle —
+      while the payload also carries `Pcore_crest_W`, the value AT the line crest. Different
+      quantities, and after C175 we know they diverge sharply at high line. The crest column now reads
+      `Pcore_crest_W`, the ratio is computed against it, and the cycle-max is shown as its own column
+      since both are meaningful.
+
+CONSISTENCY CHECK (the designer's requirement — one parameter, one value everywhere): core loss now
+agrees exactly. Engine design corner Pcore_avg_W 2.1435 == loss table @90 V == Review 3D/KPI == report
+Table 4.2/4.5 Method 2. No hardcodes introduced; every value flows from the engine payload.
+
+NEW FINDING LOGGED (PENDING_ITEMS B5): a residual 0.272 W (8.3%) COPPER gap remains between the design
+scalar `Pcu_100C_W` (3.270 W, reference-current basis) and `loss_table_100C[90V]["Pcu_W"]` (3.542 W,
+per-point OPS basis) — both "copper at 90 Vac / 100 °C". It is why ReviewMagnetics still needs
+`pcuAnchor`, and why Ptotal_100C_W (5.4135) != Table 4.2's Ptotal_avg_W at 90 V (5.6853). PRE-EXISTING,
+surfaced only because core loss stopped masking it. Same family as C161; deliberately NOT changed inside
+a core-loss batch.
+
+Suite 172 passed / 2 skipped; frontend tsc clean; report renders with 0 glyph boxes.
