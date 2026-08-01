@@ -285,6 +285,37 @@ designer state before concluding anything about production designs.
 The check is REPORTING ONLY by design (convention D0b): it never filters candidates and never
 changes a verdict.
 
+#### What to decide
+The two intake inputs below independently determine an inductance, and they currently disagree:
+
+| Input | Where the designer sets it | What it produces |
+|---|---|---|
+| Confirmed inductance `L_target` | Mode A / Step-7 intake (`confirmed_L_uH_sel`) | 235 uH on the reference state |
+| Crest ripple ratio `r` | `topology_specific_inputs.default_crest_ripple_ratio` (0.20) | `L_req(V)`, max 140.4 uH at 220 Vac |
+
+**Exactly one of them is redundant.** Three ways to resolve it:
+
+- **(1) Ripple ratio is the master (recommended).** `L_target` becomes a display-only "designer's
+  expectation", clearly labelled as not driving anything. Cheapest, matches what the engine already
+  does, zero behaviour change. The divergence note then reads as information rather than a warning.
+- **(2) `L_target` is the master.** The turns loop would have to size to `max(L_req, L_target)`.
+  On the reference state that means N sized for 235 uH instead of 140.4 uH -> more turns, more
+  copper, higher fill and DCR, and the design would run at a LOWER ripple ratio than the designer
+  selected. **This changes selection** and contradicts the "zero added margin" rule in Section 3.4.3.
+- **(3) Make them consistent at intake.** Derive `L_target` FROM the ripple ratio when the designer
+  changes `r` (and vice versa), so they can never diverge. Most correct, most GUI work: the two
+  fields become coupled and need a "which one do you want to drive?" control.
+
+#### First step before any of this
+Confirm whether the +67% is real or a harness artifact. `verify_combined_report._std_state()` hard
+-codes `confirmed_L_uH: 235.0`. Load a REAL designer state (or run Mode A end-to-end) and read the
+divergence percentage off the Section 3.3.1 PITFALL box. If a real design diverges by only a few
+percent, this is documentation-only; if it diverges like the fixture, it is a live design-intent bug.
+
+- **Done when:** one of (1)/(2)/(3) is chosen, the report says which input is authoritative, and the
+  advisory box either disappears or is reworded to match the chosen model.
+- **Do NOT** silently make the divergence check a gate — it would block designs that are correct.
+
 ### B12. Guard against unrenderable entities (black squares)
 Item 6.3 traced the designer's "black square" comments to two numeric entities whose codepoints
 have NO glyph in Helvetica's WinAnsi encoding AND are absent from ReportLab's symbol-substitution
@@ -392,18 +423,41 @@ The report now uses ONE flux-margin convention everywhere: headroom
 in a toroid). Ratio forms such as `B_sat/B_max = 3.66x` are gone.
 
 **Still open:** the engine's accept/reject gate (`step7_magnetic_calc.py` ~line 1060, threshold
->= 15%) still runs on the MEAN-PATH `sat_margin_pct`, not on `sat_margin_inner_pct`. So the report
-quotes the conservative number (63% on the reference design) while the gate judges the permissive
-one (73%). The report states this explicitly rather than hiding it, and the GUI now shows both
-figures side by side, labelled.
+>= 15%) still runs on the MEAN-PATH `sat_margin_pct`, not on `sat_margin_inner_pct`.
 
-Moving the gate to `B_inner` ("Package 3") is the physically consistent end state, but it CHANGES
-SELECTION: with crowding ~1.36x the inner margin runs ~10 points below mean-path, so cores that
-pass today at 15-27% mean-path margin would newly fail. Deliberately deferred so it is decided on
-its own merits and not as a side effect of a wording fix.
+#### Current numbers (updated after item 27c made powder Bsat temperature-dependent)
+Reference design, T_core 92.8 C, `Bsat = 1.434 T`, crowding 1.365:
 
-Also update alongside it: `generate_full_report.py` (2 gate labels) and
-`generate_steps13_14.py` (2 labels) — all currently say "(mean path, gate basis)".
+| Basis | Margin | Used for |
+|---|---|---|
+| Mean-path `B_max` = 0.410 T | **71.4%** | the engine's >= 15% accept/reject GATE |
+| Inner-bore `B_inner` = 0.560 T | **60.9%** | every figure the REPORT quotes |
+
+Both are stated on the page (Section 4.3 convention note) and both are on the GUI, labelled — so
+nothing is hidden. The gap is ~10 points and is structural: `B_inner = B_max x crowd`.
+
+#### What changing it would cost
+Moving the gate to `B_inner` is the physically consistent end state (the bore IS the worst point in
+a toroid) but it **CHANGES SELECTION**: cores passing today between 15% and ~27% mean-path margin
+would newly fail. On the reference design nothing changes — it sits at 60.9%, miles clear — but the
+effect on a marginal design is real and is exactly why this is a decision, not a cleanup.
+
+#### If it is picked up, change all of these together
+1. `step7_magnetic_calc.py` ~line 1060 — the `< 15.0` fail check -> `sat_margin_inner_pct`.
+2. `generate_full_report.py` — 2 gate labels + the `>= 15` check (currently "(mean path)").
+3. `generate_steps13_14.py` — 2 labels (currently "(mean path, gate basis)").
+4. Report Section 4.3 convention note — it currently EXPLAINS the difference; that paragraph must be
+   rewritten or removed once there is no difference.
+5. `Step7Wizard.tsx` — the "(mean path, gate basis)" row label.
+6. **Re-tune the threshold.** 15% against `B_max` is not the same requirement as 15% against
+   `B_inner`. Decide whether the intent is "keep today's strictness" (then the inner threshold is
+   roughly 15% - 10% = ~5%, which looks wrong on paper) or "genuinely tighten" (keep 15%, accept
+   that some previously-passing cores now fail). **This is the real question, not the plumbing.**
+
+- **Done when:** one flux point drives both the report and the gate, the threshold has been chosen
+  deliberately with the above in mind, and a before/after candidate-count comparison is recorded.
+- **Verify with:** the baseline-diff method used in item 29 — snapshot candidate count, ordering and
+  `passed` flags before and after, and report how many cores changed verdict.
 
 ### D2. Max-stacks 3-stack sighting
 A designer once saw a 3-stack candidate when max_stacks should have excluded it. The chain was verified
