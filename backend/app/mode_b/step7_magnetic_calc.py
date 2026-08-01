@@ -1023,7 +1023,9 @@ def design_one_core(
     res._cyc_ctx = dict(material_key=material_key, core_type=res.core_type, N=N, Ae_m2=Ae,
                         Ve_m3=Ve, Le_s=Le_s, L0_nom_H=L0_nom_H,
                         Icrest_ref_A=I_phi_avg_crest, Vout_V=Vout_V, fsw_Hz=fsw_Hz,
-                        T_core_C=T_core, f_line_Hz=f_line_Hz, Rdc=Rdc_Tc, Rac=Rac_Tc)
+                        T_core_C=T_core, f_line_Hz=f_line_Hz,
+                        # 100 C basis, matching loss_table_100C AND Pcu_final_100 exactly
+                        Rdc=DCR_100, Rac=DCR_100 * Rac_Rdc)
 
     # ── Medical creepage check ────────────────────────────────────────────────
     if app_class == "Medical":
@@ -1327,8 +1329,14 @@ def _add_cycle_avg_core_loss(rows: list, l_vs_vin: list, *, material_key: str, c
     from the SAME engine the design corner uses (`_half_cycle_averages`), so the report can show
     both bases from one source instead of quoting a peak in one table and an average in another.
 
-    Writes per row:  Pcore_peak_W (= the existing Pcore_W), Pcore_avg_W, Ptotal_avg_W.
-    The legacy `Pcore_W` key is left untouched so existing readers keep their current meaning.
+    Writes per row:  Pcore_crest_W, Pcore_avg_W, Pcu_avg_W, Ptotal_avg_W.
+    The legacy `Pcore_W` / `Pcu_W` keys are left untouched so existing readers keep their meaning.
+
+    COPPER is averaged here too, for the same reason as the core: the row's `Pcu_W` derives its HF
+    ripple from the CREST dIpp, which overstates the cycle-averaged ripple RMS by ~40%. Passing
+    Rdc/Rac at the table's own temperature makes this Pcu_avg_W algebraically identical to the
+    design's Pcu_final_100 (both are Irms^2*Rdc + IhfRms^2*(Rdc + (Rac-Rdc)*K_HARM) over the same
+    integration), which is what removes the last scalar-vs-table disagreement.
     """
     if not rows or N <= 0 or Ae_m2 <= 0 or Le_s <= 0:
         return rows
@@ -1347,7 +1355,8 @@ def _add_cycle_avg_core_loss(rows: list, l_vs_vin: list, *, material_key: str, c
         if Icrest_ref_A > 0 and _ref > 0 and ic > 0:
             ic = Icrest_ref_A * (ic / _ref)
         if vin <= 0 or ic <= 0:
-            row["Pcore_avg_W"] = None          # not computable -> never silently reuse the peak
+            row["Pcore_avg_W"] = None          # not computable -> never silently reuse the crest
+            row["Pcu_avg_W"] = None
             row["Ptotal_avg_W"] = None
             continue
         try:
@@ -1358,10 +1367,11 @@ def _add_cycle_avg_core_loss(rows: list, l_vs_vin: list, *, material_key: str, c
                 T_core_C=T_core_C, f_line_Hz=f_line_Hz, M=M)
             avg = float(w.get("Pcore_avg_W", 0) or 0)
         except Exception:
-            row["Pcore_avg_W"] = None; row["Ptotal_avg_W"] = None
+            row["Pcore_avg_W"] = None; row["Pcu_avg_W"] = None; row["Ptotal_avg_W"] = None
             continue
         row["Pcore_avg_W"]  = round(avg, 4)
-        row["Ptotal_avg_W"] = round(avg + float(row.get("Pcu_W", 0) or 0), 4)
+        row["Pcu_avg_W"]    = round(float(w.get("Pcu_avg_W", 0) or 0), 4)
+        row["Ptotal_avg_W"] = round(row["Pcore_avg_W"] + row["Pcu_avg_W"], 4)
     return rows
 
 

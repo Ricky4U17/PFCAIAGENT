@@ -3954,44 +3954,96 @@ def _ch4(story, state, d):
     # ── 4.7 Total loss and thermal ───────────────────────────────────────
     step_h(story, "4.7", "Total Loss and Thermal Performance", 4)
 
-    # Item 24 / 2d / Task-1 — Method 1 (peak-point) vs Method 2 (iGSE) at ALL 9 operating points.
+    # Two SEPARATE comparisons so a reviewer is never asked to compare unlike bases:
+    #   4.5a — METHOD comparison, both evaluated AT THE LINE CREST
+    #   4.5b — BASIS comparison, both from the SAME (iGSE) method
     if Pcore_peak and Pcore_cavg and lt100:
-        _bac90 = float(lt100[0].get("Bac_pk", 0) or 0)
-        rows45, w45, wt45 = [], 0, -1.0
+        _bac_ref = float(lt100[0].get("Bac_pk", 0) or 0)
+        _vref    = float(lt100[0].get("Vin_rms", 0) or 0)
+
+        # ---- 4.5a : Method 1 vs Method 2, LIKE FOR LIKE (both at the crest) ----
+        annotation(story, "TABLE 4.5a — WHAT IS CALCULATED, AND WHAT IS COMPARED TO WHAT",
+            "<b>Both columns are the core loss AT THE LINE CREST</b> — the same instant, the same "
+            "flux, the same temperature. Only the METHOD differs, so the difference between them is "
+            "the error of the Chapter-3 shortcut and nothing else."
+            "<br/><b>Method 1 (Chapter 3, scaled Steinmetz)</b>: evaluate the core-loss curve ONCE at "
+            f"the {_vref:.0f} V<sub>ac</sub> crest, then scale to every other line voltage by the flux "
+            "ratio raised to the Steinmetz exponent: "
+            "P<sub>M1</sub>(V) = P<sub>core,crest</sub>(ref) &#215; "
+            "(B<sub>ac</sub>(V)/B<sub>ac</sub>(ref))<sup>2.1</sup>."
+            "<br/><b>Method 2 (Chapter 4, direct evaluation)</b>: evaluate the same core-loss curve "
+            "AT each line voltage's own crest flux and crest duty, with no scaling assumption: "
+            "P<sub>M2</sub>(V) = P<sub>v</sub>(B<sub>ac</sub>(V)) &#215; F(D<sub>crest</sub>) &#215; V<sub>e</sub>."
+            "<br/><b>Read the last column as:</b> how far the Chapter-3 scaling shortcut drifts from a "
+            "direct evaluation. It is 0% at the reference corner by construction and grows away from it.", 4)
+        rows45a, w45a, wt45a = [], 0, -1.0
+        for i, r in enumerate(lt100):
+            vin  = float(r.get("Vin_rms", 0) or 0)
+            bac  = float(r.get("Bac_pk", 0) or 0)
+            m1   = Pcore_peak * (bac / _bac_ref) ** 2.1 if _bac_ref else 0.0
+            m2   = float(r.get("Pcore_crest_W", r.get("Pcore_W", 0)) or 0)
+            derr = ((m1 - m2) / m2 * 100.0) if m2 else 0.0
+            if m2 > wt45a:
+                wt45a, w45a = m2, i
+            rows45a.append([f"{vin:.0f}", f"{bac:.5f}", f"{m1:.3f}", f"{m2:.3f}", f"{derr:+.1f}%"])
+        data_table(story, "4.5a",
+            "Core Loss AT THE CREST — Method 1 (scaled) vs Method 2 (direct). Same instant, same flux.",
+            "Both columns are crest-point core loss in watts. M1 scales one reference evaluation by "
+            "(B<sub>ac</sub>/B<sub>ac,ref</sub>)<sup>2.1</sup>; M2 evaluates the curve directly at each "
+            "point. Deviation = (M1 &#8722; M2)/M2. Amber row = highest crest-point loss.",
+            ["V<sub>in</sub> (V)", "B<sub>ac,pk</sub> (T)",
+             "M1 crest (W)", "M2 crest (W)", "M1 vs M2"],
+            rows45a,
+            col_widths=[CW*0.16, CW*0.20, CW*0.21, CW*0.21, CW*0.22],
+            worst_rows=[w45a], ch=4)
+
+        # ---- 4.5b : same METHOD, two BASES (crest vs cycle average) ----
+        annotation(story, "TABLE 4.5b — WHAT IS CALCULATED, AND WHAT IS COMPARED TO WHAT",
+            "<b>Both columns come from the SAME method (Method 2, iGSE).</b> Only the BASIS differs, "
+            "so the difference between them is purely the cost of quoting an instant instead of an "
+            "average — no method error is mixed in."
+            "<br/><b>Crest basis</b>: the core loss at the single instant the flux peaks. This is the "
+            "correct basis for the SATURATION check (Section 4.3), because saturation is instantaneous."
+            "<br/><b>Cycle-average basis</b>: the same loss integrated over the line half-cycle and "
+            "divided by it &#8212; P<sub>core,avg</sub> = (1/&#960;)&#8747; P<sub>core</sub>(&#952;) d&#952;. "
+            "This is the correct basis for TEMPERATURE RISE (Table 4.6) and for the EFFICIENCY budget "
+            "(Chapter 7 Table 7.8b), because the core is heated by the average, not by a peak reached "
+            "twice per cycle."
+            "<br/><b>Read the last column as:</b> avg/crest. Below 1 the crest OVERSTATES the heating; "
+            "above 1 it UNDERSTATES it. It exceeds 1 at high line because the duty at the crest "
+            "collapses toward zero there, so most of the loss happens away from the crest.", 4)
+        rows45b, w45b, wt45b = [], 0, -1.0
         for i, r in enumerate(lt100):
             vin = float(r.get("Vin_rms", 0) or 0)
-            bac = float(r.get("Bac_pk", 0) or 0)
-            m1c = Pcore_peak * (bac / _bac90) ** 2.1 if _bac90 else 0.0   # crest-point core (scaled)
-            # Method 2 is the CYCLE-AVERAGED iGSE value. It previously read the row's Pcore_W,
-            # which is the crest-point figure — so both columns were the same basis and the
-            # comparison proved nothing. Falls back only if the engine did not supply an average.
-            m2c = float(r.get("Pcore_avg_W") if r.get("Pcore_avg_W") is not None
-                        else r.get("Pcore_W", 0) or 0)
-            cu  = float(r.get("Pcu_W", 0) or 0)                            # copper (same both methods)
-            m1t, m2t = m1c + cu, m2c + cu
-            if m2t > wt45:
-                wt45, w45 = m2t, i
-            rows45.append([f"{vin:.0f}", f"{m1c:.3f}", f"{m2c:.3f}", f"{cu:.3f}", f"{m1t:.3f}", f"{m2t:.3f}"])
-        data_table(story, "4.5",
-            "Loss Comparison — Method 1 (crest-point) vs Method 2 (cycle-averaged iGSE)",
-            "<b>Method 1</b> = Chapter 3 first-pass Steinmetz core loss evaluated AT THE LINE CREST, "
-            "scaled by (B<sub>ac</sub>/B<sub>ac,ref</sub>)<sup>2.1</sup>. <b>Method 2</b> = the "
-            "cycle-averaged iGSE core loss from Table 4.2 (P<sub>core</sub>,avg column) — the heat "
-            "actually generated, and the basis the thermal design and efficiency budget use. Copper "
-            "loss uses the same I²R method in both, so the totals differ only by the core-loss basis. "
-            "Amber row = highest total on Method 2.",
-            ["V<sub>in</sub> (V)", "Core M1 (W)", "Core M2 (W)", "Copper (W)",
-             "Total M1 (W)", "Total M2 (W)"],
-            rows45,
-            col_widths=[CW*0.13, CW*0.18, CW*0.18, CW*0.15, CW*0.18, CW*0.18],
-            worst_rows=[w45], ch=4)
+            cr  = float(r.get("Pcore_crest_W", r.get("Pcore_W", 0)) or 0)
+            av  = r.get("Pcore_avg_W")
+            av  = float(av) if av is not None else None
+            rat = (av / cr) if (av is not None and cr) else None
+            if av is not None and av > wt45b:
+                wt45b, w45b = av, i
+            rows45b.append([f"{vin:.0f}", f"{cr:.3f}",
+                            (f"{av:.3f}" if av is not None else "&#8212;"),
+                            (f"{rat:.2f}&#215;" if rat is not None else "&#8212;"),
+                            ("saturation check" if i == 0 else "") ])
+        data_table(story, "4.5b",
+            "Core Loss — CREST basis vs CYCLE-AVERAGE basis (both Method 2, iGSE)",
+            "Same method, two bases. Crest = value at the flux peak (used for saturation). "
+            "Cycle-average = half-cycle integral (used for temperature rise and efficiency). "
+            "Amber row = highest cycle-averaged loss, i.e. the thermally governing corner.",
+            ["V<sub>in</sub> (V)", "P<sub>core</sub> crest (W)",
+             "P<sub>core</sub> avg (W)", "avg / crest", "Basis in use"],
+            rows45b,
+            col_widths=[CW*0.15, CW*0.22, CW*0.22, CW*0.18, CW*0.23],
+            worst_rows=[w45b], ch=4)
         _dc90 = (Pcore_cavg - Pcore_peak) / Pcore_peak * 100 if Pcore_peak else 0.0
-        annotation(story, "INSIGHT",
-            f"At {vin_min:.0f} V<sub>ac</sub> the peak-point core loss ({Pcore_peak:.3f} W) overestimates the "
-            f"cycle-averaged iGSE value ({Pcore_cavg:.3f} W) by {abs(_dc90):.0f}% because the crest "
-            "duty cycle sits far from 0.5; the gap narrows toward high line where D approaches 0.5. "
-            "Copper loss is identical in both methods, so the cycle-averaged total — which the thermal "
-            "design uses — is correspondingly lower than the first-pass screening estimate.", 4)
+        annotation(story, "WHY THE TWO BASES DIVERGE",
+            f"At {vin_min:.0f} V<sub>ac</sub> the crest-point core loss ({Pcore_peak:.3f} W) "
+            f"OVERSTATES the cycle-averaged value ({Pcore_cavg:.3f} W) by {abs(_dc90):.0f}%, because "
+            "the crest duty sits far from 0.5 and the flux swing collapses either side of the peak. "
+            "Toward high line the relationship INVERTS: the duty at the crest approaches zero, so the "
+            "crest-point loss nearly vanishes while the cycle average stays high. This is why a single "
+            "peak-point number cannot be used across the line range, and why Table 4.6 and Chapter 7 "
+            "both take the cycle-averaged column.", 4)
 
     # Item 8 — loss uncertainty band (+5% to +20% unanchored core loss).
     _plo = float(d.get("P_unc_lo_W", 0) or 0); _phi = float(d.get("P_unc_hi_W", 0) or 0)
@@ -4047,26 +4099,47 @@ def _ch4(story, state, d):
         if lt100:
             trows, wti, wtd = [], 0, -1.0
             for i, r in enumerate(lt100):
-                # AVERAGED total: the core is heated by the cycle-averaged loss, and the engine's
-                # own thermal convergence (dT_rise_C) runs on that basis — using the crest total
-                # here would make this table contradict the headline temperature rise.
-                pt = float(r.get("Ptotal_avg_W") if r.get("Ptotal_avg_W") is not None
-                           else r.get("Ptotal_W", 0) or 0)
+                # BOTH terms on the cycle-averaged basis — the core and the copper are each heated
+                # by their own half-cycle average. Using either crest value would contradict the
+                # engine's converged dT_rise_C, which runs on the averaged basis.
+                _pc = r.get("Pcore_avg_W"); _pu = r.get("Pcu_avg_W")
+                _pc = float(_pc) if _pc is not None else float(r.get("Pcore_W", 0) or 0)
+                _pu = float(_pu) if _pu is not None else float(r.get("Pcu_W", 0) or 0)
+                pt  = float(r.get("Ptotal_avg_W") if r.get("Ptotal_avg_W") is not None else _pc + _pu)
                 dti = (pt * 1000.0 / _SA) ** 0.833 if _SA else 0.0
                 if dti > wtd:
                     wtd, wti = dti, i
-                trows.append([f"{float(r.get('Vin_rms',0)):.0f}", f"{pt:.3f}", f"{dti:.1f}"])
+                trows.append([f"{float(r.get('Vin_rms',0)):.0f}", f"{_pc:.3f}", f"{_pu:.3f}",
+                              f"{pt:.3f}", f"{dti:.1f}"])
+            annotation(story, "TABLE 4.6 — EXACTLY WHICH LOSSES DRIVE THE TEMPERATURE RISE",
+                "Every loss term below is the <b>CYCLE-AVERAGED</b> value over the line half-cycle. "
+                "Nothing here uses a crest/peak figure, because a peak reached twice per line cycle "
+                "does not set the steady-state temperature."
+                "<br/><b>P<sub>core</sub>,avg</b> &#8212; cycle-averaged iGSE core loss (Table 4.5b, "
+                "average column). NOT the crest value used for the saturation check in Section 4.3."
+                "<br/><b>P<sub>cu</sub>,avg</b> &#8212; cycle-averaged copper loss, "
+                "I<sub>rms</sub>&#178;R<sub>dc</sub> + I<sub>hf,rms</sub>&#178;"
+                "(R<sub>dc</sub> + (R<sub>ac</sub>&#8722;R<sub>dc</sub>)K<sub>harm</sub>), with both "
+                "currents RMS over the same half-cycle integration. NOT the crest-ripple estimate in "
+                "the P<sub>cu</sub> column of Table 4.2."
+                "<br/><b>P<sub>total</sub>,avg = P<sub>core</sub>,avg + P<sub>cu</sub>,avg</b> "
+                "&#8212; the number fed to the surface-rise model, and the same total the design "
+                "summary reports as P<sub>total,100&#176;C</sub>."
+                "<br/><b>&#916;T = (P<sub>total</sub>,avg / A<sub>surface</sub>)<sup>0.833</sup></b>, "
+                "a single-node estimate per operating point. Use the converged two-node &#916;T in the "
+                "design summary for the pass/fail verdict; use this table for the shape across line.", 4)
             data_table(story, "4.6", "Temperature Rise vs Input Voltage — All 9 Operating Points",
-                "Surface temperature rise at each corner from its total loss and the converged "
-                "wound-envelope surface area. P<sub>total</sub> uses the CYCLE-AVERAGED core loss "
-                "(Table 4.2, P<sub>core</sub>,avg) — the same LOSS basis as the converged &#916;T "
-                "reported above, because the core is heated by the average and not by the crest. "
+                "Every loss column is the CYCLE-AVERAGED value; P<sub>total</sub>,avg = "
+                "P<sub>core</sub>,avg + P<sub>cu</sub>,avg is what drives the surface rise, and it "
+                "equals the design summary's P<sub>total,100&#176;C</sub> at the design corner. "
                 "Note the &#916;T here is a single-node surface estimate evaluated per operating "
                 "point, so it will not equal the converged two-node &#916;T of the design summary "
                 "digit-for-digit; use the converged value for the pass/fail verdict and this table "
                 "for the shape across line. Amber row = hottest corner.",
-                ["V<sub>in</sub> (V)", "P<sub>total</sub> (W)", "ΔT (°C)"],
-                trows, col_widths=[CW*0.34, CW*0.33, CW*0.33], worst_rows=[wti], ch=4)
+                ["V<sub>in</sub> (V)", "P<sub>core</sub>,avg (W)", "P<sub>cu</sub>,avg (W)",
+                 "P<sub>total</sub>,avg (W)", "ΔT (°C)"],
+                trows, col_widths=[CW*0.16, CW*0.22, CW*0.22, CW*0.22, CW*0.18],
+                worst_rows=[wti], ch=4)
 
     # Item 25 (figure) — 2D thermal map of the wound cross-section + budget ladder.
     try:

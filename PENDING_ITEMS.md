@@ -14,7 +14,7 @@ passed.
 `OPEN`, `CONDITIONAL` or `DATA MISSING` — never as a silent PASS, and never as something that blocks
 the designer from selecting a part.
 
-Last updated 2026-07-31 (after C176).
+Last updated 2026-07-31 (after C177).
 
 ---
 
@@ -139,28 +139,7 @@ it rather than carrying both. Map OPEN → DATA MISSING, CHECK → CONDITIONAL, 
   only those words, and the GUI badge mapping covers all of them.
 - Deliberately deferred by the designer while M1–M3 land, so the reorg is not blocked behind it.
 
-### B5. Inductor COPPER loss: design scalar ≠ loss-table value at the same corner  ⭐ next in this family
-`Pcu_100C_W` (the converged design scalar) and `loss_table_100C[90 V]["Pcu_W"]` are both "copper loss at
-90 Vac, 100 °C" and disagree:
-
-| Quantity | Value | Composition |
-|---|---|---|
-| `Pcu_100C_W` (design scalar) | **3.270 W** | `IL_rms_ref²·DCR₁₀₀ + Ihf_ref²·DCR₁₀₀·Rac_Rdc` |
-| `loss_table_100C` @ 90 V `Pcu_W` | **3.542 W** | `Irms²·DCR_T + Ihf²·R_ac` from the OPS row |
-| gap | **0.272 W (8.3 %)** | different current basis (reference vs per-point OPS) |
-
-Consequence: `Ptotal_100C_W` = 5.4135 W but Table 4.2's `Ptotal_avg_W` at 90 V = 5.6853 W, and
-`ReviewMagnetics` needs a `pcuAnchor` to reconcile the two — so the GUI's Ptotal and the report's Ptotal
-differ by this amount even though **core loss now agrees exactly** (C175 + C176).
-
-- **Pre-existing** — not introduced by the core-loss work; surfaced by it once core stopped masking it.
-- Same family as C161 (which unified Ch3 §3.6.1/§3.6.2/§3.6.3 copper) — the scalar-vs-table gap was left.
-- **Done when:** one copper basis at the design corner, `pcuAnchor` in `ReviewMagnetics.tsx` can be
-  deleted, and `Ptotal_100C_W` == the loss table's total at that corner.
-- Decide which is authoritative: the reference-current scalar or the per-point OPS row. The per-point row
-  is the better candidate — it is the one the 9-point tables and the Chapter-7 budget already use.
-
-### B6. Dead `_extra["esr_mohm"]` in main.py still carries the bug pattern  *(small, do it next tidy-up)*
+### B5. Dead `_extra["esr_mohm"]` in main.py still carries the bug pattern  *(small, do it next tidy-up)*
 `main.py` (~line 2567, in the Chapter-7 `_extra` block) still builds:
 
 ```python
@@ -183,7 +162,7 @@ a designer report and a full trace to find the first time.
   its `ESR_basis` (display) — never the `or` chain.
 - Left deliberately out of scope in C172 to keep that diff tight. Raised 2026-07-30.
 
-### B7. Audit remaining bare `onClick={fn}` handlers when adding new ones  *(FIXED for today's sites — C174)*
+### B6. Audit remaining bare `onClick={fn}` handlers when adding new ones  *(FIXED for today's sites — C174)*
 Not an open defect: all current sites are clean. This entry exists because the **failure mode is easy to
 reintroduce and expensive to diagnose**, so the rule should be visible.
 
@@ -206,12 +185,12 @@ handlers (`onBack`, `onRestart`, …) still assign fine and need no wrapper.
 - `client.ts::assertSerialisable` now rejects a DOM element / DOM event / React synthetic event in a
   request body with a message naming the field and the likely cause, instead of a circular-structure trace.
 
-### B8. EMI Phase D
+### B7. EMI Phase D
 Monte-Carlo tolerance analysis and radiated-emissions screening. Deferred by the designer after EMI
 review round 2 (C147/C148). Also outstanding from that review: E-series component snapping, and
 treating CM leakage as differential-mode L.
 
-### B9. EMI filter — Rev J methodology
+### B8. EMI filter — Rev J methodology
 `specs/EMI_Input_Filter_Design_Guide.docx` (Rev J) was reviewed but **not implemented**. Scope agreed as
 configurable PFC + DC-DC, with DC-DC as placeholders. Hard no-hardcode mandate applies.
 
@@ -280,6 +259,7 @@ workflow path only. Found during C117.
 | Ch9 never named a selected MOV part; clamp/energy judged on the class | C168–C170 |
 | Ch9 clamp result had no engineering decision beside it | C170 |
 | Ch5 vs Ch7 capacitor loss disagreed (different ESR, re-derived not carried) | C171 |
+| Inductor copper: design scalar vs loss table disagreed 8.3% at the same corner | C177 |
 | `verify_configuration` returned no ESR when the curated series table lacked the series | C172 |
 | Re-size/Re-select buttons sent React's click event as their options (circular-JSON error) | C174 |
 | Backend test suite red (33 failures) | C107–C120, now 172 passed / 2 skipped |

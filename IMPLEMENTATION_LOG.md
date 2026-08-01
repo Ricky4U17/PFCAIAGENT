@@ -6179,3 +6179,54 @@ surfaced only because core loss stopped masking it. Same family as C161; deliber
 a core-loss batch.
 
 Suite 172 passed / 2 skipped; frontend tsc clean; report renders with 0 glyph boxes.
+
+## C177 — 2026-07-31 — B5 (copper on the averaged basis) + Tables 4.5a/4.5b split + explicit 4.6 basis
+
+B5 TURNED OUT TO BE THE COPPER TWIN OF C175, not the "different current basis" the pending item
+described. Diagnosis:
+    Pcu_100C_firstpass_W = 3.5418 W   == loss_table_100C[90 V]["Pcu_W"] exactly
+    Pcu_100C_W (final)   = 3.2700 W   == the waveform-integrated value
+The loss table derives its HF ripple from the CREST dIpp (Ihf 2.658 A) while the design scalar uses the
+cycle-averaged ripple RMS from the 360-point integration (IhfRms 1.886 A) — the crest overstates it by
+41%, exactly as crest core loss overstated average core loss. The scalar also applies the harmonic
+factor _hf = 1 + (Rac_Rdc-1)*K_HARM, which the table's plain Rac_Rdc does not.
+
+FIX (engine): `_add_cycle_avg_core_loss` already called `_half_cycle_averages` per point and was
+DISCARDING `Pcu_avg_W`. It now writes Pcu_avg_W and Ptotal_avg_W = Pcore_avg + Pcu_avg. The context
+passes Rdc=DCR_100 / Rac=DCR_100*Rac_Rdc (the 100 C basis) instead of the converged-T_core pair, which
+makes the row's Pcu_avg_W ALGEBRAICALLY IDENTICAL to Pcu_final_100 — both are
+Irms^2*Rdc + IhfRms^2*(Rdc + (Rac-Rdc)*K_HARM) over the same integration.
+VERIFIED: loss table @90 V Pcu_avg_W 3.2700 == design Pcu_final_100 3.2700; Ptotal_avg_W 5.4135 ==
+Ptotal_100C_W 5.4135. The last scalar-vs-table disagreement in the inductor chain is gone.
+
+REPORT — Table 4.5 split in two so no reviewer is asked to compare unlike bases (designer's request).
+The single M1-vs-M2 table could not be made "average vs average": M1 and M2 share the same loss model
+(get_core_loss x F(D) x Ve) and differ only in WHERE they sample, so averaging M1 over the half cycle
+is definitionally M2's average — the two columns would have been identical by construction. Instead:
+  * Table 4.5a — METHOD comparison, BOTH AT THE CREST. M1 = one reference evaluation scaled by
+    (Bac/Bac_ref)^2.1; M2 = direct evaluation at each point's own crest flux and duty. The deviation
+    column is therefore purely the scaling shortcut's error: 0% at the reference corner by
+    construction, +2.1% at 132 V, -24.2% at 264 V.
+  * Table 4.5b — BASIS comparison, BOTH FROM M2. Crest (saturation basis) vs cycle-average (thermal +
+    efficiency basis) with the avg/crest ratio, so the cost of quoting an instant instead of an average
+    is visible with no method error mixed in.
+  Each table carries a "WHAT IS CALCULATED, AND WHAT IS COMPARED TO WHAT" box giving both formulas and
+  how to read the comparison column.
+
+REPORT — Table 4.6 now states exactly which averages drive the thermal rise, per the designer's ask:
+columns are Pcore,avg / Pcu,avg / Ptotal,avg / dT, with a box defining each term, its formula, and what
+it is explicitly NOT (not the Section 4.3 crest used for saturation; not the Table 4.2 crest-ripple
+Pcu). It also states that dT here is a single-node per-point estimate and the converged two-node value
+in the design summary is the pass/fail number.
+
+GUI — ReviewMagnetics now reads Pcu_avg_W per point and the copper anchor is retired (set to 1) when
+the engine supplies averages, mirroring the core-loss anchor retired in C176. GUI and report therefore
+quote the same Pcore, Pcu and Ptotal at every operating point.
+
+BUG CAUGHT BEFORE COMMIT: an earlier edit script aborted on a failed assertion after two of three
+replacements, leaving Table 4.6 with a 5-column header but a 3-value row builder — a corrupted table
+that still parsed. Found by reading the file back rather than trusting the edit. Loop and header now
+both emit 5 columns, and the missing annotation was re-added.
+
+Suite 172 passed / 2 skipped (re-run against the final state); frontend tsc clean; report 184 pp,
+0 glyph boxes. PENDING_ITEMS B5 closed.

@@ -206,7 +206,12 @@ export const ReviewMagnetics: React.FC<Props> = ({
     const hasAvgCore  = loss100.some((r: any) => r?.Pcore_avg_W != null)
     const pcoreAnchor = hasAvgCore ? 1
                       : ((ltPcore90 > 0 && result.Pcore_W) ? (result.Pcore_W / ltPcore90) : 1)
-    const pcuAnchor   = (ltPcu90   > 0 && result.Pcu_100C_W) ? (result.Pcu_100C_W / ltPcu90)   : 1
+    // Copper anchor. Retired for the same reason as the core anchor: when the engine supplies
+    // per-point cycle-averaged copper the sweep already carries the authoritative numbers, and
+    // rescaling them would re-introduce the scalar-vs-table gap this removes.
+    const hasAvgCu    = loss100.some((r: any) => r?.Pcu_avg_W != null)
+    const pcuAnchor   = hasAvgCu ? 1
+                      : ((ltPcu90 > 0 && result.Pcu_100C_W) ? (result.Pcu_100C_W / ltPcu90) : 1)
 
     // The Steinmetz 'a' is back-computed from the CREST-point relation (Pv vs Bac_pk at the crest
     // duty), so it keeps its own crest->average calibration ratio. It must NOT follow the sweep
@@ -249,7 +254,11 @@ export const ReviewMagnetics: React.FC<Props> = ({
         // the crest value only if the engine did not supply an average.
         Pcore:  Number(row.Pcore_avg_W ?? row.Pcore_W ?? 0),
         PcoreIsAvg: row.Pcore_avg_W != null,
-        Pcu:    Number(row.Pcu_W    ?? 0),
+        // CYCLE-AVERAGED copper from the same half-cycle integration as Pcore_avg_W. The row's
+        // Pcu_W derives its HF ripple from the CREST dIpp, which overstates the cycle-averaged
+        // ripple RMS by ~40%; using it here is what made the GUI Ptotal disagree with the report.
+        Pcu:    Number(row.Pcu_avg_W ?? row.Pcu_W ?? 0),
+        PcuIsAvg: row.Pcu_avg_W != null,
         Ptot:   Number(row.Ptotal_avg_W ?? row.Ptotal_W ?? 0),
       }
     })
