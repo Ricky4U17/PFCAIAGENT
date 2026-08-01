@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-01**, head = C185 (see git log).
+**Start here after a restart.** Last updated **2026-08-01**, head = `9e7ff5d` (C186), on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -18,12 +18,15 @@
 ## Where we are (2026-08-01)
 
 **Just finished:** the designer's two-PDF review (32 in-PDF annotations + a Copilot Ch1-4 review).
-Groups 1, 3a, 4 (items 21-29) and 3c (Groups 6+7) are all done — C175 to C185.
+**ALL batches are complete** — Group 1, 3a, Group 4 (items 21-29), 3c, 3d, 3e — C175 to C186,
+merged to `master` on 2026-08-01.
 
 ### Next up, in order
-1. **3d** — bridge rectifier `rd` (item B3 in PENDING_ITEMS).
-2. **3e** — status-vocabulary unification (item B4).
-3. Then: **C2** (report download — designer to retest and report browser/console), **D3**
+1. **C2** — report download. Two silent failure mechanisms were fixed (premature
+   `revokeObjectURL`, synchronous `removeChild`); **the designer must retest**. If it still fails,
+   capture the screen + whether a red banner now appears + the console, then wire the visible
+   fallback link (`downloadBlob()` already returns the URL for it).
+2. Then: **D3**
    (saturation gate on B_inner — changes selection, decide on its own merits), **B9**
    (L_target vs L_req: the reference state diverges +67%, a designer decision), **A9** (3 xflux_hdc
    materials with no Bsat-vs-T; `data_source` at the wrong nesting level in 67 powder files).
