@@ -15,7 +15,7 @@ the document gives them (the live design values are computed in Steps 1–14).
 from __future__ import annotations
 import math
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
 )
 
 CH = 6
@@ -152,8 +152,8 @@ def _appendix_a(story, ctx):
     annotation(story, "CONCEPT",
         "A Type-III compensator places its two zeros below crossover to add up to +90° of phase boost "
         "right where the loop crosses 0 dB, then uses its two poles to restore the roll-off "
-        "afterwards. That phase boost is what lets a %.0f Hz loop still achieve >80° phase margin "
-        "despite the integrator's −90° and the plant's lag." % ctx['fcv'], CH)
+        "afterwards. That phase boost is what lets a %s Hz loop still achieve >80° phase margin "
+        "despite the integrator's −90° and the plant's lag." % fhz(ctx['fcv']), CH)
 
     sub_h(story, "A.3", "Thesis-Level Derivation — Scope and Method", CH)
     body(story,
@@ -587,7 +587,7 @@ def _appendix_e(story, ctx):
         [["Loop gain", "T_v = (K_max·I_OUT/V_RAMP) · G_i,cl · G_vp · H_OTA"],
          ["Feedback divider", f"H_v = V_FBPFC / V_OUT = {ctx['hv']:.6f}"],
          ["Comp zeros / poles", f"f_z1={ctx['v_fz1']:.0f}, f_z2={ctx['v_fz2']:.0f} Hz;  f_p (origin), f_p1={ctx['v_fp1']:.0f}, f_p2={ctx['v_fp2']:.0f} Hz"],
-         ["Crossover / margin", f"f_cv = {ctx['fcv']:.0f} Hz (HL) / 7.8 Hz (LL),  PM ≈ 82°"]],
+         ["Crossover / margin", f"f_cv = {fhz(ctx['fcv'])} Hz (HL) / 7.8 Hz (LL),  PM ≈ 82°"]],
         col_widths=[CW*0.32, CW*0.68], ch=CH)
     body(story, "<b>Performance (Steps 12–13)</b>", CH)
     data_table(story, "E.3", "Performance — Quick Reference", "",

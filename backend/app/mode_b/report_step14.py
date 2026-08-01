@@ -13,7 +13,7 @@ is rendered live.
 from __future__ import annotations
 import io, math
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
 )
 from app.mode_b.step16_step13_thd import compute_step13_thd
 
@@ -48,7 +48,7 @@ def _designs(d):
         mi = max(0, min(len(_DESIGN_META) - 1, 1 + (i - bi)))   # index 1 == baseline
         letter, label, effect, color = _DESIGN_META[mi]
         out.append(dict(fcv=f, letter=letter, label=label, effect=effect, color=color,
-                        is_base=(i == bi), ftxt=f"{f:.0f} Hz"))
+                        is_base=(i == bi), ftxt=f"{fhz(f)} Hz"))
     return out
 
 

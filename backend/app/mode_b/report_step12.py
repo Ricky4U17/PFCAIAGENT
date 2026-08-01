@@ -12,7 +12,7 @@ Figure 5 (six load transitions, LL vs HL) is rendered live from the simulated
 from __future__ import annotations
 import io, math
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
 )
 from app.mode_b.step16_step12_transient import compute_step12_transient
 
@@ -106,7 +106,7 @@ def build_step12(story, data: dict):
         ["Quantity", "Value", "Note"],
         [["Bus capacitor  C_O", f"{src['co']*1e6:.0f} µF", "Fixed (power stage)"],
          ["Recovery band", f"±1%  =  ±{d['band']:.2f} V", f"About {vout:.1f} V bus"],
-         ["Voltage-loop crossover  f_cv", f"{fcv_lo:.1f} Hz (LL) / {fcv_hi:.0f} Hz (HL)", "Section 6.11 design"],
+         ["Voltage-loop crossover  f_cv", f"{fhz(fcv_lo)} Hz (LL) / {fhz(fcv_hi)} Hz (HL)", "Section 6.11 design"],
          ["Full-load current  I_full = P_OUT/V_OUT",
           f"{ifl_lo:.3f} A ({_plo} W) / {ifl_hi:.3f} A ({_phi} W)", "Step magnitude reference"]],
         col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)

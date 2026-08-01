@@ -13,7 +13,7 @@ computed transfer functions; Fig 14A (Type-III OTA schematic) drawn via SchemDra
 from __future__ import annotations
 import io, math, cmath
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
 )
 from app.mode_b.step16_step11_vloop import compute_step11_vloop
 
@@ -188,7 +188,7 @@ def build_step11(story, data: dict):
          ["Channels  N_CH", f"{s['nch']}", "Interleaved phases"],
          ["Effective inductance  L_eq = L/2", f"{s['leq']*1e6:.1f} µH", "Two-phase combined plant"],
          ["Transconductance  GMV", f"{s['gmv']*1e6:.0f} µS", "Voltage-loop OTA"],
-         ["Voltage-loop crossover  f_cv", f"{s['fcv']:.0f} Hz", "Design target"]],
+         ["Voltage-loop crossover  f_cv", f"{fhz(s['fcv'])} Hz", "Design target"]],
         col_widths=[CW*0.34, CW*0.18, CW*0.48], ch=CH)
 
     # ── 11.2 ──────────────────────────────────────────────────────────────────
@@ -208,16 +208,16 @@ def build_step11(story, data: dict):
     annotation(story, "NOTE",
         "The voltage-plant RHP-zero frequency is twice the corresponding current-loop value (Section 6.10) "
         "because the combined two-phase plant uses L<sub>eq</sub> = L/2 = %.1f µH rather than the "
-        "per-phase %.0f µH. Even the lowest f<sub>RHP</sub> (%.2f kHz) is far above the %.0f Hz "
+        "per-phase %.0f µH. Even the lowest f<sub>RHP</sub> (%.2f kHz) is far above the %s Hz "
         "crossover, so the RHP zero has negligible effect on voltage-loop phase margin."
-        % (s["leq"]*1e6, s["lphi"]*1e6, rows[0]["frhp"]/1e3, s["fcv"]), CH)
+        % (s["leq"]*1e6, s["lphi"]*1e6, rows[0]["frhp"]/1e3, fhz(s["fcv"])), CH)
 
     # ── 11.3 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.11.3", f"Detailed Calculation — {dr['vac']} Vac / {dr['pout']} W (design point)", CH)
     body(story,
         "The compensator is sized at the %s W high-line design point, where the loop must cross over "
-        "at %s Hz at full power. All quantities are evaluated at f<sub>cv</sub> = %.0f Hz, "
-        "s = j·2π·%.0f = j%.2f rad/s." % (_phi, _fcv, s["fcv"], s["fcv"], 2*math.pi*s["fcv"]), CH)
+        "at %s Hz at full power. All quantities are evaluated at f<sub>cv</sub> = %s Hz, "
+        "s = j·2π·%s = j%.2f rad/s." % (_phi, _fcv, fhz(s["fcv"]), fhz(s["fcv"]), 2*math.pi*s["fcv"]), CH)
     _ws(story, "Step 1 — Load resistance and output current:",
         [r"R_{LOAD}=\dfrac{V_{OUT}^2}{P_{OUT}}=\dfrac{%.1f^2}{%g}=%.4f\ \Omega" % (vout, dr["pout"], dr["rload"]),
          r"I_{OUT}=\dfrac{P_{OUT}}{V_{OUT}}=\dfrac{%g}{%.1f}=%.4f\ \mathrm{A}" % (dr["pout"], vout, dr["iout"])])
@@ -229,7 +229,7 @@ def build_step11(story, data: dict):
          r"\omega_{RHP}=\dfrac{%.4f\times%.4f^2}{%.1f\,\mu H}=%.0f\ \mathrm{rad/s}"
          % (dr["rload"], dr["Dp"], s["leq"]*1e6, dr["wrhp"]),
          r"f_{RHP}=%.2f\ \mathrm{kHz}" % (dr["frhp"]/1e3)])
-    body(story, "<b>Step 4 — Current-loop closed-loop term at %.0f Hz:</b>" % s["fcv"], CH)
+    body(story, "<b>Step 4 — Current-loop closed-loop term at %s Hz:</b>" % fhz(s["fcv"]), CH)
     body(story, "Using the full inner current loop with its Type-2 OTA compensator (Section 6.10):", CH)
     eq_box(story, [r"T_i(j2\pi\cdot%.0f)=%.2f%+.2fj\qquad |T_i|=%.2f\qquad\angle T_i=%.2f^\circ"
                    % (s["fcv"], dr["ti"].real, dr["ti"].imag, abs(dr["ti"]), _ang(dr["ti"])),
@@ -237,10 +237,10 @@ def build_step11(story, data: dict):
                    % (s["fcv"], dr["gicl"].real, dr["gicl"].imag),
                    r"|G_{i,cl}|=%.5f\qquad\angle G_{i,cl}=%.4f^\circ"
                    % (abs(dr["gicl"]), _ang(dr["gicl"]))], ch=CH)
-    body(story, "At %.0f Hz the current loop is essentially unity (its bandwidth is orders of magnitude "
-        "higher — see Section 6.10), but it is retained for accuracy." % s["fcv"], CH)
-    _ws(story, "Step 5 — Voltage plant at %.0f Hz:" % s["fcv"],
-        [r"G_{vp}(j2\pi\cdot%.0f)=%.5f%+.5fj" % (s["fcv"], dr["gvp"].real, dr["gvp"].imag),
+    body(story, "At %s Hz the current loop is essentially unity (its bandwidth is orders of magnitude "
+        "higher — see Section 6.10), but it is retained for accuracy." % fhz(s["fcv"]), CH)
+    _ws(story, "Step 5 — Voltage plant at %s Hz:" % fhz(s["fcv"]),
+        [r"G_{vp}(j2\pi\cdot%s)=%.5f%+.5fj" % (fhz(s["fcv"]), dr["gvp"].real, dr["gvp"].imag),
          r"|G_{vp}|=%.5f\qquad\angle G_{vp}=%.2f^\circ" % (abs(dr["gvp"]), _ang(dr["gvp"]))])
     _ws(story, "Step 6 — Voltage-loop gain without compensator:",
         [r"T_{v,base}=GMOD\times G_{i,cl}\times G_{vp}=%.4f\times%.5f\times%.5f"
@@ -269,10 +269,10 @@ def build_step11(story, data: dict):
     # ── 11.5 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.11.5", "Required Compensator Gain", CH)
     body(story,
-        "To force the loop to cross 0 dB at f<sub>cv</sub> = %.0f Hz, the OTA %s compensator "
+        "To force the loop to cross 0 dB at f<sub>cv</sub> = %s Hz, the OTA %s compensator "
         "(which now contains the divider H<sub>v</sub>) must supply a magnitude equal to the inverse "
-        "of the uncompensated base gain:" % (s["fcv"], _tlabel), CH)
-    eq_box(story, [r"H_{OTA}(%.0f\ \mathrm{Hz})=\dfrac{1}{T_{v,base}}" % s["fcv"]], ch=CH)
+        "of the uncompensated base gain:" % (fhz(s["fcv"]), _tlabel), CH)
+    eq_box(story, [r"H_{OTA}(%s\ \mathrm{Hz})=\dfrac{1}{T_{v,base}}" % fhz(s["fcv"])], ch=CH)
     body(story, "Sizing at the high-line %s W design point:" % _phi, CH)
     eq_box(story, [r"H_{OTA}=\dfrac{1}{%.4f}=%.6f\quad(%.2f\ \mathrm{dB})"
                    % (d["tvbase_mag_design"], d["G"], 20*math.log10(d["G"]))], ch=CH)
@@ -298,7 +298,7 @@ def build_step11(story, data: dict):
         [["Top feedback resistor", f"{s['r1']/1e6:.2f} MΩ", "R1 = R_FB,top", "From Section 6.5 divider"],
          ["Bottom feedback resistor", f"{s['r4']/1e3:.1f} kΩ", "R4 = R_FB,bottom", "From Section 6.5 divider"],
          ["Transconductance", f"{s['gmv']*1e6:.0f} µS", "gm = GMV", "Voltage-loop OTA"],
-         ["Crossover", f"{s['fcv']:.0f} Hz", "f_c", "Design target"],
+         ["Crossover", f"{fhz(s['fcv'])} Hz", "f_c", "Design target"],
          ["Required gain at f_c", f"{d['G']:.6f}", "G", "= 1/|T_v,base| (HL)"],
          ["Zero 1 / Zero 2", f"{cm['fz1']:.0f} Hz / {cm['fz2']:.0f} Hz", "f_z1 / f_z2", "Phase boost"],
          ["Pole 1 / Pole 2", f"{cm['fp1']:.0f} Hz / {cm['fp2']:.0f} Hz", "f_p1 / f_p2", "HF roll-off"]],
@@ -464,7 +464,7 @@ def _build_step11_type2(story, d, cm, s, rows):
         [["Top feedback resistor", f"{s['r1']/1e6:.2f} MΩ", "R1 = R_FB,top", "From Section 6.5 divider"],
          ["Bottom feedback resistor", f"{s['r4']/1e3:.1f} kΩ", "R4 = R_FB,bottom", "From Section 6.5 divider"],
          ["Transconductance", f"{s['gmv']*1e6:.0f} µS", "gm = GMV", "Voltage-loop OTA"],
-         ["Crossover", f"{s['fcv']:.0f} Hz", "f_c", "Design target"],
+         ["Crossover", f"{fhz(s['fcv'])} Hz", "f_c", "Design target"],
          ["Required gain at f_c", f"{d['G']:.6f}", "G", "= 1/|T_v,base| (HL)"],
          ["Zero / Pole", f"{cm['fz']:.0f} Hz / {cm['fp']:.0f} Hz", "f_z / f_p", "Phase boost / HF roll-off"]],
         col_widths=[CW*0.30, CW*0.20, CW*0.22, CW*0.28], ch=CH)

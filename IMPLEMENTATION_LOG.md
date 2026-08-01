@@ -6275,3 +6275,34 @@ surgical-install rule. Suite re-run afterwards because TestCombinedReport assert
 the figure adds pages: still 172 passed / 2 skipped.
 
 Suite 172 passed / 2 skipped (re-run post-install); Ch8/9 27 pp, 0 glyph boxes.
+
+## C179 — 2026-08-01 — 3a step 1: f_cv display precision (17.5 Hz no longer prints as 18 Hz)
+
+Designer saw "18 Hz" in Table 6.11.6, Tables 6.14.1/6.14.2, the Note/Decision boxes and Section 6.11.5
+after entering f_cv = 17.5 Hz in the GUI. The MATHS always used 17.5 — only the display rounded — but a
+reviewer comparing the report against the GUI sees a number they never entered and doubts the chapter.
+
+NEW `doc_report_builder.fhz(v)`: renders a user-entered frequency with just enough precision — integers
+stay clean (17 -> "17", not "17.0"), fractional values keep one decimal (17.5 -> "17.5"). One helper in
+the module every Chapter-6 report file already imports, so the rule lives in one place.
+
+Applied at ALL 17 display sites (the first grep found 12; a rendered-PDF check found 5 more):
+  report_step11.py  — 6.11.2 crossover row, 6.11.3 design-point prose, Step-4/Step-5 headings, the
+                      G_vp and H_OTA equation labels, both "Crossover" summary rows, the RHP-zero
+                      sentence, the unity-current-loop sentence, the 6.11.5 required-gain sentence
+  report_step12.py  — the LL/HL crossover row (HL was .0f while LL was already .1f)
+  report_step13.py  — 6.13.3 sweep table + the fz2/fp2 hold sentence
+  report_step14.py  — `ftxt` for the design table, i.e. Tables 6.14.1/6.14.2 f_cv column
+  appendices.py     — A.2 phase-boost sentence and the A.7 crossover/margin row
+
+BUG I INTRODUCED AND CAUGHT ON THE FIRST BUILD: report_step11 line ~218 is a multi-line %-format whose
+THIRD placeholder was also %.0f on a line my replacement did not touch; feeding it fhz() (a str) raised
+"TypeError: must be real number, not str" and the report 500'd. Fixed to %s and swept every fhz() call
+to confirm each lands in a %s slot. This is why the per-item verification the designer asked for is
+worth the round trip — ast.parse and the suite would not have caught it before a build.
+
+VERIFIED by building the combined report at the designer's actual f_cv = 17.5 Hz:
+  before: "17.5 Hz" x0  / "18 Hz" x5
+  after : "17.5 Hz" x26 / "18 Hz" x0
+Integer f_cv still prints clean (the suite's own 17 Hz build is unchanged at 172 passed / 2 skipped).
+185 pp, 0 glyph boxes.

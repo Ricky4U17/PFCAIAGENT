@@ -13,7 +13,7 @@ Figure 6 (120 Hz rejection + closed-loop attenuation) is rendered live.
 from __future__ import annotations
 import io, math
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
 )
 from app.mode_b.step16_step13_thd import compute_step13_thd
 
@@ -151,13 +151,13 @@ def build_step13(story, data: dict):
     annotation(story, "CONCEPT",
         "Crossover frequency is the single knob trading transient stiffness against ripple rejection. "
         "The table below re-designs the voltage compensator at %d candidate bandwidths "
-        "(f<sub>z2</sub>/f<sub>p2</sub> held at %.0f/%.0f Hz; f<sub>z1</sub>, f<sub>p1</sub> scaled with "
+        "(f<sub>z2</sub>/f<sub>p2</sub> held at %s/%s Hz; f<sub>z1</sub>, f<sub>p1</sub> scaled with "
         "f<sub>cv</sub>; components snapped to the selected series) and recomputes everything from the "
-        "model." % (len(d["sweep"]), d["hold_z2"], d["hold_p2"]), CH)
+        "model." % (len(d["sweep"]), fhz(d["hold_z2"]), fhz(d["hold_p2"])), CH)
     data_table(story, "6.13.3", "Crossover Trade-off — Transient vs Rejection",
         "Each row is a full re-design at that crossover, recomputed from the model.",
         ["f_cv", "PM LL/HL (°)", "Rej. LL/HL (dB)", "Dip 0→100% LL/HL (V)", "Recovery LL/HL (ms)", "Note"],
-        [[f"{s['fcv']:.0f} Hz", f"{s['pm_lo']:.1f} / {s['pm_hi']:.1f}",
+        [[f"{fhz(s['fcv'])} Hz", f"{s['pm_lo']:.1f} / {s['pm_hi']:.1f}",
           f"{s['rej_lo']:.1f} / {s['rej_hi']:.1f}", f"{s['dip_lo']:.1f} / {s['dip_hi']:.1f}",
           f"{s['trec_lo']:.0f} / {s['trec_hi']:.0f}", s["note"]] for s in d["sweep"]],
         col_widths=[CW*0.10, CW*0.18, CW*0.18, CW*0.22, CW*0.18, CW*0.14], ch=CH)

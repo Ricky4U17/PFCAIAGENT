@@ -46,6 +46,21 @@ LM = RM = 20 * mm
 TM = BM = 18 * mm
 CW = PAGE_W - LM - RM
 
+
+def fhz(v) -> str:
+    """Frequency as text with just enough precision to be faithful to the designer's input.
+
+    A crossover the designer entered as 17.5 Hz was being printed as "18 Hz" by `%.0f`, in a dozen
+    places across Chapter 6. The maths always used 17.5 — only the display rounded — but a reviewer
+    comparing the report against the GUI sees a number they did not enter and reasonably doubts the
+    whole chapter. Integers still print clean (17 -> "17", not "17.0"); fractional values keep one
+    decimal (17.5 -> "17.5"). Use this for any user-entered frequency that is rendered."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return f"{f:.0f}" if abs(f - round(f)) < 5e-3 else f"{f:.1f}"
+
 # ── Exact colours from Word doc ───────────────────────────────────────────────
 STEP_BLUE = colors.HexColor("#2E74B5")   # step heading colour (Word run colour)
 NAVY      = colors.HexColor("#1F3B63")
