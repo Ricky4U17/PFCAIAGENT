@@ -14,7 +14,7 @@ with SchemDraw (see app/mode_b/schematics.py).
 from __future__ import annotations
 import io, math, cmath
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fsig,
 )
 from app.mode_b.step16_step10_iloop import compute_step10_iloop
 
@@ -267,7 +267,7 @@ def build_step10(story, data: dict):
                    r"\angle H_{CS}=-\arctan\!\left(\dfrac{f_{ci}}{f_{RC}}\right)"], ch=CH)
     body(story, "The ramp normalization scales the sensed current to the internal PWM ramp:", CH)
     eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%s}{%g}=%s"
-                   % (_n(rcs, 3), _vr, _n(d["ramp_norm"], 3))], ch=CH)
+                   % (_n(rcs, 3), _vr, fsig(d["ramp_norm"]))], ch=CH)
 
     # ── 10.5 ──────────────────────────────────────────────────────────────────
     sub_h(story, "6.10.5", "Type-2 OTA Compensator G_mi(s)", CH)
@@ -401,7 +401,7 @@ def build_step10(story, data: dict):
                    r"G_{id}=K_{front}\cdot\dfrac{s+\omega_z}{s^2+a_1 s+a_0}",
                    r"|G_{id}|=%.4f,\qquad\angle G_{id}=%.4f^\circ" % (gid_mag, gid_ang)], ch=CH)
     body(story, "<b>9.  Ramp normalization R<sub>CS</sub> / V<sub>RAMP</sub></b>", CH)
-    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{%g}=%.3f" % (rcs, _vr, d["ramp_norm"])], ch=CH)
+    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{%g}=%s" % (rcs, _vr, fsig(d["ramp_norm"]))], ch=CH)
     body(story, "<b>10.  CS filter H<sub>CS</sub> at %s kHz</b>" % _fk, CH)
     eq_box(story, [r"|H_{CS}|=\dfrac{1}{\sqrt{1+(f_{ci}/f_{RC})^2}}=\dfrac{1}{\sqrt{1+(%.0f/%.1f\times10^3)^2}}"
                    % (fci, d["f_rc"]/1e3),

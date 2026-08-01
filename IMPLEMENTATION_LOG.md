@@ -6306,3 +6306,39 @@ VERIFIED by building the combined report at the designer's actual f_cv = 17.5 Hz
   after : "17.5 Hz" x26 / "18 Hz" x0
 Integer f_cv still prints clean (the suite's own 17 Hz build is unchanged at 172 passed / 2 skipped).
 185 pp, 0 glyph boxes.
+
+## C180 — 2026-08-01 — 3a step 2: R_CS/V_RAMP precision (0.0024, not 0.002) + V_RAMP de-hardcoded
+
+Designer (report p.141 and p.176): "Rcs = 12 mOhm, Vramp = 5 V means Rcs/Vramp = 0.0024 and not 0.002.
+What is the reason for error?" — no calculation error; `%.3f` cannot express a ratio whose magnitude
+depends on the chosen shunt. 12e-3/5 = 0.0024 truncates to "0.002".
+
+NEW `doc_report_builder.fsig(v, sig=3)`: significant digits with trailing zeros trimmed and no
+scientific notation in a report — 0.0024 -> "0.0024", 0.003 -> "0.003", 0.02 -> "0.02". A fixed-decimal
+format was the wrong tool here, which is why raising it to %.4f would only move the problem (0.0200).
+
+Applied at every R_CS/V_RAMP display:
+  report_step10.py  — Section 6.10.4 ramp-normalisation equation, and the Section 6.10.11 worked step 9
+                      (the p.141 site). Both previously 3-decimal.
+  appendices.py     — A.6.9 ramp-normalisation equation (the p.176 site).
+  doc_report_builder.py — the legacy `_ch6` narration.
+
+HARDCODES REMOVED while in these lines (designer's standing no-hardcode rule):
+  * appendices.py A.6.9 printed the literal `\dfrac{R_CS}{5}` — V_RAMP nailed to 5 V. Now takes
+    `ctx["vramp"]`, newly sourced from the step-10 solve's own `p.v_ramp`.
+  * doc_report_builder `_ch6` had `RCS_m, VRAMP, Kmax, GMV_uS, VFB = 15.0, 5.0, 1.4, 100.0, 2.5`
+    labelled "FAN9672 / design constants". R_CS and V_RAMP are NOT constants — they are the
+    designer's shunt and the controller ramp — so a 12 mOhm selection was narrated as 15 mOhm.
+    Both now read from `res`; the remaining three are genuine datasheet constants and are relabelled
+    as such.
+
+VERIFIED: fsig unit-checked against the designer's own arithmetic —
+  12 mOhm / 5 V -> old "0.002"  new "0.0024"      15 mOhm / 5 V -> "0.003" (unchanged)
+  10 mOhm / 5 V -> "0.002" (unchanged)            20 mOhm / 5 V -> "0.004" (unchanged)
+Combined report builds 185 pp, 0 glyph boxes. Suite 172 passed / 2 skipped.
+NOTE: the ramp-normalisation equations render as matplotlib images, so the value is not recoverable
+from a PDF text extract — the check above is on the formatter and the call sites, not on extracted text.
+
+STILL OPEN (flagged, not fixed — outside this step): `appendices.py` also hardcodes V_RAMP = 5.0 inside
+the `gmod_lo` / `gmod_hi` modulator-gain expressions. Same class, different quantity; folding it in
+would have widened a precision fix into a modulator-gain change.

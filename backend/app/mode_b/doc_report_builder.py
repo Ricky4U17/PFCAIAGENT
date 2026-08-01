@@ -61,6 +61,26 @@ def fhz(v) -> str:
         return str(v)
     return f"{f:.0f}" if abs(f - round(f)) < 5e-3 else f"{f:.1f}"
 
+
+def fsig(v, sig: int = 3) -> str:
+    """Small dimensionless ratio with `sig` significant digits, trailing zeros trimmed.
+
+    R_CS/V_RAMP is ~0.0024 for a 12 mOhm shunt on a 5 V ramp. Printed with "%.3f" that becomes
+    "0.002" — the designer read it as a calculation error, because 12/5000 is plainly 0.0024.
+    Fixed-decimal formats cannot serve a quantity whose magnitude depends on the chosen shunt, so
+    render significant digits instead: 0.0024 -> "0.0024", 0.003 -> "0.003", 0.02 -> "0.02"."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if f == 0:
+        return "0"
+    from decimal import Decimal
+    txt = f"{f:.{sig}g}"
+    if "e" in txt or "E" in txt:          # avoid 2.4e-03 in a report
+        txt = format(Decimal(txt), "f")
+    return txt
+
 # ── Exact colours from Word doc ───────────────────────────────────────────────
 STEP_BLUE = colors.HexColor("#2E74B5")   # step heading colour (Word run colour)
 NAVY      = colors.HexColor("#1F3B63")
@@ -5135,7 +5155,12 @@ def _ch6_loop_derivation(story, res):
     Nch  = int(res.get("nch", 2));         Plo  = float(res.get("Pout_lo_W", 1700))
     Phi  = float(res.get("Pout_hi_W", 3600))
     fci  = float(res.get("fci_Hz", 8000)); fcv  = float(res.get("fcv_Hz", 17))
-    RCS_m, VRAMP, Kmax, GMV_uS, VFB = 15.0, 5.0, 1.4, 100.0, 2.5   # FAN9672 / design constants
+    # R_CS and V_RAMP come from the DESIGN (the shunt the designer selected and the controller's
+    # ramp), not from constants — a 12 mOhm selection was being narrated as 15 mOhm here. The
+    # remaining three are genuine FAN9672 datasheet constants.
+    RCS_m = float(res.get("RCS_mOhm") or res.get("rcs_mOhm") or 15.0)
+    VRAMP = float(res.get("V_RAMP") or res.get("v_ramp") or 5.0)
+    Kmax, GMV_uS, VFB = 1.4, 100.0, 2.5                            # FAN9672 datasheet constants
     Rf, Cf = 2000.0, 470e-12
     import math as _m
     fRC   = 1.0 / (2 * _m.pi * Rf * Cf)
@@ -5222,8 +5247,8 @@ def _ch6_loop_derivation(story, res):
         r"\quad \omega_{RC}=\dfrac{1}{R_f C_f}",
     ], heading="Inner current-loop open-loop gain", number="6.5", ch=6)
     body(story,
-        f"For this design R<sub>CS</sub>/V<sub>RAMP</sub> = {RCS_m:.0f} mΩ / {VRAMP:.0f} V = "
-        f"{RCS_m*1e-3/VRAMP:.3f} (strong attenuation, restored by the OTA); the sense-filter "
+        f"For this design R<sub>CS</sub>/V<sub>RAMP</sub> = {RCS_m:g} mΩ / {VRAMP:g} V = "
+        f"{fsig(RCS_m*1e-3/VRAMP)} (strong attenuation, restored by the OTA); the sense-filter "
         f"pole f<sub>RC</sub> = 1/(2π·R<sub>f</sub>C<sub>f</sub>) ≈ {fRC/1e3:.0f} kHz "
         f"(R<sub>f</sub>={Rf/1e3:.0f} kΩ, C<sub>f</sub>={Cf*1e12:.0f} pF). The Type-II "
         f"compensator places a zero at ≈1 kHz and a pole at ≈26 kHz for a current-loop "

@@ -15,7 +15,7 @@ the document gives them (the live design values are computed in Steps 1–14).
 from __future__ import annotations
 import math
 from app.mode_b.doc_report_builder import (
-    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz,
+    step_h, sub_h, body, eq_box, data_table, annotation, CW, fhz, fsig,
 )
 
 CH = 6
@@ -70,6 +70,9 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
         # BOM extras
         "rri": float(p4.get("rri_selected", 11500.0)), "rfb2": float(p5.get("rfb2", 23200.0)),
         "rcs": float(p6.get("rcs_sel", 0.015)),
+        # PWM ramp amplitude from the current-loop solve — was hardcoded to 5 V at the
+        # R_CS/V_RAMP equation below, which would misstate the ratio for any other controller.
+        "vramp": float((s10.get("p") or {}).get("v_ramp", 5.0) or 5.0),
         "fsw": float(p.get("inputs", {}).get("fsw", 70000) or 70000),
         # performance (E.3): worst-case dip (HL full step) + per-band ripple / rejection / THD3
         "dip_v": abs(float(d12w.get("dv_hi", -28.9))), "dip_pct": abs(float(d12w.get("pct_hi", -7.3))),
@@ -332,7 +335,8 @@ def _appendix_a(story, ctx):
     body(story, "The PWM ramp gain is", CH)
     eq_box(story, [r"F_m=\dfrac{1}{V_{RAMP}}"], ch=CH)
     body(story, "and the current-sense / ramp normalization is", CH)
-    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{5}=%.3f" % (ctx['rcs'], ctx['rcs']/5.0)], ch=CH)
+    eq_box(story, [r"\dfrac{R_{CS}}{V_{RAMP}}=\dfrac{%.3f}{%g}=%s"
+                   % (ctx['rcs'], ctx['vramp'], fsig(ctx['rcs'] / max(ctx['vramp'], 1e-9)))], ch=CH)
     body(story, "<b>A.6.10  Type-II current OTA compensator</b>", CH)
     body(story, "The FAN9672 current amplifier is an OTA. The transconductance amplifier converts "
         "error voltage into output current, and the external impedance Z<sub>IEA</sub>(s) converts "
