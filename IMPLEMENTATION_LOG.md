@@ -6374,3 +6374,36 @@ inductor's per-point curve (Chapter 4, Table 4.1), not a rounded or nameplate va
 reads "Per-Phase Inductance (min as-built)  L_phi  130.3  130.3  uH" — the harness design's min
 as-built L, which the old %.0f would have shown as "130". 185 pp, 0 glyph boxes.
 Suite 172 passed / 2 skipped.
+
+## C182 — 2026-08-01 — 3a step 4: E-series snapping missed the decade wrap (99.97 nF picked 82 nF)
+
+Designer (report p.154): "If C1 calculated value is 99.97 nF then nearest standard value will be 100 nF
+and not 82 nF. Why does the agent select a lower value?" Not a policy — a real bug, and the same one in
+three places.
+
+ROOT CAUSE: every "nearest E-series" helper normalises the value into [1, 10) and then searches the
+series list — but an E-series list STOPS BELOW 10 (E12 ends at 8.2, E24 at 9.1, E96 at 9.76). A
+normalised value above the last entry therefore has NO candidate above it and snaps DOWN a whole step.
+For C1: 99.97 nF -> base 9.997 -> nearest of [1.0 … 8.2] is 8.2 -> 82 nF. An 18% error, and the
+designer was right that 100 nF is obviously nearer. The next decade's first entry (10.0 = 1.0 of the
+decade above) is a perfectly real standard value and simply was not in the candidate set.
+
+FIXED in all three, by adding 10.0 to the candidate list:
+  step16_step11_vloop._snap        (E12 integrator cap, E24 precision caps)  <- the designer's C1
+  step16_step10_iloop._nearest_e24 (current-loop caps)
+  step16_steps1_8._nearest_e96     (R_LS / R_GC resistors; log-distance metric, wrap applies equally)
+`_e24_floor` in step16_steps1_8 is deliberately a FLOOR (R_CS band edge) and is left alone.
+
+Worst-case error the wrap removes, by series: E12 up to 18% (base 9.1–10 snapped to 8.2), E24 up to
+~9%, E96 ~2.4%.
+
+VERIFIED — the crossover now sits where nearest-value says it should (midpoint 9.1 between 8.2 and 10):
+  E12: 99.97 nF 82 -> 100 (designer's case) · 95 nF 82 -> 100 · 90 nF stays 82 · 47/120 nF unchanged
+  E24: 99 nF 91 -> 100 · 96 nF 91 -> 100 · 95/93/91 nF stay 91 · 47 nF unchanged
+  E96: 99.9 k -> 100 k · 98 k stays 97.6 k · 66.5 k / 38.3 k unchanged
+No over-correction: values already at or near a series entry are untouched.
+
+REGRESSION CHECK on the reference design (its C1 is 330.90 nF, which does not hit the wrap, so it is a
+clean no-change control): report builds 185 pp, every selection still a correct nearest pick —
+R2 160.33 k -> 162 k, R3 8.6336 M -> 8.66 M, C1 330.90 -> 330 nF, C2 1.0815 -> 1.1 nF, C3 21.12 -> 22 nF
+— and the voltage loop still crosses at the designed 17.5 Hz. Suite 172 passed / 2 skipped.

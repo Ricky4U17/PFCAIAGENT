@@ -37,7 +37,11 @@ def _nearest_e96(v: float) -> float:
         return v
     dec = math.floor(math.log10(v))
     base = v / (10 ** dec)
-    best = min(_E96, key=lambda m: abs(math.log(m) - math.log(base)))
+    # DECADE WRAP: an E-series list stops below 10 (E12 at 8.2, E24 at 9.1, E96 at 9.76), so a
+    # normalised value above the last entry had NO candidate above it and snapped DOWN a whole
+    # step — 99.97 nF became 82 nF instead of the obvious 100 nF. The next decade's first entry
+    # (10.0) is a real standard value and must be a candidate.
+    best = min(_E96 + [10.0], key=lambda m: abs(math.log(m) - math.log(base)))
     return round(best * (10 ** dec), 6)
 
 

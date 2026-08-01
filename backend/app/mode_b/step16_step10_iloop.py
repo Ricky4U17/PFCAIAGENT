@@ -63,7 +63,11 @@ def _nearest_e24(x):
         return x
     d = math.floor(math.log10(x))
     base = x / 10 ** d
-    best = min(_E24, key=lambda e: abs(e - base))
+    # DECADE WRAP: an E-series list stops below 10 (E12 at 8.2, E24 at 9.1, E96 at 9.76), so a
+    # normalised value above the last entry had NO candidate above it and snapped DOWN a whole
+    # step — 99.97 nF became 82 nF instead of the obvious 100 nF. The next decade's first entry
+    # (10.0) is a real standard value and must be a candidate.
+    best = min(_E24 + [10.0], key=lambda e: abs(e - base))
     return best * 10 ** d
 
 
