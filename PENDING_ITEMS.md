@@ -387,10 +387,42 @@ Also fixed in passing: 4 of the 7 screens read `(confirmedState as any).project_
 chaining, which throws a TypeError *after* the PDF is fetched — discarding a report that had been
 generated, and on ControlDesign also skipping `setReportGen(true)` (the approve-gate flag).
 
-**Still open / next step:** designer to retest. If it still fails, capture (a) screen, (b) whether a
-red banner now appears, (c) the console text. A visible "download didn't start? click here"
-fallback link is designed but NOT wired — `downloadBlob()` already returns the still-valid object
-URL for exactly that, it just needs UI in the 7 screens.
+#### ROOT-CAUSE ANALYSIS 2026-08-01 (console reviewed; nothing implemented yet)
+Designer clarification: it now fails **every time, on every screen** (was intermittent).
+
+**The discriminator.** There are seven download paths and they split cleanly:
+
+| Path | Shape | User activation when the anchor is clicked |
+|---|---|---|
+| `DonePanel` (Mode A) | blob already in memory, `downloadBlob` called SYNCHRONOUSLY from `onClick` | **alive** |
+| the other six report screens | `await docGenerateReport(...)` -> **~111 s** -> `downloadBlob` | **long expired** |
+
+Chrome's transient user activation lasts ~5 s; the report request takes ~111 s (measured on the
+combined report; an EMI-inclusive one is longer). By the time the anchor is clicked the browser no
+longer treats it as user-initiated, and Chrome's automatic-download protection applies. **That
+protection is surfaced in the ADDRESS BAR, not the console** — which is exactly why the console
+shows no error. It is also per-site and sticky once triggered, explaining "sometimes" -> "always".
+
+**Testable prediction (designer to confirm):** the Mode A DonePanel download should still work,
+because it is the only synchronous path. Also check the right-hand end of the address bar for a
+blocked-download icon; "Always allow" there is an immediate workaround.
+
+**Proposed fixes, NOT applied — designer deferred them 2026-08-01:**
+1. **Visible fallback link** — after the PDF arrives, render "Download didn't start? click here"
+   beside the button. Clicking it is a FRESH user gesture and can never be blocked. This is the
+   robust fix whatever the root cause; `downloadBlob()` already returns the URL for it, it just
+   needs UI in the six screens.
+2. **`allow-downloads` on two sandboxed iframes** — see C3 below.
+3. *(bigger, optional)* split generation from download so the save is always a direct user click.
+
+### C3. Two studio iframes are sandboxed without `allow-downloads`
+- `ReviewMagnetics.tsx:1002` — `sandbox="allow-scripts allow-same-origin"`
+- `CapacitorSimAgent.tsx:380` — `sandbox="allow-scripts allow-same-origin"`
+- `ControlDesign.tsx:263` — `sandbox="allow-scripts allow-downloads allow-forms allow-modals"` (correct)
+
+Any download initiated INSIDE the first two (a studio CSV/PNG export) is silently blocked by the
+browser. This is **not** the report button — that lives in the parent document — but it is the same
+class of silent failure. Found while analysing C2, 2026-08-01. One-line fix each.
 
 ---
 
