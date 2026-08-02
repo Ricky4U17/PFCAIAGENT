@@ -29,6 +29,11 @@ class IntakeApplication(BaseModel):
     output_power_w_high_line: Optional[float] = None
     output_bus_voltage_v:     Optional[float] = None
     nominal_line_frequency_hz:Optional[float] = None
+    # Minimum bus voltage the converter must still hold during the hold-up interval. Sizes the
+    # DC-bus capacitor: C = 2*P*t / (Vbus^2 - holdup_vmin^2), so raising it needs MORE capacitance.
+    # Chapter 1 used to read a different key (`vdc_min_holdup_v`) that nothing ever wrote, so it
+    # printed a hardcoded 300 V while Chapter 5 sized on 290 V. One key now, designer-supplied.
+    holdup_vmin_v:            Optional[float] = None
 
 
 class IntakeThermal(BaseModel):

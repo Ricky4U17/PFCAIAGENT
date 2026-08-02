@@ -330,6 +330,37 @@ for every &#NNNN; in app/mode_b/*.py:  cp >= 256, not cp1252-encodable,
 and chr(cp) not in reportlab.platypus.paraparser.greeks.values()  ->  will render as a box
 ```
 
+### B13. Unrenderable sub/superscript characters beyond the two fixed in B12
+The B12 scan was widened (raw characters, not only `&#NNNN;` entities) and found a PRE-EXISTING set
+that will render as wrong glyphs or boxes wherever it reaches report prose:
+
+| File | Characters |
+|---|---|
+| `generate_full_report.py` | `₀` x3 |
+| `generate_step16.py` | `₀` x2 |
+| `generate_steps13_14.py` | `₀` x1 |
+| `report_steps1_8.py` | `⁰ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁻` |
+| `report_semiconductor.py` | `&#8486;` (U+2126 OHM SIGN) x2 |
+
+Confirmed live: a `₀` I introduced in Section 5.4.2 rendered as **"LI"** instead of "L₀".
+Some hits may be in comments/docstrings and therefore harmless — **each needs checking in a BUILT
+PDF, not by grep alone.** Replace rendered ones with `<sub>`/`<sup>` markup (ReportLab handles those
+natively) or the entity ReportLab's `paraparser.greeks` knows.
+
+- **Done when:** the widened scan reports NONE for strings that reach a Paragraph, and it is wired
+  as a test (see B12) so new prose cannot reintroduce one.
+
+### B14. C6 capacitance tolerance — GUI half not started
+The report half is done (Tables 5.3.3 / 5.4.2 / 5.5.2, C187). The designer also asked for:
+1. **Step-15 "Vout DC Bus Capacitor Design" page** — the selected-part table should carry the
+   +20% / -20% figures alongside nominal.
+2. **DC-bus capacitor simulation agent page** — a selector for nominal / +20% / -20% so the agent
+   re-runs and shows results at the chosen corner.
+
+Backend is ready: `step15_capacitor.cap_tolerance_from_selection(step15_result, state)` returns all
+three corners already computed by the same engine the report uses, so both screens can read it
+without duplicating any physics. Scope reminder: DC bus only — the control loop stays nominal.
+
 ### B10. Pre-existing duplicate table numbers (13 remain)
 Found while doing the item-26 numbering sweep. Three kinds, none introduced by that sweep:
 - **if/else pairs** — 6.11.6, 6.11.7, 6.11.9, 8.6a, 9.6. Two `data_table` calls share a number but

@@ -130,7 +130,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     out["step3_1"] = {
         "riac_fr": c["riac_fr"], "riac_hv": c["riac_hv"],
         "rows": iac_rows([int(p["vin_ll_min"]), 110, 120, 132], c["riac_fr"], "Low / FR")
-              + iac_rows([180, 210, 220, int(p["vin_hl_max"])], c["riac_hv"], "High / HV"),
+              + iac_rows([180, 200, 220, 230, int(p["vin_hl_max"])], c["riac_hv"], "High / HV"),
     }
 
     # ── Step 3.2 — V_LPK check (FR ×2, HV ×4) ──────────────────────────────────
@@ -142,7 +142,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         iac, vl = vlpk(vac, c["riac_fr"], 2)
         st = "✓ ≤ 3.7 V" if vl <= c["vlpk_pref"] else ("! 3.7–3.8 V" if vl < c["vlpk_ds"] else "✗ > 3.8 V")
         vlpk_rows.append([f"{vac} Vac / FR", f"{iac*1e6:.3f}", f"{vl:.4f}", st])
-    for vac in [180, 210, 220, 230, int(p["vin_hl_max"])]:
+    for vac in [180, 200, 220, 230, int(p["vin_hl_max"])]:
         iac, vl = vlpk(vac, c["riac_hv"], 4)
         st = "✓ ≤ 3.7 V" if vl <= c["vlpk_pref"] else ("! 3.7–3.8 V" if vl < c["vlpk_ds"] else "✗ > 3.8 V")
         vlpk_rows.append([f"{vac} Vac / HV", f"{iac*1e6:.3f}", f"{vl:.4f}", st])
@@ -307,8 +307,9 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     paths_rows = []
     for vac, riac, A in [(90, c["riac_fr"], gA_ll), (110, c["riac_fr"], gA_ll),
                          (120, c["riac_fr"], gA_ll), (132, c["riac_fr"], gA_ll),
-                         (180, c["riac_hv"], gA_hl), (210, c["riac_hv"], gA_hl),
-                         (220, c["riac_hv"], gA_hl), (264, c["riac_hv"], gA_hl)]:
+                         (180, c["riac_hv"], gA_hl), (200, c["riac_hv"], gA_hl),
+                         (220, c["riac_hv"], gA_hl), (230, c["riac_hv"], gA_hl),
+                         (int(p["vin_hl_max"]), c["riac_hv"], gA_hl)]:
         rng = "LL" if riac == c["riac_fr"] else "HL"
         B = A
         C = gC_ll if rng == "LL" else gC_hl
@@ -431,7 +432,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     out["step7"]["inv_fr"], out["step7"]["inv_hv"] = inv_fr, inv_hv
     vrm_rows = []
     for vac, riac, mult, inv in ([(v, c["riac_fr"], 2, inv_fr) for v in [int(p["vin_ll_min"]),110,120,132]]
-                                 + [(v, c["riac_hv"], 4, inv_hv) for v in [180,210,220,230,int(p["vin_hl_max"])]]):
+                                 + [(v, c["riac_hv"], 4, inv_hv) for v in [180,200,220,230,int(p["vin_hl_max"])]]):
         iac = SQRT2*vac/riac
         vl = mult*c["k_rlpk"]*iac*c["r_rlpk"]
         vrm = inv/vl

@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-01**, head = `9e7ff5d` (C186), on `master`.
+**Start here after a restart.** Last updated **2026-08-01**, head = C187, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -22,7 +22,13 @@
 merged to `master` on 2026-08-01.
 
 ### Next up, in order
-1. **C2** — report download. Two silent failure mechanisms were fixed (premature
+1. **B14** — finish C6: the two GUI pieces (Step-15 selected-part table gains +/-20% columns; CapSim
+   page gains a nominal / +20% / -20% selector). Backend helper is ready and shared with the report:
+   `step15_capacitor.cap_tolerance_from_selection()`. DC bus only — control loop stays nominal.
+2. **Designer decision from C187:** Table 5.5.2 shows the reference bank FAILS the capacitance
+   requirement at -20% (1920 uF vs 2047 uF, -6.2%). Add capacitance, accept reduced worst-case
+   hold-up, or source a tighter part.
+3. **C2** — report download. Two silent failure mechanisms were fixed (premature
    `revokeObjectURL`, synchronous `removeChild`); **the designer must retest**. If it still fails,
    capture the screen + whether a red banner now appears + the console, then wire the visible
    fallback link (`downloadBlob()` already returns the URL for it).

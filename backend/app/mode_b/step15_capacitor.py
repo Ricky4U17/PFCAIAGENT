@@ -710,6 +710,73 @@ def run_capacitor_design(state: dict) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Capacitance tolerance corners (designer decision 2026-08-01)
+# ══════════════════════════════════════════════════════════════════════════════
+# Every part in the DC-bus capacitor database is a +/-20% part, so the tolerance is a fixed
+# constant rather than a per-part field or a designer input.
+#
+# SCOPE: the DC-BUS capacitor only (report Sections 5.3/5.4/5.5, the Step-15 screen and the
+# CapSim page). The CONTROL LOOP keeps the NOMINAL capacitance — step16_params.C_uF is not
+# touched — because the compensator is designed against the nominal plant.
+#
+# Only the CAPACITANCE is varied. ESR is the part's own specification and is NOT scaled with
+# it: a -20% part is not a +25% ESR part. So V_ripple and hold-up move with the tolerance,
+# while the ESR-driven loss and self-heating stay on the part's rated ESR.
+CAP_TOLERANCE_PCT = 20.0
+CAP_CORNERS = (("minus", 1.0 - CAP_TOLERANCE_PCT / 100.0, f"-{CAP_TOLERANCE_PCT:.0f}%"),
+               ("nominal", 1.0, "nominal"),
+               ("plus",  1.0 + CAP_TOLERANCE_PCT / 100.0, f"+{CAP_TOLERANCE_PCT:.0f}%"))
+
+
+def tolerance_corner_config(config: list[dict], scale: float) -> list[dict]:
+    """The same bank with every capacitance scaled — qty and part identity unchanged."""
+    return [{**r, "value_uF": float(r["value_uF"]) * float(scale)} for r in (config or [])]
+
+
+def cap_tolerance_from_selection(step15_result: dict, state: dict) -> dict | None:
+    """Tolerance corners for the SELECTED bank — the entry point the report and the GUI share.
+
+    Built from `selected_cap` exactly the way `bank_loss_table` does, so all three views describe
+    the same bank. Returns None when no part is selected (DATA MISSING, never a substitute).
+    """
+    sel = (step15_result or {}).get("selected_cap") or {}
+    if not sel:
+        return None
+    try:
+        cfg = [{"value_uF": float(sel.get("value_uF", 0) or 0),
+                "qty": int(float(sel.get("qty", 1) or 1)),
+                "part_number": sel.get("part_number", "")}]
+        return cap_tolerance_variants(cfg, state or {}, sel.get("supplier", "—"),
+                                      sel.get("series", "—"),
+                                      int(float(sel.get("voltage_rating_V", 0) or 0)))
+    except Exception:
+        return None
+
+
+def cap_tolerance_variants(config: list[dict], state: dict, supplier: str, series: str,
+                           voltage_rating: int) -> dict:
+    """Re-run the EXISTING thermal/ripple model at -20% / nominal / +20% capacitance.
+
+    Deliberately re-runs `calculate_thermal_table` per corner instead of scaling results after
+    the fact: ripple voltage, hold-up and the self-consistent core temperature are not linear in
+    C, so a post-hoc scale factor would quietly disagree with the nominal table it sits beside.
+    """
+    out = {}
+    for key, scale, label in CAP_CORNERS:
+        try:
+            th = calculate_thermal_table(config=tolerance_corner_config(config, scale),
+                                         state=state or {}, supplier=supplier, series=series,
+                                         voltage_rating=voltage_rating)
+        except Exception:
+            th = None
+        out[key] = {"label": label, "scale": scale,
+                    "C_total_uF": round(sum(float(r["value_uF"]) * int(r["qty"])
+                                            for r in (config or [])) * scale, 1),
+                    "thermal": th}
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Capacitor bank loss — SINGLE SOURCE OF TRUTH
 # ══════════════════════════════════════════════════════════════════════════════
 def bank_loss_table(step15_result: dict, state: dict) -> dict | None:

@@ -75,8 +75,20 @@ def compute_step11_vloop(inp: dict | None = None, prior: dict | None = None) -> 
 
     pin, pc = prior["inputs"], prior["const"]
     # 8-point sweep endpoints track the designer's spec corners (middle band voltages kept)
-    p["vac_ll"] = [int(pin.get("vin_ll_min", p["vac_ll"][0]))] + list(p["vac_ll"][1:])
-    p["vac_hl"] = list(p["vac_hl"][:-1]) + [int(pin.get("vin_hl_max", p["vac_hl"][-1]))]
+    # C7 — build the sweep from the SAME canonical 9-point grid every other chapter uses, so
+    # Chapter 6 proves stability at the voltages the rest of the report actually reports.
+    # Falls back to the module defaults if the shared table is unavailable (standalone use).
+    try:
+        from app.mode_b.calculations import canonical_ops_table as _cot
+        _v = [float(r[0]) for r in _cot(float(pin.get("vin_ll_min", p["vac_ll"][0])),
+                                       float(pin.get("vin_hl_max", p["vac_hl"][-1])),
+                                       float(pin["pout_lo"]), float(pin["pout_hi"]))]
+        _split = float(pin.get("band_split_vac", 160.0))
+        p["vac_ll"] = [int(round(x)) for x in _v if x <  _split]
+        p["vac_hl"] = [int(round(x)) for x in _v if x >= _split]
+    except Exception:
+        p["vac_ll"] = [int(pin.get("vin_ll_min", p["vac_ll"][0]))] + list(p["vac_ll"][1:])
+        p["vac_hl"] = list(p["vac_hl"][:-1]) + [int(pin.get("vin_hl_max", p["vac_hl"][-1]))]
     vout = pin["vout"]
     lphi = pin["lphi_uH"] * 1e-6
     co = pin["cout_uF"] * 1e-6

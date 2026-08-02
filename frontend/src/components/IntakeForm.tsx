@@ -8,7 +8,7 @@ export interface IntakeData {
     universal_input_frequency: boolean
     output_bus_voltage_v: number; output_power_w_high_line: number
     output_power_w_low_line: number; power_factor_target: number
-    efficiency_target_percent: number; hold_up_time_ms: number
+    efficiency_target_percent: number; hold_up_time_ms: number; holdup_vmin_v: number
     dc_bus_voltage_ripple_pk_pk_v: number
   }
   thermal: {
@@ -38,7 +38,7 @@ const DEFAULT: IntakeData = {
     nominal_line_frequency_hz: 60, universal_input_frequency: true,
     output_bus_voltage_v: 394, output_power_w_high_line: 3600,
     output_power_w_low_line: 1700, power_factor_target: 0.99,
-    efficiency_target_percent: 98, hold_up_time_ms: 20,
+    efficiency_target_percent: 98, hold_up_time_ms: 20, holdup_vmin_v: 290,
     dc_bus_voltage_ripple_pk_pk_v: 20,
   },
   thermal: { cooling_type: 'fan_cooled', ambient_temp_c_max: 50, max_temp_rise_c: 45, hotspot_limit_c: 110 },
@@ -188,6 +188,12 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
           <Field label="Hold-up time (ms)">
             <Inp value={d.application.hold_up_time_ms} min={0} max={100}
               onChange={v => set('application.hold_up_time_ms', v)} />
+          </Field>
+          {/* Sizes the bus capacitor together with the hold-up time. Raising this floor needs
+              MORE capacitance: C = 2*P*t / (Vbus^2 - Vmin^2). */}
+          <Field label="Min bus voltage during hold-up (V)">
+            <Inp value={d.application.holdup_vmin_v} min={100} max={400}
+              onChange={v => set('application.holdup_vmin_v', v)} />
           </Field>
         </div>
 

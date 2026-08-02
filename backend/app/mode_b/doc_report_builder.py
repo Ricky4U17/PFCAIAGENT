@@ -1147,7 +1147,10 @@ def _ch1(story, state):
     vripple  = float(raw_ap.get("bus_voltage_ripple_pk_pk_v", 20))
     f_line   = float(raw_ap.get("nominal_line_frequency_hz", 60))
     t_hold   = float(raw_ap.get("hold_up_time_ms", 20))
-    vdc_min  = float(raw_ap.get("vdc_min_holdup_v", 300))
+    # C5 — the SAME key Chapter 5 sizes on. The old `vdc_min_holdup_v` was read here and
+    # written nowhere, so this line always returned its hardcoded 300 V while the capacitor
+    # was sized to 290 V — a ~9% capacitance discrepancy between the requirement and the bank.
+    vdc_min  = float(raw_ap.get("holdup_vmin_v") or raw_ap.get("vdc_min_holdup_v") or 290.0)
     pf_tgt   = float(raw_ap.get("power_factor_target", 0.99))
     # canonical intake key is efficiency_target_percent (intake/schema.py); the old
     # *_pct spelling never matched and silently printed the 95% default over the
@@ -3774,7 +3777,14 @@ def _sim_verification(story, state, d):
 
     tiers = sim.get("tier", {}) or {}
     tier_txt = ", ".join(f"{k} {v}" for k, v in tiers.items())
-    body(story, f"<b>Field-engine verdict:</b> {sim.get('verdict','—')}.  "
+    # The raw engine word (APPROVE / REJECT) is deliberately NOT printed: it is that engine's own
+    # standalone acceptance opinion under stricter internal asserts, not a verdict on this design,
+    # and printing it beside our PASS row read as a contradiction.
+    _sv = str(sim.get("verdict", "") or "").upper()
+    _sv_txt = ("agrees with the Step-7 design" if _sv == "APPROVE"
+               else "raises an item under its own stricter internal checks (detailed below)"
+               if _sv else "did not return an acceptance opinion")
+    body(story, f"<b>Field-engine standalone assessment (informational):</b> {_sv_txt}.  "
                 f"<b>Provenance:</b> {tier_txt}.", 4)
 
     ccr = adapter.crosscheck_rows(d, sim)   # single shared, apples-to-apples definition
@@ -3816,9 +3826,11 @@ def _sim_verification(story, state, d):
     _xok = (n_tot > 0 and n_ok == n_tot)
     _engine_note = ""
     if sim.get("verdict") and sim["verdict"] != "APPROVE":
-        _engine_note = (f"  Field-engine internal acceptance: {sim['verdict']} — its stricter "
-                        "standalone asserts (e.g. crowded inner-radius flux) flag an item outside "
-                        "this comparison; see Chapters 3–4 for the governing design acceptance.")
+        _engine_note = ("  Note: the field engine's own standalone acceptance is more restrictive "
+                        "than this comparison — its internal asserts (e.g. crowded inner-radius "
+                        "flux) flag an item that is NOT part of the quantity-by-quantity check "
+                        "above. It is not a verdict on this design; the governing design "
+                        "acceptance is in Chapters 3-4.")
     verdict_row(story, "Independent field-engine cross-check",
         f"Field engine agrees with Step-7 within band on {n_ok}/{n_tot} cross-checked quantities."
         + ("" if _xok else f" {n_tot - n_ok} flagged for review.") + _engine_note,
@@ -4913,6 +4925,14 @@ def _ch5(story, state, s15):
             thermal = None
 
     if thermal and thermal.get("thermal_table"):
+        # Capacitance tolerance corners, computed ONCE for Sections 5.3 / 5.4 / 5.5. Re-runs the
+        # same thermal/ripple engine at -20% / nominal / +20% (see step15_capacitor.CAP_CORNERS).
+        try:
+            from app.mode_b.step15_capacitor import cap_tolerance_from_selection as _ctfs
+            _cap_tol = _ctfs(s15 or {}, state or {})
+        except Exception:
+            _cap_tol = None
+
         step_h(story, "5.3", "Ripple Current and Voltage Verification — 9 Operating Points", 5)
         annotation(story, "THEORY",
             "Each parallel capacitor carries 1/N of the bank ripple current. Self-heating "
@@ -5015,6 +5035,31 @@ def _ch5(story, state, s15):
                     "ESR(T)). The Chapter-7 Section 7.8b system loss budget reads this P<sub>bank</sub> "
                     "column PER LINE VOLTAGE from the same engine, so its Capacitor column matches this "
                     "table row for row rather than carrying a single averaged figure.", 5)
+        if _cap_tol:
+            _tt_n = ((_cap_tol.get("nominal") or {}).get("thermal") or {}).get("thermal_table") or []
+            _tt_m = ((_cap_tol.get("minus")   or {}).get("thermal") or {}).get("thermal_table") or []
+            _tt_p = ((_cap_tol.get("plus")    or {}).get("thermal") or {}).get("thermal_table") or []
+            if _tt_n and len(_tt_n) == len(_tt_m) == len(_tt_p):
+                _rt = [[f"{float(a['Vin_rms']):.0f}", f"{float(a['Pout_W']):.0f}",
+                        f"{float(b.get('V_ripple_pp_V', 0)):.2f}",
+                        f"{float(a.get('V_ripple_pp_V', 0)):.2f}",
+                        f"{float(c.get('V_ripple_pp_V', 0)):.2f}"]
+                       for a, b, c in zip(_tt_n, _tt_m, _tt_p)]
+                _wi_t = max(range(len(_tt_m)), key=lambda i: float(_tt_m[i].get("V_ripple_pp_V", 0)))
+                data_table(story, "5.3.3",
+                    "Output Ripple Voltage Across the ±20% Capacitance Tolerance Band",
+                    "Ripple voltage is inversely proportional to capacitance, so it is the quantity "
+                    "the ±20% tolerance actually moves. The −20% column is the worst case and is "
+                    "the one to check against the bus ripple specification. Amber row = highest "
+                    "−20% ripple. NOTE: only the CAPACITANCE is varied — ESR is the part's own "
+                    "specification and is not scaled with it, so the ripple CURRENT, loss and case "
+                    "temperature in Table 5.3.1 are unchanged across the band.",
+                    ["V<sub>in</sub> (V)", "P<sub>out</sub> (W)",
+                     "ΔV<sub>pp</sub> at −20% (V)", "ΔV<sub>pp</sub> nominal (V)",
+                     "ΔV<sub>pp</sub> at +20% (V)"],
+                    _rt, col_widths=[CW*0.15, CW*0.15, CW*0.24, CW*0.23, CW*0.23],
+                    worst_rows=[_wi_t], ch=5)
+
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
         verdict_row(story, "Ripple-current rating (all 9 points)",
@@ -5214,6 +5259,34 @@ def _ch5(story, state, s15):
               (f"{_m3.get('life_hours'):,} h" if isinstance(_m3.get('life_hours'), (int, float)) else "—"),
               f"{life.get('min_life_years','—')} yr"]],
             col_widths=[CW*0.46, CW*0.16, CW*0.20, CW*0.18], ch=5)
+
+        # C6 — the same result at the tolerance corners. The values are IDENTICAL by construction
+        # and the table exists to make that verifiable rather than merely asserted: the lifetime
+        # model is L = L0.f(T).f(I).f(V), and none of those three factors contains capacitance.
+        if _cap_tol:
+            _rows_life = []
+            for _k in ("minus", "nominal", "plus"):
+                _c = _cap_tol.get(_k) or {}
+                _thl = _c.get("thermal") or {}
+                _rows_life.append([
+                    _c.get("label", _k),
+                    f"{float(_c.get('C_total_uF') or 0):.0f} µF",
+                    (f"{_thl.get('worst_case_T_C')} °C" if _thl.get("worst_case_T_C") is not None else "—"),
+                    (f"{_m3.get('life_hours'):,} h" if isinstance(_m3.get('life_hours'), (int, float)) else "—"),
+                    f"{life.get('min_life_years','—')} yr"])
+            data_table(story, "5.4.2",
+                "Life Time Period Across the ±20% Capacitance Tolerance Band",
+                "The projected life is the SAME at all three corners, and that is a result rather "
+                "than an omission: the lifetime model is L = L<sub>0</sub>·f(T)·f(I)·f(V), and none of those "
+                "factors contains capacitance. Life is set by the core temperature, which is driven "
+                "by ripple CURRENT through the part's own ESR — and the ripple current is fixed by "
+                "the load and the switching pattern, not by how much capacitance is installed. A "
+                "−20% bank therefore ages at the same rate; what it loses is ripple-voltage "
+                "headroom (Table 5.3.3) and hold-up margin (Table 5.5.2).",
+                ["Capacitance corner", "C<sub>installed</sub>", "Core temp",
+                 "Life (hours)", "Life Time Period"],
+                _rows_life, col_widths=[CW*0.20, CW*0.20, CW*0.18, CW*0.22, CW*0.20], ch=5)
+
         verdict_row(story, "Life Time Period (≥ 15-year target)",
             f"{life.get('min_life_years','—')} yr projected",
             "PASS" if life.get("pass_15yr") else "REVIEW", ch=5)
@@ -5244,6 +5317,40 @@ def _ch5(story, state, s15):
             "(Sections 5.1–5.4).",
             ["Qualification check", "Value", "Status"],
             _mar, col_widths=[CW*0.46, CW*0.34, CW*0.20], ch=5)
+
+        # C6 — the margins above are on the NAMEPLATE capacitance. Every part in the database is a
+        # +/-20% part, so the same bank can legitimately ship anywhere in that band. Show it.
+        if _cap_tol:
+            _rows_tol, _minus_fail = [], False
+            for _k in ("minus", "nominal", "plus"):
+                _c = _cap_tol.get(_k) or {}
+                _C = float(_c.get("C_total_uF") or 0.0)
+                _m = ((_C - C_req) / C_req * 100.0) if C_req else 0.0
+                _ok = _C >= C_req
+                if _k == "minus" and not _ok:
+                    _minus_fail = True
+                _rows_tol.append([_c.get("label", _k), f"{_C:.0f}", f"{C_req:.0f}",
+                                  f"{_m:+.1f}%", "PASS" if _ok else "FAIL"])
+            data_table(story, "5.5.2",
+                "Installed Capacitance vs the Requirement, Across the ±20% Tolerance Band",
+                "Every capacitor in the database is a ±20% part, so the delivered bank can be "
+                "anywhere in this band. The margins in Table 5.5.1 are on the NAMEPLATE value; "
+                "this table is the same check at the tolerance corners.",
+                ["Capacitance corner", "C<sub>installed</sub> (µF)", "C<sub>required</sub> (µF)",
+                 "Margin", "Verdict"],
+                _rows_tol, col_widths=[CW*0.22, CW*0.22, CW*0.22, CW*0.17, CW*0.17],
+                worst_rows=[0], ch=5)
+            annotation(story, "PITFALL" if _minus_fail else "INSIGHT",
+                ("<b>The bank meets the capacitance requirement at nominal but NOT at the −20% "
+                 "corner.</b> A production bank built entirely from low-tolerance parts would "
+                 "hold the bus above the hold-up floor for less than the specified time. The "
+                 "acceptance verdict in Table 5.5.1 is deliberately still the NOMINAL one — this "
+                 "is reported so the tolerance exposure is a visible design decision, not a "
+                 "surprise. Closing it means either adding capacitance, accepting the reduced "
+                 "worst-case hold-up, or sourcing a tighter-tolerance part."
+                 if _minus_fail else
+                 "The bank meets the capacitance requirement across the whole ±20% band, so the "
+                 "hold-up specification is met even for a worst-case-tolerance production bank."), 5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

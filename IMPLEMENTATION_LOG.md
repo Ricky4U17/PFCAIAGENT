@@ -6591,3 +6591,71 @@ They render correctly through the boundary; renaming them means moving several c
 same commit. Logged as the residual half of PENDING B4.
 
 VERIFIED: combined 187 pp (204 pp with Ch7), Ch8+9 25 pp, tsc clean, suite 172 passed / 2 skipped.
+
+## C187 — Copilot Ch1-Ch6 review: C4, C5, C7 and the C6 report half
+
+Source: `specs/Review/PFC_Report_Ch1_to_Ch6_Review_Comments.pdf` (4 findings; 2 blockers).
+
+### C5 (blocker) — hold-up floor 290 V vs 300 V. ROOT CAUSE: a dead intake key.
+Chapter 1 read `vdc_min_holdup_v` (default 300); the GUI and `step15_capacitor` read
+`holdup_vmin_v` (default 290). **Nothing in the codebase ever WROTE `vdc_min_holdup_v`**, so Ch1
+always printed a hardcoded 300 V that no designer input could reach, while the capacitor was sized
+on 290 V. Not cosmetic: C = 2*P*t/(Vbus^2 - Vmin^2), so 290 -> 300 needs ~9.2% MORE capacitance —
+the bank was ~9% below the requirement Ch1 stated.
+Fixed: `holdup_vmin_v` declared in `IntakeApplication`; Ch1 reads it with a fallback chain; and —
+because there was NO intake field for the floor at all, only hold-up TIME — a new
+"Min bus voltage during hold-up (V)" input next to it. Verified: Ch1 and Ch5 both read 290 V.
+
+### C7 (blocker) — Chapter 6 control grid: 8 points with 210 Vac vs the canonical 9.
+`step16_step10_iloop.py` / `step16_step11_vloop.py` hardcoded `vac_hl=[180,210,220,264]` and
+overrode only the endpoints, so loop stability was proven at 210 Vac (a voltage in no other
+chapter) and NOT at 200/230 Vac. `calculations.canonical_ops_table`'s own docstring says it is the
+"single source of truth ... every report chapter must build their OPS arrays from this same table"
+— Ch6 was the one chapter that did not.
+Both loops now derive the sweep from `canonical_ops_table` (with a fallback for standalone use).
+SPANNED THREE MODULES, not two: fixing the two loops left 210 Vac in the report because
+`step16_steps1_8.py` had the same list hardcoded in four more tables (R_IAC rows, V_LPK sweep, gain
+table, V_RM table). Verified in a built report: 210 Vac = 0 occurrences, 200 Vac = 12, 230 Vac = 6.
+
+### C4 (high) — "REJECT" and "PASS" on the same page.
+Section 4.8 printed a bare "Field-engine verdict: REJECT" above a green PASS row. Designer: avoid
+the word REJECT entirely. The raw engine word is no longer printed at all; the line is reframed as
+"Field-engine standalone assessment (informational)" with the meaning spelled out. Verified: the
+string REJECT appears 0 times in the report (2 remaining mentions are source comments).
+
+### C6 (high) — capacitance tolerance. REPORT HALF DONE; GUI HALF NOT STARTED.
+Designer scope: fixed +/-20% (every DB part is +/-20%), DC-BUS ONLY — the control loop keeps the
+nominal capacitance and `step16_params.C_uF` is untouched.
+New engine helpers in `step15_capacitor.py`: `CAP_TOLERANCE_PCT`, `CAP_CORNERS`,
+`tolerance_corner_config`, `cap_tolerance_variants`, `cap_tolerance_from_selection`. They RE-RUN
+`calculate_thermal_table` per corner rather than scaling results afterwards, because ripple
+voltage, hold-up and the self-consistent core temperature are not linear in C.
+Only CAPACITANCE is scaled — ESR is the part's own spec and is not scaled with it; the report says
+so, and that is why current/loss/temperature are unchanged across the band.
+- **Table 5.3.3** ripple voltage: 13.11 / 10.49 / 8.74 V at -20/nom/+20.
+- **Table 5.4.2** lifetime: IDENTICAL at all three corners, shown rather than asserted, because
+  L = L0.f(T).f(I).f(V) contains no capacitance term.
+- **Table 5.5.2** capacitance vs requirement — **THE FINDING**: -20% gives 1920 uF vs 2047 uF
+  required = **-6.2%, FAIL**; nominal +17.3%; +20% +40.7%. A worst-case-tolerance production bank
+  does NOT meet the hold-up requirement. Acceptance verdict deliberately stays on nominal (item-22
+  precedent) with a PITFALL naming the three ways to close it.
+
+### MISTAKES MADE THIS ENTRY — recorded for future reference
+1. **`_ch5`'s parameter is `s15`, not `step15_result`.** My reference raised NameError, MY OWN
+   try/except swallowed it, `_cap_tol` became None and all three tables silently vanished while the
+   build still reported success. *Lesson: a defensive try/except around new code hides the typo it
+   was meant to survive — grep the enclosing `def` for the real parameter name first.*
+2. **I numbered a table 5.3.2, which was already taken** ("Temperature Characterization of the
+   Selected Capacitor") — violating the letter-series rule I had just established in 3c/6.2.
+   Moved to 5.3.3. *Lesson: `grep -c 'data_table(story, "X"'` BEFORE choosing a number.*
+3. **I used `L₀` (U+2080), which has no WinAnsi glyph** — the exact B12 defect class fixed one
+   commit earlier. It rendered as "LI". *Lesson: the B12 scan must be run after writing new report
+   prose, not only when hunting an existing bug.* Use `<sub>0</sub>`.
+4. An assertion guard I wrote (`assert four_space_anchor not in s`) was meaningless because the
+   8-space string CONTAINS the 4-space one. It aborted a good edit. *Lesson: guard with
+   `s.count(anchor) == 1`, not `in` / `not in`.*
+
+All three were caught only by extracting text from a BUILT PDF — none by `ast.parse`, the suite, or
+the page-count guard.
+
+VERIFIED: combined report 189 pp, all verify checks OK.
