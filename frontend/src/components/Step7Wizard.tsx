@@ -1319,14 +1319,34 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{row.Bac_pk?.toFixed(5)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.green,fontWeight:600}}>{row.Pcore_avg_W?.toFixed(3)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{crest?.toFixed(3)}</td>
-                            <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{row.Pcore_pk_W?.toFixed(3)}</td>
-                            <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',
-                              color:ratio>1.5?C.red:ratio<0.7?C.amber:C.green}}>{(ratio*100).toFixed(0)}%</td>
+                            <td title='Peak instantaneous core loss anywhere in the half cycle. Bac is proportional to Vin*D = Vin*(1 - Vin/Vout), which peaks at Vin = Vout/2. Every high-line cycle passes through that voltage, so this column is IDENTICAL across the high-line points by construction - it is the same operating condition each time, not a frozen value.'
+                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{row.Pcore_pk_W?.toFixed(3)}</td>
+                            {/* Avg/Crest ABOVE 100% is correct at high line, not a fault: the crest
+                                duty collapses as Vin,pk approaches Vout, so the crest-point loss becomes
+                                tiny while the cycle average does not. Colouring it red implied an error
+                                (the designer flagged it as one). Neutral colour + a tooltip instead. */}
+                            <td title={ratio>1
+                                ? 'Above 100% is expected at high line: D at the crest collapses, so the crest-point loss is much smaller than the cycle average. The average is the thermal/efficiency basis.'
+                                : 'Below 100%: the crest is the hottest point of the cycle, as expected at low line.'}
+                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',
+                              color:ratio>1?C.text:C.green}}>{(ratio*100).toFixed(0)}%</td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div style={{marginTop:8,fontSize:10.5,color:C.muted,lineHeight:1.6}}>
+                  <b style={{color:C.text}}>Reading this table.</b>{' '}
+                  <b>Pcore cycle-max</b> is identical at every high-line point <i>by construction</i>:
+                  B<sub>ac</sub> ∝ V<sub>in</sub>·D = V<sub>in</sub>(1 − V<sub>in</sub>/V<sub>out</sub>),
+                  which peaks at V<sub>in</sub> = V<sub>out</sub>/2 ≈ {Math.round((confirmedState as any)?.intake?.application?.output_bus_voltage_v ?? 393)/2} V.
+                  Once V<sub>in,pk</sub> exceeds that, every cycle passes through the same worst angle, so the
+                  peak is the same number. At low line the sine never reaches it, so cycle-max equals the crest
+                  value instead.{' '}
+                  <b>Avg/Crest above 100%</b> is likewise expected at high line — the crest duty collapses, so
+                  the crest-point loss falls far below the cycle average. Neither is an error; the
+                  cycle-<i>average</i> column is the value that drives temperature rise and efficiency.
                 </div>
               </Card>
             )}

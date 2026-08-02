@@ -56,6 +56,13 @@ export const CapacitorSimAgent: React.FC<Props> = ({
   const [life,    setLife]    = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
+  // Capacitance tolerance corner the simulation runs at. Every part in the DC-bus database is
+  // a +/-20% part, so the delivered bank can sit anywhere in the band; the designer can now
+  // simulate the corner instead of only the nameplate value. DC BUS ONLY - the control loop
+  // is designed against the nominal plant and is unaffected by this selector.
+  const [capCorner, setCapCorner] = useState<'minus'|'nominal'|'plus'>('nominal')
+  const CAP_SCALE = { minus: 0.8, nominal: 1.0, plus: 1.2 } as const
+  const CAP_LABEL = { minus: '−20%', nominal: 'nominal', plus: '+20%' } as const
 
   // Fetch the authoritative operating envelope + acceptance from the backend
   // (same source as the Step-15 page) so the locked specs match upstream.
@@ -82,7 +89,7 @@ export const CapacitorSimAgent: React.FC<Props> = ({
       Tamb_C: Number((confirmedState as any)?.intake?.thermal?.ambient_temp_c_max ?? 50),
     }).then((d: any) => { if (alive) setLife(d) }).catch(() => {})
     return () => { alive = false }
-  }, [result, confirmedState])
+  }, [result, confirmedState, capCorner])
 
   // ── Build the dcbus package from upstream design + approved part ────────────
   const pkg = useMemo(() => {
@@ -110,7 +117,9 @@ export const CapacitorSimAgent: React.FC<Props> = ({
     const highVacMin = VacMax >= 180 ? 180 : Math.max(VacMin, lineBreak)
 
     // Capacitor part values (from the approved selection)
-    const C_uF    = Number(cap?.value_uF         ?? cfg0.value_uF ?? 0)
+    // Scaled to the selected tolerance corner. Only CAPACITANCE is scaled - ESR is the part's
+    // own specification and is not scaled with it (same rule as report Tables 5.3.3/5.4.2/5.5.2).
+    const C_uF    = Number(cap?.value_uF         ?? cfg0.value_uF ?? 0) * CAP_SCALE[capCorner]
     const nPar    = Number(cap?.qty              ?? cfg0.qty      ?? 1)
     const Vrated  = Number(cap?.voltage_rating_V ?? result.voltage_rating ?? 450)
     const esr120  = Number(cap?.ESR_each_mohm    ?? 0) / 1000     // mΩ → Ω
@@ -353,6 +362,34 @@ export const CapacitorSimAgent: React.FC<Props> = ({
         <span style={{ marginLeft: 'auto', color: C.hint, fontSize: 10,
           fontFamily: 'IBM Plex Mono,monospace' }}>
           adjust input voltage · output power · ambient
+        </span>
+      </div>
+
+      {/* Capacitance tolerance corner. Re-runs the whole simulation at -20% / nominal / +20%
+          bank capacitance. Only capacitance is scaled; ESR is the part's own spec. */}
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap',
+        padding:'8px 12px', marginBottom:10, borderRadius:8,
+        background:C.bg3, border:`0.5px solid ${C.border}` }}>
+        <span style={{ fontSize:11, color:C.text, fontWeight:600 }}>Bank capacitance</span>
+        <div style={{ display:'flex', gap:6 }}>
+          {(['minus','nominal','plus'] as const).map(k => (
+            <button key={k} onClick={() => setCapCorner(k)}
+              style={{ padding:'5px 12px', borderRadius:6, cursor:'pointer', fontSize:11,
+                fontFamily:'IBM Plex Mono,monospace', fontWeight:capCorner===k?600:400,
+                border:`1px solid ${capCorner===k?C.accent:C.border}`,
+                background:capCorner===k?C.accentL:'transparent',
+                color:capCorner===k?C.accent:C.muted }}>
+              {CAP_LABEL[k]}
+            </button>
+          ))}
+        </div>
+        <span style={{ fontSize:10, color:C.muted, lineHeight:1.5 }}>
+          Every part in the database is a ±20% part. Re-runs the simulation at the selected corner —
+          only the CAPACITANCE is scaled; ESR is the part's own specification, so ripple current and
+          self-heating are unchanged while ripple voltage and hold-up move.
+          {capCorner !== 'nominal' && (
+            <b style={{ color:C.amber }}>{' '}Showing the {CAP_LABEL[capCorner]} corner, not nameplate.</b>
+          )}
         </span>
       </div>
 

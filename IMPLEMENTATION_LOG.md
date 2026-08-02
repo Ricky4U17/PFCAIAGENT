@@ -6659,3 +6659,44 @@ All three were caught only by extracting text from a BUILT PDF — none by `ast.
 the page-count guard.
 
 VERIFIED: combined report 189 pp, all verify checks OK.
+
+## C188 — C6 GUI half (B14) + the "red values" on the magnetic design page
+
+### B14 — capacitance tolerance in the GUI (closes C6)
+- **Step-15 (Vout DC Bus Capacitor Design):** new "+/-20% CAPACITANCE TOLERANCE" panel under the
+  Life Time Period block. Three rows (-20% / nominal / +20%) with bank capacitance, margin vs the
+  requirement with PASS/FAIL, and the Life Time Period. Life is IDENTICAL at all three corners and
+  the panel says why (L = L0.f(T).f(I).f(V) has no capacitance term; the ripple current that heats
+  the part is set by the load, not by installed capacitance) — same wording basis as report
+  Table 5.4.2, so screen and report cannot drift.
+- **CapSim page:** a `-20% / nominal / +20%` selector in the header. It scales the injected
+  `C_uF` and is in the payload useMemo's dependency list, so the whole simulation re-runs at the
+  chosen corner. Only CAPACITANCE is scaled; ESR is the part's own spec. A live amber note appears
+  whenever a non-nominal corner is showing, so a screenshot can never be mistaken for nameplate.
+- Scope honoured: DC BUS ONLY. `step16_params.C_uF` and the control loop are untouched.
+
+### "Red values" on the Inductor core selection page — NOT a calculation error
+Designer screenshot (`specs/Error ON GUI Magnetic Design page.png`) flagged two columns of the
+TIME DOMAIN CORE LOSS table. Both values are CORRECT; the presentation implied a fault.
+
+**1. `Pcore cycle-max` pinned at 4.730 W for 180/200/220/230/264 V.**
+Bac is proportional to Vin*D = Vin*(1 - Vin/Vout), which is maximised at Vin = Vout/2 = 196.5 V.
+Verified numerically over a 900-point sweep:
+  - 90-132 Vac: Vin_pk = 127-187 V never reaches 196.5 V, so the maximum is AT THE CREST ->
+    cycle-max equals the crest column exactly (3.648, 4.332, 4.556, 4.705). Matches the screenshot.
+  - 180-264 Vac: the sine passes through 196.5 V, so max(Vin*D) = 98.25 for ALL of them -> the
+    peak core loss is the same number every time.
+It looks frozen; it is the signature of the maximum being INTERIOR to the sweep. Same operating
+condition each time, so the same answer.
+
+**2. `Avg/Crest` above 100% at high line.**
+Also correct, and the same effect C177 relied on: as Vin_pk approaches Vout the crest duty
+collapses, so the crest-point loss becomes tiny (0.212 W at 264 V) while the cycle average stays
+~2.2 W. The colour rule (ratio > 1.5 -> red) was painting correct physics as an error.
+
+**Fix (presentational):** red colouring removed from the ratio column (neutral above 100%, green
+below); tooltips on both columns; and a "Reading this table" note under it deriving the
+Vin = Vout/2 result and stating that the cycle-AVERAGE column is what drives temperature rise and
+efficiency. No numbers changed.
+
+VERIFIED: report 189 pp, tsc clean, suite 172 passed / 2 skipped.

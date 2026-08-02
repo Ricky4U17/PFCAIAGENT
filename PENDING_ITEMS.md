@@ -350,7 +350,14 @@ natively) or the entity ReportLab's `paraparser.greeks` knows.
 - **Done when:** the widened scan reports NONE for strings that reach a Paragraph, and it is wired
   as a test (see B12) so new prose cannot reintroduce one.
 
-### B14. C6 capacitance tolerance — GUI half not started
+### B14. C6 capacitance tolerance — GUI half  `DONE 2026-08-02 (C188)`
+Step-15 gained a ±20% panel (capacitance, margin vs requirement, Life Time Period) and the CapSim
+page gained a −20% / nominal / +20% selector that re-runs the simulation at the chosen corner.
+DC bus only; the control loop still uses nominal capacitance.
+
+<details><summary>Original entry</summary>
+
+### B14-orig. C6 capacitance tolerance — GUI half not started
 The report half is done (Tables 5.3.3 / 5.4.2 / 5.5.2, C187). The designer also asked for:
 1. **Step-15 "Vout DC Bus Capacitor Design" page** — the selected-part table should carry the
    +20% / -20% figures alongside nominal.
@@ -360,6 +367,8 @@ The report half is done (Tables 5.3.3 / 5.4.2 / 5.5.2, C187). The designer also 
 Backend is ready: `step15_capacitor.cap_tolerance_from_selection(step15_result, state)` returns all
 three corners already computed by the same engine the report uses, so both screens can read it
 without duplicating any physics. Scope reminder: DC bus only — the control loop stays nominal.
+
+</details>
 
 ### B10. Pre-existing duplicate table numbers (13 remain)
 Found while doing the item-26 numbering sweep. Three kinds, none introduced by that sweep:

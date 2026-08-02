@@ -747,6 +747,57 @@ export const Step15Capacitor: React.FC<Props> = ({
                       rated-ripple self-heat × voltage factor). Values beyond ~15 years should be read
                       as "≥ 15 yr with margin" — vendors do not extrapolate further.
                     </div>
+
+                    {/* ±20% capacitance tolerance. Every part in the database is a ±20% part.
+                        Lifetime is INVARIANT across the band (L = L0·f(T)·f(I)·f(V) contains no
+                        capacitance term) — shown explicitly rather than omitted, matching report
+                        Table 5.4.2. Capacitance margin DOES move, and that is the real exposure. */}
+                    {C_total > 0 && (
+                      <div style={{marginTop:10,border:`0.5px solid ${C.border}`,borderRadius:7,overflow:'hidden'}}>
+                        <div style={{padding:'6px 10px',background:C.bg4,fontSize:10,color:C.hint,
+                          fontFamily:'IBM Plex Mono,monospace',letterSpacing:'.05em'}}>
+                          ±20% CAPACITANCE TOLERANCE (all database parts are ±20%)
+                        </div>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:10}}>
+                          <thead>
+                            <tr style={{background:C.bg3,borderBottom:`0.5px solid ${C.border}`}}>
+                              {['Corner','C bank','vs required','Life Time Period'].map(h=>(
+                                <th key={h} style={{padding:'5px 8px',textAlign:'left',color:C.hint,fontWeight:400}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[['−20%',0.8],['nominal',1.0],['+20%',1.2]].map(([lbl,sc]:any)=>{
+                              const Cc = C_total*sc
+                              const mg = C_req>0 ? (Cc-C_req)/C_req*100 : null
+                              const ok = C_req>0 ? Cc>=C_req : true
+                              return (
+                                <tr key={lbl} style={{borderBottom:`0.5px solid ${C.border}`,
+                                  background:lbl==='nominal'?C.bg2:'transparent'}}>
+                                  <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace',
+                                    fontWeight:lbl==='nominal'?600:400}}>{lbl}</td>
+                                  <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{Cc.toFixed(0)} µF</td>
+                                  <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace',
+                                    color:ok?C.green:C.red,fontWeight:600}}>
+                                    {mg===null?'—':`${mg>=0?'+':''}${mg.toFixed(1)}%`} {ok?'PASS':'FAIL'}
+                                  </td>
+                                  <td style={{padding:'5px 8px',fontFamily:'IBM Plex Mono,monospace'}}>
+                                    {lifetime.min_life_years} yr
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                        <div style={{padding:'6px 10px',fontSize:9.5,color:C.muted,lineHeight:1.6}}>
+                          <b style={{color:C.text}}>Life is the same at all three corners</b> — that is a
+                          result, not an omission: L = L₀·f(T)·f(I)·f(V) has no capacitance term, and the
+                          ripple current that heats the part is set by the load, not by how much
+                          capacitance is installed. What a −20% bank loses is ripple-voltage headroom and
+                          hold-up margin — the “vs required” column above.
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
