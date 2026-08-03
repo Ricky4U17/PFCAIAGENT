@@ -90,6 +90,39 @@ DC Bias XFlux Bulletin.
 `Bsat_Tcoeff = -0.00065`. The explicit 25/100/150 °C points are used in preference to either, so
 nothing is currently wrong, but one of the two fields is dead and misleading.
 
+### A10. Reference-file protection — 4 agreed actions (designer 2026-08-02)
+Triggered by an accidental deletion of `specs/*.docx|pdf` that went unnoticed for a whole session.
+**Key distinction found while investigating:** the deleted files were CITATIONS ONLY (comments and
+docstrings) — nothing opens them, nothing broke. The genuinely exposed category is different:
+
+| Category | Files | Deletion impact |
+|---|---|---|
+| **Runtime-loaded** | `specs/Database/*.xlsx` — `inputprotection/database.py:25` resolves `specs/Database` and opens `ICL_Database.xlsx` | **NTC + fuse selection BREAK** |
+| Provenance-only | `PFC_Design_Report_Steps13_15_Styled.docx`, `Output_Capacitor_Calculation.docx`, `PFC_Report_Structure_Agreement.pdf`, `PFC_Inductor_Engine_Equations.pdf`, the 2-channel reference PDF | nothing breaks; the "why" is lost |
+
+**Agreed actions, in priority order:**
+
+1. **Commit `specs/Database/ferroxcube_cores_database (1).xlsx`** — it is currently UNTRACKED, so
+   deleting it is PERMANENT. Every other workbook in that folder is tracked and recoverable. This is
+   the only unrecoverable exposure; highest value, smallest effort.
+2. **Add a startup/test check** asserting the runtime-loaded workbooks exist. A folder cannot give
+   this: it turns a silent breakage into an immediate failure, and would have caught the deletion on
+   day one instead of it sitting unnoticed. (The accident was a DETECTION failure, not a protection
+   failure — git already protected the files.)
+3. **Create `specs/Reference/`** for the PROVENANCE documents only. **Leave `specs/Database/` where
+   it is** — moving it means editing the hard-coded `_SPEC` path in `inputprotection/database.py`
+   and re-testing every selector. Two folders with distinct jobs: `Database/` = the code reads this,
+   `Reference/` = humans read this.
+4. **Update the citations** to carry the new path so a reader can find them
+   (`doc_report_builder.py` header + line ~1912, `step15_cap_db.py` docstring,
+   `generate_steps13_14.py` ~1789).
+
+**Also fix while there:** `edge_60.json`'s `validation_anchor.reference_doc` cites
+`2_Channel_Inteleaved_magnetics_calculations.pdf`, which does NOT match the restored
+`2 Channel Inteleaved TTP CCM PFC Design Document.pdf`, and no file of that name exists. That
+citation is PRINTED in the report at Section 3.2.6 as the loss-model validation source, so the
+report currently points at a document the repo does not contain.
+
 ---
 
 ## B. Report & calculation  `CODE`
