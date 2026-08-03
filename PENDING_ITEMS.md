@@ -363,6 +363,21 @@ for every &#NNNN; in app/mode_b/*.py:  cp >= 256, not cp1252-encodable,
 and chr(cp) not in reportlab.platypus.paraparser.greeks.values()  ->  will render as a box
 ```
 
+### B15. Ch5-Ch7 review — items the designer chose NOT to do (C189)
+From `PFC_Report_Ch5_to_Ch7_Review_Comments.pdf`. Recorded so they are not re-raised as new:
+- **EOL capacitance derating** — DECLINED for now. We model initial ±20% tolerance only. Electrolytics
+  also lose capacitance over life (~another −20%); combined worst case ≈ 0.64 × nameplate. Needs an
+  EOL-loss figure (not in the DB) and a decision on whether it gates or only reports.
+- **Rename "Life Time Period" → "Lifetime estimate"** — DECLINED. "Life Time Period" is a designer
+  decision of 2026-07-14: it is the manufacturer's own term for their published model and is
+  deliberately distinct from the retired Methods 1/2.
+- **50 °C thermal sensitivity study** — moot once #6 landed; Chapter 7 now runs AT the spec ambient.
+
+**Newly opened by #4 (needs designer input):** `intake.protection.ovp_threshold_v` and
+`intake.protection.bus_transient_max_v` do not exist anywhere. Report Table 5.2.2 prints them as
+DATA MISSING, so the 450 V capacitor class is currently justified against the regulated bus only —
+not against the worst voltage the part actually sees. Supplying both closes that table.
+
 ### B13. Unrenderable sub/superscript characters beyond the two fixed in B12
 The B12 scan was widened (raw characters, not only `&#NNNN;` entities) and found a PRE-EXISTING set
 that will render as wrong glyphs or boxes wherever it reaches report prose:
@@ -376,6 +391,10 @@ that will render as wrong glyphs or boxes wherever it reaches report prose:
 | `report_semiconductor.py` | `&#8486;` (U+2126 OHM SIGN) x2 |
 
 Confirmed live: a `₀` I introduced in Section 5.4.2 rendered as **"LI"** instead of "L₀".
+
+**FALSE POSITIVE — do not "fix":** the scan flags `●` at `doc_report_builder.py:887`, but
+that is a **matplotlib** axis label (DejaVu renders it correctly), not a ReportLab Paragraph. The
+scan cannot distinguish the two rendering engines — check the call site before changing anything.
 Some hits may be in comments/docstrings and therefore harmless — **each needs checking in a BUILT
 PDF, not by grep alone.** Replace rendered ones with `<sub>`/`<sup>` markup (ReportLab handles those
 natively) or the entity ReportLab's `paraparser.greeks` knows.

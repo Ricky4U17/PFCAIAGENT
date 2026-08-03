@@ -47,6 +47,23 @@ TM = BM = 18 * mm
 CW = PAGE_W - LM - RM
 
 
+def _num_or_none(state, dotted: str):
+    """Read a dotted path out of the design state and return a float, or None if absent/blank.
+
+    Used where a MISSING value must print DATA MISSING rather than silently become a default —
+    an assumed OVP threshold would look like a justified margin when nothing justifies it.
+    """
+    cur = state or {}
+    for key in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    try:
+        return float(cur) if cur not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _material_supplier(material_key: str) -> str:
     """Supplier name for a material key, straight from the magnetics database.
 
@@ -4913,6 +4930,43 @@ def _ch5(story, state, s15):
             _rows521,
             col_widths=[CW*0.45, CW*0.55], ch=5)
 
+        # #4 - the voltage-rating check was "rating vs bus" only. What justifies the class is the
+        # WORST voltage the part ever sees, which is the OVP trip and any transient above it, not
+        # the regulated bus. Neither is currently a design input, so they are reported DATA MISSING
+        # rather than assumed - the margin against the bus alone is not a sufficient justification.
+        _DMV = "<i>DATA MISSING</i>"
+        _ovp = _num_or_none(state, "intake.protection.ovp_threshold_v")
+        _vtr = _num_or_none(state, "intake.protection.bus_transient_max_v")
+        def _mgn(v):
+            return (f"{(V_sel - v) / v * 100:+.1f}%" if (v and V_sel) else "—")
+        _vs_rows = [
+            ["Regulated bus V<sub>out</sub>", f"{Vout:.0f} V", _mgn(Vout),
+             "Chapter 1 specification"],
+            ["OVP trip threshold",
+             (f"{_ovp:.0f} V" if _ovp else _DMV), (_mgn(_ovp) if _ovp else "—"),
+             "highest STEADY voltage the bank sees before the controller latches off"],
+            ["Bus transient maximum",
+             (f"{_vtr:.0f} V" if _vtr else _DMV), (_mgn(_vtr) if _vtr else "—"),
+             "load-dump / mains-surge overshoot above the OVP trip"],
+            ["Capacitor voltage rating", f"{_i(V_sel)} V", "—",
+             "the selected class"],
+        ]
+        data_table(story, "5.2.2", "DC-Bus Voltage Stress vs the Selected Voltage Class",
+            "What justifies the voltage class. Margin is quoted as the capacitor rating relative to "
+            "each stress. Rows marked DATA MISSING are not yet design inputs — until they are, the "
+            f"{_i(V_sel)} V class is justified against the REGULATED BUS only, which is not the "
+            "worst case the part actually experiences.",
+            ["Voltage stress", "Value", "Rating margin", "Basis"],
+            _vs_rows, col_widths=[CW*0.24, CW*0.14, CW*0.16, CW*0.46], ch=5)
+        if not (_ovp and _vtr):
+            annotation(story, "PITFALL",
+                "<b>The voltage class is not fully justified yet.</b> The bank is rated "
+                f"{_i(V_sel)} V against a {Vout:.0f} V regulated bus, but the sizing case for an "
+                "electrolytic is the <b>OVP trip threshold</b> (the highest steady voltage before "
+                "the controller acts) and any <b>transient overshoot</b> above it — neither of "
+                "which is currently a design input. Supply both and this table closes; until then "
+                "the margin shown against the bus should not be read as the design margin.", 5)
+
     # ── 5.4 Ripple current and voltage verification — all 9 operating points ──
     thermal = None
     if cfg and sel:
@@ -5062,12 +5116,31 @@ def _ch5(story, state, s15):
 
         _n_pass = sum(1 for r in tt if r.get('ripple_pass'))
         _n_der  = sum(1 for r in tt if r.get('ripple_status') == 'pass_derated')
+        _tamb5v = thermal.get("T_amb_C", "—")
+        _em5v = thermal.get("esr_model") or {}
         verdict_row(story, "Ripple-current rating (all 9 points)",
             f"I/cap ≤ I<sub>allow</sub> at {_n_pass}/{len(tt)} points"
             + (f" ({_n_der} within the temperature allowance above nameplate)" if _n_der else "")
             + f"; T<sub>cap,max</sub> = {thermal.get('worst_case_T_C','—')} °C "
-            f"≤ {thermal.get('temp_rating_C','—')} °C",
+            f"≤ {thermal.get('temp_rating_C','—')} °C"
+            + f" &#8212; at T<sub>amb</sub> = {_tamb5v} °C",
             "PASS" if thermal.get("all_ripple_pass") else "VERIFY", ch=5)
+        # The verdict is conditional on two modelled inputs, not on datasheet scalars alone.
+        annotation(story, "BASIS",
+            f"<b>This PASS is conditional on its stated basis.</b> It holds at <b>T<sub>amb</sub> = "
+            f"{_tamb5v} °C</b> (the Chapter-1 system ambient) and uses the vendor-implied "
+            "<b>ESR(T)</b> model together with the temperature ripple multiplier "
+            + (f"<b>K(T<sub>amb</sub>) = {_em5v.get('K_temp')}</b> " if _em5v.get("K_temp") else "")
+            + "applied to the "
+            + (f"{_em5v.get('I_rated_A')} A " if _em5v.get("I_rated_A") else "")
+            + "datasheet rating"
+            + (f" ({_em5v.get('K_source')})" if _em5v.get("K_source") else "")
+            + ". Both are MODELLED from the part's own datasheet row rather than read directly "
+            "from a published ripple-vs-temperature curve"
+            + (f"; model source: {_em5v.get('source')}" if _em5v.get("source") else "")
+            + ". A higher ambient, or a vendor curve that differs from the implied model, moves "
+            "the allowed ripple and can move this verdict &#8212; quote the pass together with "
+            "this basis, never on its own.", 5)
         if _n_der:
             annotation(story, "NOTE",
                 "<b>Derated-PASS condition.</b> At the flagged operating points the per-capacitor "

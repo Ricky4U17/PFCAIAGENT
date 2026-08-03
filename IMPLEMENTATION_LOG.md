@@ -6700,3 +6700,75 @@ Vin = Vout/2 result and stating that the cycle-AVERAGE column is what drives tem
 efficiency. No numbers changed.
 
 VERIFIED: report 189 pp, tsc clean, suite 172 passed / 2 skipped.
+
+## C189 — Copilot Ch5-Ch7 review: items 6, 7, 8, 4, 3, 9, 10
+
+Source: `specs/Review/PFC_Report_Ch5_to_Ch7_Review_Comments.pdf`. Designer selected 6,7,4,3,10 and
+asked about 8/9 — 8 folded in with 7 (same block), 9 paired with 10 (both Ch7 explanation).
+Explicitly IGNORED by the designer: 1 (already done in C187), 2 (EOL derating), 5 (rename "Life
+Time Period" — conflicts with the 2026-07-14 designer decision), 11 (moot once 6 is fixed).
+NOTE: Copilot reviewed an OLDER report — it cites 4 x 470 uF = 1880 uF; the current bank is
+2 x 1200 = 2400 uF, so its arithmetic does not match current state.
+
+### #6 (High) — Chapter 7 ran at 45 C while the rest of the report used 50 C. SAME CLASS AS C5.
+Chapters 1/3/4/5 read `intake.thermal.ambient_temp_c_max` (50 C). Chapter 7 read
+`thermal.t_ambient`, which `SemiconductorSelection.tsx` HARDCODED to '45' and never sourced from
+intake — so every semiconductor junction temperature was **5 C optimistic against the system spec**.
+Fixed at both ends: the GUI field now seeds from the spec and shows an amber "spec is N C" badge if
+the designer overrides it (a `useRef` tracks whether they have touched it, so the spec stops
+overwriting once they do); `main.py` resolves an ABSENT `t_ambient` to the intake value instead of
+45. An explicit designer value still wins. VERIFIED: Ch7 now prints "Ambient 50 C".
+
+### #7 (High) + #8 — loss-budget wording
+The note ASSERTED "A negative Balance — seen at high line…" as fact, contradicting a table that can
+show positive balance at every point. Now conditional AND data-driven: a `_bal_vals` accumulator
+feeds `_bal_min`, and the note states what the table actually shows either way. (On the reference
+design the Balance DOES go negative, so it now reports that with the minimum value.)
+#8: new SCOPE box at the top of Ch7 — first-pass design-stage modelling, not final thermal
+qualification; efficiency figures are an UPPER BOUND; no line-frequency junction ripple without a
+Foster Zth; several parameters estimated.
+
+### #4 — DC-bus voltage stress (new Table 5.2.2)
+The voltage class was justified against the REGULATED BUS only. The sizing case for an electrolytic
+is the OVP trip and any transient above it — **neither is a design input anywhere in the codebase**
+(only a hardcoded 415 V inside a `registry.py` description string). Table 5.2.2 reports what is
+known (393 V bus, 450 V class, +14.5%) and marks OVP trip and transient maximum **DATA MISSING**
+rather than assuming them, with a PITFALL saying the class is not fully justified until supplied.
+New `_num_or_none(state, "dotted.path")` helper so a missing value prints DATA MISSING instead of
+silently becoming a default.
+
+### #3 — ripple-current PASS now carries its basis
+The pass rests on two MODELLED inputs, not datasheet scalars: the ambient it was evaluated at, and
+the vendor-implied ESR(T) + K(Tamb) multiplier. The verdict row now names the ambient, and a BASIS
+annotation states the multiplier, the rating it is applied to, its source, and that a different
+ambient or a real vendor curve can move the verdict.
+
+### #9 — sync-bottom bridge current path
+New CURRENT PATH annotation, gated on `is_sync`: the two parallel routes to the negative rail, why
+the bottom diodes take current back when hot Rds(on) reaches the diode knee, and the node-voltage
+solve `v/Rds + n*i_diode(v) = i(theta)` that decides the split — so Table 7.3's bottom-diode share
+reads as a computed result rather than an assumption.
+
+### #10 — model-parameter provenance (new Table 7.2d)
+`to_block` already recorded WHICH parameters it had to estimate (`_estimated`) and it was never
+surfaced. New table lists, per device, the part, whether a datasheet link is on file, and each
+estimated parameter with what it was estimated FROM (Rth_jc from rated Pd or package, Eoss scaled
+from die size, Qrr from trr and Io, Vf curve SHAPE anchored on the datasheet point, ...).
+
+### MISTAKE REPEATED — third time
+**I numbered the new provenance table 7.2c, which was already "Loss-Model Summary".** Same error as
+C187 (5.3.2) and the 3c/6.2 rule I set myself. Caught by a duplicate scan before building; renumbered
+to 7.2d. *The check is one command and I keep not running it first:*
+`grep -c 'data_table(story, "X"' <file>`.
+Also: I first wrote a 47-character annotation label ("SCOPE — WHAT THIS CHAPTER IS, AND WHAT IT IS
+NOT") which would have wrapped character-by-character in the 20 mm label cell; shortened to "SCOPE"
+before building. And I used `_num_or_none` before it existed — added it rather than leave a
+NameError for a try/except to swallow (the C187 lesson applied correctly this time).
+
+FALSE POSITIVE worth recording: the B12/B13 unrenderable-character scan flags `●` at
+doc_report_builder.py:887, but that is a **matplotlib** label (DejaVu handles it), not ReportLab.
+The scan cannot tell the two engines apart — do not "fix" that one.
+
+VERIFIED: report 207 pp with Ch7, six of seven markers found in the built PDF (#9 correctly absent —
+it is gated on `is_sync` and the reference bridge is a diode bridge), tsc clean,
+suite 172 passed / 2 skipped.

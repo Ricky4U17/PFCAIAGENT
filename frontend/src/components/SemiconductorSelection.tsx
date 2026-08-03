@@ -8,7 +8,7 @@
  * from the same single-source-of-truth grid every chapter uses, and a consistency
  * gate guarantees the loss numbers never diverge from the rest of the design.
  */
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
@@ -183,7 +183,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // expose (e.g. vf_tco, _estimated) survive into Calculate — otherwise the form round-trip drops them
   // and the Results loss diverges from the Top-10 screen (which uses the full block).
   const [dbBlock, setDbBlock] = useState<Record<string, Record<string, unknown>>>({})
-  const [thermal, setThermal] = useState({ t_ambient: '45', rth_sa: '0.35' })
+  const _specAmbient = Number(
+    (confirmedState as any)?.intake?.thermal?.ambient_temp_c_max ?? 45)
+  const [thermal, setThermal] = useState({
+    t_ambient: String(_specAmbient), rth_sa: '0.35' })
+  // Keep the field in step with the spec until the designer edits it themselves.
+  const _ambTouched = useRef(false)
+  useEffect(() => {
+    if (!_ambTouched.current) setThermal(t => ({ ...t, t_ambient: String(_specAmbient) }))
+  }, [_specAmbient])
   const [tjLimit] = useState({ fet: 150, diode: 150, bridge: 130 })
 
   const [res, setRes] = useState<SemiCalcResult | null>(null)
@@ -575,9 +583,18 @@ export const SemiconductorSelection: React.FC<Props> = ({
             </div>
           ))}
           <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 9px' }}>
-            <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>T_ambient (°C)</div>
+            <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>
+              T_ambient (°C)
+              {Number(thermal.t_ambient) !== _specAmbient && (
+                <span style={{ color: C.amber, textTransform: 'none' }}>
+                  {' '}· spec is {_specAmbient}°C
+                </span>
+              )}
+            </div>
             <input style={{ ...inStyle, padding: '2px 6px', fontSize: 13 }} value={thermal.t_ambient}
-              onChange={e => setThermal(s => ({ ...s, t_ambient: e.target.value }))} />
+              title={`Seeded from the intake spec (ambient_temp_c_max = ${_specAmbient} °C), the same ambient Chapters 1/3/4/5 use. Override only with a reason — a lower value makes every junction temperature optimistic.`}
+              onChange={e => { _ambTouched.current = true
+                setThermal(s => ({ ...s, t_ambient: e.target.value })) }} />
           </div>
           <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 9px' }}>
             <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>Rθ(sink-amb) °C/W</div>

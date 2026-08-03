@@ -333,6 +333,20 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
          "7.6 Thermal network and junction temperatures",
          "7.7 Loss & temperature vs line voltage  ·  7.8 Summary and efficiency cross-check"])
 
+    # #8 - state the chapter's standing up front. The efficiency cross-check in 7.8 is explicitly
+    # an upper bound, and the thermal network is a design-stage estimate, not a qualification.
+    annotation(story, "SCOPE",
+        "<b>What this chapter is, and what it is not.</b> This is <b>first-pass design-stage loss "
+        "and thermal modelling</b>, not a final thermal "
+        "qualification. It sizes devices and heatsinks and shows where the loss goes. Three limits "
+        "to read it with: (1) the efficiency figures in Section 7.8 are computed from the "
+        "<b>accounted</b> losses only, so they are an <b>upper bound</b> on achievable efficiency "
+        "and not a predicted efficiency; (2) junction temperatures come from a steady-state "
+        "R<sub>th</sub> network &#8212; line-frequency junction ripple is not modelled unless a "
+        "Foster Z<sub>th</sub> is supplied; and (3) several device parameters are interpolated or "
+        "estimated from the datasheet scalars available (flagged per parameter in Section 7.2). "
+        "Final numbers require bench measurement on the built hardware.", CH)
+
     # ── 7.1 Operating-point basis ────────────────────────────────────────────
     step_h(story, "7.1", "Operating-Point Basis", CH)
     annotation(story, "CONCEPT",
@@ -455,6 +469,38 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "shown where a field was left blank). These drive every calculation in Section 7.3&#8211;7.6.",
         ["Parameter", "Value", "Note"], prows,
         col_widths=[CW*0.36, CW*0.30, CW*0.34], ch=CH)
+
+    # #10 - model-source provenance. `to_block` already records WHICH parameters it had to
+    # estimate (`_estimated`); that was never surfaced, so a reader could not tell a datasheet
+    # scalar from an engine estimate. Same pattern as the material provenance table (Section 3.2.6).
+    _EST_LABEL = {
+        "rth_jc":          "R<sub>&#952;jc</sub> — from rated P<sub>d</sub> or by package",
+        "rth_cs":          "R<sub>&#952;cs</sub> — assumed interface",
+        "eoss_at_v":       "E<sub>oss</sub>(V) — scaled from die size (1/R<sub>DS(on)</sub>, V<sup>1.5</sup>)",
+        "rdson_tj":        "R<sub>DS(on)</sub> tempco — generic Si/SiC curve",
+        "qgd":             "Q<sub>gd</sub> — fraction of Q<sub>g</sub>",
+        "vpl":             "V<sub>plateau</sub> — V<sub>th</sub> + 2 V",
+        "qrr":             "Q<sub>rr</sub> — from t<sub>rr</sub> and I<sub>o</sub>",
+        "qc":              "Q<sub>c</sub> — SiC typical",
+        "vf_curve(slope)": "V<sub>f</sub>(i) SHAPE — anchored on the datasheet point, knee shape estimated",
+    }
+    _prov_rows = []
+    for _lbl, _blk in (("Bridge", bridge), ("MOSFET", mosfet), ("Diode", diode)):
+        _est = list((_blk or {}).get("_estimated") or [])
+        _pn = (_blk or {}).get("part_number") or "&#8212;"
+        _mf = (_blk or {}).get("manufacturer") or "&#8212;"
+        _prov_rows.append([f"<b>{_lbl}</b>", f"{_mf} {_pn}".strip(),
+                           ("datasheet URL on file" if (_blk or {}).get("datasheet_url")
+                            else "<i>no datasheet link</i>"),
+                           ("all model parameters datasheet-backed" if not _est else
+                            "; ".join(_EST_LABEL.get(e, e) for e in _est))])
+    data_table(story, "7.2d", "Model-Parameter Provenance — Datasheet vs Estimated",
+        "Which numbers behind Sections 7.3&#8211;7.6 come from the part's datasheet and which the "
+        "engine had to estimate from the scalars available. Estimated parameters are ordinary "
+        "design-stage practice, but they are where a bench measurement is most likely to differ "
+        "&#8212; supplying the real curve or value removes the approximation entirely.",
+        ["Device", "Selected part", "Datasheet", "Parameters the engine ESTIMATED"],
+        _prov_rows, col_widths=[CW*0.11, CW*0.25, CW*0.16, CW*0.48], ch=CH)
     annotation(story, "NOTE",
         "Datasheet parameters (R<sub>DS(on)</sub>, V<sub>f</sub> curves, Q<sub>g</sub>, E<sub>oss</sub>, "
         "R<sub>&#952;jc</sub> …) and the application inputs (gate drive, R<sub>g</sub>, R<sub>&#952;cs</sub>, "
@@ -496,6 +542,31 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         story.append(_cfg_img)
         body(story, f"<i>Figure 7.3 — Selected bridge configuration. {_cfg_cap}</i>", CH)
     _bridge_section(story, traces, is_sync)
+    # #9 - the sync-bottom arrangement is not obvious from the schematic alone: the bottom
+    # diodes sit in PARALLEL with the bypass-FET channel and can take back part of the current.
+    # Spell out the path so a reviewer can follow where each term in Table 7.3 comes from.
+    if is_sync:
+        annotation(story, "CURRENT PATH",
+            "<b>How current flows in the sync-bottom bridge.</b> Over each half of the line cycle "
+            "the return current has TWO parallel routes to the negative rail, and the split is set "
+            "by which one drops less voltage:<br/><br/>"
+            "<b>1. Top arm (diodes).</b> The line-side diode of the conducting arm carries the full "
+            "input current; loss is V<sub>f</sub>(i)&#183;i. With packages in parallel each carries "
+            "i/n and therefore sits lower on its own V-I curve &#8212; that is where paralleling "
+            "helps.<br/>"
+            "<b>2. Bottom arm (bypass FET).</b> A MOSFET replaces the return diode. Its drop is "
+            "ohmic, i&#183;R<sub>DS(on)</sub>(T<sub>j</sub>), so it beats a diode knee at low and "
+            "moderate current &#8212; the reason for the arrangement.<br/>"
+            "<b>3. The bottom DIODE pair, in parallel with that FET.</b> R<sub>DS(on)</sub> rises "
+            "with temperature, so near the line crest on a hot FET the ohmic drop i&#183;R can "
+            "reach the diode knee. Beyond that point the diodes take back part of the current and "
+            "the two conduct together.<br/><br/>"
+            "The engine does not assume which wins: at every line angle it solves the node voltage "
+            "v from <b>v/R<sub>DS(on)</sub> + n&#183;i<sub>diode</sub>(v) = i(&#952;)</b>, "
+            "inverting the per-device forward curve at the bridge junction temperature. That is "
+            "why Table 7.3 carries a separate bottom-diode share: it is a computed result, not an "
+            "assumption. A lower hot R<sub>DS(on)</sub> restores full FET conduction and that "
+            "share falls to zero.", CH)
     _has_bd = any(r.get("P_BRIDGE_bottom_bd", 0) > 0.01 for r in rows)
     data_table(story, "7.3", "Bridge Loss vs Line Voltage",
         "Conducting-pair loss at each operating point" + (" (top diodes + bottom MOSFETs)." if is_sync else "."),
@@ -700,6 +771,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             + f", {srcs}across the per-phase RMS current I<sub>&#966;,rms</sub> from Chapter 5. The "
             f"<b>Inductor</b> column is copper + core; the <b>Capacitor</b> column is the bank ESR loss; the "
             f"remaining <b>Balance</b> is control / auxiliary (Ch 6).", CH)
+        _bal_vals: list[float] = []
         brows = []
         for i, r in enumerate(rows):
             iphi = float(iph[i]); p_sys = float(r["P_SYSTEM_total"]); p_semi = float(r["P_SEMI_total"])
@@ -710,6 +782,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             p_other = p_sys - p_semi - p_ind - p_rcs - p_cap
             brows.append([f"{r['Vac']:.0f} V", f"{_f(p_semi,1)}", f"{_f(p_ind,1)}", f"{_f(p_cap,2)}",
                           f"{_f(p_rcs,1)}", f"{_f(p_other,1)}", f"{_f(p_sys,1)} W"])
+            _bal_vals.append(p_other)      # #7 - so the note can describe the ACTUAL data
         data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W)",
             "Every system loss reconciled against P<sub>system</sub> from the efficiency. The <b>Inductor</b> "
             "column is copper (I&#178;&#183;DCR, per line) plus a <b>constant worst-case core loss held at the "
@@ -722,13 +795,21 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             "above) is the control / auxiliary remainder.",
             ["V_AC", "Semicond.", "Inductor (Cu+core*)", "Capacitor", "R_CS", "Balance (ctrl)", "System total"],
             brows, col_widths=[CW*0.12, CW*0.15, CW*0.19, CW*0.14, CW*0.12, CW*0.15, CW*0.13], ch=CH)
+        _bal_min = min(_bal_vals) if _bal_vals else None
         annotation(story, "NOTE",
             "<b>Reading the Balance.</b> With inductor (copper + core) and capacitor loss now itemised, the "
-            "Balance is just the control / auxiliary remainder. A <i>negative</i> Balance &#8212; seen at "
-            "high line, where the assumed efficiency is highest and the implied system loss smallest &#8212; "
-            "means the computed component losses already exceed that implied system loss: the assumed "
-            "efficiency is <b>optimistic</b> at that corner and should be revisited. Surfacing exactly this "
-            "kind of inconsistency is the purpose of the cross-check.", CH)
+            "Balance is the remaining control / auxiliary and unmodelled-loss allowance. If any row goes "
+            "<i>negative</i>, the computed component losses already exceed the system loss implied by the "
+            "assumed efficiency at that corner &#8212; the assumed efficiency is <b>optimistic</b> there and "
+            "should be revisited. That is most likely at high line, where the assumed efficiency is highest "
+            "and the implied system loss smallest. "
+            + ("<b>In this design every row is positive</b>, so the assumed efficiency is consistent with "
+               "the computed losses at all nine points."
+               if _bal_min is not None and _bal_min >= 0 else
+               (f"<b>In this design the Balance goes negative (minimum {_bal_min:.2f} W)</b>, so the "
+                "assumed efficiency needs revisiting at that corner."
+                if _bal_min is not None else ""))
+            + " Surfacing exactly this kind of inconsistency is the purpose of the cross-check.", CH)
         wi = rows.index(wr); iw = float(iph[wi])
         plcu_w = nch * iw * iw * dcr if dcr else 0.0; prcs_w = nch * iw * iw * rcs if rcs else 0.0
         p_ind_w = plcu_w + core_w

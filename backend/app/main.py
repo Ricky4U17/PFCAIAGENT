@@ -2628,8 +2628,17 @@ def doc_generate_report(req: _DocReportReq):
                             _extra["inrush_tau_ms"] = _ntc["result"]["tau"] * 1e3
                     except Exception:
                         pass
+                # #6 - Chapter 7's thermal ambient must be the SAME ambient Chapters 1/3/4/5 use
+                # (intake.thermal.ambient_temp_c_max). It used to fall back to a hardcoded 45 C, so
+                # junction temperatures ran optimistic against the system spec. An explicit designer
+                # value still wins; only the ABSENT case now resolves to the spec instead of 45.
+                _sc_th = dict(sc.get("thermal") or {})
+                if _sc_th.get("t_ambient") in (None, ""):
+                    _sc_th["t_ambient"] = float(
+                        (req.state or {}).get("intake", {}).get("thermal", {})
+                        .get("ambient_temp_c_max", 45) or 45)
                 parts.append(build_semiconductor_report(
-                    sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"],
+                    sc["design"], sc["mosfet"], sc["diode"], sc["bridge"], _sc_th,
                     sc.get("tj_limit"), extra=_extra))
             if req.input_protection:                        # Chapters 8 (NTC) + 9 (MOV compliance)
                 from app.mode_b.report_inputprotection import build_inputprotection_report
