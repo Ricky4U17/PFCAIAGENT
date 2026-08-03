@@ -1297,7 +1297,7 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                     <thead>
                       <tr style={{background:C.bg3,borderBottom:`0.5px solid ${C.border}`}}>
-                        {['Vin rms','Bac pk T','Pcore avg W','Pcore crest W','Pcore cycle-max W','Avg/Crest'].map(h=>(
+                        {['Vin rms','Bac,pk @crest (T)','Bdc (T)','H (Oe)','Pcore avg W','Pcore crest W','Pcore cycle-max W'].map(h=>(
                           <th key={h} style={{padding:'6px 8px',textAlign:'left',color:C.hint,
                             fontFamily:'IBM Plex Mono,monospace',fontWeight:400,fontSize:10}}>{h}</th>
                         ))}
@@ -1310,26 +1310,22 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                         // They are different quantities and diverge sharply at high line, so the
                         // ratio quoted against "crest" must use Pcore_crest_W, not Pcore_pk_W.
                         const crest=row.Pcore_crest_W
-                        const ratio=crest>0?row.Pcore_avg_W/crest:1
                         return (
                           <tr key={i} style={{background:row.Vin_rms===90?C.accentL:i%2===0?C.bg2:C.bg3,
                             borderBottom:`0.5px solid ${C.border}`}}>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',
                               color:row.Vin_rms===90?C.accent:C.text,fontWeight:row.Vin_rms===90?600:400}}>{row.Vin_rms}V</td>
-                            <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{row.Bac_pk?.toFixed(5)}</td>
+                            <td title='AC flux at the LINE CREST — the saturation reference. Note this is a crest value while the Pcore avg column beside it is a cycle average; the two are deliberately different bases.'
+                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{row.Bac_pk?.toFixed(5)}</td>
+                            <td title='DC (bias) flux at this point, from the crest average current.'
+                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{row.Bdc_T?.toFixed(4) ?? '—'}</td>
+                            <td title='DC bias field H = 0.4*pi*N*I / Le. This is what drives k_bias and therefore how much inductance survives at this operating point.'
+                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.teal}}>{row.H_Oe?.toFixed(1) ?? '—'}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.green,fontWeight:600}}>{row.Pcore_avg_W?.toFixed(3)}</td>
                             <td style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{crest?.toFixed(3)}</td>
                             <td title='Peak instantaneous core loss anywhere in the half cycle. Bac is proportional to Vin*D = Vin*(1 - Vin/Vout), which peaks at Vin = Vout/2. Every high-line cycle passes through that voltage, so this column is IDENTICAL across the high-line points by construction - it is the same operating condition each time, not a frozen value.'
                               style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',color:C.muted}}>{row.Pcore_pk_W?.toFixed(3)}</td>
-                            {/* Avg/Crest ABOVE 100% is correct at high line, not a fault: the crest
-                                duty collapses as Vin,pk approaches Vout, so the crest-point loss becomes
-                                tiny while the cycle average does not. Colouring it red implied an error
-                                (the designer flagged it as one). Neutral colour + a tooltip instead. */}
-                            <td title={ratio>1
-                                ? 'Above 100% is expected at high line: D at the crest collapses, so the crest-point loss is much smaller than the cycle average. The average is the thermal/efficiency basis.'
-                                : 'Below 100%: the crest is the hottest point of the cycle, as expected at low line.'}
-                              style={{padding:'6px 8px',fontFamily:'IBM Plex Mono,monospace',
-                              color:ratio>1?C.text:C.green}}>{(ratio*100).toFixed(0)}%</td>
+
                           </tr>
                         )
                       })}
@@ -1344,9 +1340,11 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                   Once V<sub>in,pk</sub> exceeds that, every cycle passes through the same worst angle, so the
                   peak is the same number. At low line the sine never reaches it, so cycle-max equals the crest
                   value instead.{' '}
-                  <b>Avg/Crest above 100%</b> is likewise expected at high line — the crest duty collapses, so
-                  the crest-point loss falls far below the cycle average. Neither is an error; the
-                  cycle-<i>average</i> column is the value that drives temperature rise and efficiency.
+                  <b>H (Oe)</b> is the DC bias field at each point — it is what drives k<sub>bias</sub> and
+                  therefore how much inductance survives. <b>B<sub>ac,pk</sub></b> is a CREST value (the
+                  saturation reference) while <b>P<sub>core</sub> avg</b> beside it is a cycle average:
+                  deliberately different bases, and the cycle-<i>average</i> column is what drives
+                  temperature rise and efficiency.
                 </div>
               </Card>
             )}

@@ -225,6 +225,12 @@ export const ReviewMagnetics: React.FC<Props> = ({
     // The JS uses a single empirical formula calibrated to EDGE 75µ, ignoring µ.
     // We replace it with Python's L_vs_Vin_table which has DB k_bias at each H.
     const lvt     = (result.L_vs_Vin_table ?? []) as any[]
+    // Governing requirement across the 9 points — the value N was converged against.
+    const _lvtReq   = lvt.filter(r => r?.L_req_uH != null)
+    const _govRow   = _lvtReq.length
+      ? _lvtReq.reduce((a, b) => (Number(b.L_req_uH) > Number(a.L_req_uH) ? b : a)) : null
+    const pyLreqMax_uH = _govRow ? Number(_govRow.L_req_uH) : 0
+    const pyLreqVac    = _govRow ? Number(_govRow.Vin_rms) : 0
     // Anchor: H=0 → k=1.0 (no bias = full inductance)
     const kPairs: [number, number][] = [[0, 1.0]]
     for (const row of lvt) {
@@ -288,6 +294,9 @@ export const ReviewMagnetics: React.FC<Props> = ({
       pyPtot_100_W, pyDT_C, pyBmax_T, pyT_hotspot_C, pyDT_core_C, pyDT_wdg_C,
       pyBmax_inner, pySatInner_pct, pyMLT_v10_mm, pyCuLen_m, pyIhf_rms_A,
       pyPac_W, pyJ_A_mm2, pyKu, pyPuncLo_W, pyPuncHi_W,
+      // The acceptance basis: the governing per-point REQUIREMENT the engine actually converged
+      // against, not the designer's confirmed L_target (which sizes nothing — PENDING B9).
+      pyLreqMax_uH, pyLreqVac,
       kTable: kPairs, sweepData: sweepRows, currentMap: currentMapObj,
     }
 
@@ -728,7 +737,8 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
       if (osi) {
         var cg2 = window.cfg || {};
         var satT2 = cg2.satT || 1.0;
-        var okL2 = pyLfull >= 235, okB2 = pyBmax < 0.5, okT2 = pyDT < 40;
+        var pyLreq2 = PY.pyLreqMax_uH || 0, pyLreqV2 = PY.pyLreqVac || 0;
+        var okL2 = pyLreq2 > 0 ? (pyLfull >= pyLreq2) : true, okB2 = pyBmax < 0.5, okT2 = pyDT < 40;
         var okBi2 = pyBinner < satT2 * 0.85;      // inner-bore: healthy when <85% of Bsat
         var okThs2 = pyThotspot < 110;             // hotspot: healthy when <110°C absolute
         var sm2   = (satT2 / Math.max(pyBmax,   1e-9)).toFixed(2);
@@ -745,7 +755,10 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
           if (t.indexOf('Inductance target') >= 0) {
             dv.innerHTML = '<span class="' + (okL2?'ok':'warn') + '">' +
               (okL2?'Inductance target met':'Inductance target missed') +
-              '</span> — Lfull = ' + pyLfull.toFixed(1) + ' µH versus 235 µH target.';
+              '</span> — L_full = ' + pyLfull.toFixed(1) + ' µH at this point versus the governing '
+              + 'requirement L_req = ' + (pyLreq2 ? pyLreq2.toFixed(1) : '—') + ' µH'
+              + (pyLreqV2 ? ' (at ' + pyLreqV2.toFixed(0) + ' Vac)' : '')
+              + '. The turns count is converged against L_req, not against the confirmed L target.';
           } else if (t.indexOf('Flux level') >= 0) {
             dv.innerHTML = '<span class="' + (okB2?'ok':'warn') + '">' +
               (okB2?'Flux level looks comfortable':'Flux level is getting high') +
@@ -799,7 +812,7 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
         var pyUncHi = pyPuncHi > 0 ? pyPuncHi.toFixed(2) : (pyPcu2 + 1.20*pyPcore).toFixed(2);
         var satT3   = (window.cfg && window.cfg.satT) ? window.cfg.satT : 1.0;
         var sm3     = (satT3 / Math.max(pyBmax, 1e-9)).toFixed(2);
-        var okL3 = pyLfull >= 235, pyBHigh = pyBmax > 0.45, pyTHigh = pyDT > 35;
+        var okL3 = (PY.pyLreqMax_uH || 0) > 0 ? (pyLfull >= PY.pyLreqMax_uH) : true, pyBHigh = pyBmax > 0.45, pyTHigh = pyDT > 35;
         var lines = su.value.split('\\n'), recIdx = -1;
         for (var si = 0; si < lines.length; si++) {
           var ln = lines[si];

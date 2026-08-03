@@ -6772,3 +6772,50 @@ The scan cannot tell the two engines apart — do not "fix" that one.
 VERIFIED: report 207 pp with Ch7, six of seven markers found in the built PDF (#9 correctly absent —
 it is gated on `is_sync` and the reference bridge is a diode bridge), tsc clean,
 suite 172 passed / 2 skipped.
+
+## C190 — Designer GUI review: 6 items (#4 skipped by the designer)
+
+### #3 — "Lfull = 102.0 uH versus 235 uH target" was wrong TWICE
+`ReviewMagnetics.tsx` compared as-built L against a **HARDCODED 235** (lines 731/748/802 — four
+literals in the file, one of which is the copper tempco constant and must NOT be touched).
+Two defects: the target never tracked the designer's input, and `L_target` is the WRONG BASIS —
+the engine converges N against the per-point requirement `L_req` (PENDING B9), so judging 102 uH
+against 235 uH declares failure on a design that meets its actual requirement.
+Now: `pyLreqMax_uH` / `pyLreqVac` derived from `L_vs_Vin_table` and carried into the injection; the
+verdict and both `okL` gates use the governing requirement, and the text names the voltage it
+applies at plus the fact that turns are converged against L_req, not the confirmed target.
+
+### #6 / #7 — FET 17.74 vs 27.85 W, diode 15.12 vs 18.18 W: STALENESS, not a calc error
+Both come from the SAME engine — `rank_by_loss` calls `engine.simulate_point` over all 9 points with
+the same `loss_key` as `P_FET_max`, and the GUI already passes a design `context` so the two agree.
+The gap is that **the ranked table is a cached snapshot while the banner is recomputed live**: rank
+once, then change a companion part, n_parallel or the ambient, and the table keeps the old numbers.
+**C189 likely widened this** — moving the ambient 45 -> 50 C raises Rds(on) and therefore the live
+loss, while a list ranked earlier still shows the cooler figure.
+Fixed: `dbCtx` records the ambient / Rth the list was ranked with; an amber "This list is out of
+date" banner appears when the live context differs, naming both values; the column header now reads
+"loss (worst-case, at ranking)"; and the ranking call's `?? 45` fallback was changed to the spec
+ambient (a leftover from before C189 seeded the field from intake).
+
+### #5 — "Ripple FAIL" now explains itself
+The badge gave a verdict and one remedy but never the conditions. It now states the comparison
+(I/cap vs the temperature-scaled allowance and the nameplate it came from), what exceeding it
+actually means (self-heating past the endurance assumption — shortened life, not instant failure),
+the three conditions the verdict rests on, and the ways to clear it — including that **adding
+capacitance alone does not help unless it adds units to share the current**.
+
+### #1 / #2 — Result-page time-domain table
+`Avg/Crest` removed. It was a ratio of two DIFFERENT bases, legitimately exceeded 100% at high line,
+and read as an error (the designer flagged it twice). Replaced with **B_dc (T)** and **H (Oe)** —
+H = 0.4*pi*N*I/Le, the DC bias that drives k_bias and therefore the inductance roll-off. Both are
+emitted by `step8_time_domain.py` so the GUI and any future report column share one source.
+#2: `Bac_pk` values verified correct — B_ac is proportional to Vin*D, which peaks near Vin = Vout/2,
+so the column correctly rises to 132 Vac then falls to 0.022 T at 264 Vac. The real defect was an
+unlabelled BASIS MISMATCH: `Bac_pk` is a CREST value sitting beside a cycle-AVERAGE loss. The column
+is now titled "Bac,pk @crest (T)" with a tooltip, and the note under the table says so.
+
+Sanity-checked the new columns on a live run: H (Oe) peaks at 180 Vac (70.9) rather than 90 Vac
+(67.7), which is correct — high line carries 3600 W against 1700 W at low line, so the per-phase
+crest current is slightly higher there.
+
+VERIFIED: report 190 pp, tsc clean, suite 172 passed / 2 skipped.

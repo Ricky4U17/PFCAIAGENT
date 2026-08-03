@@ -262,6 +262,12 @@ def run_step8_full(
             # (The Result-page table has always read this key; it was never emitted, so the column
             # rendered blank.)
             "Bac_pk":         round(float(Bac_crest_list[i]), 5),
+            # DC bias at this point's crest — H = 0.4*pi*N*I / Le(cm). This is what drives
+            # k_bias and therefore the inductance roll-off, and it is the column the Result
+            # page shows in place of the old Avg/Crest ratio (which read as an error above 100%).
+            "H_Oe":           round(0.4 * math.pi * N * Icrest_i / (Le_single_m * 100.0), 2)
+                              if Le_single_m else 0.0,
+            "Bdc_T":          round(float(wf.get("BdcMax_T", 0.0)), 5),
             "Pcore_avg_W":    round(Pcore_avg, 3),
             "Pcore_pk_W":     round(Pcore_pk,  3),
             "t_pk_ms":        round(t_pk_s * 1000.0, 3),

@@ -220,6 +220,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
     }
   })
   const [dbRes, setDbRes] = useState<Record<string, DbRankResult[] | null>>({})
+  // Design context each ranked list was produced with, so a stale list can be flagged
+  // rather than silently disagreeing with the live Results figure.
+  const [dbCtx, setDbCtx] = useState<Record<string, { tamb: number; rth: number }>>({})
   const [dbBusy, setDbBusy] = useState<Record<string, boolean>>({})
   const [extBusy, setExtBusy] = useState<Record<string, boolean>>({})
   const [extInfo, setExtInfo] = useState<Record<string, { found: string[]; missing: string[]; part: string } | null>>({})
@@ -253,9 +256,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
       if (np != null && kind === 'mosfet') mBlk.n_parallel = np
       const r = await semiconductorDbRank(kind, { design, criteria, top: 10, mode,
         mosfet: mBlk, diode: dBlk, bridge: bBlk,
-        thermal: { t_ambient: pnum(thermal.t_ambient) ?? 45, rth_sa: pnum(thermal.rth_sa) ?? 0.35 },
+        thermal: { t_ambient: pnum(thermal.t_ambient) ?? _specAmbient, rth_sa: pnum(thermal.rth_sa) ?? 0.35 },
         approved_design: approvedInductorDesign as Record<string, unknown> })
       setDbRes(s => ({ ...s, [key]: r.results }))
+      setDbCtx(s => ({ ...s, [key]: { tamb: pnum(thermal.t_ambient) ?? _specAmbient,
+                                      rth:  pnum(thermal.rth_sa)   ?? 0.35 } }))
     } catch (e) { setErr((e as Error).message) } finally { setDbBusy(s => ({ ...s, [key]: false })) }
   }
   const pickDbPart = (which: Sub, r: DbRankResult) => {
@@ -386,6 +391,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, whiteSpace: 'nowrap' }
 
   const dbResultsTable = (results: DbRankResult[], lossLabel: string, onPick: (r: DbRankResult) => void,
+    rankedCtx?: { tamb: number; rth: number },
     note = "Worst-case loss over the 9 operating points (the @V is the line voltage where it peaks — e.g. the " +
            "boost diode peaks at HIGH line, the MOSFET usually at LOW line). Computed with the part's REAL " +
            "datasheet Vf/Rds and YOUR actual design context (devices-in-parallel, topology, companions, thermal, " +
@@ -395,8 +401,29 @@ export const SemiconductorSelection: React.FC<Props> = ({
     results.length === 0
       ? <div style={{ fontSize: 11, color: C.muted }}>No parts match — relax the filters.</div>
       : <div style={{ overflowX: 'auto' }}>
+          {/* #6/#7 - this table is a SNAPSHOT taken with the design context as it stood when the
+              ranking ran; the "worst ... loss" figure in the header is recomputed live. If the
+              context has moved since, the two legitimately disagree - say so instead of leaving
+              the designer to spot two different numbers for the same quantity. */}
+          {(() => {
+            const c = rankedCtx
+            if (!c) return null
+            const tNow = pnum(thermal.t_ambient) ?? _specAmbient
+            const rNow = pnum(thermal.rth_sa) ?? 0.35
+            if (Math.abs(c.tamb - tNow) < 0.05 && Math.abs(c.rth - rNow) < 0.005) return null
+            return (
+              <div style={{ fontSize: 10.5, color: C.amber, background: C.amberL,
+                border: `1px solid ${C.amber}55`, borderRadius: 6,
+                padding: '6px 9px', marginBottom: 8, lineHeight: 1.5 }}>
+                ⚠ <b>This list is out of date.</b> It was ranked at T<sub>amb</sub> {c.tamb}°C /
+                Rθ<sub>sa</sub> {c.rth} °C/W; the design now uses {tNow}°C / {rNow} °C/W. The losses
+                below were computed with the older context, so they will not match the live
+                “worst … loss” figure above or the Results tab. Re-run the search to refresh.
+              </div>
+            )
+          })()}
           <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead><tr>{['#', `${lossLabel} loss (worst-case)`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
+            <thead><tr>{['#', `${lossLabel} loss (worst-case, at ranking)`, 'Tj', 'Rating', 'Mfr', 'Part #', ''].map(h =>
               <th key={h} style={{ ...rcell, color: C.hint, textTransform: 'uppercase', fontSize: 9 }}>{h}</th>)}</tr></thead>
             <tbody>{results.map((r, i) => (
               <tr key={i}>
@@ -445,7 +472,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         </div>
         {bridge.bottom_part && <div style={{ fontSize: 11, color: C.green, marginBottom: 6 }}>
           ✓ selected bottom FET: <b>{bridge.bottom_part}</b> → R_DS(on)={bridge.rdson_bottom_25} Ω, ×{bridge.n_parallel_bottom}</div>}
-        {results && dbResultsTable(results, 'FET conduction', pickBottomMosfet,
+        {results && dbResultsTable(results, 'FET conduction', pickBottomMosfet, dbCtx['bottom_mosfet'],
           'Conduction loss only (line-frequency commutation). Selecting a part fills the bottom-FET fields above.')}
       </div>
     )
@@ -513,7 +540,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
             {dbBusy[which] ? '⏳ Ranking…' : '🔎 Find top 10 (lowest loss)'}
           </Btn>
         </div>
-        {results && dbResultsTable(results, which === 'mosfet' ? 'FET' : which, r => pickDbPart(which, r))}
+        {results && dbResultsTable(results, which === 'mosfet' ? 'FET' : which, r => pickDbPart(which, r), dbCtx[which])}
       </>)}
 
       {mode === 'manual' && (

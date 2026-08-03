@@ -591,7 +591,30 @@ export const Step15Capacitor: React.FC<Props> = ({
                         ? `⚠ Ripple PASS (derated) — exceeds the nameplate ${nameplate?.toFixed(2)}A (@${tempSweep?.T_rated_C ?? 105}°C) `
                           + `but within the temperature allowance ${chosenPart?.I_allow_A?.toFixed(2)}A @${fAmbientC}°C `
                           + `and the Life Time Period target is met`
-                        : `✗ Ripple FAIL — I/cap ${I_per_cap.toFixed(3)}A beyond the temperature allowance — increase qty`}
+                        : `✗ Ripple FAIL — I/cap ${I_per_cap.toFixed(3)}A beyond the temperature allowance`}
+                      {st === 'fail' && (
+                        <div style={{marginTop:6,fontSize:10,fontWeight:400,color:C.text,lineHeight:1.6}}>
+                          <b>What this means.</b> Each capacitor must carry its share of the bank ripple
+                          current continuously. The comparison is
+                          {' '}<b>I/cap {I_per_cap.toFixed(3)} A</b> against the
+                          {' '}<b>allowed {chosenPart?.I_allow_A?.toFixed(2) ?? '—'} A</b>, which is the
+                          {' '}{nameplate?.toFixed(2) ?? '—'} A nameplate rating (at
+                          {' '}{tempSweep?.T_rated_C ?? 105} °C) scaled by the temperature multiplier
+                          for your <b>{fAmbientC} °C</b> ambient. Exceeding it means the part self-heats
+                          past what the vendor's endurance rating assumes, which shortens life rather
+                          than failing immediately.
+                          <br/><br/>
+                          <b>Conditions this verdict depends on:</b> the ambient above, the vendor-implied
+                          ESR(T) model, and the ripple current itself — which is set by the load and the
+                          switching pattern, <i>not</i> by how much capacitance is installed.
+                          <br/><br/>
+                          <b>Ways to clear it:</b> increase the quantity (each unit then carries a smaller
+                          share — the most direct fix); choose a part with a higher ripple rating or lower
+                          ESR; or, if the real ambient is genuinely lower than {fAmbientC} °C, correct the
+                          ambient and re-check. Adding capacitance alone does <i>not</i> help unless it
+                          also adds units to share the current.
+                        </div>
+                      )}
                     </div>
                   )
                 })()}
