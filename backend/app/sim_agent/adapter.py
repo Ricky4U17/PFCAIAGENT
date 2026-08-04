@@ -287,8 +287,20 @@ def build_package(result: dict, state: dict, *,
     # step7 dT_rise_C — so the cross-check compares surface-to-surface (within band). Our 2-node
     # hotspot stays the authoritative thermal number in step7 / the report.
     crowd = _num(R.get("crowd_axial"), 0.0)
-    if crowd > 0 and geometry["ID_mm"] > 0:
-        fields["flux"] = {"radial": {"r_mm": [geometry["ID_mm"] / 2.0], "crowd": [crowd]},
+    _id_mm, _od_mm = geometry.get("ID_mm") or 0.0, geometry.get("OD_mm") or 0.0
+    if crowd > 0 and _id_mm > 0 and _od_mm > _id_mm:
+        # Flux in a toroid concentrates as 1/r, so crowd(r) = r_mean / r. Anchor on the inner
+        # bore so crowd(r_in) == crowd_axial exactly and the studio agrees with report Table 4.3.
+        _r_in, _r_out = _id_mm / 2.0, _od_mm / 2.0
+        _r_mean = _r_in * crowd                      # == (r_in + r_out)/2 for the analytic case
+        _N = 24
+        _rs = [_r_in + (_r_out - _r_in) * k / (_N - 1) for k in range(_N)]
+        fields["flux"] = {"radial": {"r_mm": [round(r, 4) for r in _rs],
+                                     "crowd": [round(_r_mean / r, 5) for r in _rs]},
+                          "provenance": provenance}
+    elif crowd > 0 and _id_mm > 0:
+        # geometry incomplete - keep the single-point form rather than inventing an outer radius
+        fields["flux"] = {"radial": {"r_mm": [_id_mm / 2.0], "crowd": [crowd]},
                           "provenance": provenance}
     if fields:
         pkg["fields"] = fields

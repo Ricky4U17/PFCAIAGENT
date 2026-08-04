@@ -6819,3 +6819,52 @@ Sanity-checked the new columns on a live run: H (Oe) peaks at 180 Vac (70.9) rat
 crest current is slightly higher there.
 
 VERIFIED: report 190 pp, tsc clean, suite 172 passed / 2 skipped.
+
+## C191 — designer GUI review round 2: ripple verdict, cap suggestions, L target, flux gradient
+
+### #4 — "Ripple FAIL" always shown: TWO CONTRADICTORY VERDICTS on one page
+The badge used the engine's three-state `ripple_status`; the SUMMARY ROW under the candidate table
+(line ~1008) used a bare nameplate comparison `I_per_cap <= I_rated_120hz_A`. The nameplate is
+rated at 105 C — the correct comparison is against the temperature-scaled allowance `I_allow_A`.
+Reference part: nameplate 4.7 A, allowance 11.75 A, actual I/cap 5.0 A -> the badge correctly said
+"PASS (derated)" while the summary row said "Ripple FAIL", simultaneously.
+Second defect in the same expression: `ripple_pass` is `null` when nothing is selected, and `null`
+is falsy, so it rendered FAIL before any part was picked — which is why it looked permanent.
+Fixed with ONE derived verdict (`rippleSt`) used by both: engine status first, then the allowance,
+then the raw nameplate only as a last resort; `null` now renders "ripple not evaluated".
+Backend was never wrong — a live call returns pass/pass_derated/fail correctly ranked pass-first.
+
+### #2 — capacitor suggestions ignored the +/-20% tolerance
+`suggest_configurations` sized on NAMEPLATE only (`needed = ceil(C_required / n)`). With
+C_req = 1330 it proposed 3 x 470 = 1410 nameplate, which is 1128 uF at -20% — under requirement.
+Now sizes against `C_target = C_required / (1 - tol)` using `CAP_TOLERANCE_PCT`, so the -20% corner
+still clears. Verified: C_req 1330 -> 560x3 (1680 nameplate, 1344 at -20%).
+SECOND BUG found while verifying: the "fewest caps" fallback hardcoded `qty = 2` of the largest
+part without checking it reached the target — that is how 2 x 1200 = 2400 was suggested against a
+2047 uF requirement and then FAILED the -20% corner in report Table 5.5.2. Now
+`ceil(C_target / largest)`; the same case yields 1200x3. All suggestions now clear -20%.
+
+### #3 — "Inductance target missed": the C190 fix was structurally WRONG
+There were TWO sources and C190 fixed only the DOM-patch one. `review_magnetics.html` had its own
+hardcoded `okL = o.Lfull_uH >= 235` and "versus 235 µH target" text — INSIDE `renderAll()`, which
+rebuilds `overviewStatus.innerHTML` on every render. The C190 patch ran once after mount and was
+clobbered by the next slider move. That is why it appeared unfixed.
+Now fixed AT SOURCE: the studio reads `pyLreqMax_uH` / `pyLreqVac` from the existing JSON data
+island and uses the governing requirement, with "requirement not supplied" when absent. The
+redundant DOM patch in ReviewMagnetics.tsx was REMOVED — leaving it would only recreate a second
+place for the text to drift. The 3 remaining 235s in that file are RGB colour values.
+*Lesson: do not patch the DOM of a view that re-renders; fix the render.*
+
+### #1 — flux animation showed one flat colour: injected profile was a SINGLE POINT
+The studio already shades per-radius (`valAt(r) = Brad(Bmean, r)`, `bCrowd(r) = rmean/r`) in the
+2D strip, ring, section and 3D WebGL views — the gradient machinery was never missing. But
+`sim_agent/adapter.py` injected `radial = {"r_mm": [ID/2], "crowd": [crowd_axial]}` — ONE point.
+The studio interpolates that table, and a one-element table returns the same value at every
+radius, so bCrowd collapsed to a constant and the whole core rendered one colour that only varied
+with time. The analytic rmean/r fallback was never reached because the injected data "existed".
+Now injects the real 1/r curve over 24 points from r_in to r_out, anchored so `crowd(r_in)`
+reproduces `crowd_axial` exactly (so the studio agrees with Table 4.3 and the saturation verdict).
+Verified: 24 points, crowd(r_in) = 1.3649 == crowd_axial, bore/OD ratio 1.73x. Incomplete geometry
+keeps the old single-point form rather than inventing an outer radius.
+
+VERIFIED: suite 172 passed / 2 skipped, report 190 pp, tsc clean.

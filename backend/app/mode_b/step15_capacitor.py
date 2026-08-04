@@ -280,23 +280,37 @@ def verify_configuration(
 
 # ── Suggested configurations ──────────────────────────────────────────────────
 
-def suggest_configurations(C_required_uF: float, available_values: list[int]) -> list[dict]:
+def suggest_configurations(C_required_uF: float, available_values: list[int],
+                           tolerance_pct: float | None = None) -> list[dict]:
+    """Bank configurations that meet the requirement AT THE WORST-CASE TOLERANCE CORNER.
+
+    Sizing on the nameplate value alone under-counts: with the DB's +/-20% parts a bank that
+    just clears C_required at nameplate delivers only 0.8x that in a worst-case build. The
+    target is therefore raised to C_required / (1 - tol) so the -20% corner still meets the
+    requirement, which is the same basis report Table 5.5.2 judges the finished bank on.
+    """
     avail   = sorted(available_values)
     results = []
+    tol     = (CAP_TOLERANCE_PCT if tolerance_pct is None else float(tolerance_pct)) / 100.0
+    tol     = min(max(tol, 0.0), 0.9)
+    # what the NAMEPLATE total must be so the low-tolerance corner still clears the requirement
+    C_target = C_required_uF / (1.0 - tol) if tol else C_required_uF
 
     # 1. Fewest caps: single cap >= required, else 2× next lower
     for val in reversed(avail):
-        if val >= C_required_uF:
+        if val >= C_target:
             results.append({"label": "Fewest caps", "rows": [{"value_uF": val, "qty": 1}]})
             break
     else:
         if avail:
+            # no single part reaches the target - take the fewest of the largest that does
+            _n = max(2, math.ceil(C_target / avail[-1]))
             results.append({"label": "Fewest caps",
-                            "rows": [{"value_uF": avail[-1], "qty": 2}]})
+                            "rows": [{"value_uF": avail[-1], "qty": _n}]})
 
     # 2. Balanced: 2 or 3 equal caps
     for n in [2, 3]:
-        needed = math.ceil(C_required_uF / n)
+        needed = math.ceil(C_target / n)
         for val in avail:
             if val >= needed:
                 results.append({"label": f"Balanced ×{n}",
@@ -306,7 +320,7 @@ def suggest_configurations(C_required_uF: float, available_values: list[int]) ->
     # 3. Mixed: largest + fill remainder
     if avail:
         big = avail[-1]
-        rem = C_required_uF - big
+        rem = C_target - big
         if rem <= 0:
             results.append({"label": "Mixed", "rows": [{"value_uF": big, "qty": 1}]})
         else:

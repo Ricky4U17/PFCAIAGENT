@@ -752,14 +752,10 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
         var sa2   = (Math.PI*odW2*oh2 + 2*(Math.PI/4)*(odW2*odW2 - hlID2*hlID2) + Math.PI*hlID2*oh2) / 100;
         osi.querySelectorAll('div').forEach(function (dv) {
           var t = dv.textContent;
-          if (t.indexOf('Inductance target') >= 0) {
-            dv.innerHTML = '<span class="' + (okL2?'ok':'warn') + '">' +
-              (okL2?'Inductance target met':'Inductance target missed') +
-              '</span> — L_full = ' + pyLfull.toFixed(1) + ' µH at this point versus the governing '
-              + 'requirement L_req = ' + (pyLreq2 ? pyLreq2.toFixed(1) : '—') + ' µH'
-              + (pyLreqV2 ? ' (at ' + pyLreqV2.toFixed(0) + ' Vac)' : '')
-              + '. The turns count is converged against L_req, not against the confirmed L target.';
-          } else if (t.indexOf('Flux level') >= 0) {
+          // NOTE: the inductance verdict is deliberately NOT patched here. It is correct at
+          // source in review_magnetics.html, which reads the injected L_req. Patching it after
+          // mount does not survive renderAll(), which rebuilds this block on every render.
+          if (t.indexOf('Flux level') >= 0) {
             dv.innerHTML = '<span class="' + (okB2?'ok':'warn') + '">' +
               (okB2?'Flux level looks comfortable':'Flux level is getting high') +
               '</span> — Bmax,mean = ' + pyBmax.toFixed(3) + ' T (≈' + sm2 + '× to ' + satT2.toFixed(2) + ' T);  inner-bore peak = ' + pyBinner.toFixed(3) + ' T (≈' + smI2 + '× B(r) crowded).';

@@ -235,7 +235,16 @@ export const Step15Capacitor: React.FC<Props> = ({
   const esr_eff_mohm   = selectedQty > 0 ? esr_each_mohm / selectedQty : 0
   const I_per_cap      = selectedQty > 0 ? I_worst / selectedQty : 0
   const I_rated        = chosenPart?.I_rated_120hz_A ?? null
-  const ripple_pass    = I_rated !== null ? I_per_cap <= I_rated : null
+  const I_allow        = chosenPart?.I_allow_A ?? null
+  // Single source for the ripple verdict, used by BOTH the badge and the table summary row.
+  // Prefer the engine's three-state status; fall back to the temperature-scaled allowance;
+  // only as a last resort compare against the raw nameplate. null = not evaluated, NOT a fail.
+  const rippleSt: 'pass' | 'pass_derated' | 'fail' | null =
+    (chosenPart?.ripple_status as any)
+    ?? (I_allow !== null ? (I_per_cap <= I_allow ? 'pass_derated' : 'fail')
+        : I_rated !== null ? (I_per_cap <= I_rated ? 'pass' : 'fail')
+        : null)
+  const ripple_pass    = rippleSt === null ? null : rippleSt !== 'fail'
 
   const lifetimeOk = lifetime ? lifetime.pass_15yr : true   // allow approve if not yet calculated
   const canApprove = meetsC && !!chosenPart
@@ -576,7 +585,7 @@ export const Step15Capacitor: React.FC<Props> = ({
                        : (I_rated ? `${I_rated.toFixed(3)} A` : '—')} />
                 {/* three-tier ripple verdict: PASS / PASS-derated ⚠ / FAIL */}
                 {(() => {
-                  const st = chosenPart?.ripple_status ?? (ripple_pass === null ? null : ripple_pass ? 'pass' : 'fail')
+                  const st = rippleSt
                   const nameplate = chosenPart?.I_rated_120hz_A
                   const col = st === null ? C.hint : st === 'pass' ? C.green : st === 'pass_derated' ? C.amber : C.red
                   const bg  = st === null ? C.bg4  : st === 'pass' ? C.greenL : st === 'pass_derated' ? C.amberL : C.redL
@@ -1004,8 +1013,12 @@ export const Step15Capacitor: React.FC<Props> = ({
                   </td>
                   <td colSpan={7} style={{padding:'7px 12px',fontSize:11,color:C.muted}}>
                     ESR∥={esr_eff_mohm.toFixed(1)}mΩ · I/cap={I_per_cap.toFixed(3)}A ·
-                    {ripple_pass
+                    {rippleSt === null
+                      ? <span style={{color:C.hint}}> · ripple not evaluated</span>
+                      : rippleSt === 'pass'
                       ? <span style={{color:C.green}}> ✓ Ripple PASS</span>
+                      : rippleSt === 'pass_derated'
+                      ? <span style={{color:C.amber}}> ⚠ Ripple PASS (derated)</span>
                       : <span style={{color:C.red}}> ⚠ Ripple FAIL</span>}
                     {lifetime && (
                       <span style={{marginLeft:10,fontWeight:600,

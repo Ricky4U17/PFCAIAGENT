@@ -442,6 +442,16 @@
     var out=[];for(var k=0;k<w.t_ms.length;k++){out.push({t_ms:w.t_ms[k],H:w.H_Oe[k],Bdc:w.Bdc[k],BacPk:w.Bac_pk[k],Bmax:w.Bmax[k],Pcore:w.Pcore[k],Pcu:w.Pcu[k],Ptotal:w.Ptot[k],Iavg:w.Iavg[k],D:w.D[k]});}
     return out;
   }
+  // Governing per-point inductance REQUIREMENT, injected by the host (L_vs_Vin_table max).
+  // Falls back to 0 = "no requirement supplied", in which case the verdict is not asserted.
+  var _LREQ = (function(){
+    try {
+      var el = document.getElementById('pyReviewData');
+      var d  = el ? JSON.parse(el.textContent) : {};
+      return { uH: +d.pyLreqMax_uH || 0, vac: +d.pyLreqVac || 0 };
+    } catch (e) { return { uH: 0, vac: 0 }; }
+  })();
+
   function renderAll(){ const i=inp(); sync(i); const o=compute(i); const sw=makeSweep(i);
     var _s7=_step7WaveFor(i.vinRms);
     if(_s7&&_s7.length){ o.wave=_s7;
@@ -466,14 +476,14 @@
     state.last={i,o,sw}; draw3D(i,o); drawWindowBuild(i,o);
     $('kpiL0').textContent=`${fmt(o.L0_uH,1)} µH`; $('kpiLfull').textContent=`${fmt(o.Lfull_uH,1)} µH`; $('kpiH').textContent=`${fmt(o.Hcrest,1)} Oe`; $('kpiK').textContent=fmt(o.k,3); $('kpiBpk').textContent=`${fmt(o.BacPk_crest,3)} T`; $('kpiDCR').textContent=`${fmt(o.Rdc_mOhm,1)} mΩ`; $('kpiPcore').textContent=`${fmt(o.Pcore,2)} W`; $('kpiPtot').textContent=`${fmt(o.Ptotal,2)} W`;
     {const _ot=$('kpiOpTag');if(_ot)_ot.innerHTML='Operating point: <span style="color:#38bdf8">'+i.vinRms+' Vac</span> &middot; '+i.tempC+' &deg;C';}
-    const satMargin=cfg.satT/o.Bmax, okL=o.Lfull_uH>=235, okB=o.Bmax<0.5, okT=o.dT<40;
+    const satMargin=cfg.satT/o.Bmax, okL=(_LREQ.uH>0? o.Lfull_uH>=_LREQ.uH : true), okB=o.Bmax<0.5, okT=o.dT<40;
     const fitBad=o.fillIns>=1.0, fitHard=!fitBad&&o.fillIns>=0.85, fitTight=!fitBad&&!fitHard&&o.fillIns>0.70;
     $('overviewStatus').innerHTML=(inGap(i.vinRms)?`<div><span class="warn">Between defined operating corners</span> — 133–179 Vac lies outside both Table-A regimes (different power corners); crest current is taken as manually set, verify it.</div>`:'')
       +(fitBad?`<div><span class="bad">Winding does not fit</span> — insulated fill ${fmt(o.fillIns*100,0)} % ≥ 100 % of the ${cfg.Wa_mm2} mm² bore. Reduce N or bundle size.</div>`
         :fitHard?`<div><span class="bad">Beyond practical winding limit</span> — insulated fill ${fmt(o.fillIns*100,0)} % (>85 % is generally unwindable on a toroid).</div>`
         :fitTight?`<div><span class="warn">Window getting tight</span> — insulated fill ${fmt(o.fillIns*100,0)} %.</div>`
         :`<div><span class="ok">Winding fits</span> — insulated fill ${fmt(o.fillIns*100,0)} % (screening estimate).</div>`)
-      +`<div><span class="${okL?'ok':'warn'}">${okL?'Inductance target met':'Inductance target missed'}</span> — Lfull = ${fmt(o.Lfull_uH,1)} µH versus 235 µH target.</div>`
+      +`<div><span class="${okL?'ok':'warn'}">${_LREQ.uH>0?(okL?'Inductance requirement met':'Inductance requirement missed'):'Inductance requirement not supplied'}</span> — L_full = ${fmt(o.Lfull_uH,1)} µH${_LREQ.uH>0?` versus the governing requirement L_req = ${fmt(_LREQ.uH,1)} µH`+(_LREQ.vac?` (at ${fmt(_LREQ.vac,0)} Vac)`:'')+`. Turns are converged against L_req, not the confirmed L target.`:'.'}</div>`
       +`<div><span class="${okB?'ok':'warn'}">${okB?'Flux level looks comfortable':'Flux level is getting high'}</span> — Bmax ≈ ${fmt(o.Bmax,3)} T (≈${fmt(satMargin,2)}× to ${cfg.satT.toFixed(2)} T).</div>`
       +`<div><span class="${okT?'ok':'warn'}">${okT?'Estimated temperature rise looks manageable':'Estimated temperature rise is getting high'}</span> — ΔT ≈ ${fmt(o.dT,1)} °C (SA ${fmt(o.SA,0)} cm², ${i.stacks}-stack).</div>`;
     $('overviewTbl').innerHTML=[['Copper length',`${fmt(o.len_m,2)} m`,'Directly affects DCR'],['Duty at crest',fmt(o.Dcrest,3),'D = 1 − Vin,pk / Vout'],['Irms',`${fmt(o.Irms,2)} A`,'Half-line sine assumption'],['HF ripple rms',`${fmt(o.IhfRms,2)} A`,'From ΔIpp/(2√3)'],['HF ripple copper loss',`${fmt(o.Pac*1000,1)} mW`,'Ihf,rms² · Rac (full term)'],['Current density',`${fmt(o.J,2)} A/mm²`,'Irms / Cu_area — overridden by Python below'],['Insulated fill',`${fmt(o.fillIns*100,1)} %`,'N × nParallel bundles/turn — overridden by Python below'],['Estimated ΔT',`${fmt(o.dT,1)} °C`,`Surface-area method, SA = ${fmt(o.SA,0)} cm² (editable wound envelope)`],['Total-loss uncertainty range',`${fmt(o.PuncLo,2)}–${fmt(o.PuncHi,2)} W`,'+5–20% core uplift — unanchored band']].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
