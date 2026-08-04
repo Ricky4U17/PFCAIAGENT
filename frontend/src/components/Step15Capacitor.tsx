@@ -158,8 +158,14 @@ export const Step15Capacitor: React.FC<Props> = ({
   const C_req     = design?.C_required_uF ?? 0
   const I_worst   = design?.worst_case?.I_total_A ?? 0
 
+  // Capacitance tolerance of every part in the DC-bus database. Must match
+  // backend step15_capacitor.CAP_TOLERANCE_PCT.
+  const CAP_TOL_PCT = 20
+  const TOL_K       = 1 - CAP_TOL_PCT / 100          // 0.8 -> the worst-case corner
+  // Minimum quantity whose WORST-CASE (-20%) capacitance still meets the requirement.
+  // Sizing on the nameplate value under-counts: 3 x 470 = 1410 nameplate is only 1128 uF at -20%.
   const computeMinQty = (cap_uF: number) =>
-    cap_uF > 0 ? Math.ceil(C_req / cap_uF) : 1
+    cap_uF > 0 ? Math.ceil(C_req / (cap_uF * TOL_K)) : 1
 
   const loadTable = useCallback((cap_uF: number, qty: number) => {
     setLoadingTable(true)
@@ -227,7 +233,9 @@ export const Step15Capacitor: React.FC<Props> = ({
   // ── Computed effective parameters ─────────────────────────────────────────
   const C_total     = (selectedCapUF ?? 0) * selectedQty
   const pctOfReq    = C_req > 0 ? Math.min((C_total / C_req) * 100, 100) : 0
-  const meetsC      = C_total >= C_req
+  const C_total_min = C_total * TOL_K                 // worst-case tolerance corner
+  const meetsC      = C_total >= C_req                // nominal basis - the approve gate
+  const meetsC_min  = C_total_min >= C_req            // worst-case basis - advisory
   const minQtyNeeded = selectedCapUF ? computeMinQty(selectedCapUF) : 1
 
   // Effective parameters based on chosen part + qty
@@ -549,6 +557,19 @@ export const Step15Capacitor: React.FC<Props> = ({
                   <span style={{fontSize:11,color:C.hint}}>of {C_req.toFixed(0)} µF required</span>
                   <span style={{fontSize:11,fontWeight:600,color:meetsC?C.green:C.red}}>
                     {meetsC?'✓ OK':'✗ Short'}
+                  </span>
+                </div>
+                {/* Worst-case tolerance corner. Every DB part is +/-20%, so a bank that only
+                    clears the requirement at nameplate does not clear it on a low-tolerance
+                    build. Advisory: the approve gate stays on the nominal value. */}
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4,fontSize:10.5}}>
+                  <span style={{color:C.muted}}>at −{CAP_TOL_PCT}% tolerance:</span>
+                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:600,
+                    color:meetsC_min?C.green:C.amber}}>
+                    {C_total_min.toFixed(0)} µF
+                  </span>
+                  <span style={{fontWeight:600,color:meetsC_min?C.green:C.amber}}>
+                    {meetsC_min?'✓ still meets requirement':'⚠ below requirement'}
                   </span>
                 </div>
                 {/* Progress bar */}

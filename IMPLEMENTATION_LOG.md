@@ -6868,3 +6868,36 @@ Verified: 24 points, crowd(r_in) = 1.3649 == crowd_axial, bore/OD ratio 1.73x. I
 keeps the old single-point form rather than inventing an outer radius.
 
 VERIFIED: suite 172 passed / 2 skipped, report 190 pp, tsc clean.
+
+## C192 — capacitor quantity: the SECOND tolerance path (frontend) that C191 missed
+
+C191 made `suggest_configurations` (backend) tolerance-aware, and that half works — for
+C_required = 1395.3 it now returns 680x3, not 470x3. But the designer still saw 470 x 3.
+
+**Root cause: the GUI has its OWN quantity maths, independent of the backend suggestions.**
+`Step15Capacitor.tsx` computed
+    computeMinQty(cap_uF) = ceil(C_req / cap_uF)          # NAMEPLATE only
+which gives ceil(1395.3 / 470) = 3 -> 1128 uF at -20%, under the requirement. That function drives
+the default quantity when a capacitance value is picked (line ~183), the "min qty needed" figure
+(~231) and the per-value chips (~490). Fixing only the backend left the path the designer actually
+uses untouched.
+
+Now `ceil(C_req / (cap_uF * (1 - tol)))`. Verified against the designer's exact case across the
+whole value list: 470 -> was 3 (1128 uF at -20%, LOW) -> now 4 (1504 uF, OK). 330->6, 390->5,
+560->4, 820->3; 680/1000/1200 unchanged (already sufficient). Every value now clears -20%.
+
+Also surfaced the worst-case total beside the nominal one ("at -20% tolerance: N uF - still meets
+requirement / below requirement"), so the basis is visible rather than implied.
+
+**Deliberately NOT changed: the approve gate.** `meetsC` (and therefore `canApprove`) stays on the
+NOMINAL total, per the standing convention that a gate may block release but never selection - the
+designer may still choose fewer units on purpose, and now sees exactly what that costs. A separate
+`meetsC_min` carries the worst-case verdict for display only.
+
+`CAP_TOL_PCT` in the component must stay in step with `step15_capacitor.CAP_TOLERANCE_PCT`;
+noted in the code comment at both ends.
+
+*Lesson: when a quantity is computed in more than one place, fixing the engine is not enough -
+grep for the same arithmetic in the GUI before declaring it done.*
+
+VERIFIED: suite 172 passed / 2 skipped, tsc clean.
