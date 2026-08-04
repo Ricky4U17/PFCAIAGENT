@@ -12,6 +12,7 @@ Each is a standalone document (like the Chapter-6 / Chapter-7 reports), merged a
 """
 from __future__ import annotations
 import io
+from math import exp
 
 from app.mode_b.doc_report_builder import (
     chapter_splash, step_h, sub_h, body, eq_box, data_table, annotation, CW,
@@ -67,12 +68,13 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "What series element holds the cold-start inrush below target — across R25 tolerance and warm "
         "restart — while the whole startup-current path (NTC, bridge, fuse, relay, bulk cap) survives?",
         ["8.1 Design inputs, limits & selection gates — no part chosen yet",
-         "8.2 Maximum allowed inrush target  ·  8.3 Required cold series resistance",
-         "8.4 R25 tolerance → required nominal R25  ·  8.5 Pulse-energy requirement",
-         "8.6 Candidate database screen  ·  8.7 Final NTC selection  ·  8.8 Selected-part recalculation",
-         "8.9 Bypass relay timing & residual make  ·  8.10 Warm / hot restart policy",
-         "8.11 Fuse selection & I²t coordination  ·  8.12 Startup-path stress",
-         "8.13 AC phase-angle sweep  ·  8.14 Final margin summary & open items"])
+         "8.2 Inrush requirement — target, cold resistance, tolerance & pulse energy",
+         "8.3 Selected-part recalculation — every figure re-derived on the actual NTC",
+         "8.4 Bypass relay: 8.4.1 why bypass · 8.4.2 precharge timing · 8.4.3 residual make current",
+         "8.4.4 Bypass-relay selection from the vendor catalogue (8.4.5 catalogue data)",
+         "8.5 Warm / hot restart policy  ·  8.6 Fuse selection & I²t coordination (8.6.1 by case)",
+         "8.7 Startup-path component stress  ·  8.8 AC phase-angle startup sweep",
+         "8.9 Final margin summary, open items & release classification"])
 
     # ── 8.1 inputs, limits & selection gates ──
     # The selected NTC is NOT stated here — the chapter derives the REQUIREMENT first
@@ -87,7 +89,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "worst-case input RMS current (from the shared operating grid) sets the continuous self-heat "
         "that forces a bypass. This section states ONLY those inputs and the selection gates they imply — "
         "the NTC part itself is derived and named later (Sections 8.6–8.8), not pre-selected here.", CH)
-    data_table(story, "8.1a", "Carried-in Operating Basis", "Each input with its source and status.",
+    data_table(story, "8.1", "Carried-in Operating Basis", "Each input with its source and status.",
         ["Quantity", "Symbol", "Value", "Source / status"],
         [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V", "design grid"],
          ["High-line peak", "V<sub>in,pk</sub>", f"{_f(r['vin_pk_max'],1)} V", "computed = &#8730;2&#183;V<sub>ac,max</sub>"],
@@ -114,28 +116,60 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "the NTC alone must provide; the margin then covers the spread between a nominal part and its "
         "tolerance band, and the pulse-energy rating — not the steady current — is the governing "
         "datasheet filter.", CH)
+    # Every line substitutes the design's own numbers, so the algebra and the arithmetic are read
+    # once, in one place, instead of the symbols here and the values in a paragraph underneath.
+    _tolp = float(r.get("r25_tol_screen") or s.get("r25_tol_default") or 0.20)
+    _r25_min_chk = r["r25_nom_required"] * (1.0 - _tolp)
+    _i_worst_chk = r["vin_pk_max"] / max(_r25_min_chk + r["r_parasitic"], 1e-9)
     eq_box(story, [
-        r"R_{total,cold}=\dfrac{V_{in,pk}}{I_{target}}\ ,\qquad "
-        r"R_{25}=(R_{total,cold}-R_{parasitic})\times k_{margin}",
-        r"R_{25,min}=R_{25,nom}\times(1-tol)\ \Rightarrow\ "
-        r"R_{25,nom\,required}=\dfrac{R_{25}}{1-tol}",
-        r"I_{inrush,max}=\dfrac{V_{in,pk}}{R_{25,min}+R_{parasitic}}",
-        r"E_{cap}=\frac{1}{2}\,C_{out}\,V_{in,pk}^{2}\ ,\qquad "
-        r"C_{max,equiv}=\dfrac{2E_{pulse}}{V_{ref}^{2}}",
+        rf"R_{{total,cold}}=\dfrac{{V_{{in,pk}}}}{{I_{{target}}}}"
+        rf"=\dfrac{{{r['vin_pk_max']:.1f}\ \mathrm{{V}}}}{{{s['i_inrush_target']:.0f}\ \mathrm{{A}}}}"
+        rf"={r['r_total_min']:.3f}\ \Omega",
+
+        rf"R_{{25}}=(R_{{total,cold}}-R_{{par}})\times k_{{margin}}"
+        rf"=({r['r_total_min']:.3f}-{r['r_parasitic']:.3f})\times{s['r25_margin']:.2f}"
+        rf"={r['r25_pick']:.3f}\ \Omega",
+
+        rf"R_{{25,nom}}=\dfrac{{R_{{25}}}}{{1-tol}}"
+        rf"=\dfrac{{{r['r25_pick']:.3f}}}{{1-{_tolp:.2f}}}"
+        rf"={r['r25_nom_required']:.3f}\ \Omega",
+
+        rf"I_{{inrush,max}}=\dfrac{{V_{{in,pk}}}}{{R_{{25,min}}+R_{{par}}}}"
+        rf"=\dfrac{{{r['vin_pk_max']:.1f}}}{{{_r25_min_chk:.3f}+{r['r_parasitic']:.3f}}}"
+        rf"={_i_worst_chk:.1f}\ \mathrm{{A}}\ \leq\ {s['i_inrush_target']:.0f}\ \mathrm{{A}}",
+
+        rf"E_{{cap}}=\frac{{1}}{{2}}C_{{out}}V_{{in,pk}}^{{2}}"
+        rf"=\frac{{1}}{{2}}({s['cout']*1e6:.0f}\,\mu\mathrm{{F}})({r['vin_pk_max']:.1f})^{{2}}"
+        rf"={r['e_cap']:.1f}\ \mathrm{{J}}",
+
+        rf"E_{{pulse,req}}=k_{{E}}E_{{cap}}={s['energy_margin']:.2f}\times{r['e_cap']:.1f}"
+        rf"={r['e_pulse_required']:.1f}\ \mathrm{{J}}"
+        rf"\quad\Leftrightarrow\quad C_{{max,equiv}}=\dfrac{{2E_{{pulse}}}}{{V_{{ref}}^{{2}}}}"
+        rf"=\dfrac{{2({r['e_pulse_required']:.1f})}}{{({s['vref_pulse']:.0f})^{{2}}}}"
+        rf"={r['cmax_equiv_required']*1e6:.0f}\ \mu\mathrm{{F}}",
     ], number="8.2", ch=CH)
     body(story,
-        f"<b>Worked.</b> R<sub>total,cold</sub> = {_f(r['vin_pk_max'],1)} V / "
-        f"{_f(s['i_inrush_target'],0)} A = {_f(r['r_total_min'],3)} {_OHM}. Subtracting the loop parasitic "
-        f"({_f(r['r_parasitic'],3)} {_OHM}) leaves R<sub>25</sub> &#8805; {_f(r['r25_required'],3)} {_OHM}; "
-        f"the &#215;{_f(s['r25_margin'],2)} margin gives the pick <b>R<sub>25</sub> = "
-        f"{_f(r['r25_pick'],3)} {_OHM}</b>, and the tolerance-aware catalog floor is "
-        f"<b>R<sub>25,nom</sub> &#8805; {_f(r['r25_nom_required'],2)} {_OHM}</b> so that a part landing on "
-        f"the LOW edge of its band still holds the target. The bulk capacitor stores E<sub>cap</sub> = "
-        f"&#189;&#183;{_f(s['cout']*1e6,0)} {_MU}F&#183;({_f(r['vin_pk_max'],1)} V)&#178; = "
-        f"<b>{_f(r['e_cap'],1)} J</b>; with the &#215;{_f(s['energy_margin'],2)} survival margin the part "
-        f"must be rated &#8805; {_f(r['e_pulse_required'],1)} J, equivalently a maximum switchable "
-        f"capacitance &#8805; {_f(r['cmax_equiv_required']*1e6,0)} {_MU}F at the "
-        f"{_f(s['vref_pulse'],0)} V vendor reference. Accept a part meeting <i>either</i> energy figure.", CH)
+        f"<b>Reading the chain.</b> The arithmetic is in the box above; what it <i>means</i> is this. "
+        f"The first two lines give the resistance the NTC alone must contribute, "
+        f"<b>{_f(r['r25_pick'],3)} {_OHM}</b> after the &#215;{_f(s['r25_margin'],2)} margin. The third "
+        f"line is the one that governs which catalog parts are even eligible: a part is quoted at its "
+        f"NOMINAL R<sub>25</sub> but may be delivered anywhere in a &#177;{_f(_tolp*100,0)}% band, and it "
+        f"is the LOW edge that must still hold the target &#8212; so the nominal value has to be grossed "
+        f"up to <b>{_f(r['r25_nom_required'],2)} {_OHM}</b>. The fourth line closes the loop by putting "
+        f"that low edge back in: {_f(_i_worst_chk,1)} A against the {_f(s['i_inrush_target'],0)} A limit. "
+        f"<b>That headroom IS the margin factor</b> &#8212; set k<sub>margin</sub> to 1.00 and the "
+        f"worst-case part would land exactly on the limit with nothing left for temperature, ageing or "
+        f"a low mains impedance.", CH)
+    body(story,
+        f"The last two lines size the SURVIVAL requirement rather than the limiting one. The bulk "
+        f"capacitor's stored energy {_f(r['e_cap'],1)} J is dissipated in the series element on every "
+        f"cold start regardless of how the resistance is split, so the NTC must be rated to absorb "
+        f"{_f(r['e_pulse_required'],1)} J with the &#215;{_f(s['energy_margin'],2)} survival margin. "
+        f"Vendors publish this either in Joules or as a maximum switchable capacitance at a test "
+        f"voltage &#8212; {_f(r['cmax_equiv_required']*1e6,0)} {_MU}F at {_f(s['vref_pulse'],0)} V here. "
+        f"They are the same requirement in two currencies; accept a part meeting <i>either</i>. "
+        f"Note this is an ENERGY filter, not a current one: the steady-current rating is not what "
+        f"selects the part (see Section 8.3).", CH)
     annotation(story, "WHAT Rpar IS",
         "<b>R<sub>par</sub> is the TOTAL non-NTC resistance in the inrush loop</b> — mains and wiring "
         "+ EMI-filter series + bridge + bulk-capacitor ESR, added together and entered as ONE figure "
@@ -148,24 +182,33 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "resistance is the <i>only</i> thing left limiting the current, so it is what that fault case "
         "divides into. R<sub>par</sub> = 0 means nothing is credited and the NTC carries the whole limit, "
         "which is the conservative reading.", CH)
-    _tol_sw = 0.20
+    # The final column MUST reproduce the equation chain above, margin included. It used to compute
+    # (R_total - R_par)/(1 - tol) and drop k_margin entirely, so the design row printed a nominal
+    # floor a factor of k_margin below the one the candidate screen actually filters on (6.53 vs
+    # 7.18 ohm on the reference design). The margin now gets its own column so the chain reads
+    # left-to-right, and the tolerance is threaded from the engine rather than written in as 0.20.
     _sw_rows = []
     for _t, _rr in r["sweep"]:
         _net = max(_rr - r["r_parasitic"], 0.0)
-        _sw_rows.append([f"{_f(_t,0)}", f"{_f(_rr,3)}", f"{_f(_net,3)}",
-                         f"{_f(_net/(1.0-_tol_sw),3)}"])
+        _mrg = _net * s["r25_margin"]
+        _sw_rows.append([f"{_f(_t,0)}", f"{_f(_rr,3)}", f"{_f(_net,3)}", f"{_f(_mrg,3)}",
+                         f"{_f(_mrg/(1.0-_tolp),3)}"])
     data_table(story, "8.2",
-        "Inrush-Target Sweep — Required Resistance, Net of Parasitics, With Tolerance",
-        f"How the resistance requirement moves if the inrush target is revised. "
+        "Inrush-Target Sweep — Required Resistance, Net of Parasitics, Margin and Tolerance",
+        f"How the resistance requirement moves if the inrush target is revised, following the same "
+        f"chain as Equation 8.2 left to right. "
         f"<b>R<sub>min,total</sub></b> = V<sub>in,pk</sub>/I. "
-        f"<b>R<sub>min,total</sub> &#8722; R<sub>par</sub></b> credits the "
-        f"{_f(r['r_parasitic'],3)} {_OHM} loop parasitic — what the NTC alone must provide. "
-        f"<b>20% tolerance</b> is the NOMINAL catalog value needed so the LOW edge of the band still "
-        f"holds the target. Design row = {_f(s['i_inrush_target'],0)} A.",
+        f"<b>&#8722; R<sub>par</sub></b> credits the {_f(r['r_parasitic'],3)} {_OHM} loop parasitic — "
+        f"what the NTC alone must provide. <b>&#215; k<sub>margin</sub></b> applies the "
+        f"{_f(s['r25_margin'],2)} design margin. <b>&#247; (1&#8722;tol)</b> grosses that up to the "
+        f"NOMINAL catalog value needed so the LOW edge of a &#177;{_f(_tolp*100,0)}% band still holds "
+        f"the target — this last column is the floor the candidate screen filters on. "
+        f"Design row = {_f(s['i_inrush_target'],0)} A.",
         ["Target I (A)", "R<sub>min,total</sub> (" + _OHM + ")",
-         "R<sub>min,total</sub> &#8722; R<sub>par</sub> (" + _OHM + ")",
-         "20% tolerance (" + _OHM + ")"],
-        _sw_rows, col_widths=[CW*0.20, CW*0.26, CW*0.28, CW*0.26], ch=CH)
+         "&#8722; R<sub>par</sub> (" + _OHM + ")",
+         "&#215; k<sub>margin</sub> (" + _OHM + ")",
+         "&#247; (1&#8722;tol) &#8658; R<sub>25,nom</sub> (" + _OHM + ")"],
+        _sw_rows, col_widths=[CW*0.15, CW*0.20, CW*0.20, CW*0.20, CW*0.25], ch=CH)
 
     # ── 8.3 selected part — every figure re-derived on the ACTUAL part ──
     # `sel` was previously bound in the old Section 8.7 (removed 2026-08-03 at the designer's
@@ -176,12 +219,42 @@ def build_ntc_story(story, design, cap=None, opts=None):
         body(story,
             "All inrush and precharge figures below use the PART's real cold resistance rather than "
             "the generic pick, so the release numbers belong to the part that will be fitted.", CH)
-        eq_box(story, [
+        # Each line ends in a comparison against the requirement Section 8.2 derived, so "meets or
+        # exceeds" is visible as arithmetic rather than asserted in a verdict column.
+        _e_part = sel.get("energy_est_J")
+        _eq83 = [
             rf"I_{{inrush}} = \dfrac{{V_{{in,pk}}}}{{R_{{25}}+R_{{par}}}} = "
-            rf"\dfrac{{{r['vin_pk_max']:.1f}}}{{{sel['r_total_cold_ohm']:.2f}}} = {sel['i_inrush_actual_A']:.1f}\ \mathrm{{A}}",
-            rf"\tau = R_{{25}}\,C_{{out}} = {sel['tau_ms']:.1f}\ \mathrm{{ms}},\qquad "
-            rf"t_{{bypass}} = {s['tau_multiple']:.0f}\,\tau = {sel['t_bypass_ms']:.0f}\ \mathrm{{ms}}",
-        ], number="8.3", ch=CH)
+            rf"\dfrac{{{r['vin_pk_max']:.1f}}}{{{sel['r25_ohm']:.2f}+{r['r_parasitic']:.2f}}}"
+            rf" = {sel['i_inrush_actual_A']:.1f}\ \mathrm{{A}}"
+            rf"\ \leq\ {s['i_inrush_target']:.0f}\ \mathrm{{A}}",
+
+            rf"\tau = R_{{25}}C_{{out}} = ({sel['r25_ohm']:.2f}\ \Omega)"
+            rf"({s['cout']*1e6:.0f}\,\mu\mathrm{{F}}) = {sel['tau_ms']:.1f}\ \mathrm{{ms}}",
+
+            rf"t_{{bypass}} = N_{{\tau}}\tau = {s['tau_multiple']:.0f}\times{sel['tau_ms']:.1f}"
+            rf" = {sel['t_bypass_ms']:.0f}\ \mathrm{{ms}}",
+        ]
+        if _e_part:
+            _e_ok = float(_e_part) >= float(r["e_pulse_required"])
+            # keep the backslash OUT of the f-string expression: an escape inside {...} is not
+            # covered by the outer rf prefix, so '\geq' there is an invalid escape sequence.
+            _rel = r"\geq" if _e_ok else "<"
+            _eq83.append(
+                rf"E_{{part}} \approx {float(_e_part):.0f}\ \mathrm{{J}}"
+                rf"\ {_rel}\ "
+                rf"E_{{pulse,req}} = {r['e_pulse_required']:.1f}\ \mathrm{{J}}")
+        eq_box(story, _eq83, number="8.3", ch=CH)
+        body(story,
+            f"<b>How to read this.</b> Line 1 is the requirement of Section 8.2 evaluated on the part "
+            f"that will actually be fitted &#8212; if it does not end in "
+            f"&#8804; {_f(s['i_inrush_target'],0)} A the part is not usable at any tolerance. Lines 2 and "
+            f"3 are the timing the same R<sub>25</sub> produces: a LARGER R<sub>25</sub> limits the "
+            f"inrush harder but stretches &#964;, so the bypass must wait longer &#8212; the two are not "
+            f"independent choices. Line 4 is survival rather than limiting: the energy the part must "
+            f"absorb does not depend on which R<sub>25</sub> was chosen (it is the capacitor's "
+            f"{_f(r['e_cap'],1)} J either way), only on the bulk capacitance and the line peak."
+            + ("" if _e_part else " The part's energy rating is not published in the catalogue, so that "
+                                  "line is omitted &#8212; confirm it on the datasheet."), CH)
         _chk = sel.get("checks") or {}
         data_table(story, "8.3", "Selected Part — Recalculated Design Values",
             "Actual-part figures vs the design targets. Verdict: "
@@ -198,9 +271,29 @@ def build_ntc_story(story, design, cap=None, opts=None):
               + f" (margin {_f(sel.get('energy_margin'),2)}&#215; E_cap)"],
              ["Precharge &#964; / bypass delay", f"{_f(sel['tau_ms'],1)} ms / {_f(sel['t_bypass_ms'],0)} ms",
               "close relay after settle"],
-             ["Steady I<sub>max</sub>", f"{_f(sel.get('imax_A'),1)} A",
-              ("below I<sub>rms</sub> — OK, bypassed after precharge" if _chk.get('imax_note') else "&#8212;")]],
+             ["Steady-state I<sub>max</sub><br/>(NTC continuous rating)",
+              (f"{_f(sel.get('imax_A'),1)} A" if sel.get('imax_A') is not None else "DATA MISSING"),
+              (("vs I<sub>in,rms</sub> " + _f(r['i_rms_worst'],1) + " A &#8212; "
+                + ("lower, and that is expected: bypassed" if sel['imax_A'] < r['i_rms_worst']
+                   else "higher, so it would survive even unbypassed"))
+               if sel.get('imax_A') is not None else "confirm on the datasheet")]],
             col_widths=[CW*0.34, CW*0.30, CW*0.36], ch=CH)
+        annotation(story, "STEADY Imax",
+            f"<b>Steady-state I<sub>max</sub> is the NTC's own CONTINUOUS current rating</b> &#8212; the "
+            f"RMS current the thermistor can carry indefinitely, at its hot resistance, without "
+            f"exceeding its body-temperature limit. It is <i>not</i> an inrush figure. "
+            f"<b>It does not have to exceed I<sub>in,rms</sub> in this design, and normally will not:</b> "
+            f"the relay bypasses the NTC once the bus has precharged, so in service the NTC conducts only "
+            f"during the startup pulse &#8212; a "
+            f"{_f(sel.get('imax_A'),0) if sel.get('imax_A') is not None else 'small'} A thermistor behind "
+            f"a {_f(r['i_rms_worst'],1)} A line is correct, not undersized. In a design with NO bypass "
+            f"relay it would have to be &#8805; I<sub>in,rms</sub>. "
+            f"<b>The condition attached to that:</b> the rating only stops mattering while the relay "
+            f"actually closes. If the relay fails to close, the NTC carries the full "
+            f"{_f(r['i_rms_worst'],1)} A continuously &#8212; the dissipation tabulated in Section 8.4.1 "
+            f"&#8212; and this rating becomes the limit that is exceeded. That is the mirror of the "
+            f"stuck-CLOSED fault in Section 8.7, and it is why the relay is a release item rather than a "
+            f"convenience.", CH)
         annotation(story, "NOTE",
             "The pulse-energy figure is estimated from the disc diameter; confirm the Joule (or "
             "max-switchable-capacitance) rating and the R25 tolerance on the live datasheet before "
@@ -242,7 +335,38 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "<b>Model.</b> After the bulk capacitor has precharged through the NTC, a relay shorts the NTC out so "
         "it carries current only during the startup pulse. The bus settles with the RC time constant "
         "&#964; = R<sub>25</sub>&#183;C<sub>out</sub>; the bypass is closed after a few time constants.", CH)
-    eq_box(story, [r"\tau=R_{25}\,C_{out},\qquad t_{bypass}=N_{\tau}\,\tau"], number="8.4.2", ch=CH)
+    eq_box(story, [
+        r"\tau=R_{25}\,C_{out},\qquad t_{bypass}=N_{\tau}\,\tau",
+        r"V_{cap}(t_{bypass})=V_{in,pk}\left(1-e^{-N_{\tau}}\right),\qquad "
+        r"V_{residual}=V_{in,pk}\,e^{-N_{\tau}}",
+    ], number="8.4.2", ch=CH)
+    body(story,
+        f"<b>Why N<sub>&#964;</sub> = {_f(s['tau_multiple'],0)}, and what it buys.</b> N<sub>&#964;</sub> "
+        f"is a designer choice, and the second equation shows exactly what it decides. The capacitor "
+        f"charges exponentially, so it never reaches the peak &#8212; what is left at the moment of "
+        f"closure is V<sub>in,pk</sub>&#183;e<sup>&#8722;N</sup>, and <b>that residual is what the relay "
+        f"contact makes into</b> (Section 8.4.3). Each additional time constant divides the residual "
+        f"&#8212; and therefore the make current &#8212; by e &#8776; 2.72, and costs one more &#964; of "
+        f"startup delay. So N is not a rule of thumb: it is a direct trade of startup time against "
+        f"contact stress.", CH)
+    _ntau_rows = []
+    for _n in (2, 3, 4, 5, 6):
+        _vr = r["vin_pk_max"] * exp(-_n)
+        _rmk = r["r_parasitic"] + (s.get("relay_path_ohm") or 0.0)
+        _ntau_rows.append([
+            f"{_n}" + ("  &#8592; design" if abs(_n - s["tau_multiple"]) < 0.01 else ""),
+            f"{_f(_n * (r['tau'] * 1e3), 0)}",
+            f"{_f(100.0 * (1.0 - exp(-_n)), 2)}%",
+            f"{_f(_vr, 2)}",
+            (f"{_f(_vr / _rmk, 2)}" if _rmk > 0 else "needs Loop R")])
+    data_table(story, "8.4.2", "Choice of N&#964; — Settling vs Contact Stress",
+        f"On the generic R<sub>25</sub> pick (&#964; = {_f(r['tau']*1e3,1)} ms). Delay scales with N; the "
+        f"residual voltage and the make current fall by e &#8776; 2.72 per step, so going from N = 2 to "
+        f"N = 4 costs {_f(2*r['tau']*1e3,0)} ms and cuts the contact stress by about 7&#215;. Beyond "
+        f"N &#8776; 5 the bus is within 1% of the peak and further delay buys very little.",
+        ["N<sub>&#964;</sub>", "t<sub>bypass</sub> (ms)", "Bus charged",
+         "V<sub>residual</sub> (V)", "Make current (A)"],
+        _ntau_rows, col_widths=[CW*0.18, CW*0.20, CW*0.20, CW*0.21, CW*0.21], ch=CH)
     # Precharge timing must be quoted for the SELECTED part once one exists. Using the generic
     # r25_pick here made the report state an R25 the designer had not chosen (e.g. 5.08 ohm while a
     # 50 ohm NTC was selected), and it disagreed with the selected-part recalculation in Section 8.3.

@@ -7125,3 +7125,73 @@ sections 8.1-8.9 in order; combined report 190 pp; suite 172 passed / 2 skipped;
 TRAP RE-HIT: the first annotation label ("WHAT TO CHECK ON THE RELAY DATASHEET", 36 chars) wrapped
 per-character into "RELAY DA TASHEET" in its ~20 mm cell — the C185 lesson. Shortened to "MAKE
 RATING". Keep annotation titles under ~20 characters.
+
+## C197 — Chapter 8 legibility: substituted equations, the margin in Table 8.2, why N=4, what Imax is
+
+Designer, five points plus the chapter heading page. All report-side; one arithmetic fix.
+
+### 1 + 3 — the numbers now live inside the equations
+Section 8.2 printed five symbolic equations and then a "Worked." paragraph restating each in prose,
+so the algebra was read twice and matched up by eye. Section 8.3 already did it properly, so 8.2 was
+made to match: each line is symbols = substituted values = result. The `eq_box` docstring asks for
+exactly this ("symbolic definition -> numeric substitution -> numeric result"). The prose that
+replaced the old "Worked." paragraph now explains what the chain MEANS — why the low tolerance edge
+governs, and that the headroom in line 4 (55.4 A vs the 60 A limit) IS k_margin made visible.
+
+Section 8.3 gained the same treatment for tau (R25 and C_out now substituted, not just the result)
+and a fourth line the chapter never had: **the energy verification as arithmetic**,
+`E_part ~ 307 J >= E_pulse,req = 294.8 J`, so "meets or exceeds" is shown rather than asserted in a
+verdict column. Omitted, with a pointer to the datasheet, when the catalogue has no energy figure.
+
+### 2 — Table 8.2 disagreed with the equation above it
+The last column computed `(R_total - R_par)/(1 - tol)` and **dropped k_margin**, so the design row
+printed **6.528 ohm** while the equation chain and the candidate screen both use **7.181 ohm** —
+exactly a factor of 1.10 apart, with the table the wrong one. Fixed, and k_margin now has its own
+column so the table reads left-to-right in the same order as Equation 8.2: Target I -> R_min,total
+-> - R_par -> x k_margin -> / (1-tol). The tolerance is threaded from the engine's `r25_tol_screen`;
+it had been hardcoded `_tol_sw = 0.20` with "20% tolerance" written into the header text.
+
+### 4 — why N_tau = 4
+The report said 4*tau "lets the bus settle" and stopped. Added the second equation
+`V_residual = V_in,pk * e^(-N)` and a table of N = 2..6, because N is a designer knob and it decides
+the residual the contact makes into. **Each additional tau divides the make current by e ~ 2.72 and
+costs one more tau of startup delay** — 50.5 A at N=2, 6.84 A at N=4, 0.93 A at N=6. This also
+closes a loop the chapter left implicit: the 6.8 V in Section 8.4.3 IS this choice.
+
+### 5 — Steady I_max
+It is the NTC's own CONTINUOUS current rating, and the row only said anything when it was BELOW
+I_rms (otherwise "—", which reads as missing data). Now always states the comparison, renamed
+"Steady-state I_max (NTC continuous rating)" so it is not read as an inrush figure, and a new
+annotation explains why it does not need to exceed I_rms: the relay bypasses the NTC, so a 15 A
+thermistor behind a 21 A line is correct, not undersized. **With the condition stated** — that holds
+only while the relay closes. If the relay fails to CLOSE the NTC carries the full line current
+continuously (the dissipation already tabulated in Section 8.4.1) and this rating becomes the limit
+that is exceeded. That is the mirror of the stuck-CLOSED fault in Section 8.7, which the chapter
+covered while leaving this one unstated.
+
+### 6 — chapter heading page
+The splash still listed the pre-C193 8.1-8.14 topics (candidate screen at 8.6, final selection 8.7,
+selected-part recalculation 8.8 ...) — none of which match the current chapter. Rewritten to the
+real sections 8.1-8.9 including the 8.4.x sub-sections. Also renumbered the lone Table
+**8.1a -> 8.1**: C193 removed 8.1b, and a letter series must start at 'a' with a single table
+carrying no letter.
+
+VERIFIED by rendering, not extraction — `eq_box` draws through matplotlib, so equations never appear
+in extracted text and had to be checked as images. Ch8+9 27 pp with an NTC selected, 0 unrenderable
+glyphs; Table 8.2 design row 6.223 -> 5.223 -> 5.745 -> 7.181 matching Equation 8.2 exactly; Section
+8.3 box shows 33.9 A <= 60 A, tau = 28.2 ms, t_bypass = 113 ms, 307 J >= 294.8 J; N-table 2..6
+correct; I_max wording correct in BOTH branches (15 A vs 21 A "lower, and that is expected"; and the
+>= case). Combined report 190 pp; suite 172 passed / 2 skipped; tsc clean.
+
+TRAP: `&#9664;` (U+25C4) for the design-row marker is outside cp1252 — rendered as a stray "I"
+("4 I design"). Replaced with `&#8592;` (left arrow), which is in the C89 verified-safe set. Also
+hit a SyntaxWarning: a backslash inside an f-string EXPRESSION is not covered by the outer `rf`
+prefix — hoist it to a variable. The suite now runs under `-W error::SyntaxWarning`.
+
+FINDING, not fixed (needs a designer decision): **Chapter 8 no longer shows the NTC candidate
+screen.** The C193 restructure removed the old "Candidate Database Screen" and "Final NTC Selection"
+sections, so the chapter goes from the requirement (8.2) straight to "Selected-Part Recalculation"
+(8.3) — it never shows which parts were considered or why this one won. `out["candidates"]` is
+computed and `cat = out["catalog"]` is still unpacked and now unused, and the GUI has had the
+two-tier candidate list since C163. Logged for the designer to decide whether the screen should come
+back as its own section.
