@@ -226,6 +226,16 @@ def build_ntc_story(story, design, cap=None, opts=None):
         [[f"{_f(rh,2)}", f"{_f(pl,1)}"] for rh, pl in r["loss_rows"]],
         col_widths=[CW*0.5, CW*0.5], ch=CH)
 
+    # The relay selection is resolved HERE, before the timing section, because the release timing
+    # below must quote the operate time of the relay actually chosen — not a separately typed one.
+    # (Section 8.4.4 renders the selection itself; this is the same result object.)
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_relay
+        _rly = calculate_relay(design, cap or {}, opts)
+    except Exception:
+        _rly = None
+    _rsel = (_rly or {}).get("selected") or {}
+
     # ── 8.9.2 precharge timing — on the SELECTED part's R25 ──
     sub_h(story, "8.4.2", "Precharge Timing", CH)
     body(story,
@@ -261,6 +271,13 @@ def build_ntc_story(story, design, cap=None, opts=None):
             f"minimum the part had to clear, not the value to design the relay delay around.</i>", CH)
     if wc:
         _rr = wc.get("r_required_ohm"); _op = wc.get("relay_operate_ms"); _tolm = wc.get("relay_delay_tol_ms")
+        # Operate time comes from the relay actually selected unless the designer overrode it. The
+        # catalogue publishes it on nearly every part, and the selection gate already screens on it —
+        # quoting a separately typed number here let the two disagree silently.
+        _op_src = "designer input"
+        if _op is None and _rsel.get("t_operate_ms"):
+            _op = float(_rsel["t_operate_ms"])
+            _op_src = f"{_rsel.get('mfr','')} {_rsel.get('part_number','')} datasheet".strip()
         _sel_ms = (out.get("selected") or {}).get("t_bypass_ms")
         _min_ms = (_rr * s['cout'] * s['tau_multiple'] * 1e3) if _rr else None
         _final_ms = (_sel_ms or r['t_bypass'] * 1e3) + (_op or 0) + (_tolm or 0)
@@ -270,7 +287,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
                f"required resistance {_f(_rr,2)} {_OHM}); " if _min_ms else "")
             + f"selected-part timing = {_f(_sel_ms or r['t_bypass']*1e3,0)} ms (from the actual R<sub>25</sub>). "
             f"The final relay-command delay must be &#8805; the selected-part value plus the relay operate-time "
-            + (f"({_f(_op,0)} ms) " if _op else "(TBD) ")
+            + (f"({_f(_op,0)} ms, {_op_src}) " if _op else "(TBD) ")
             + "and control-timing tolerance"
             + (f" ({_f(_tolm,0)} ms)" if _tolm else " (TBD)")
             + f" &#8658; <b>&#8805; {_f(_final_ms,0)} ms</b>.", CH)
@@ -286,41 +303,64 @@ def build_ntc_story(story, design, cap=None, opts=None):
             "regulated PFC bus — the PFC boost stage lifts the bus to V<sub>bus</sub> only after startup. The "
             "capacitor voltage at the bypass instant, and the residual the relay closes into, are:", CH)
         eq_box(story, [r"V_{cap}(t)=V_{in,pk}\,(1-e^{-t/\tau}),\qquad V_{residual}=V_{in,pk}-V_{cap}(N_\tau\tau)",
-                       r"I_{relay,make}=\dfrac{V_{residual}}{R_{relay\,path}}"], number="8.4.3", ch=CH)
+                       r"I_{relay,make}=\dfrac{V_{residual}}{R_{par}+R_{relay}}"], number="8.4.3", ch=CH)
+        body(story,
+            "<b>Which resistance divides here, and why it is not the NTC.</b> Closing the contact is "
+            "precisely what shorts the NTC out, so at the instant the contact carries current the NTC is "
+            "no longer in the path: what limits the make current is the loop parasitic R<sub>par</sub> of "
+            "Section 8.2 plus the relay's own contact and wiring resistance R<sub>relay</sub>. Dividing by "
+            "R<sub>par</sub>+R<sub>25</sub> would describe the current through the <i>NTC</i> a moment "
+            "<i>before</i> the contact touches, which is a different and much smaller number. "
+            "R<sub>relay</sub> is rarely published; leaving it out <b>over-states</b> the make current, "
+            "which is the safe direction &#8212; so the requirement below needs no datasheet lookup, and "
+            "entering a relay-path resistance can only reduce it.", CH)
         _imk = wc.get("i_relay_make_A")
+        _mkpath = wc.get("r_make_path_ohm")
         body(story,
             f"<b>Worked.</b> At {_f(s['tau_multiple'],0)}&#183;&#964; the capacitor reaches "
             f"{_f(wc['vcap_close_V'],1)} V &#8776; <b>{_f(wc['vcap_close_pct'],1)}%</b> of the "
             f"{_f(r['vin_pk_max'],1)} V rectified peak, leaving V<sub>residual</sub> = "
-            f"<b>{_f(wc['v_residual_V'],1)} V</b>. The relay therefore makes into a small differential "
-            + (f"; with a relay-path impedance of {_f(s['relay_path_ohm'],3)} {_OHM} the make current is "
-               f"<b>{_f(_imk,2)} A</b>"
+            f"<b>{_f(wc['v_residual_V'],1)} V</b> across the open contact. Dividing by the make path "
+            + (f"{_f(_mkpath,3)} {_OHM} (R<sub>par</sub> {_f(r['r_parasitic'],3)} {_OHM}"
+               + (f" + R<sub>relay</sub> {_f(s['relay_path_ohm'],3)} {_OHM}" if s.get('relay_path_ohm')
+                  else ", R<sub>relay</sub> not supplied &#8212; omitted, which over-states the result")
+               + f") gives a make current of <b>{_f(_imk,2)} A</b>, drawn once per start"
                if _imk is not None else
-               ", but the make <i>current</i> = V<sub>residual</sub>/R<sub>path</sub> needs the relay-path "
-               "impedance (contact + wiring + bridge + cap ESR + PCB) — an open item until layout is fixed")
+               " needs a loop resistance (Section 8.2 <i>Loop R</i>), which has not been supplied")
             + ".", CH)
         _mk_rating = wc.get("relay_make_rating_A")
         data_table(story, "8.4.3", "Relay-Make Assessment",
-            "Residual is computed; make current and rating close on the datasheet/layout.",
+            "The make duty is fully computed. Only the contact's published make rating is outstanding, "
+            "and that is a datasheet/vendor confirmation rather than a calculation.",
             ["Item", "Value / Action", "Status"],
             [["Residual voltage at bypass", f"{_f(wc['v_residual_V'],1)} V", "Calculated"],
-             ["Relay-path impedance", (f"{_f(s['relay_path_ohm'],3)} {_OHM}" if s.get('relay_path_ohm') else "TBD (contact + wiring + bridge + ESR + PCB)"),
-              "Input" if s.get('relay_path_ohm') else "Open"],
-             ["Relay make current", (f"{_f(_imk,2)} A" if _imk is not None else "TBD = V_residual / R_path"),
+             ["Loop parasitic R<sub>par</sub> (Section 8.2)", f"{_f(r['r_parasitic'],3)} {_OHM}", "Input"],
+             ["Relay's own path R<sub>relay</sub>",
+              (f"{_f(s['relay_path_ohm'],3)} {_OHM}" if s.get('relay_path_ohm')
+               else "not supplied &#8212; omitted (over-states the current)"),
+              "Input" if s.get('relay_path_ohm') else "Optional"],
+             ["Relay make current",
+              (f"{_f(_imk,2)} A at {_f(wc['v_residual_V'],1)} V" if _imk is not None else "needs Loop R"),
               "Calculated" if _imk is not None else "Open"],
-             ["Contact make rating", (f"{_f(_mk_rating,1)} A" if _mk_rating else "TBD from relay datasheet"),
+             ["Contact make rating",
+              (f"{_f(_mk_rating,1)} A" if _mk_rating
+               else "confirm on the datasheet or with the vendor"),
               (("PASS" if (_imk is not None and _mk_rating and _imk <= _mk_rating) else "CHECK") if _mk_rating else "Required")]],
             col_widths=[CW*0.34, CW*0.42, CW*0.24], ch=CH)
+        # Keep this label SHORT: annotation titles render in a ~20 mm cell and wrap per-character
+        # once they get long ("...RELAY DA TASHEET"). Same trap as the 47-character label in C185.
+        annotation(story, "MAKE RATING",
+            f"Confirm the contact can make <b>{_f(_imk,1) if _imk is not None else '(compute Loop R first)'} A "
+            f"at {_f(wc['v_residual_V'],1)} V</b>, once per start. Most relay datasheets publish only a "
+            f"CONTINUOUS contact rating; a make / inrush rating is often absent, in which case confirm with "
+            f"the vendor or measure at closure on the bench. The stated figure is conservative &#8212; it "
+            f"omits the relay's own contact and wiring resistance, which can only reduce it. This is a "
+            f"release item: it does not block selecting a relay.", CH)
 
     # ── 8.4.4 bypass-relay selection from the vendor catalogue ──
     # The duty is entirely carried in from the NTC sizing above — worst-case RMS, line peak,
     # precharge delay and the loop parasitic — so the relay is screened against the SAME numbers
     # the inrush design produced rather than a second, drifting set.
-    try:
-        from app.mode_b.inputprotection.adapter import calculate_relay
-        _rly = calculate_relay(design, cap or {}, opts)
-    except Exception:
-        _rly = None
     if _rly:
         sub_h(story, "8.4.4", "Bypass-Relay Selection", CH)
         _rsp, _rrq = _rly.get("spec") or {}, _rly.get("requirements") or {}
@@ -348,7 +388,16 @@ def build_ntc_story(story, design, cap=None, opts=None):
             f"R<sub>25</sub> {_f(_rsp.get('r_ntc_ohm'),2)}) &#8658; a make current of "
             f"<b>{_f(_rrq.get('i_make_A'),2)} A</b>. <b>That small make current is the entire purpose of "
             f"waiting</b>: close too early and the contact makes into a nearly-full line peak.", CH)
-        _rsel = _rly.get("selected")
+        annotation(story, "CONFIRM THE MAKE DUTY",
+            f"A published make / inrush contact rating is <b>not available for any part in this "
+            f"catalogue</b>, and most relay datasheets state only a continuous rating. Gate 3 therefore "
+            f"clears on the continuous rating and reports CONDITIONAL &#8212; that means <i>nothing here "
+            f"rules the part out</i>, not that the duty is proven. <b>What to confirm:</b> that the "
+            f"chosen relay can make <b>{_f(_rrq.get('i_make_A'),1)} A at "
+            f"{_f((_rsp.get('vin_pk_max') or 0) - (_rsp.get('v_bus_precharged') or 0),1)} V</b>, once per "
+            f"start &#8212; from the datasheet, the vendor, or a bench measurement at closure. The duty is "
+            f"light because of the precharge delay, so most contacts of this size will cover it; it is the "
+            f"evidence that is missing, not the margin. This is a release item and never blocks selection.", CH)
         data_table(story, "8.4.4", "Bypass-Relay Selection Gates",
             (f"Screened against {_rly.get('catalog_size', 0)} catalogue relays. "
              + (f"Selected: <b>{(_rsel.get('mfr') or '')} {(_rsel.get('part_number') or '')}</b>."

@@ -227,10 +227,15 @@ export const InputProtection: React.FC<Props> = ({
   // ONE place where the carried-in values are folded in. Everything that talks to the NTC engine
   // goes through this — the panel's own calculation AND the report payload — because a value that
   // reaches the report but not the screen (or the reverse) is exactly the disconnect we keep hitting.
+  // Operate time of the relay actually selected. The catalogue publishes it on 1076 of 1082 parts
+  // and the selection gate already screens on it, so typing a second figure here let the gate and
+  // the report's relay-command delay disagree silently. A designer entry still wins.
+  const selRelayOperate = Number(relayRes?.selected?.t_operate_ms) || null
   const ntcOptsEffective = (base?: Record<string, string>): Record<string, string> => {
     const o = { ...(base ?? ntcOpts) }
     if (bridgeIfsm && !o.bridge_ifsm_a) o.bridge_ifsm_a = String(bridgeIfsm)
     if (selFuseI2t && !o.fuse_i2t_rating) o.fuse_i2t_rating = String(selFuseI2t)
+    if (selRelayOperate && !o.relay_operate_ms) o.relay_operate_ms = String(selRelayOperate)
     return o
   }
 
@@ -238,7 +243,7 @@ export const InputProtection: React.FC<Props> = ({
   // The fuse runs alongside the NTC on mount, so its melting I²t only exists on the second pass.
   // Re-run the NTC once a carried-in value first appears, otherwise the panel would sit showing OPEN
   // on a gate the report has already closed.
-  useEffect(() => { if (selFuseI2t || bridgeIfsm) calcNtc() }, [selFuseI2t, bridgeIfsm])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (selFuseI2t || bridgeIfsm || selRelayOperate) calcNtc() }, [selFuseI2t, bridgeIfsm, selRelayOperate])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [rptBusy, setRptBusy] = useState(false)
   // FULL report: all previous chapters (design basis, magnetics, DC-bus capacitor) + the
@@ -323,22 +328,10 @@ export const InputProtection: React.FC<Props> = ({
               combined figure; do not also count the parts separately. The same value is used for the
               relay make-current and bypassed-path checks.
             </div>
-            {/* Carried in from elsewhere — shown, not editable, so this screen states the same
-                numbers the report uses. Relay timing and restart policy are on the Relay tab, the
-                fuse I²t on the Line-fuse tab, and the bridge I_FSM comes from Chapter 7. */}
-            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-              Carried in from other chapters <span style={{ color: C.muted, textTransform: 'none' }}>— not entered here; missing = OPEN in the report</span></div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-              {([['Bridge I_FSM', bridgeIfsm ? `${num(bridgeIfsm, 0)} A` : 'no bridge selected', 'Chapter 7 selection'],
-                 ['Fuse melting I²t', selFuseI2t ? `${num(selFuseI2t, 0)} A²s` : 'no fuse selected', 'the Line-fuse tab'],
-                 ['Bypassed / stuck-relay R', `${ntcOpts.r_loop_ohm || '0'} Ω`, 'the Loop R above']] as [string, string, string][])
-                .map(([k, v, src]) => (
-                  <div key={k} style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 10px' }}>
-                    <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>{k}</div>
-                    <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono,monospace', color: C.text }}>{v}</div>
-                    <div style={{ fontSize: 9, color: C.muted }}>from {src}</div>
-                  </div>))}
-            </div>
+            {/* Bridge I_FSM (Ch 7), fuse melting I²t (Line-fuse tab) and the bypassed-path resistance
+                (the Loop R above) are all folded in by ntcOptsEffective. They are not shown here:
+                nothing on this tab reads them — the gates they close are in the report — and the
+                third simply restated the Loop R knob a few rows up. */}
             {/* Inrush-limiter topology schematic (same drawing embedded in the Ch 8 report). */}
             <details style={{ marginBottom: 14 }}>
               <summary style={{ cursor: 'pointer', fontSize: 11.5, color: C.teal, fontWeight: 600 }}>
@@ -490,9 +483,10 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Coil supply rail" unit="V" value={relayOpts.relay_coil_supply_v} onChange={v => setR('relay_coil_supply_v', v)} />
               <Knob label="Contact current margin" unit="×" value={relayOpts.relay_current_margin} onChange={v => setR('relay_current_margin', v)} />
               <Knob label="Switching voltage margin" unit="×" value={relayOpts.relay_voltage_margin} onChange={v => setR('relay_voltage_margin', v)} />
-              <Knob label="Relay make rating" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
-              <Knob label="Relay-path R" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
-              <Knob label="Relay operate" unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
+              <Knob label="Relay make rating (if published)" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
+              <Knob label="Relay-path R (optional)" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
+              <Knob label={`Relay operate${!ntcOpts.relay_operate_ms && selRelayOperate ? ` (${selRelayOperate} from part)` : ''}`}
+                unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
               <Knob label="Delay tolerance" unit="ms" value={ntcOpts.relay_delay_tol_ms} onChange={v => setN('relay_delay_tol_ms', v)} />
               <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
               <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
@@ -528,7 +522,7 @@ export const InputProtection: React.FC<Props> = ({
                   {([['Worst-case I_rms', `${(relayRes.spec.i_rms_worst ?? 0).toFixed(2)} A`],
                      ['Line peak', `${(relayRes.spec.vin_pk_max ?? 0).toFixed(0)} V`],
                      ['Bus at closure', `${(relayRes.spec.v_bus_precharged ?? 0).toFixed(0)} V`],
-                     ['Make path R', `${(relayRes.spec.r_path_ohm ?? 0).toFixed(2)} Ω`],
+                     ['Make path R', `${(relayRes.spec.r_path_ohm ?? 0).toFixed(2)} Ω (loop, NTC shorted)`],
                      ['Precharge delay', `${(relayRes.spec.t_bypass_ms ?? 0).toFixed(0)} ms`]] as [string, string][])
                     .map(([k, v]) => (
                       <div key={k} style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 10px' }}>
@@ -537,6 +531,19 @@ export const InputProtection: React.FC<Props> = ({
                       </div>))}
                 </div>
 
+                {relayRes.requirements.i_make_A != null && (
+                  <div style={{ background: C.bg3, border: `1px solid ${C.amber}44`, borderRadius: 8, padding: '9px 12px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: C.amber, textTransform: 'uppercase', marginBottom: 3 }}>Confirm on the relay datasheet</div>
+                    <div style={{ fontSize: 11.5, color: C.text, lineHeight: 1.7 }}>
+                      The contact must make <b>{relayRes.requirements.i_make_A} A at{' '}
+                      {num((relayRes.spec.vin_pk_max ?? 0) - (relayRes.spec.v_bus_precharged ?? 0), 1)} V</b>, once per start.
+                      Most datasheets publish only a <i>continuous</i> contact rating — a make/inrush rating is
+                      often absent, and it is absent for every part in this catalogue. Confirm with the vendor
+                      or measure at closure. The figure is conservative: it omits the relay's own contact and
+                      wiring resistance, which can only reduce it. Enter it above if published — this is a
+                      release item and never blocks selecting a relay.
+                    </div>
+                  </div>)}
                 <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
                   Requirements derived from the duty</div>
                 <div style={{ fontSize: 11.5, color: C.text, marginBottom: 12, lineHeight: 1.7 }}>

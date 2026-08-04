@@ -9,9 +9,12 @@ Five gates, in the order they constrain the choice:
 
   1. Contact current    — the contact must carry the worst-case continuous input RMS with margin.
   2. Switching voltage  — rating >= the highest voltage across the open contact (the line peak).
-  3. Make current       — the residual precharge current at the instant of closure. This is the
-                          gate that actually distinguishes relays here: the contact closes onto
-                          (V_in,pk - V_bus)/(R_path), and welding is the failure mode.
+  3. Make current       — the current the CONTACT carries at the instant of closure, and welding is
+                          the failure mode. Closing the contact is what shorts the NTC out, so the
+                          NTC is NOT in this path: I_make = (V_in,pk - V_bus)/(R_par + R_relay).
+                          R_relay (the relay's own contact + wiring resistance) is rarely published;
+                          omitting it OVER-states the current, which is the safe direction, so the
+                          requirement can be stated without any datasheet lookup.
   4. Coil supply        — the coil voltage must be a rail the board actually has.
   5. Timing             — operate time must fit inside the precharge delay, so the contact does not
                           close before the bus has charged.
@@ -41,7 +44,8 @@ class RelaySpec:
     i_rms_worst: float = 0.0          # A, worst-case continuous input RMS
     vin_pk_max: float = 0.0           # V, line peak (max voltage across the open contact)
     v_bus_precharged: float = 0.0     # V, bus voltage at the moment of closure
-    r_path_ohm: float = 0.0           # ohm, resistance in the make path (loop parasitic + NTC)
+    r_path_ohm: float = 0.0           # ohm, make path = loop parasitic + the relay's own contact and
+                                      # wiring resistance. NOT the NTC — the contact shorts it out.
     t_bypass_ms: float = 0.0          # ms, precharge delay the relay must close within
     coil_supply_v: Optional[float] = None    # V, the rail available on the board (None = unknown)
     ambient_c: float = 45.0           # degC
@@ -66,10 +70,11 @@ def requirements(spec: RelaySpec) -> RelayRequirement:
     i_contact_min = spec.i_rms_worst * spec.current_margin
     v_switch_min = spec.vin_pk_max * spec.voltage_margin
 
-    # Residual make current: the contact closes across whatever is still dropped over the NTC and
-    # the loop resistance. Once the bus has precharged to near the peak this is small - that is the
-    # whole point of waiting - but it is NOT zero, and it is what welds contacts when the delay is
-    # too short.
+    # Residual make current: the contact closes across whatever is still dropped across the NTC, and
+    # in doing so shorts the NTC out - so the current that flows through the CONTACT is limited by
+    # the loop, not by the NTC. Once the bus has precharged to near the peak this is small - that is
+    # the whole point of waiting - but it is NOT zero, and it is what welds contacts when the delay
+    # is too short.
     i_make = None
     if spec.r_path_ohm > 0:
         dv = max(spec.vin_pk_max - spec.v_bus_precharged, 0.0)
@@ -80,7 +85,8 @@ def requirements(spec: RelaySpec) -> RelayRequirement:
 
     notes = []
     if spec.r_path_ohm <= 0:
-        notes.append("Make-path resistance not supplied — make current cannot be evaluated.")
+        notes.append("No loop resistance supplied (Section 8.2 Loop R) — make current cannot be "
+                     "evaluated.")
     if spec.coil_supply_v is None:
         notes.append("Coil supply rail not declared — coil-voltage gate is informational.")
     return RelayRequirement(round(i_contact_min, 3), round(v_switch_min, 1),
@@ -114,8 +120,10 @@ def gate_rows(part: dict | None, req: RelayRequirement, spec: RelaySpec) -> list
                  "result": (f"{sv:g} V" if sv is not None else "—"),
                  "status": _st(None if (sv is None or not part) else sv >= req.v_switch_min_V)})
 
-    # Gate 3 compares against the CONTACT rating: a datasheet make/inrush rating is rarely given in
-    # this table, so passing on the continuous rating is CONDITIONAL, not a clean pass.
+    # Gate 3 compares against the CONTACT rating because a published make/inrush rating is rare —
+    # in this catalogue it is absent for every part. Clearing the continuous rating is therefore
+    # CONDITIONAL, never a clean PASS: it means "nothing here rules the part out, now confirm the
+    # make duty against the datasheet or the vendor". It never removes a part from selection.
     if req.i_make_A is None:
         rows.append({"n": 3, "name": GATES[2][1], "requirement": "make current must be evaluated",
                      "result": "path R not supplied", "status": "DATA MISSING"})

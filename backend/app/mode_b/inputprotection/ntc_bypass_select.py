@@ -84,7 +84,9 @@ class Spec:
     rsource_min: float = 0.0       # ohm, min documented source R (conservative 0 -> highest inrush)
     fuse_i2t_rating: float = 0.0   # A^2s, fuse pre-arcing I2t (0 -> open item, compare skipped)
     relay_make_rating_a: float = 0.0   # A, relay contact make-current rating (0 -> open item)
-    relay_path_ohm: float = 0.0    # ohm, relay-path impedance for make-current (0 -> open item)
+    relay_path_ohm: float = 0.0    # ohm, the relay's OWN contact + wiring resistance. Optional
+                                   # refinement only: it is added to the loop parasitic for the make
+                                   # current, so leaving it 0 over-states the current (conservative).
     off_time_min_ms: float = 0.0   # ms, minimum enforced off-time before restart (0 -> not guaranteed)
     restart_protection: str = ""   # "hardware" | "firmware" | "procedure" | "" (unstated)
     # --- round-2 review: bridge surge rating + relay timing (0/blank -> OPEN) ---
@@ -246,7 +248,16 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     tau = r25 * s.cout
     vcap_close = vpk * (1.0 - exp(-n_tau))         # Vcap at N*tau (fraction of rectified peak)
     v_residual = vpk - vcap_close
-    i_relay_make = (v_residual / s.relay_path_ohm) if s.relay_path_ohm > 0 else None
+    # MAKE CURRENT — the current the CONTACT carries, which is the current AFTER closure, not before.
+    # Closing the contact is what shorts the NTC out, so at that instant the NTC is no longer in the
+    # path: what limits the current is the loop parasitic plus the relay's own contact/wiring
+    # resistance. Two earlier readings of this were wrong in opposite directions — dividing by the
+    # relay path ALONE omits the loop (grossly over-states it), and including R25 describes the
+    # current through the NTC a moment BEFORE the contact touches (under-states it ~7x).
+    # Omitting an unknown relay-path resistance is the CONSERVATIVE direction: adding it can only
+    # reduce the current, so the designer never has to supply a number to get a safe requirement.
+    r_make_path = r_para + s.relay_path_ohm
+    i_relay_make = (v_residual / r_make_path) if r_make_path > 0 else None
 
     # ---- pt5: warm / hot restart (DB r_hot if present; else off-time requirement) ----
     r_hot = (float(rec["r_hot_mohm"]) / 1000.0) if rec.get("r_hot_mohm") else None
@@ -304,7 +315,9 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     st["min_r25_cold"] = ("BLOCKED" if not hard_ok else ("PASS" if design_margin_ok else "CHECK"))
     st["pulse_energy"] = "OPEN"                 # DB energy is an estimate → datasheet confirmation required
     st["precharge_timing"] = "PASS"
-    st["relay_make"] = ("OPEN" if (s.relay_path_ohm <= 0 or s.relay_make_rating_a <= 0)
+    # Only the published make RATING is open now; the make current itself is always computable
+    # (conservatively) from the loop resistance, so a missing relay-path figure no longer hides it.
+    st["relay_make"] = ("OPEN" if s.relay_make_rating_a <= 0
                         else ("PASS" if (i_relay_make is not None and i_relay_make <= s.relay_make_rating_a) else "CHECK"))
     # Hot restart is a REQUIRED DESIGN DECISION, not a part-selection blocker: if a restart policy
     # is defined (enforced min off-time OR a stated protection method) it PASSES; otherwise it stays
@@ -362,6 +375,8 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
         "vcap_close_V": round(vcap_close, 1), "vcap_close_pct": round(100.0 * vcap_close / vpk, 1),
         "v_residual_V": round(v_residual, 1),
         "i_relay_make_A": (round(i_relay_make, 2) if i_relay_make is not None else None),
+        "r_make_path_ohm": (round(r_make_path, 3) if r_make_path > 0 else None),
+        "relay_path_ohm": (s.relay_path_ohm or None),
         "relay_make_rating_A": (s.relay_make_rating_a or None),
         "r_hot_ohm": (round(r_hot, 3) if r_hot else None),
         "i_warm_A": (round(i_warm, 1) if i_warm else None),

@@ -426,10 +426,19 @@ def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = N
     i_rms = float(res.get("i_rms_worst") or 0.0)
     vin_pk = float(res.get("vin_pk_max") or 0.0)
     r_par = float(res.get("r_parasitic") or 0.0)
-    # Make path: the loop parasitic plus the NTC still in circuit at the instant of closure. Prefer
-    # the SELECTED part's real R25; fall back to the requirement pick before a part is chosen.
-    r_ntc = float(sel_ntc.get("r25_ohm") or res.get("r25_pick") or 0.0)
-    r_path = r_par + r_ntc
+    # MAKE PATH. The contact closing is what shorts the NTC out, so the NTC is NOT in the path at
+    # the instant the contact carries current — what limits the make current is the loop parasitic
+    # plus the relay's own contact/wiring resistance. (Including R25 here described the current
+    # through the NTC a moment BEFORE closure, roughly 7x low on the reference design.) The relay's
+    # own resistance is rarely published, and omitting it is the conservative direction: it can only
+    # reduce the current, so no datasheet lookup is needed to state a safe requirement.
+    r_ntc = float(sel_ntc.get("r25_ohm") or res.get("r25_pick") or 0.0)   # context only, reported
+    r_relay = 0.0
+    try:
+        r_relay = float(opts.get("relay_path_ohm") or 0.0)
+    except (TypeError, ValueError):
+        r_relay = 0.0
+    r_path = r_par + r_relay
     # Bus voltage reached by the end of the precharge window: 1 - e^(-t/tau) of the peak.
     t_bypass_ms = float(sel_ntc.get("t_bypass_ms") or (res.get("t_bypass") or 0.0) * 1e3)
     tau_ms = float(sel_ntc.get("tau_ms") or (res.get("tau") or 0.0) * 1e3)
@@ -468,6 +477,7 @@ def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = N
     return _native({
         "spec": {"i_rms_worst": i_rms, "vin_pk_max": vin_pk, "v_bus_precharged": v_bus,
                  "r_path_ohm": r_path, "r_parasitic": r_par, "r_ntc_ohm": r_ntc,
+                 "r_relay_path_ohm": (r_relay or None),
                  "t_bypass_ms": t_bypass_ms, "tau_ms": tau_ms,
                  "coil_supply_v": spec.coil_supply_v, "current_margin": spec.current_margin,
                  "voltage_margin": spec.voltage_margin},

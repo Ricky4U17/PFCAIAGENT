@@ -7063,3 +7063,65 @@ bridge I_FSM 400 A; Table 8.9a bridge_surge PASS; legacy r_wiring/r_pcb payload 
 NOT A DEFECT (checked, so it is not "fixed" later): the tick in Table 8.7's IFSM column extracts as
 nothing because ReportLab substitutes ZapfDingbats 0x13 for it. It renders correctly — same class of
 false positive as the matplotlib bullet in B13.
+
+## C196 — relay make current: one formula, at the right instant; requirement stated, not looked up
+
+Designer decision: the relay's make/inrush rating and its contact resistance "are not available in
+all datasheets so hard to enter — just provide a suggestion to the designer, in the report as well
+as on the GUI, about the requirement to check". No auto-fill from `contact_i_A`, no new DB column.
+Working out what that requirement statement should SAY exposed a defect in the number itself.
+
+### The make current was computed from the wrong instant
+`adapter.py` set the make path to `R_par + R_NTC`, commented "the NTC still in circuit at the
+instant of closure". But closing the contact IS what shorts the NTC out — that is the entire job of
+the relay. So the current the CONTACT carries is the post-closure current:
+
+| Instant | Path | Reference design |
+|---|---|---|
+| just BEFORE closure | R_par + R_25 = 1.00 + 5.74 Ω | 1.01 A ← what C194 printed |
+| just AFTER closure | R_par + R_relay ≈ 1.00 Ω | **6.84 A** ← what the contact makes |
+
+A third copy lived in the NTC engine: `i_relay_make = V_residual / relay_path_ohm`, dividing by the
+relay path ALONE and omitting the loop — 138 A with a 0.05 Ω entry. One quantity, three formulas,
+spanning 1 A to 138 A. Now ONE: `I_make = V_residual / (R_par + R_relay)`, used by the relay
+selector's gate 3, the NTC engine's relay-make check and Sections 8.4.3/8.4.4. Verified both paths
+return 6.84 A on the same design, and 6.51 A when a 0.05 Ω relay path is entered.
+
+**This is what makes the designer's decision work.** R_relay is the value that cannot be looked up —
+and omitting it OVER-states the current. So the conservative requirement needs no datasheet at all,
+and entering a relay-path resistance can only reduce it. Gate outcomes do not move: 6.84 A is far
+under the 31.4 A continuous rating gate 1 already demands.
+
+Consequence in the status taxonomy: `st["relay_make"]` no longer goes OPEN for a missing relay-path
+resistance, since the current is always computable. Only the missing published make RATING keeps it
+open — which is the thing the designer actually has to go and confirm.
+
+### The requirement, stated in both places
+Report Section 8.4.3 gains "Which resistance divides here, and why it is not the NTC", the corrected
+equation box, a worked line naming every term, a rebuilt Table 8.4.3 (R_par and R_relay as separate
+rows, R_relay marked Optional) and a "MAKE RATING" annotation. Section 8.4.4 gains a "CONFIRM THE
+MAKE DUTY" annotation stating that no part in this catalogue publishes a make rating, so gate 3
+clearing on the continuous rating means "nothing rules it out", not "proven". The Relay tab carries
+the same words. Both name the duty concretely: **make 6.8 A at 6.8 V, once per start**.
+Release item; never blocks selection.
+
+### Relay operate time now comes from the selected part
+The catalogue publishes `t_operate_ms` on 1076/1082 parts and gate 5 already screened on it, while
+Section 8.5's relay-command delay was built from a separately typed figure — they could disagree
+silently. Now fed from the selected relay in `ntcOptsEffective` (GUI) and via `_rsel` in the report,
+designer entry still winning. The relay selection is resolved ONCE, before Section 8.4.2, instead of
+inside 8.4.4, so the timing section can quote it. Renders: "plus the relay operate-time (8 ms,
+Amphenol Anytek AKE112D00G datasheet) and control-timing tolerance (2 ms) ⇒ ≥ 75 ms".
+
+### Also
+The three read-only chips added to the NTC tab in C195 are removed — the designer asked whether they
+were needed and they were not: the gates they feed render only in the report, and the third restated
+the Loop R knob a few rows above. The auto-feed itself is untouched. Relay knobs relabelled "Relay
+make rating (if published)" and "Relay-path R (optional)".
+
+VERIFIED: both make-current paths agree at 6.84 A (6.51 A with a relay path entered); relay selection
+still returns a part (Amphenol Anytek AKE112D00G, CONDITIONAL); Ch8+9 24 pp, 0 unrenderable glyphs,
+sections 8.1-8.9 in order; combined report 190 pp; suite 172 passed / 2 skipped; tsc clean.
+TRAP RE-HIT: the first annotation label ("WHAT TO CHECK ON THE RELAY DATASHEET", 36 chars) wrapped
+per-character into "RELAY DA TASHEET" in its ~20 mm cell — the C185 lesson. Shortened to "MAKE
+RATING". Keep annotation titles under ~20 characters.
