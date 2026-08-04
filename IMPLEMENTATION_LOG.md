@@ -6950,3 +6950,48 @@ the 8.9 summary; Rpar note and 4-column sweep present. Combined report 190 pp,
 suite 172 passed / 2 skipped, tsc clean.
 
 STILL OPEN from this batch: items 1, 2, 3 (relay tab, relay database, moving relay/fuse params).
+
+## C194 — items 1, 2, 3: relay tab, relay database, parameter moves
+
+### #2 — relay database (1082 parts)
+`specs/Database/Power_Relays_Database.xlsx` is a Digi-Key parametric export in the SAME shape as the
+ICL / fuse tables, so it drops into the existing Excel -> JSON-cache pattern. New in
+`inputprotection/database.py`: `_relay_src_path` / `_relay_rows` / `ingest_relay` / `build_relay` /
+`load_relay` / `options_relay` / `_relay_label`, cached as `data/relay.json`.
+18 columns mapped; numeric scalars parsed off the leading number of the parametric string
+("16 A" -> 16.0). Coverage on ingest: contact_i_A, switch_v_V, coil_v_V 1082/1082;
+t_operate_ms 1076/1082. Missing cells stay None -> DATA MISSING, never a substituted default.
+NOTE: `openpyxl` was NOT installed (runtime reads the JSON cache, so nothing had needed it).
+Installed surgically for the one-off ingest, per the standing convention.
+
+### #1 + #3 — relay selector, tab, and parameter moves
+New `inputprotection/relay_select.py` — five gates in the order they constrain the choice:
+  1 contact current (worst-case RMS x margin)   2 switching voltage (line peak x margin)
+  3 MAKE CURRENT at closure                     4 coil supply rail    5 operate time vs precharge
+Gate 3 is the one that actually distinguishes parts. The duty is NOT re-derived: `calculate_relay`
+calls `calculate_ntc` and takes the worst-case RMS, line peak, loop parasitic, tau and t_bypass from
+it, then computes V_bus(t_bypass) = V_pk(1-e^-t/tau) and I_make = (V_pk - V_bus)/(R_par + R25).
+On the reference design that gives I_make = 1.01 A against a 373 V peak — the bus reaches 366.5 V in
+the 55 ms window, which is exactly why the delay exists. Screening is never-empty and pass-first,
+and prefers the SMALLEST contact that still clears (an oversized relay costs area and coil power).
+Convention honoured: a gate with a missing input reports DATA MISSING and the part stays selectable.
+
+Endpoints `/mode-b/input-protection/relay/calculate` and `/relay/options`; `inputProtectionRelay`
++ typed `RelayResult` in client.ts.
+
+GUI is now FOUR tabs: NTC inrush limiter · **Relay** · Surge (MOV+GDT) · Line fuse.
+Parameter moves (item 3): "Relay make rating" and "Relay-path R" moved to the Relay tab, "Fuse I²t
+rating" to the Line-fuse tab. **The values still travel in `ntcOpts`** because the NTC engine reads
+them for its own relay/fuse checks — only the EDITING location moved, not the data flow.
+New relay inputs: coil supply rail (12 V default), contact-current margin, switching-voltage
+margin, contact-form and mounting filters.
+
+### Report
+New Section 8.4.4 "Bypass-Relay Selection" — equation box (contact/switching/make-current/timing),
+worked substitution naming every carried-in figure, and the five-gate table; plus Table 8.4.5
+"Selected Relay — Catalogue Data" with the part's own datasheet scalars. Open items render as a
+release-only annotation.
+
+VERIFIED: relay endpoint 200 with a selected part; Ch8+9 renders 8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.4,
+8.5, 8.6, 8.6.1, 8.7, 8.8, 8.9 in order (24 pp); combined report 190 pp;
+suite 172 passed / 2 skipped; tsc clean.

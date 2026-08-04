@@ -577,6 +577,28 @@ export interface FuseResult {
 }
 export const inputProtectionFuse = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
   post<FuseResult>('/mode-b/input-protection/fuse/calculate', body)
+
+// ── NTC bypass relay ─────────────────────────────────────────────────────────
+// The duty (worst-case RMS, line peak, precharge delay, loop parasitic) is carried in from the
+// NTC calculation server-side, so the relay is sized on the same numbers the inrush design used.
+export interface RelayGate { n: number; name: string; requirement: string; result: string; status: string }
+export interface RelayCandidate {
+  mfr?: string; part_number: string; description?: string; datasheet_url?: string
+  mounting?: string; contact_form?: string; coil_type?: string; contact_material?: string
+  op_temp?: string; coil_v_V?: number | null; coil_i_mA?: number | null
+  contact_i_A?: number | null; switch_v_V?: number | null; load_max?: string
+  t_operate_ms?: number | null; t_release_ms?: number | null
+  gates?: RelayGate[]; verdict?: string
+}
+export interface RelayResult {
+  spec: Record<string, number | null>
+  requirements: { i_contact_min_A: number; v_switch_min_V: number; i_make_A: number | null
+                  t_operate_max_ms: number | null; coil_supply_v: number | null; notes: string[] }
+  candidates: RelayCandidate[]; selected: RelayCandidate | null
+  gates: RelayGate[]; gate_status: string; catalog_size: number
+}
+export const inputProtectionRelay = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>
+  post<RelayResult>('/mode-b/input-protection/relay/calculate', body)
 // ── input EMI filter (DM + CM conducted-emissions synthesis) ─────────────────
 export interface EmiResult {
   feasible: boolean; conducted_class: string; detector: string; margin_db: number

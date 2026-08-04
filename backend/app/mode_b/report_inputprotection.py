@@ -310,6 +310,73 @@ def build_ntc_story(story, design, cap=None, opts=None):
               (("PASS" if (_imk is not None and _mk_rating and _imk <= _mk_rating) else "CHECK") if _mk_rating else "Required")]],
             col_widths=[CW*0.34, CW*0.42, CW*0.24], ch=CH)
 
+    # ── 8.4.4 bypass-relay selection from the vendor catalogue ──
+    # The duty is entirely carried in from the NTC sizing above — worst-case RMS, line peak,
+    # precharge delay and the loop parasitic — so the relay is screened against the SAME numbers
+    # the inrush design produced rather than a second, drifting set.
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_relay
+        _rly = calculate_relay(design, cap or {}, opts)
+    except Exception:
+        _rly = None
+    if _rly:
+        sub_h(story, "8.4.4", "Bypass-Relay Selection", CH)
+        _rsp, _rrq = _rly.get("spec") or {}, _rly.get("requirements") or {}
+        body(story,
+            "The relay is not a general-purpose contactor choice: its duty is ONE make per start into a "
+            "partly-charged bus, then continuous conduction of the line current with the NTC out of "
+            "circuit. Every input below comes from the sizing above — nothing is re-derived here.", CH)
+        eq_box(story, [
+            r"I_{contact} \geq k_{I}\,I_{in,rms(worst)}\ ,\qquad "
+            r"V_{switch} \geq k_{V}\,V_{in,pk}",
+            r"I_{make}=\dfrac{V_{in,pk}-V_{bus}(t_{bypass})}{R_{par}+R_{25}}\ ,\qquad "
+            r"V_{bus}(t)=V_{in,pk}\left(1-e^{-t/\tau}\right)",
+            r"t_{operate} \leq t_{bypass}",
+        ], number="8.4.4", ch=CH)
+        body(story,
+            f"<b>Worked.</b> The contact must carry the worst-case continuous input RMS "
+            f"{_f(_rsp.get('i_rms_worst'),2)} A with a &#215;{_f(_rsp.get('current_margin'),2)} margin "
+            f"&#8658; <b>&#8805; {_f(_rrq.get('i_contact_min_A'),1)} A</b>, and stand off the line peak "
+            f"{_f(_rsp.get('vin_pk_max'),1)} V with &#215;{_f(_rsp.get('voltage_margin'),2)} "
+            f"&#8658; <b>&#8805; {_f(_rrq.get('v_switch_min_V'),0)} V</b>. By the end of the "
+            f"{_f(_rsp.get('t_bypass_ms'),0)} ms precharge window (&#964; = {_f(_rsp.get('tau_ms'),1)} ms) "
+            f"the bus has reached {_f(_rsp.get('v_bus_precharged'),1)} V, so the contact closes across only "
+            f"{_f((_rsp.get('vin_pk_max') or 0) - (_rsp.get('v_bus_precharged') or 0),1)} V through "
+            f"{_f(_rsp.get('r_path_ohm'),2)} {_OHM} (R<sub>par</sub> {_f(_rsp.get('r_parasitic'),2)} + "
+            f"R<sub>25</sub> {_f(_rsp.get('r_ntc_ohm'),2)}) &#8658; a make current of "
+            f"<b>{_f(_rrq.get('i_make_A'),2)} A</b>. <b>That small make current is the entire purpose of "
+            f"waiting</b>: close too early and the contact makes into a nearly-full line peak.", CH)
+        _rsel = _rly.get("selected")
+        data_table(story, "8.4.4", "Bypass-Relay Selection Gates",
+            (f"Screened against {_rly.get('catalog_size', 0)} catalogue relays. "
+             + (f"Selected: <b>{(_rsel.get('mfr') or '')} {(_rsel.get('part_number') or '')}</b>."
+                if _rsel else "No part selected yet — the requirement column still stands.")
+             + " A gate whose input is missing reports DATA MISSING and never removes a part from "
+               "selection (convention: gates block release, not selection)."),
+            ["#", "Gate", "Requirement", "Selected part", "Status"],
+            [[str(g["n"]), g["name"], g["requirement"], g["result"], g["status"]]
+             for g in (_rly.get("gates") or [])],
+            col_widths=[CW*0.05, CW*0.27, CW*0.28, CW*0.24, CW*0.16], ch=CH)
+        if _rsel:
+            data_table(story, "8.4.5", "Selected Relay — Catalogue Data",
+                "The part's own datasheet scalars, as carried in the vendor table.",
+                ["Parameter", "Value"],
+                [["Manufacturer / part", f"{_rsel.get('mfr','')} {_rsel.get('part_number','')}"],
+                 ["Contact form", str(_rsel.get("contact_form") or "&#8212;")],
+                 ["Contact rating", f"{_f(_rsel.get('contact_i_A'),1)} A"],
+                 ["Switching voltage", f"{_f(_rsel.get('switch_v_V'),0)} V"],
+                 ["Max switching load", str(_rsel.get("load_max") or "&#8212;")],
+                 ["Coil voltage / current", f"{_f(_rsel.get('coil_v_V'),1)} V / {_f(_rsel.get('coil_i_mA'),0)} mA"],
+                 ["Operate / release time", f"{_f(_rsel.get('t_operate_ms'),1)} / {_f(_rsel.get('t_release_ms'),1)} ms"],
+                 ["Contact material", str(_rsel.get("contact_material") or "&#8212;")],
+                 ["Mounting", str(_rsel.get("mounting") or "&#8212;")],
+                 ["Operating temperature", str(_rsel.get("op_temp") or "&#8212;")]],
+                col_widths=[CW*0.36, CW*0.64], ch=CH)
+        if (_rrq.get("notes") or []):
+            annotation(story, "OPEN ITEMS — RELAY",
+                " ".join(str(n) for n in _rrq["notes"])
+                + " These do not block selection; they are release items.", CH)
+
     # ── 8.10 warm / hot restart — review point 5 ──
     if wc:
         sub_h(story, "8.5", "Warm / Hot Restart Policy", CH)

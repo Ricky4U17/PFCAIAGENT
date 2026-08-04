@@ -403,3 +403,82 @@ if __name__ == "__main__":
     print("MOV:", json.dumps({"mcov_class": m["mcov"]["class"], "governing": m["stress"]["governing"],
                               "targets": [(t["path"], round(t["vc"]), t["coord"]) for t in m["targets"]],
                               "pass": [c["name"] for c in m["catalog"] if c["ok"]]}, indent=2))
+
+
+def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = None) -> dict:
+    """Select the NTC bypass relay.
+
+    Reuses the NTC calculation for the whole duty — worst-case continuous RMS, the line peak, the
+    precharge delay and the loop parasitic — so the relay is sized against the SAME numbers the
+    inrush design produced rather than a second, drifting set. Nothing here re-derives a quantity
+    another engine already owns.
+    """
+    from . import relay_select as rl
+    from . import database as _db
+    opts = opts or {}
+
+    ntc = calculate_ntc(design, cap or {}, opts)
+    res = ntc.get("result") or {}
+    spec_n = ntc.get("spec") or {}
+    sel_ntc = ntc.get("selected") or {}
+
+    i_rms = float(res.get("i_rms_worst") or 0.0)
+    vin_pk = float(res.get("vin_pk_max") or 0.0)
+    r_par = float(res.get("r_parasitic") or 0.0)
+    # Make path: the loop parasitic plus the NTC still in circuit at the instant of closure. Prefer
+    # the SELECTED part's real R25; fall back to the requirement pick before a part is chosen.
+    r_ntc = float(sel_ntc.get("r25_ohm") or res.get("r25_pick") or 0.0)
+    r_path = r_par + r_ntc
+    # Bus voltage reached by the end of the precharge window: 1 - e^(-t/tau) of the peak.
+    t_bypass_ms = float(sel_ntc.get("t_bypass_ms") or (res.get("t_bypass") or 0.0) * 1e3)
+    tau_ms = float(sel_ntc.get("tau_ms") or (res.get("tau") or 0.0) * 1e3)
+    if tau_ms > 0 and t_bypass_ms > 0:
+        import math
+        v_bus = vin_pk * (1.0 - math.exp(-t_bypass_ms / tau_ms))
+    else:
+        v_bus = 0.0
+
+    def _num_opt(key):
+        v = opts.get(key)
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    spec = rl.RelaySpec(
+        i_rms_worst=i_rms, vin_pk_max=vin_pk, v_bus_precharged=v_bus, r_path_ohm=r_path,
+        t_bypass_ms=t_bypass_ms, coil_supply_v=_num_opt("relay_coil_supply_v"),
+        ambient_c=float(opts.get("ambient_c") or 45.0),
+        current_margin=float(opts.get("relay_current_margin") or 1.5),
+        voltage_margin=float(opts.get("relay_voltage_margin") or 1.1),
+        contact_form=(opts.get("relay_contact_form") or None),
+        mounting=(opts.get("relay_mounting") or None),
+    )
+    req = rl.requirements(spec)
+    parts = _db.load_relay()
+    candidates = rl.screen(parts, spec, req, top=int(opts.get("relay_top") or 25))
+
+    sel_pn = (opts.get("relay_selected_part") or "").strip()
+    selected = (next((c for c in candidates if (c.get("part_number") or "") == sel_pn), None)
+                if sel_pn else
+                next((c for c in candidates if c.get("verdict") in ("PASS", "CONDITIONAL")), None))
+    gates = rl.gate_rows(selected, req, spec) if selected else rl.gate_rows(None, req, spec)
+
+    return _native({
+        "spec": {"i_rms_worst": i_rms, "vin_pk_max": vin_pk, "v_bus_precharged": v_bus,
+                 "r_path_ohm": r_path, "r_parasitic": r_par, "r_ntc_ohm": r_ntc,
+                 "t_bypass_ms": t_bypass_ms, "tau_ms": tau_ms,
+                 "coil_supply_v": spec.coil_supply_v, "current_margin": spec.current_margin,
+                 "voltage_margin": spec.voltage_margin},
+        "requirements": {"i_contact_min_A": req.i_contact_min_A,
+                         "v_switch_min_V": req.v_switch_min_V,
+                         "i_make_A": req.i_make_A,
+                         "t_operate_max_ms": req.t_operate_max_ms,
+                         "coil_supply_v": req.coil_supply_v,
+                         "notes": req.notes},
+        "candidates": candidates,
+        "selected": selected,
+        "gates": gates,
+        "gate_status": rl.overall_status(gates),
+        "catalog_size": len(parts),
+    })

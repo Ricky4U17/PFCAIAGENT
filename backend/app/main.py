@@ -669,6 +669,29 @@ def input_protection_fuse(req: _MovReq):
     except Exception as e:
         log.exception("fuse calculate"); raise HTTPException(500, str(e))
 
+@app.post("/mode-b/input-protection/relay/calculate", tags=["mode-b"])
+def input_protection_relay(req: _MovReq):
+    """Select the NTC bypass relay from the vendor DB.
+
+    Reuses the NTC calculation for the whole duty (worst-case RMS, line peak, precharge delay,
+    loop parasitic) so the relay is sized against the same numbers the inrush design produced."""
+    try:
+        from app.mode_b.inputprotection.adapter import calculate_relay
+        return calculate_relay(req.design, req.cap or {}, req.opts or {})
+    except Exception as e:
+        log.exception("relay calculate"); raise HTTPException(500, str(e))
+
+
+@app.post("/mode-b/input-protection/relay/options", tags=["mode-b"])
+def input_protection_relay_options():
+    """Distinct contact forms / mountings / coil rails for the relay filter dropdowns."""
+    try:
+        from app.mode_b.inputprotection.database import options_relay
+        return options_relay()
+    except Exception as e:
+        log.exception("relay options"); raise HTTPException(500, str(e))
+
+
 @app.post("/mode-b/input-protection/gdt/calculate", tags=["mode-b"])
 def input_protection_gdt(req: _MovReq):
     """Screen GDTs for the common-mode paths + the safety-level/environment MOV-vs-MOV+GDT recommendation."""

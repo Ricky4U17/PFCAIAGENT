@@ -15,8 +15,10 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { C, Btn, Card, SecHead, Badge } from './ui'
-import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, inputProtectionFuse, docGenerateReport, inrushSchematicUrl,
-         type NtcResult, type MovResult, type GdtResult, type FuseResult, type CatalogRow, type NtcCandidate } from '../api/client'
+import { inputProtectionNtc, inputProtectionMov, inputProtectionGdt, inputProtectionFuse, inputProtectionRelay,
+         docGenerateReport, inrushSchematicUrl,
+         type NtcResult, type MovResult, type GdtResult, type FuseResult, type RelayResult,
+         type CatalogRow, type NtcCandidate } from '../api/client'
 import { downloadBlob, reportFilename } from '../api/download'
 import type { CapacitorResult } from './Step15Capacitor'
 
@@ -99,7 +101,7 @@ export const InputProtection: React.FC<Props> = ({
   }, [approvedCapacitorDesign])
   const mosfetVds = Number((selectedMosfet as any)?.vdss ?? 650)
 
-  const [tab, setTab] = useState<'ntc' | 'mov' | 'fuse'>('ntc')
+  const [tab, setTab] = useState<'ntc' | 'relay' | 'mov' | 'fuse'>('ntc')
   const [err, setErr] = useState<string | null>(null)
 
   // ── NTC ──
@@ -138,6 +140,22 @@ export const InputProtection: React.FC<Props> = ({
   const [movBusy, setMovBusy] = useState(false)
   // Architecture choice: 'auto' follows the recommendation; else force MOV-only / MOV+GDT.
   const [movArch, setMovArch] = useState<'auto' | 'mov' | 'movgdt'>('auto')
+  // ── Bypass relay ── duty is derived server-side from the NTC calculation, so the relay is
+  // sized on the same worst-case RMS / line peak / precharge delay the inrush design produced.
+  const [relayOpts, setRelayOpts] = useState<Record<string, string>>({
+    relay_coil_supply_v: '12', relay_current_margin: '1.5', relay_voltage_margin: '1.1',
+    relay_contact_form: '', relay_mounting: '', relay_selected_part: '',
+  })
+  const setR = (k: string, v: string) => setRelayOpts(o => ({ ...o, [k]: v }))
+  const [relayRes, setRelayRes] = useState<RelayResult | null>(null)
+  const [relayBusy, setRelayBusy] = useState(false)
+  const calcRelay = async (override?: Record<string, string>) => {
+    setRelayBusy(true); setErr(null)
+    try {
+      const o = { ...ntcOpts, ...relayOpts, ...(override || {}) }
+      setRelayRes(await inputProtectionRelay({ design, cap, opts: o }))
+    } catch (e) { setErr((e as Error).message) } finally { setRelayBusy(false) }
+  }
   const [gdtRes, setGdtRes] = useState<GdtResult | null>(null)
   const setM = (k: string, v: string) => setMovOpts(s => ({ ...s, [k]: v }))
   const movOptsPayload = (): Record<string, unknown> => {
@@ -210,7 +228,8 @@ export const InputProtection: React.FC<Props> = ({
   const ipReportPayload = (): Record<string, unknown> => ({
     design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
     // fold the fuse selection margins in, and auto-feed the selected fuse I²t into the NTC/MOV coordination
-    ntc_opts: { ...ntcOpts, ...fuseOpts,
+    ntc_opts: { ...ntcOpts, ...fuseOpts, ...relayOpts,
+      ...(relayRes?.selected ? { relay_selected_part: relayRes.selected.part_number } : {}),
       ...(selFuseI2t && !ntcOpts.fuse_i2t_rating ? { fuse_i2t_rating: String(selFuseI2t) } : {}) },
     mov_opts: { ...movOptsPayload(), surge_architecture: useGdt ? 'MOV+GDT' : 'MOV-only',
       ...fuseOpts,
@@ -242,7 +261,7 @@ export const InputProtection: React.FC<Props> = ({
         <SecHead icon="🛡️" label="Input Protection — MOV surge + NTC inrush"
           sub={`${design.vin_min}–${design.vin_max} Vac · bus ${num(design.vout, 0)} V`} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {([['ntc', '🌡️ NTC inrush limiter'], ['mov', '⚡ Surge (MOV + GDT)'], ['fuse', '🔌 Line fuse']] as [typeof tab, string][])
+          {([['ntc', '🌡️ NTC inrush limiter'], ['relay', '🔁 Relay'], ['mov', '⚡ Surge (MOV + GDT)'], ['fuse', '🔌 Line fuse']] as [typeof tab, string][])
             .map(([t, lbl]) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -289,9 +308,8 @@ export const InputProtection: React.FC<Props> = ({
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
               Worst-case & coordination <span style={{ color: C.muted, textTransform: 'none' }}>— datasheet / layout; blank = open item in the report</span></div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-              <Knob label="Fuse I²t rating" unit="A²s" value={ntcOpts.fuse_i2t_rating} onChange={v => setN('fuse_i2t_rating', v)} />
-              <Knob label="Relay make rating" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
-              <Knob label="Relay-path R" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
+              {/* Relay knobs now live on the Relay tab and the fuse I²t on the Line-fuse tab;
+                  the values still travel in ntcOpts because the NTC engine reads them. */}
               <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
               <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
                 <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
@@ -444,6 +462,127 @@ export const InputProtection: React.FC<Props> = ({
         )}
 
         {/* ─────────────── MOV ─────────────── */}
+        {tab === 'relay' && (
+          <div>
+            <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.7, marginBottom: 12 }}>
+              The bypass relay shorts the NTC out once the bus has precharged. Its duty is carried in
+              from the NTC sizing — worst-case input RMS, line peak, precharge delay and the loop
+              parasitic — so the relay is selected against the <b>same numbers the inrush design
+              produced</b>, not a second set. The gate that actually distinguishes parts here is the
+              <b> make current at closure</b>: the contact closes onto whatever is still dropped
+              across the NTC, and welding is the failure mode.
+            </div>
+
+            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+              Relay inputs <span style={{ color: C.muted, textTransform: 'none' }}>— board rail + margins; blank filters = whole catalogue</span></div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+              <Knob label="Coil supply rail" unit="V" value={relayOpts.relay_coil_supply_v} onChange={v => setR('relay_coil_supply_v', v)} />
+              <Knob label="Contact current margin" unit="×" value={relayOpts.relay_current_margin} onChange={v => setR('relay_current_margin', v)} />
+              <Knob label="Switching voltage margin" unit="×" value={relayOpts.relay_voltage_margin} onChange={v => setR('relay_voltage_margin', v)} />
+              <Knob label="Relay make rating" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
+              <Knob label="Relay-path R" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
+              <label style={{ fontSize: 10.5, color: C.muted, minWidth: 190 }}>Contact form<br />
+                <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
+                  value={relayOpts.relay_contact_form} onChange={e => setR('relay_contact_form', e.target.value)}>
+                  <option value="">— any —</option>
+                  {Array.from(new Set((relayRes?.candidates ?? []).map(c => c.contact_form).filter(Boolean)))
+                    .map(cf => <option key={cf as string} value={cf as string}>{cf}</option>)}
+                </select></label>
+              <label style={{ fontSize: 10.5, color: C.muted, minWidth: 170 }}>Mounting<br />
+                <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
+                  value={relayOpts.relay_mounting} onChange={e => setR('relay_mounting', e.target.value)}>
+                  <option value="">— any —</option>
+                  {Array.from(new Set((relayRes?.candidates ?? []).map(c => c.mounting).filter(Boolean)))
+                    .map(mt => <option key={mt as string} value={mt as string}>{mt}</option>)}
+                </select></label>
+              <Btn variant="primary" disabled={relayBusy} onClick={() => calcRelay()}>
+                {relayBusy ? '⏳ Selecting…' : '↻ Select relay'}</Btn>
+            </div>
+
+            {!relayRes && !relayBusy && (
+              <div style={{ fontSize: 11.5, color: C.hint }}>Run “Select relay” to screen the catalogue.</div>
+            )}
+
+            {relayRes && (
+              <>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {([['Worst-case I_rms', `${(relayRes.spec.i_rms_worst ?? 0).toFixed(2)} A`],
+                     ['Line peak', `${(relayRes.spec.vin_pk_max ?? 0).toFixed(0)} V`],
+                     ['Bus at closure', `${(relayRes.spec.v_bus_precharged ?? 0).toFixed(0)} V`],
+                     ['Make path R', `${(relayRes.spec.r_path_ohm ?? 0).toFixed(2)} Ω`],
+                     ['Precharge delay', `${(relayRes.spec.t_bypass_ms ?? 0).toFixed(0)} ms`]] as [string, string][])
+                    .map(([k, v]) => (
+                      <div key={k} style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 10px' }}>
+                        <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>{k}</div>
+                        <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono,monospace', color: C.text }}>{v}</div>
+                      </div>))}
+                </div>
+
+                <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                  Requirements derived from the duty</div>
+                <div style={{ fontSize: 11.5, color: C.text, marginBottom: 12, lineHeight: 1.7 }}>
+                  Contact ≥ <b>{relayRes.requirements.i_contact_min_A} A</b> ·
+                  switching ≥ <b>{relayRes.requirements.v_switch_min_V} V</b> ·
+                  make current <b>{relayRes.requirements.i_make_A ?? '—'} A</b> ·
+                  operate ≤ <b>{relayRes.requirements.t_operate_max_ms?.toFixed(0) ?? '—'} ms</b>
+                  {relayRes.requirements.notes.length > 0 && (
+                    <div style={{ color: C.amber, fontSize: 10.5, marginTop: 4 }}>
+                      {relayRes.requirements.notes.map((n, i) => <div key={i}>⚠ {n}</div>)}
+                    </div>)}
+                </div>
+
+                {relayRes.selected && (
+                  <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                      <b style={{ color: C.text, fontSize: 13 }}>{relayRes.selected.mfr} {relayRes.selected.part_number}</b>
+                      <Badge color={vColor(relayRes.gate_status)}>{relayRes.gate_status}</Badge>
+                      {relayRes.selected.datasheet_url && (
+                        <a href={relayRes.selected.datasheet_url} target="_blank" rel="noreferrer"
+                          style={{ color: C.muted, fontSize: 11 }}>datasheet ↗</a>)}
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginTop: 8 }}>
+                      <thead><tr>{['#', 'Gate', 'Requirement', 'Selected part', 'Status'].map(h =>
+                        <th key={h} style={{ textAlign: 'left', padding: '3px 7px', color: C.hint, fontSize: 9, textTransform: 'uppercase' }}>{h}</th>)}</tr></thead>
+                      <tbody>{relayRes.gates.map(g => (
+                        <tr key={g.n} style={{ borderTop: `1px solid ${C.border}` }}>
+                          <td style={{ padding: '3px 7px', color: C.muted }}>{g.n}</td>
+                          <td style={{ padding: '3px 7px' }}>{g.name}</td>
+                          <td style={{ padding: '3px 7px', fontFamily: 'IBM Plex Mono,monospace', color: C.muted }}>{g.requirement}</td>
+                          <td style={{ padding: '3px 7px', fontFamily: 'IBM Plex Mono,monospace' }}>{g.result}</td>
+                          <td style={{ padding: '3px 7px' }}><Badge color={vColor(g.status)}>{g.status}</Badge></td>
+                        </tr>))}</tbody>
+                    </table>
+                  </div>)}
+
+                <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
+                  Candidates <span style={{ color: C.muted, textTransform: 'none' }}>
+                    — {relayRes.candidates.length} of {relayRes.catalog_size} screened, pass-first; click to select</span></div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead><tr>{['', 'Mfr / Part', 'Contact', 'Switching', 'Coil', 'Form', 'Operate', 'Verdict'].map(h =>
+                      <th key={h} style={{ textAlign: 'left', padding: '4px 7px', color: C.hint, fontSize: 9, textTransform: 'uppercase' }}>{h}</th>)}</tr></thead>
+                    <tbody>{relayRes.candidates.map(cd => {
+                      const isSel = relayRes.selected?.part_number === cd.part_number
+                      return (
+                        <tr key={cd.part_number} onClick={() => calcRelay({ relay_selected_part: cd.part_number })}
+                          style={{ borderTop: `1px solid ${C.border}`, cursor: 'pointer', background: isSel ? C.accentL : 'transparent' }}>
+                          <td style={{ padding: '4px 7px', color: isSel ? C.accent : C.hint }}>{isSel ? '●' : '○'}</td>
+                          <td style={{ padding: '4px 7px' }}>{cd.mfr} {cd.part_number}</td>
+                          <td style={{ padding: '4px 7px', fontFamily: 'IBM Plex Mono,monospace' }}>{cd.contact_i_A ?? '—'} A</td>
+                          <td style={{ padding: '4px 7px', fontFamily: 'IBM Plex Mono,monospace' }}>{cd.switch_v_V ?? '—'} V</td>
+                          <td style={{ padding: '4px 7px', fontFamily: 'IBM Plex Mono,monospace' }}>{cd.coil_v_V ?? '—'} V</td>
+                          <td style={{ padding: '4px 7px', fontSize: 10, color: C.muted }}>{(cd.contact_form ?? '').slice(0, 22)}</td>
+                          <td style={{ padding: '4px 7px', fontFamily: 'IBM Plex Mono,monospace' }}>{cd.t_operate_ms ?? '—'} ms</td>
+                          <td style={{ padding: '4px 7px' }}><Badge color={vColor(cd.verdict ?? '')}>{cd.verdict}</Badge></td>
+                        </tr>)
+                    })}</tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {tab === 'mov' && (
           <div>
             <div style={{ background: C.tealL, border: `1px solid ${C.teal}55`, borderRadius: 8,
@@ -707,6 +846,8 @@ export const InputProtection: React.FC<Props> = ({
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
               <Knob label="Current margin" unit="×I_rms" value={fuseOpts.fuse_current_margin} onChange={v => setF('fuse_current_margin', v)} />
+              {/* moved here from the NTC tab; still carried in ntcOpts for the I²t coordination check */}
+              <Knob label="Fuse I²t rating" unit="A²s" value={ntcOpts.fuse_i2t_rating} onChange={v => setN('fuse_i2t_rating', v)} />
               <Knob label="Load factor" unit="× rating" value={fuseOpts.fuse_load_factor} onChange={v => setF('fuse_load_factor', v)} />
               <Knob label="I²t margin" unit="×startup" value={fuseOpts.fuse_i2t_margin} onChange={v => setF('fuse_i2t_margin', v)} />
               <Knob label="Ambient derate" unit="×" value={fuseOpts.fuse_ambient_derate} onChange={v => setF('fuse_ambient_derate', v)} />

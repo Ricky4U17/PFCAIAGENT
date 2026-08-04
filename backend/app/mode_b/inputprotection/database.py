@@ -882,3 +882,124 @@ if __name__ == "__main__":
     print("ingesting MOV database…", build_mov(), "parts (0 = no filled vendor file yet; template ignored)")
     print("ingesting GDT database…", build_gdt(), "parts (0 = no filled vendor file yet)")
     print("ingesting Fuse database…", build_fuse(), "parts (0 = no filled vendor file yet)")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Power-relay database — Power_Relays_Database.xlsx (bypass relay for the NTC)
+# ══════════════════════════════════════════════════════════════════════════════
+# Digi-Key-style parametric export, same shape as the ICL / fuse tables. The bypass relay shorts
+# the NTC out once the bus has precharged, so the parameters that matter are the CONTACT rating
+# (it must make into the residual precharge current), the switching voltage, the coil supply the
+# board can provide, and the operate/release timing against the precharge delay.
+_RELAY_XLSX = ["Power_Relays_Database.xlsx"]
+_RELAY_JSON = "relay.json"
+
+
+def _relay_src_path():
+    return _first_existing(_RELAY_XLSX, _DATA, _SURGE_SPEC, _SPEC)
+
+
+def _relay_rows(path):
+    """Yield dict rows keyed by the header row (first row whose first cell is 'Datasheet')."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    hdr = None
+    for row in ws.iter_rows(values_only=True):
+        if hdr is None:
+            if row and any(str(c or "").strip() in ("Datasheet", "Mfr Part #") for c in row[:3]):
+                hdr = [str(h).strip() if h is not None else "" for h in row]
+            continue
+        if any(v not in (None, "") for v in row):
+            yield dict(zip(hdr, row))
+    wb.close()
+
+
+def _first_num(text):
+    """Leading number out of a parametric string ('16 A' -> 16.0, '250VAC' -> 250.0)."""
+    import re
+    m = re.search(r"(\d+(?:\.\d+)?)", str(text or "").replace(",", ""))
+    return float(m.group(1)) if m else None
+
+
+def ingest_relay(path=None):
+    src = path or _relay_src_path()
+    if not src:
+        return []
+    out = []
+    for r in _relay_rows(src):
+        part = r.get("Mfr Part #")
+        if not part:
+            continue
+        out.append({
+            "mfr":              r.get("Mfr"),
+            "part_number":      part,
+            "description":      r.get("Description"),
+            "datasheet_url":    r.get("Datasheet"),
+            "mounting":         r.get("Mounting Type"),
+            "contact_form":     r.get("Contact Form"),
+            "coil_type":        r.get("Coil Type"),
+            "contact_material": r.get("Contact Material"),
+            "op_temp":          r.get("Operating Temperature"),
+            # numeric scalars — None where the vendor cell is blank or non-numeric (DATA MISSING,
+            # never a substituted default)
+            "coil_v_V":         _first_num(r.get("Coil Voltage")),
+            "coil_i_mA":        _first_num(r.get("Coil Current")),
+            "contact_i_A":      _first_num(r.get("Contact Rating (Current)")),
+            "switch_v_V":       _first_num(r.get("Switching Voltage")),
+            "load_max":         r.get("Load - Max Switching"),
+            "v_operate_V":      _first_num(r.get("Must Operate Voltage")),
+            "v_release_V":      _first_num(r.get("Must Release Voltage")),
+            "t_operate_ms":     _first_num(r.get("Operate Time")),
+            "t_release_ms":     _first_num(r.get("Release Time")),
+        })
+    return out
+
+
+def build_relay():
+    os.makedirs(_DATA, exist_ok=True)
+    src = _relay_src_path()
+    if not src:
+        return 0
+    local = os.path.join(_DATA, _RELAY_XLSX[0])
+    if os.path.abspath(src) != os.path.abspath(local):
+        shutil.copyfile(src, local)
+    recs = ingest_relay(local)
+    with open(os.path.join(_DATA, _RELAY_JSON), "w", encoding="utf-8") as f:
+        json.dump(recs, f)
+    return len(recs)
+
+
+_RELAY_CACHE = None
+def load_relay():
+    global _RELAY_CACHE
+    if _RELAY_CACHE is None:
+        path = os.path.join(_DATA, _RELAY_JSON)
+        if not os.path.exists(path):
+            if not _relay_src_path():
+                _RELAY_CACHE = []
+                return _RELAY_CACHE
+            build_relay()
+        with open(path, encoding="utf-8") as f:
+            _RELAY_CACHE = json.load(f)
+    return _RELAY_CACHE
+
+
+def options_relay():
+    recs = load_relay()
+    uniq = lambda key: sorted({(r.get(key) or "").strip() for r in recs if r.get(key)})
+    nums = lambda key: sorted({r[key] for r in recs if r.get(key) is not None})
+    return {"manufacturers": uniq("mfr"), "contact_form": uniq("contact_form"),
+            "mounting": uniq("mounting"), "coil_type": uniq("coil_type"),
+            "contact_material": uniq("contact_material"),
+            "coil_voltages": nums("coil_v_V")}
+
+
+def _relay_label(rec):
+    bits = []
+    if rec.get("contact_i_A") is not None: bits.append(f"{rec['contact_i_A']:g}A")
+    if rec.get("switch_v_V") is not None: bits.append(f"{rec['switch_v_V']:g}V")
+    if rec.get("coil_v_V") is not None:   bits.append(f"coil {rec['coil_v_V']:g}V")
+    if rec.get("contact_form"):           bits.append(str(rec["contact_form"]))
+    tail = f" — {', '.join(bits)}" if bits else ""
+    return f"{rec.get('mfr') or ''} {rec.get('part_number') or ''}".strip() + tail
