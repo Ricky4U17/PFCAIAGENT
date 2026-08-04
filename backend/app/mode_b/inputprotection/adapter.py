@@ -69,8 +69,13 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         i_inrush_target=float(opts.get("i_inrush_target", 60.0)),
         p_out=0.0,                                        # use the grid's I_rms verbatim
         i_rms_worst=float(iin_worst or 0.0),
-        r_line=float(opts.get("r_line") or 0.0), r_emi=float(opts.get("r_emi") or 0.0),
-        r_esr=float(opts.get("r_esr") or 0.0), r_bridge=float(opts.get("r_bridge") or 0.0),
+        # `r_loop_ohm` is the single designer-facing total. When present it IS the whole loop
+        # parasitic (carried in r_line; the other three are zeroed so nothing can double-count).
+        # Legacy payloads without it keep the old four-component sum.
+        **(dict(r_line=float(opts["r_loop_ohm"] or 0.0), r_emi=0.0, r_esr=0.0, r_bridge=0.0)
+           if opts.get("r_loop_ohm") not in (None, "") else
+           dict(r_line=float(opts.get("r_line") or 0.0), r_emi=float(opts.get("r_emi") or 0.0),
+                r_esr=float(opts.get("r_esr") or 0.0), r_bridge=float(opts.get("r_bridge") or 0.0))),
         energy_margin=float(opts.get("energy_margin", 1.5)),
         r25_margin=float(opts.get("r25_margin", 1.10)),
         vref_pulse=float(opts.get("vref_pulse", 345.0)),

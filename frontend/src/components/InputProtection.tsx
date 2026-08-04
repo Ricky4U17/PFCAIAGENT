@@ -105,7 +105,7 @@ export const InputProtection: React.FC<Props> = ({
   // ── NTC ──
   const [ntcOpts, setNtcOpts] = useState<Record<string, string>>({
     i_inrush_target: '60', energy_margin: '1.5', r25_margin: '1.10', vref_pulse: '345',
-    tau_multiple: '4', ambient_c: '45', r_line: '0', r_emi: '0', r_esr: '0', r_bridge: '0',
+    tau_multiple: '4', ambient_c: '45', r_loop_ohm: '1',
     // worst-case / coordination inputs (datasheet / layout; blank = open item in the report)
     fuse_i2t_rating: '', relay_make_rating_a: '', relay_path_ohm: '', off_time_min_ms: '',
     restart_protection: '',
@@ -271,8 +271,19 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="R25 margin" unit="×" value={ntcOpts.r25_margin} onChange={v => setN('r25_margin', v)} />
               <Knob label="Pulse V_ref" unit="V" value={ntcOpts.vref_pulse} onChange={v => setN('vref_pulse', v)} />
               <Knob label="Bypass delay" unit="×τ" value={ntcOpts.tau_multiple} onChange={v => setN('tau_multiple', v)} />
-              <Knob label="Loop R (line+EMI+ESR)" unit="Ω" value={ntcOpts.r_emi} onChange={v => setN('r_emi', v)} />
+              <Knob label="Loop R (total)" unit="Ω" value={ntcOpts.r_loop_ohm} onChange={v => setN('r_loop_ohm', v)} />
               <Btn variant="primary" disabled={ntcBusy} onClick={() => calcNtc()}>{ntcBusy ? '⏳ Sizing…' : '↻ Re-size NTC'}</Btn>
+            </div>
+            {/* One total, deliberately. The engine sums line + EMI + bridge + ESR into a single
+                parasitic; showing them as separate knobs (one of them mislabelled as the sum)
+                let the same resistance be entered twice, which understates the required R25. */}
+            <div style={{ fontSize: 10, color: C.muted, marginTop: -8, marginBottom: 12, lineHeight: 1.6 }}>
+              <b style={{ color: C.text }}>Loop R</b> is the <b>total non-NTC resistance in the inrush
+              loop</b> — mains and wiring + EMI-filter series + bridge + bulk-cap ESR, added together.
+              The NTC only has to make up the difference between this and the resistance the inrush
+              target needs, so a larger Loop R means a <i>smaller</i> required R<sub>25</sub>. Enter one
+              combined figure; do not also count the parts separately. The same value is used for the
+              relay make-current and bypassed-path checks.
             </div>
             {/* Worst-case / coordination inputs (datasheet + layout). Blank ⇒ shown as an open item. */}
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
@@ -292,8 +303,7 @@ export const InputProtection: React.FC<Props> = ({
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
               Startup path & stress <span style={{ color: C.muted, textTransform: 'none' }}>— for bypassed/stuck-relay inrush &amp; bridge IFSM; blank = OPEN</span></div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-              <Knob label="R_bridge" unit="Ω" value={ntcOpts.r_bridge} onChange={v => setN('r_bridge', v)} />
-              <Knob label="R_ESR" unit="Ω" value={ntcOpts.r_esr} onChange={v => setN('r_esr', v)} />
+
               <Knob label="R_wiring" unit="Ω" value={ntcOpts.r_wiring_ohm} onChange={v => setN('r_wiring_ohm', v)} />
               <Knob label="R_PCB" unit="Ω" value={ntcOpts.r_pcb_ohm} onChange={v => setN('r_pcb_ohm', v)} />
               <Knob label="Bridge IFSM" unit="A" value={ntcOpts.bridge_ifsm_a} onChange={v => setN('bridge_ifsm_a', v)} />

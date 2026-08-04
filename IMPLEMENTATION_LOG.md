@@ -6901,3 +6901,52 @@ noted in the code comment at both ends.
 grep for the same arithmetic in the GUI before declaring it done.*
 
 VERIFIED: suite 172 passed / 2 skipped, tsc clean.
+
+## C193 — items 4 and 5: single Loop R, and the Chapter 8 restructure
+
+### #4 — ONE loop-parasitic input (and a double-count trap removed)
+The engine has always summed FOUR components: `r_parasitic = r_line + r_emi + r_esr + r_bridge`.
+The GUI exposed only three of them, and named one wrongly:
+  - "Loop R (line+EMI+ESR)"  ->  bound to `r_emi` ALONE
+  - "R_bridge", "R_ESR"      ->  separate knobs
+  - `r_line`                 ->  NO KNOB AT ALL, permanently 0
+So a designer reading the label literally and entering the combined line+EMI+ESR total, then also
+filling R_ESR below, had the ESR counted TWICE. That inflates r_parasitic, REDUCES the required
+R25 and can select an under-sized NTC. Nothing warned about it.
+Designer chose option (A): one honest total. GUI now has a single **Loop R (total)** defaulting to
+**1 ohm**, sending `r_loop_ohm`. The adapter maps it to the whole parasitic (carried in r_line,
+other three zeroed so nothing can double-count); payloads without it keep the legacy four-way sum,
+so nothing already stored breaks.
+Explained in BOTH places: a note under the GUI knob, and a "WHAT Rpar IS" annotation in report
+Section 8.2 stating it is the total non-NTC loop resistance, that it is CREDITED (larger Rpar ->
+smaller required R25), that entering it once is deliberate, and that 0 means the NTC carries the
+whole limit. The same figure is credited in the relay make-current and bypassed-path checks.
+
+### #5 — Chapter 8 restructure (designer chose option (a))
+Was 8.1-8.14; now 8.1-8.9 with no gaps. 23 pp (was 25).
+- 8.1 Design Inputs, Limits & Selection Gates — kept; **Table 8.1b removed** (its gates are now
+  derived and shown inside 8.2).
+- **8.2 is the merged requirement section** (old 8.2+8.3+8.4+8.5). New equation box carries
+  R_total,cold / R25 / R25,min / R25,nom,required / I_inrush,max / E_cap / C_max,equiv, with the
+  worked substitution after it. **Table 8.2 now has the four requested columns**: Target I,
+  R_min,total, R_min,total - Rpar, 20% tolerance.
+- **8.6 and 8.7 removed** outright (option (a)). This also removed the selection rationale and the
+  8.7b/8.7c selected-part screen rows added in C185 — flagged to the designer beforehand and
+  accepted.
+- 8.8 Selected-Part Recalculation -> **8.3**; then 8.9->8.4, 8.10->8.5, 8.11->8.6, 8.12->8.7,
+  8.13->8.8, 8.14->8.9 (sub-numbers 8.9.x->8.4.x, 8.11.1->8.6.1 followed automatically).
+- **Figure 8.1 moved to the very end of the chapter** (was inside 8.1).
+
+CAUGHT DURING THE EDIT — `sel` was bound inside the removed 8.7 and used 14 times afterwards.
+Left alone that is a NameError that takes the WHOLE CHAPTER out while the endpoint still returns
+200 (the C187 failure mode). Re-bound at the top of the new 8.3.
+Also fixed: `\tfrac` is not a matplotlib mathtext symbol (500 on first build) -> `\frac`; and four
+prose cross-references that pointed at now-removed sections and would otherwise have silently
+meant something else after renumbering ("part chosen in Section 8.7" -> 8.3, "sizing calculation
+of Section 8.3" -> 8.2, the Figure 8.1 caption, and the flow comment).
+
+VERIFIED: Ch8 renders 8.1,8.2,8.3,8.4,8.4.1-3,8.5,8.6,8.6.1,8.7,8.8,8.9 in order; Figure 8.1 after
+the 8.9 summary; Rpar note and 4-column sweep present. Combined report 190 pp,
+suite 172 passed / 2 skipped, tsc clean.
+
+STILL OPEN from this batch: items 1, 2, 3 (relay tab, relay database, moving relay/fuse params).
