@@ -495,7 +495,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
         eq_box(story, [
             r"I_{contact} \geq k_{I}\,I_{in,rms(worst)}\ ,\qquad "
             r"V_{switch} \geq k_{V}\,V_{in,pk}",
-            r"I_{make}=\dfrac{V_{in,pk}-V_{bus}(t_{bypass})}{R_{par}+R_{25}}\ ,\qquad "
+            r"I_{make}=\dfrac{V_{in,pk}-V_{bus}(t_{bypass})}{R_{par}+R_{relay}}\ ,\qquad "
             r"V_{bus}(t)=V_{in,pk}\left(1-e^{-t/\tau}\right)",
             r"t_{operate} \leq t_{bypass}",
         ], number="8.4.4", ch=CH)
@@ -508,8 +508,11 @@ def build_ntc_story(story, design, cap=None, opts=None):
             f"{_f(_rsp.get('t_bypass_ms'),0)} ms precharge window (&#964; = {_f(_rsp.get('tau_ms'),1)} ms) "
             f"the bus has reached {_f(_rsp.get('v_bus_precharged'),1)} V, so the contact closes across only "
             f"{_f((_rsp.get('vin_pk_max') or 0) - (_rsp.get('v_bus_precharged') or 0),1)} V through "
-            f"{_f(_rsp.get('r_path_ohm'),2)} {_OHM} (R<sub>par</sub> {_f(_rsp.get('r_parasitic'),2)} + "
-            f"R<sub>25</sub> {_f(_rsp.get('r_ntc_ohm'),2)}) &#8658; a make current of "
+            f"{_f(_rsp.get('r_path_ohm'),2)} {_OHM} (R<sub>par</sub> {_f(_rsp.get('r_parasitic'),2)}"
+            + (f" + R<sub>relay</sub> {_f(_rsp.get('r_relay_path_ohm'),3)}"
+               if _rsp.get('r_relay_path_ohm')
+               else f" {_OHM} alone &#8212; the contact shorts the NTC out as it closes")
+            + f") &#8658; a make current of "
             f"<b>{_f(_rrq.get('i_make_A'),2)} A</b>. <b>That small make current is the entire purpose of "
             f"waiting</b>: close too early and the contact makes into a nearly-full line peak.", CH)
         annotation(story, "CONFIRM THE MAKE DUTY",
@@ -547,6 +550,44 @@ def build_ntc_story(story, design, cap=None, opts=None):
                  ["Mounting", str(_rsel.get("mounting") or "&#8212;")],
                  ["Operating temperature", str(_rsel.get("op_temp") or "&#8212;")]],
                 col_widths=[CW*0.36, CW*0.64], ch=CH)
+        _asm = _rly.get("assumed") or []
+        if _asm:
+            body(story,
+                "Four of the relay inputs are not values a designer can simply look up: two are absent "
+                "from every part in the vendor table, one is a property of the control firmware rather "
+                "than of any part, and one depends on the finished layout. Leaving them blank would "
+                "report OPEN and say nothing useful, so each is given a value DERIVED from this design "
+                "or from the vendor table. <b>Every one of them is an assumption, marked as such, and "
+                "none upgrades a verdict to PASS</b> &#8212; an assumed input can close a calculation "
+                "but it cannot prove a part.", CH)
+            # Per-unit precision: 3 decimals on every quantity read as noise ("35.000 A").
+            def _amt(v, unit):
+                if v is None:
+                    return "&#8212;"
+                dp = {"ohm": 3, "A": 1, "ms": 1}.get(unit, 2)
+                return f"{_f(v, dp)} {(_OHM if unit == 'ohm' else unit)}"
+            data_table(story, "8.4.6", "Inputs Not Supplied — Safe Values Used",
+                "Where a designer value is present it is used and the assumption is not applied.",
+                ["Input", "Designer value", "Value used", "Derived from", "Which way it errs"],
+                [[a["param"],
+                  (_amt(a["supplied"], a["unit"]) if a.get("supplied") is not None
+                   else "not supplied"),
+                  (_amt(a["supplied"], a["unit"]) if a.get("supplied") is not None
+                   else (f"<b>{_amt(a['assumed'], a['unit'])}</b> (assumed)"
+                         if a.get("assumed") is not None else "&#8212;")),
+                  a.get("basis", ""), a.get("direction", "")] for a in _asm],
+                col_widths=[CW*0.19, CW*0.14, CW*0.16, CW*0.29, CW*0.22], ch=CH)
+        _scr = _rly.get("screen") or {}
+        if _scr.get("hidden"):
+            annotation(story, "SCREEN",
+                f"{_scr['hidden']} of {_scr.get('considered', 0)} catalogue relays are rated below the "
+                f"{_f(_scr.get('i_contact_min_A'),1)} A contact requirement and are not offered for "
+                f"selection &#8212; they cannot carry the continuous line current at any margin. "
+                + ("<b>No part in the catalogue clears the requirement</b>, so the closest parts are "
+                   "shown instead and the shortfall is the finding."
+                   if _scr.get("fallback") else
+                   "A part that does not PUBLISH a contact rating is still offered: missing data is "
+                   "not a violation."), CH)
         if (_rrq.get("notes") or []):
             annotation(story, "OPEN ITEMS — RELAY",
                 " ".join(str(n) for n in _rrq["notes"])
@@ -555,6 +596,49 @@ def build_ntc_story(story, design, cap=None, opts=None):
     # ── 8.10 warm / hot restart — review point 5 ──
     if wc:
         sub_h(story, "8.5", "Warm / Hot Restart Policy", CH)
+        # Minimum off-time is the one input of the five with no derivable safe value: it depends on
+        # the NTC's thermal cooling curve, which this vendor table does not carry. But the QUESTION
+        # it answers is computable — if the hot-restart case already survives the bridge and the
+        # fuse, no off-time is required at all, and the open item disappears instead of persisting.
+        _hr = next((c for c in (wc.get("stress_cases") or []) if "Hot restart" in c.get("case", "")), {})
+        _hr_i, _hr_i2t, _hr_ifsm = _hr.get("i_A"), _hr.get("i2t"), _hr.get("ifsm_ok")
+        _fuse_i2t = s.get("fuse_i2t_rating") or None
+        _i2t_ok = (_hr_i2t is not None and _fuse_i2t and _hr_i2t < float(_fuse_i2t))
+        # Two columns, as everywhere else in this chapter: CONSERVATIVE (NTC alone, no parasitic
+        # credited) governs the verdict, REALISTIC (loop parasitic credited) is stated alongside so
+        # the designer can see how much of the result rests on crediting Loop R.
+        _hr_row = next((x for x in (wc.get("restart_rows") or [])
+                        if "restart" in (x.get("case") or "").lower()), {})
+        _hr_real = _hr_row.get("i_A_real")
+        if _hr_i is not None:
+            _verdict = ("NO OFF-TIME REQUIRED" if (_hr_ifsm and _i2t_ok) else
+                        "AN OFF-TIME (OR OTHER RESTART GATE) IS REQUIRED")
+            body(story,
+                f"<b>Is a minimum off-time actually needed?</b> This is usually left as a policy to be "
+                f"decided, but for this design it is a calculation. A restart with the NTC still hot "
+                f"draws <b>{_f(_hr_i,0)} A</b> ({_f(_hr_i2t,1)} A&#178;s) against the cold "
+                f"{_f(wc.get('i_inrush_max_A'),0)} A, because a hot thermistor has collapsed to a "
+                f"fraction of its R<sub>25</sub> &#8212; it is barely a series element any more. "
+                + (f"Crediting the {_f(r['r_parasitic'],3)} {_OHM} loop parasitic brings that to "
+                   f"{_f(_hr_real,0)} A; the figure above credits nothing and is the one the verdict "
+                   f"uses. " if _hr_real else "")
+                + f"If that current already survives the two elements that would fail first, the "
+                f"restart needs no gating at all: the bridge "
+                + ("clears it" if _hr_ifsm else
+                   ("does NOT clear it" if _hr_ifsm is False else "cannot be checked (no I<sub>FSM</sub>)"))
+                + ", and the fuse "
+                + (f"pre-arcing I&#178;t {_f(_fuse_i2t,0)} A&#178;s "
+                   + ("is not exceeded" if _i2t_ok else "IS exceeded") if _fuse_i2t
+                   else "rating is not supplied")
+                + f". <b>Verdict: {_verdict}.</b>", CH)
+            if not (_hr_ifsm and _i2t_ok):
+                annotation(story, "OFF-TIME",
+                    "The minimum off-time itself cannot be derived here: it depends on the NTC's "
+                    "thermal cooling curve, which this vendor table does not carry, and it is the one "
+                    "input in this chapter with no safe stand-in. Take it from the cooling curve on "
+                    "the datasheet, or measure the recovery on the bench. The alternative is to gate "
+                    "restart on measured recovery rather than on elapsed time, which removes the "
+                    "dependency altogether &#8212; see the options below.", CH)
         body(story,
             "After operation the NTC is hot and its resistance is far below R25, so a short-off-time restart "
             "can draw <b>much higher</b> inrush than the cold case. Restart is therefore a REQUIRED design "

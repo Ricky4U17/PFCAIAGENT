@@ -590,11 +590,22 @@ export interface RelayCandidate {
   t_operate_ms?: number | null; t_release_ms?: number | null
   gates?: RelayGate[]; verdict?: string
 }
+// Inputs a designer rarely has to hand (make rating, path R, operate time, timing tolerance).
+// Each carries a value derived from the design or the vendor table, plus what it came from and
+// which way it errs — reported as an assumption, never as a proven figure.
+export interface RelayAssumed {
+  param: string; unit: string; supplied: number | null; assumed: number | null
+  basis: string; direction: string
+}
 export interface RelayResult {
   spec: Record<string, number | null>
   requirements: { i_contact_min_A: number; v_switch_min_V: number; i_make_A: number | null
                   t_operate_max_ms: number | null; coil_supply_v: number | null; notes: string[] }
   candidates: RelayCandidate[]; selected: RelayCandidate | null
+  // parts rated below the computed contact requirement are hidden; `fallback` means nothing in the
+  // catalogue cleared it, so the closest parts are shown instead (the list is never empty)
+  screen?: { hidden: number; fallback: boolean; i_contact_min_A: number; considered: number }
+  assumed?: RelayAssumed[]
   gates: RelayGate[]; gate_status: string; catalog_size: number
 }
 export const inputProtectionRelay = (body: { design: Record<string, number>; cap?: Record<string, unknown>; opts?: Record<string, unknown> }) =>

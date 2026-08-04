@@ -511,6 +511,18 @@ export const InputProtection: React.FC<Props> = ({
               <Btn variant="primary" disabled={relayBusy} onClick={() => calcRelay()}>
                 {relayBusy ? '⏳ Selecting…' : '↻ Select relay'}</Btn>
             </div>
+            {/* Leave a box blank and a derived safe value is used instead — the same value and the
+                same wording the report carries (Table 8.4.6), so the two never disagree. */}
+            {(relayRes?.assumed ?? []).some(a => a.supplied == null && a.assumed != null) && (
+              <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 11px', marginBottom: 12 }}>
+                <div style={{ fontSize: 10, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
+                  Left blank — safe values used</div>
+                {(relayRes?.assumed ?? []).filter(a => a.supplied == null && a.assumed != null).map(a => (
+                  <div key={a.param} style={{ fontSize: 11, color: C.text, lineHeight: 1.6 }}>
+                    <b>{a.param}</b> = {a.assumed} {a.unit === 'ohm' ? 'Ω' : a.unit}
+                    <span style={{ color: C.muted }}> — {a.basis}. {a.direction}.</span>
+                  </div>))}
+              </div>)}
 
             {!relayRes && !relayBusy && (
               <div style={{ fontSize: 11.5, color: C.hint }}>Run “Select relay” to screen the catalogue.</div>
@@ -582,7 +594,17 @@ export const InputProtection: React.FC<Props> = ({
 
                 <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
                   Candidates <span style={{ color: C.muted, textTransform: 'none' }}>
-                    — {relayRes.candidates.length} of {relayRes.catalog_size} screened, pass-first; click to select</span></div>
+                    — {relayRes.candidates.length} shown of {relayRes.catalog_size} screened, pass-first; click to select</span></div>
+                {/* Parts that cannot carry the computed contact current are removed rather than
+                    ranked last. A part with NO published rating is still listed — missing data is
+                    not a violation. If nothing clears the requirement the filter lifts, so the
+                    designer always has something to select. */}
+                {!!relayRes.screen?.hidden && (
+                  <div style={{ fontSize: 10.5, color: relayRes.screen.fallback ? C.amber : C.muted, marginBottom: 6 }}>
+                    {relayRes.screen.fallback
+                      ? `⚠ No catalogue relay carries ${num(relayRes.screen.i_contact_min_A, 1)} A — showing the closest parts.`
+                      : `${relayRes.screen.hidden} parts rated below ${num(relayRes.screen.i_contact_min_A, 1)} A are hidden (cannot carry the line current).`}
+                  </div>)}
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                     <thead><tr>{['', 'Mfr / Part', 'Contact', 'Switching', 'Coil', 'Form', 'Operate', 'Verdict'].map(h =>

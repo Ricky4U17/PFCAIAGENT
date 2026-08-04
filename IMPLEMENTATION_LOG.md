@@ -7195,3 +7195,72 @@ sections, so the chapter goes from the requirement (8.2) straight to "Selected-P
 computed and `cat = out["catalog"]` is still unpacked and now unused, and the GUI has had the
 two-tier candidate list since C163. Logged for the designer to decide whether the screen should come
 back as its own section.
+
+## C198 — under-rated parts hidden from the relay list; safe values for the inputs nobody publishes
+
+Designer: (a) do not restore the NTC candidate list to the report — the GUI is where parts are seen
+and chosen (the fuse and relay lists will be removed from the report later, when we get to them);
+(b) hide any part in the GUI list rated below the calculated current; (c) five relay/restart inputs
+have no database value and a designer may not have them to hand — compute safe values and state them
+as a note in the report.
+
+### (b) — hiding under-rated parts: relay only, and here is why
+
+| List | State before | Action |
+|---|---|---|
+| **Relay** | showed all 1082 pass-first, FAIL parts ranked last | **now filtered** — 1038 hidden |
+| NTC | backend already returns PASS/CONDITIONAL only; parts that cannot hold the inrush never reach the GUI (C163) | none needed |
+| Line fuse | GUI already filters `verdict !== 'FAIL'`; gate 2 IS the current-margin gate | none needed |
+
+`relay_select.screen()` now drops a part whose PUBLISHED contact rating is below the computed
+requirement — 1038 of 1082 on the reference design, lowest offered 35 A against a 31.4 A
+requirement. Two rules preserved: a part that publishes NO rating is kept (missing data is not a
+violation, [[feedback-selection-never-blocked]]), and never-empty is guaranteed — if nothing clears
+the requirement the filter lifts and the closest parts are returned with `fallback` set, so the
+shortfall becomes the finding rather than an empty screen. `screen()` now returns `(rows, meta)`;
+the one caller was updated. GUI banner states the hidden count, or the fallback warning.
+
+**NOT applied to the NTC, deliberately.** The NTC's current rating is `I_max`, its steady-state
+rating — and C197 established, at the designer's own request, that `I_max` BELOW `I_rms` is correct
+and expected because the relay bypasses the NTC. On the reference design every offered part is
+1–19 A against a 20.96 A line. A current filter there would remove the entire catalogue. The NTC is
+screened on R25 and pulse energy, and those gates already exclude the unusable parts.
+
+### (c) — safe values for the five un-lookupable inputs
+New `_relay_assumed_inputs()` (adapter) → report Table 8.4.6, and the same values shown on the Relay
+tab so screen and report cannot disagree. Every one is labelled ASSUMED and none upgrades a verdict
+to PASS: an assumed input can close a calculation, not prove a part.
+
+| Input | Safe value | Derived from | Errs |
+|---|---|---|---|
+| Relay make rating | the part's own continuous contact rating (35.0 A) | no part in this catalogue publishes a make/inrush rating; contacts are specified to make their rated current | verdict stays CONDITIONAL |
+| Relay-path R | 0 Ω | contact + wiring resistance is rarely published | conservative — including it only reduces the make current |
+| Relay operate time | the selected part's datasheet (40 ms) | 1076/1082 parts publish it; falls back to the catalogue's 95th percentile | from the part that will be fitted |
+| Control-timing tolerance | 8.3 ms | larger of one line half-cycle at the design's own f_line (a bypass timed in line cycles cannot resolve finer) and 10% of the commanded delay | lengthens the delay, lowering the make current |
+
+**Minimum off-time is the one with no derivable safe value** — it depends on the NTC's thermal
+cooling curve, which this vendor table does not carry, and inventing a figure would be exactly the
+substituted default this project forbids. Instead Section 8.5 now answers the QUESTION by
+calculation: if the hot-restart current already survives the bridge I_FSM and the fuse pre-arcing
+I²t, no off-time is required at all and the open item disappears. On the reference design it does
+not — 6437 A / 3388.7 A²s conservative (353 A crediting the 1 Ω loop; the conservative column
+governs, per the chapter's two-column convention) against a 400 A bridge and a 2340 A²s fuse — so
+the verdict is "AN OFF-TIME (OR OTHER RESTART GATE) IS REQUIRED", with the annotation pointing at
+the cooling curve or at gating restart on measured recovery instead of elapsed time.
+
+### C196 leftover, fixed
+Section 8.4.4's equation box and worked line still printed the pre-C196 denominator
+`(R_par + R_25)` and labelled the second term `R_25`, so its arithmetic contradicted 8.4.3 and the
+value the selector actually uses. C196 fixed the engine and 8.4.3 but missed this copy in the same
+chapter. Now `R_par + R_relay`, and the worked line says the contact shorts the NTC out as it closes.
+
+VERIFIED: relay requirement 31.44 A, 1038/1082 hidden, lowest offered 35 A, selection unchanged
+(Altech RS35-3022-25-1012); Table 8.4.6 renders with per-unit precision; off-time verdict renders
+with both columns; 8.4.4 make path now reads 1.00 Ω matching 8.4.3's 6.84 A; Ch8+9 27 pp, 0
+unrenderable glyphs; combined report 190 pp; suite 172 passed / 2 skipped; tsc clean.
+
+TRAP, third time: annotation label "CATALOGUE SCREEN" (16 chars) still wrapped to "CATALOG UE
+SCREEN". The safe limit is tighter than the ~20 I noted in C197 — **keep annotation titles to about
+12 characters**, matching the ones that have always rendered ("WHAT Rpar IS", "MAKE RATING",
+"OFF-TIME", "NOTE"). Shortened to "SCREEN". Also fixed 3-decimal formatting on every quantity in
+8.4.6 ("35.000 A") — per-unit precision now, and "ohm" renders as Ω.

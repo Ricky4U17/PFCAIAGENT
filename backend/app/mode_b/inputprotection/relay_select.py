@@ -157,14 +157,23 @@ def gate_rows(part: dict | None, req: RelayRequirement, spec: RelaySpec) -> list
     return rows
 
 
-def screen(parts: list[dict], spec: RelaySpec, req: RelayRequirement, top: int = 25) -> list[dict]:
-    """Rank the catalogue: never-empty, pass-first, then conditional, then data-missing."""
+def _rank_all(parts: list[dict], spec: RelaySpec, req: RelayRequirement,
+              drop_under_rated: bool) -> list[dict]:
     order = {"PASS": 0, "CONDITIONAL": 1, "DATA MISSING": 2, "FAIL": 3}
     scored = []
     for p in parts:
         if spec.contact_form and (p.get("contact_form") or "") != spec.contact_form:
             continue
         if spec.mounting and (p.get("mounting") or "") != spec.mounting:
+            continue
+        # A part whose PUBLISHED contact rating is below the computed requirement cannot be used at
+        # any margin, so it is dropped from the list rather than ranked last — the designer should
+        # not have to read past parts that are already excluded. A part that does not publish a
+        # rating is NOT dropped: that is DATA MISSING, not a violation, and the standing convention
+        # is that missing data never removes a part from selection.
+        ci = p.get("contact_i_A")
+        if drop_under_rated and ci is not None and req.i_contact_min_A > 0 \
+                and ci < req.i_contact_min_A:
             continue
         rows = gate_rows(p, req, spec)
         worst = max(order.get(r["status"], 2) for r in rows)
@@ -178,7 +187,29 @@ def screen(parts: list[dict], spec: RelaySpec, req: RelayRequirement, top: int =
     scored.sort(key=lambda x: x["_rank"])
     for x in scored:
         x.pop("_rank", None)
-    return scored[:top]
+    return scored
+
+
+def screen(parts: list[dict], spec: RelaySpec, req: RelayRequirement,
+           top: int = 25) -> tuple[list[dict], dict]:
+    """Rank the catalogue: pass-first, then conditional, then data-missing.
+
+    Parts rated below the computed contact-current requirement are hidden. NEVER-EMPTY is still
+    guaranteed: if nothing in the catalogue clears the requirement the filter is lifted and the
+    closest parts are returned with `fallback` set, so the designer always has something to select
+    and can see how far short the catalogue falls.
+
+    Returns (rows, meta) where meta carries `hidden`, `fallback` and the requirement used.
+    """
+    kept = _rank_all(parts, spec, req, drop_under_rated=True)
+    fallback = not kept
+    if fallback:
+        kept = _rank_all(parts, spec, req, drop_under_rated=False)
+    considered = len(_rank_all(parts, spec, req, drop_under_rated=False)) if not fallback else len(kept)
+    return kept[:top], {"hidden": max(considered - len(kept), 0),
+                        "fallback": bool(fallback),
+                        "i_contact_min_A": req.i_contact_min_A,
+                        "considered": considered}
 
 
 def overall_status(rows: list[dict]) -> str:
