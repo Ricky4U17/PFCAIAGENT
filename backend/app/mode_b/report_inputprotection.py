@@ -143,9 +143,11 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "the difference between R<sub>total,cold</sub> and what the loop already provides, so a larger "
         "R<sub>par</sub> means a SMALLER required R<sub>25</sub>. Entering it as a single number is "
         "deliberate — the same resistance counted twice would understate the NTC requirement and can "
-        "select an under-sized part. The same figure is credited in the relay make-current and "
-        "bypassed-path checks later in this chapter. R<sub>par</sub> = 0 means nothing is credited and the "
-        "NTC carries the whole limit, which is the conservative reading.", CH)
+        "select an under-sized part. The same figure is credited in the relay make-current check and in "
+        "the bypassed / stuck-relay case of Section 8.7 &#8212; with the NTC shorted out, this loop "
+        "resistance is the <i>only</i> thing left limiting the current, so it is what that fault case "
+        "divides into. R<sub>par</sub> = 0 means nothing is credited and the NTC carries the whole limit, "
+        "which is the conservative reading.", CH)
     _tol_sw = 0.20
     _sw_rows = []
     for _t, _rr in r["sweep"]:
@@ -620,8 +622,14 @@ def build_ntc_story(story, design, cap=None, opts=None):
             v = c.get("ifsm_ok")
             return ("&#10003;" if v else ("&#10007;" if v is False else "IFSM TBD"))
         data_table(story, "8.7", "Startup-Path Stress — Cold / Hot-Restart / Bypass",
-            f"Peak current and I²t per case; bridge IFSM = "
-            + (f"{_f(wc['bridge_ifsm_a'],0)} A" if wc.get("bridge_ifsm_a") else "DATA MISSING (bridge datasheet I<sub>FSM</sub>)") + ".",
+            "Peak current and I²t per case. Bridge I<sub>FSM</sub> = "
+            + (f"<b>{_f(wc['bridge_ifsm_a'],0)} A</b>, taken from the bridge selected in Chapter 7 &#8212; "
+               "the same rating Section 7.3.1 checks, not a separately entered figure"
+               if wc.get("bridge_ifsm_a") else
+               "DATA MISSING &#8212; no bridge selected in Chapter 7, so this gate stays open")
+            + ". The bypass / stuck-relay row divides the line peak by the loop resistance "
+            + (f"({_f(wc['r_path_total_ohm'],3)} {_OHM})" if wc.get("r_path_total_ohm") else "(not supplied)")
+            + ", because a welded contact shorts the NTC out and leaves nothing else in the path.",
             ["Case", "Inrush (A)", "I²t (A²s)", "vs bridge I<sub>FSM</sub>"],
             [[c["case"], (_f(c["i_A"],0) if c.get("i_A") is not None else "OPEN"),
               (_f(c["i2t"],1) if c.get("i2t") is not None else "OPEN"), _ifsm_cell(c)] for c in _sc]
@@ -686,7 +694,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
                (("gates " + ", ".join(str(n) for n in (fuse.get("gates_conditional") or [])) + " estimated")
                 if fuse.get("gates_conditional") else "all closed")),
               fuse.get("gate_status", "OPEN")],
-             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A rating" if wc.get('bridge_ifsm_a') else "see Ch 7 Section 7.3.1"),
+             ["Bridge surge current", "&#8804; I<sub>FSM</sub>", (f"{_f(wc['bridge_ifsm_a'],0)} A (Ch 7 bridge)" if wc.get('bridge_ifsm_a') else "no bridge selected in Ch 7"),
               _stat.get("bridge_surge", "OPEN")],
              ["Bypass / stuck relay", "cleared by fuse", (f"{_f(wc['i_bypassed_A'],0)} A" if wc.get('i_bypassed_A') else "DATA MISSING (path R)"),
               _stat.get("bypass_stuck", "OPEN")],
@@ -703,10 +711,12 @@ def build_ntc_story(story, design, cap=None, opts=None):
              ["MOV/GDT fail-short &amp; stuck-relay fault current", "Ch 9 + schematic", "fuse must clear safely (gate 5)"],
              ["Max ambient at the fuse + re-rating slope", "enclosure thermal + fuse datasheet", "current de-rating (gate 6)"],
              ["Fuseholder / PCB temperature rise", "measured on the bench", "fuse body within its limit (gate 6)"],
-             ["Bridge I<sub>FSM</sub>", "bridge datasheet (Ch 7)", "rectifier survival"],
+             *([] if wc.get("bridge_ifsm_a") else
+               [["Bridge I<sub>FSM</sub>", "select a bridge in Ch 7", "rectifier survival"]]),
              ["Relay make rating", "relay datasheet", "safe bypass timing"],
              ["Relay-path impedance", "schematic / layout", "true make current & inrush"],
-             ["Startup-path resistances", "schematic / layout", "bypassed / stuck-relay inrush"]],
+             *([] if wc.get("r_path_total_ohm") else
+               [["Loop resistance (Section 8.2)", "schematic / layout", "bypassed / stuck-relay inrush"]])],
             col_widths=[CW*0.30, CW*0.30, CW*0.40], ch=CH)
 
         # ── 8.14c release classification (Ready / Conditional / Open / Blocked) ──

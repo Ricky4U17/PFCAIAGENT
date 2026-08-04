@@ -110,14 +110,15 @@ export const InputProtection: React.FC<Props> = ({
     tau_multiple: '4', ambient_c: '45', r_loop_ohm: '1',
     // worst-case / coordination inputs (datasheet / layout; blank = open item in the report)
     fuse_i2t_rating: '', relay_make_rating_a: '', relay_path_ohm: '', off_time_min_ms: '',
-    restart_protection: '',
-    // round-2 review: startup-path resistances (bypassed/stuck-relay inrush), bridge IFSM, relay timing
-    r_wiring_ohm: '', r_pcb_ohm: '', bridge_ifsm_a: '', relay_operate_ms: '', relay_delay_tol_ms: '' })
+    restart_protection: '', relay_operate_ms: '', relay_delay_tol_ms: '' })
+  // Gone on purpose: R_wiring / R_PCB (a second path for the resistance `r_loop_ohm` already
+  // carries — the engine now uses ONE loop parasitic everywhere) and the Bridge I_FSM box, which
+  // is carried in from the bridge selected in Chapter 7 instead of being retyped here.
   const [ntcRes, setNtcRes] = useState<NtcResult | null>(null)
   const [ntcBusy, setNtcBusy] = useState(false)
   const setN = (k: string, v: string) => setNtcOpts(s => ({ ...s, [k]: v }))
   const calcNtc = async (optsOverride?: Record<string, string>) => {
-    const opts = optsOverride ?? ntcOpts
+    const opts = ntcOptsEffective(optsOverride ?? ntcOpts)
     setNtcBusy(true); setErr(null)
     try { setNtcRes(await inputProtectionNtc({ design, cap, opts })) }
     catch (e) { setErr((e as Error).message) } finally { setNtcBusy(false) }
@@ -152,7 +153,7 @@ export const InputProtection: React.FC<Props> = ({
   const calcRelay = async (override?: Record<string, string>) => {
     setRelayBusy(true); setErr(null)
     try {
-      const o = { ...ntcOpts, ...relayOpts, ...(override || {}) }
+      const o = { ...ntcOptsEffective(), ...relayOpts, ...(override || {}) }
       setRelayRes(await inputProtectionRelay({ design, cap, opts: o }))
     } catch (e) { setErr((e as Error).message) } finally { setRelayBusy(false) }
   }
@@ -209,7 +210,7 @@ export const InputProtection: React.FC<Props> = ({
     try {
       // fuse selection shares the fault current + startup basis (incl. selected NTC) with NTC/MOV
       const fo = override ?? fuseOpts
-      const opts: Record<string, unknown> = { ...ntcOpts, ...fo,
+      const opts: Record<string, unknown> = { ...ntcOptsEffective(), ...fo,
         mains_fault_current_A: ntcOpts.mains_fault_current_A || movOpts.mains_fault_current_A }
       setFuseRes(await inputProtectionFuse({ design, cap, opts }))
     } catch (e) { setErr((e as Error).message) } finally { setFuseBusy(false) }
@@ -217,8 +218,27 @@ export const InputProtection: React.FC<Props> = ({
   const selectFuse = (pn: string) => { const o = { ...fuseOpts, fuse_selected_part: pn }; setFuseOpts(o); calcFuse(o) }
   // The selected fuse's melting I²t auto-feeds the NTC/MOV coordination in the report.
   const selFuseI2t = fuseRes?.selected_i2t ?? null
+  // Bridge single-cycle surge rating, carried in from the bridge selected in Chapter 7 rather than
+  // retyped here — Section 7.3.1 already checks this same I_FSM against the Chapter 8 inrush, and a
+  // second box would let the two chapters disagree about one datasheet number. NOT scaled by devices
+  // in parallel: current sharing is not guaranteed on a single-cycle surge, so the single-device
+  // rating is the conservative reading. No bridge selected ⇒ absent ⇒ the gate reports OPEN.
+  const bridgeIfsm = Number((approvedSemiconductor as any)?.bridge?.ifsm_A) || null
+  // ONE place where the carried-in values are folded in. Everything that talks to the NTC engine
+  // goes through this — the panel's own calculation AND the report payload — because a value that
+  // reaches the report but not the screen (or the reverse) is exactly the disconnect we keep hitting.
+  const ntcOptsEffective = (base?: Record<string, string>): Record<string, string> => {
+    const o = { ...(base ?? ntcOpts) }
+    if (bridgeIfsm && !o.bridge_ifsm_a) o.bridge_ifsm_a = String(bridgeIfsm)
+    if (selFuseI2t && !o.fuse_i2t_rating) o.fuse_i2t_rating = String(selFuseI2t)
+    return o
+  }
 
   useEffect(() => { calcNtc(); calcMov(); calcFuse() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // The fuse runs alongside the NTC on mount, so its melting I²t only exists on the second pass.
+  // Re-run the NTC once a carried-in value first appears, otherwise the panel would sit showing OPEN
+  // on a gate the report has already closed.
+  useEffect(() => { if (selFuseI2t || bridgeIfsm) calcNtc() }, [selFuseI2t, bridgeIfsm])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [rptBusy, setRptBusy] = useState(false)
   // FULL report: all previous chapters (design basis, magnetics, DC-bus capacitor) + the
@@ -228,9 +248,8 @@ export const InputProtection: React.FC<Props> = ({
   const ipReportPayload = (): Record<string, unknown> => ({
     design, cap, mosfet: { vdss: Number(movOpts.device_vds) },
     // fold the fuse selection margins in, and auto-feed the selected fuse I²t into the NTC/MOV coordination
-    ntc_opts: { ...ntcOpts, ...fuseOpts, ...relayOpts,
-      ...(relayRes?.selected ? { relay_selected_part: relayRes.selected.part_number } : {}),
-      ...(selFuseI2t && !ntcOpts.fuse_i2t_rating ? { fuse_i2t_rating: String(selFuseI2t) } : {}) },
+    ntc_opts: { ...ntcOptsEffective(), ...fuseOpts, ...relayOpts,
+      ...(relayRes?.selected ? { relay_selected_part: relayRes.selected.part_number } : {}) },
     mov_opts: { ...movOptsPayload(), surge_architecture: useGdt ? 'MOV+GDT' : 'MOV-only',
       ...fuseOpts,
       ...(selFuseI2t && !movOpts.fuse_i2t_rating_A2s ? { fuse_i2t_rating_A2s: String(selFuseI2t) } : {}) },
@@ -304,29 +323,21 @@ export const InputProtection: React.FC<Props> = ({
               combined figure; do not also count the parts separately. The same value is used for the
               relay make-current and bypassed-path checks.
             </div>
-            {/* Worst-case / coordination inputs (datasheet + layout). Blank ⇒ shown as an open item. */}
+            {/* Carried in from elsewhere — shown, not editable, so this screen states the same
+                numbers the report uses. Relay timing and restart policy are on the Relay tab, the
+                fuse I²t on the Line-fuse tab, and the bridge I_FSM comes from Chapter 7. */}
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-              Worst-case & coordination <span style={{ color: C.muted, textTransform: 'none' }}>— datasheet / layout; blank = open item in the report</span></div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-              {/* Relay knobs now live on the Relay tab and the fuse I²t on the Line-fuse tab;
-                  the values still travel in ntcOpts because the NTC engine reads them. */}
-              <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
-              <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
-                <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
-                  value={ntcOpts.restart_protection} onChange={e => setN('restart_protection', e.target.value)}>
-                  <option value="">— unstated —</option><option value="hardware">hardware</option>
-                  <option value="firmware">firmware</option><option value="procedure">procedure</option></select></label>
-            </div>
-            {/* Startup-path resistances → bypassed/stuck-relay inrush + 3-column stress (review round 2). */}
-            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-              Startup path & stress <span style={{ color: C.muted, textTransform: 'none' }}>— for bypassed/stuck-relay inrush &amp; bridge IFSM; blank = OPEN</span></div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-
-              <Knob label="R_wiring" unit="Ω" value={ntcOpts.r_wiring_ohm} onChange={v => setN('r_wiring_ohm', v)} />
-              <Knob label="R_PCB" unit="Ω" value={ntcOpts.r_pcb_ohm} onChange={v => setN('r_pcb_ohm', v)} />
-              <Knob label="Bridge IFSM" unit="A" value={ntcOpts.bridge_ifsm_a} onChange={v => setN('bridge_ifsm_a', v)} />
-              <Knob label="Relay operate" unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
-              <Knob label="Delay tolerance" unit="ms" value={ntcOpts.relay_delay_tol_ms} onChange={v => setN('relay_delay_tol_ms', v)} />
+              Carried in from other chapters <span style={{ color: C.muted, textTransform: 'none' }}>— not entered here; missing = OPEN in the report</span></div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+              {([['Bridge I_FSM', bridgeIfsm ? `${num(bridgeIfsm, 0)} A` : 'no bridge selected', 'Chapter 7 selection'],
+                 ['Fuse melting I²t', selFuseI2t ? `${num(selFuseI2t, 0)} A²s` : 'no fuse selected', 'the Line-fuse tab'],
+                 ['Bypassed / stuck-relay R', `${ntcOpts.r_loop_ohm || '0'} Ω`, 'the Loop R above']] as [string, string, string][])
+                .map(([k, v, src]) => (
+                  <div key={k} style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 10px' }}>
+                    <div style={{ fontSize: 9, color: C.hint, textTransform: 'uppercase' }}>{k}</div>
+                    <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono,monospace', color: C.text }}>{v}</div>
+                    <div style={{ fontSize: 9, color: C.muted }}>from {src}</div>
+                  </div>))}
             </div>
             {/* Inrush-limiter topology schematic (same drawing embedded in the Ch 8 report). */}
             <details style={{ marginBottom: 14 }}>
@@ -474,13 +485,21 @@ export const InputProtection: React.FC<Props> = ({
             </div>
 
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 5 }}>
-              Relay inputs <span style={{ color: C.muted, textTransform: 'none' }}>— board rail + margins; blank filters = whole catalogue</span></div>
+              Relay inputs <span style={{ color: C.muted, textTransform: 'none' }}>— board rail, margins, timing and restart policy; blank filters = whole catalogue</span></div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
               <Knob label="Coil supply rail" unit="V" value={relayOpts.relay_coil_supply_v} onChange={v => setR('relay_coil_supply_v', v)} />
               <Knob label="Contact current margin" unit="×" value={relayOpts.relay_current_margin} onChange={v => setR('relay_current_margin', v)} />
               <Knob label="Switching voltage margin" unit="×" value={relayOpts.relay_voltage_margin} onChange={v => setR('relay_voltage_margin', v)} />
               <Knob label="Relay make rating" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
               <Knob label="Relay-path R" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
+              <Knob label="Relay operate" unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
+              <Knob label="Delay tolerance" unit="ms" value={ntcOpts.relay_delay_tol_ms} onChange={v => setN('relay_delay_tol_ms', v)} />
+              <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
+              <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
+                <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
+                  value={ntcOpts.restart_protection} onChange={e => setN('restart_protection', e.target.value)}>
+                  <option value="">— unstated —</option><option value="hardware">hardware</option>
+                  <option value="firmware">firmware</option><option value="procedure">procedure</option></select></label>
               <label style={{ fontSize: 10.5, color: C.muted, minWidth: 190 }}>Contact form<br />
                 <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
                   value={relayOpts.relay_contact_form} onChange={e => setR('relay_contact_form', e.target.value)}>

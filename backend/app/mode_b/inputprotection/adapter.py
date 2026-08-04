@@ -90,9 +90,10 @@ def build_ntc_spec(design: dict, cap: dict | None = None, opts: dict | None = No
         relay_path_ohm=float(opts.get("relay_path_ohm", 0.0) or 0.0),
         off_time_min_ms=float(opts.get("off_time_min_ms", 0.0) or 0.0),
         restart_protection=str(opts.get("restart_protection", "")),
-        # round-2 review: startup-path resistances + bridge IFSM + relay timing (0/blank -> OPEN)
-        r_wiring_ohm=float(opts.get("r_wiring_ohm", 0.0) or 0.0),
-        r_pcb_ohm=float(opts.get("r_pcb_ohm", 0.0) or 0.0),
+        # round-2 review: bridge IFSM + relay timing (0/blank -> OPEN). `r_wiring_ohm`/`r_pcb_ohm`
+        # are deliberately NOT read any more — they were a second path for the same loop resistance
+        # that `r_loop_ohm` already carries; a legacy payload still containing them is ignored rather
+        # than added on top, which is the safe direction (no double-count).
         bridge_ifsm_a=float(opts.get("bridge_ifsm_a", 0.0) or 0.0),
         relay_operate_ms=float(opts.get("relay_operate_ms", 0.0) or 0.0),
         relay_delay_tol_ms=float(opts.get("relay_delay_tol_ms", 0.0) or 0.0),

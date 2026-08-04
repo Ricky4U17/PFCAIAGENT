@@ -87,10 +87,13 @@ class Spec:
     relay_path_ohm: float = 0.0    # ohm, relay-path impedance for make-current (0 -> open item)
     off_time_min_ms: float = 0.0   # ms, minimum enforced off-time before restart (0 -> not guaranteed)
     restart_protection: str = ""   # "hardware" | "firmware" | "procedure" | "" (unstated)
-    # --- round-2 review: startup-path resistances for the bypassed/stuck-relay inrush (0 -> OPEN) ---
-    r_wiring_ohm: float = 0.0      # ohm, mains + internal wiring
-    r_pcb_ohm: float = 0.0        # ohm, PCB copper in the startup path
-    bridge_ifsm_a: float = 0.0    # A, rectifier single-cycle surge (IFSM) rating (0 -> OPEN)
+    # --- round-2 review: bridge surge rating + relay timing (0/blank -> OPEN) ---
+    # NOTE: r_wiring_ohm / r_pcb_ohm used to live here and fed a SECOND sum of the same loop that
+    # omitted r_line and r_emi. They are gone: the bypassed/stuck-relay path now uses the one loop
+    # parasitic (r_line+r_emi+r_esr+r_bridge, the designer's single "Loop R") like the rest of the
+    # chapter, so the same resistance can no longer be entered twice or dropped entirely.
+    bridge_ifsm_a: float = 0.0    # A, rectifier single-cycle surge (IFSM) rating (0 -> OPEN).
+                                  # Auto-fed from the bridge selected in Chapter 7 (bridge.ifsm_A).
     relay_operate_ms: float = 0.0 # ms, relay operate/settle time added to the precharge delay
     relay_delay_tol_ms: float = 0.0  # ms, control-timing tolerance added to the precharge delay
 
@@ -250,8 +253,13 @@ def worst_case_startup(s: Spec, r: NtcResult, rec: dict) -> dict:
     i_warm = _inrush(r_hot) if r_hot else None
     # restart-permission resistance: the NTC must recover above this before restart is allowed.
     r_required = vpk / max(s.i_inrush_target, 1e-9)
-    # relay stuck-closed / NTC-bypassed inrush from the SUMMED startup path (review §3.2); None -> OPEN.
-    r_path_total = s.rsource_min + s.r_bridge + s.r_esr + s.r_wiring_ohm + s.r_pcb_ohm
+    # Relay stuck-closed / NTC-bypassed inrush: the NTC is shorted out, so what limits the current is
+    # the WHOLE remaining loop — exactly the parasitic the rest of the chapter credits (the designer's
+    # single "Loop R"), plus any documented source resistance. This used to be a second, different sum
+    # that omitted r_line and r_emi, so it either reported OPEN while a Loop R was entered, or (if the
+    # old R_wiring/R_PCB boxes were filled) computed the fault from those two alone and ignored the
+    # loop — an order-of-magnitude error that propagated into the fuse I2t coordination case.
+    r_path_total = rsrc + r_para
     i_bypassed = (vpk / r_path_total) if r_path_total > 0 else None
     restart_rows = [
         {"case": "Cold 25C nominal", "r_ohm": round(r25, 3),

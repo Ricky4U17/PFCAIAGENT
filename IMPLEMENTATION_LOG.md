@@ -6995,3 +6995,71 @@ release-only annotation.
 VERIFIED: relay endpoint 200 with a selected part; Ch8+9 renders 8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.4,
 8.5, 8.6, 8.6.1, 8.7, 8.8, 8.9 in order (24 pp); combined report 190 pp;
 suite 172 passed / 2 skipped; tsc clean.
+
+## C195 — NTC page: four controls moved to the Relay tab, three inputs removed
+
+Designer: "I still see Min off-time, R_wiring, R_PCB, Restart protection, Bridge IFSM, Relay operate,
+Delay tolerance on the NTC page. Move the first, fourth, sixth and seventh to the Relay tab; remove
+the others." Reviewed first — two of the three removals turned out to be closing real defects.
+
+### The moves (item 1) — GUI only
+Min off-time, Restart protection, Relay operate and Delay tolerance now render in the SAME block as
+the other relay inputs on the Relay tab (designer's call: one block, not split). The values still
+live in `ntcOpts` and are still read by the NTC engine — only the editing location moved, exactly as
+C194 did for Relay make rating and Relay-path R.
+
+### R_wiring / R_PCB removed — this was a live defect, not tidying
+They fed a SECOND sum of the same loop at `ntc_bypass_select.py`:
+
+    r_path_total = rsource_min + r_bridge + r_esr + r_wiring_ohm + r_pcb_ohm
+
+which omits `r_line` and `r_emi` — precisely where C193 put the designer's single Loop R. Measured on
+the reference design, both states were wrong:
+
+| R_wiring / R_PCB | Bypass / stuck-relay row | I²t |
+|---|---|---|
+| blank (the shipping default, Loop R = 1 Ω) | blank — OPEN | OPEN |
+| 0.05 / 0.02 Ω entered | **5334 A** | 2808 A²s |
+
+Blank threw the designer's 1 Ω away; filled in, it computed the fault from 0.07 Ω and ignored the
+1 Ω — a stuck-relay current 14x the cold-start figure, feeding Table 8.7, the IFSM column and case 3
+of the C166 fuse I²t split. `r_path_total` is now `rsrc + r_para`, the same loop parasitic the rest
+of the chapter credits: **373.4 A / 196.5 A²s**, sane against the 2340 A²s fuse. The two Spec fields
+are gone and the adapter no longer reads them, so a legacy payload still carrying them is IGNORED
+rather than added on top — verified: `r_path_total` stays 1.0 Ω either way.
+
+### Bridge IFSM — knob removed, value auto-fed from Chapter 7
+Deleting it alone would have left the bridge-surge gate permanently OPEN. The number already exists:
+the approved bridge carries `ifsm_A`, and Section 7.3.1 already checks that same rating against the
+Chapter 8 inrush. Fed in from there instead, so the two chapters cannot disagree about one datasheet
+figure. NOT scaled by devices in parallel — sharing is not guaranteed on a single-cycle surge, so the
+single-device rating is the conservative reading. No bridge selected ⇒ absent ⇒ gate reports OPEN,
+never a fabricated PASS.
+
+Fed in TWO places because there are two callers:
+- `ntcOptsEffective()` in InputProtection.tsx — one function that both `calcNtc` and
+  `ipReportPayload` (and the relay/fuse calls) go through. **This also fixes a pre-existing
+  disconnect**: the selected fuse's melting I²t was folded in only inside `ipReportPayload`, so the
+  GUI showed that gate OPEN while the report computed it. A `useEffect` re-runs the NTC when a
+  carried-in value first appears, since the fuse result only exists on the second pass.
+- `_ntc_opts_with_bridge()` in main.py, at both report call sites — so a report built without the
+  GUI (harness, programmatic caller) does not silently report the gate OPEN. Mirrors the existing
+  cross-feed in the other direction at main.py:2639.
+
+The NTC tab gains a read-only "Carried in from other chapters" strip (Bridge I_FSM / fuse melting
+I²t / bypassed-path R with their sources) so the screen states the same numbers as the report.
+
+### Report
+Section 8.2's "WHAT Rpar IS" annotation now says the bypassed/stuck-relay case divides by this same
+figure. Table 8.7's caption states the I_FSM provenance ("taken from the bridge selected in Chapter 7
+— the same rating Section 7.3.1 checks") and what sets the bypass row. Table 8.9a shows
+"400 A (Ch 7 bridge)". Table 8.9b's static open-item list had two rows that would now contradict
+those: "Bridge I_FSM" only appears when Chapter 7 has no bridge, and "Startup-path resistances"
+(which described the deleted boxes) became a Loop-R row that only appears when it is missing.
+
+VERIFIED: Ch8+9 renders 23 pp, 0 unrenderable glyphs; Table 8.7 shows bypass 373 A / 196.5 A²s and
+bridge I_FSM 400 A; Table 8.9a bridge_surge PASS; legacy r_wiring/r_pcb payload ignored; 3 endpoints
+200; combined report 190 pp; suite 172 passed / 2 skipped; tsc clean.
+NOT A DEFECT (checked, so it is not "fixed" later): the tick in Table 8.7's IFSM column extracts as
+nothing because ReportLab substitutes ZapfDingbats 0x13 for it. It renders correctly — same class of
+false positive as the matplotlib bullet in B13.

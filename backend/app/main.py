@@ -2175,6 +2175,26 @@ def _num(v):
         return None
 
 
+def _ntc_opts_with_bridge(ip: Dict[str, Any], semiconductor: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Chapter 8's bridge-surge gate needs the rectifier I_FSM, which Chapter 7 already selected.
+
+    The GUI folds it in before it posts (one value, one source — see `ntcOptsEffective` in
+    InputProtection.tsx). This is the same fold for programmatic callers and the verify harness, so
+    a report built without the GUI does not silently report the gate OPEN. It mirrors the existing
+    cross-feed in the other direction, where the Chapter 8 inrush is handed to Section 7.3.1.
+
+    Only fills a value the caller did not supply, and only from a bridge that was actually selected —
+    absent stays absent, which is what makes the gate read OPEN rather than a fabricated PASS. Not
+    scaled by devices in parallel: sharing is not guaranteed on a single-cycle surge.
+    """
+    opts = dict(ip.get("ntc_opts") or {})
+    if not opts.get("bridge_ifsm_a"):
+        ifsm = _num(((semiconductor or {}).get("bridge") or {}).get("ifsm_A"))
+        if ifsm:
+            opts["bridge_ifsm_a"] = ifsm
+    return opts
+
+
 def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Map the ControlDesign step16_params (power stage) + its embedded
     js_design_state (designer-selected control specs) into the control-report
@@ -2668,7 +2688,7 @@ def doc_generate_report(req: _DocReportReq):
                 ip = req.input_protection
                 parts.append(build_inputprotection_report(
                     ip["design"], ip.get("cap"), ip.get("mosfet"),
-                    ip.get("ntc_opts"), ip.get("mov_opts")))
+                    _ntc_opts_with_bridge(ip, req.semiconductor), ip.get("mov_opts")))
             if req.input_filter:                            # Chapter 10 — EMI filter
                 from app.mode_b.report_inputfilter import build_inputfilter_report
                 f = req.input_filter
@@ -2693,7 +2713,7 @@ def doc_generate_report(req: _DocReportReq):
                 ip = req.input_protection
                 _extra.append(build_inputprotection_report(
                     ip["design"], ip.get("cap"), ip.get("mosfet"),
-                    ip.get("ntc_opts"), ip.get("mov_opts")))
+                    _ntc_opts_with_bridge(ip, req.semiconductor), ip.get("mov_opts")))
             if req.input_filter:
                 from app.mode_b.report_inputfilter import build_inputfilter_report
                 f = req.input_filter
