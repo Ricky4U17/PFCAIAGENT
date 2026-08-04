@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-01**, head = C189, on `master`.
+**Start here after a restart.** Last updated **2026-08-03**, head = **`cac1cdd` C194**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -15,11 +15,35 @@
 
 ---
 
-## Where we are (2026-08-01)
+## Where we are (2026-08-03)
 
-**Just finished:** the designer's two-PDF review (32 in-PDF annotations + a Copilot Ch1-4 review).
-**ALL batches are complete** — Group 1, 3a, Group 4 (items 21-29), 3c, 3d, 3e — C175 to C186,
-merged to `master` on 2026-08-01.
+**Just finished:** the designer's 5-item GUI/report batch — ALL FIVE ARE IN.
+
+| # | Item | Where |
+|---|---|---|
+| 4 | `Loop R` default 1 Ω, and ONE loop-resistance input | C193 `d593963` |
+| 5 | Chapter 8 restructured to the designer's flow, 8.1-8.14 → **8.1-8.9** | C193 `d593963` |
+| 1 | Separate **Relay** tab (GUI is now NTC / Relay / Surge / Line fuse) | C194 `cac1cdd` |
+| 2 | Relay vendor database — `Power_Relays_Database.xlsx`, **1082 parts** | C194 `cac1cdd` |
+| 3 | Relay + fuse parameters moved to their own tabs; new relay inputs, reported in Sections 8.4.4 / 8.4.5 | C194 `cac1cdd` |
+
+Two things worth knowing before touching this area again:
+
+- **`Loop R` was labelled "line + EMI + ESR" but bound to `r_emi` alone**, and `r_line` had no knob
+  at all. It is now ONE figure (`r_loop_ohm`), deliberately — the same resistance counted twice
+  understates the NTC requirement and can select an under-sized part. The annotation "WHAT Rpar IS"
+  in Section 8.2 says so in the report.
+- **The relay and fuse knob VALUES still travel in `ntcOpts`.** Only the editing location moved.
+  The NTC engine reads them for its own relay make-current and I²t checks, so do not "tidy" them
+  into a separate payload without following those reads.
+
+Preceding that: the designer's two-PDF review (32 in-PDF annotations + a Copilot Ch1-4 review) —
+Group 1, 3a, Group 4 (items 21-29), 3c, 3d, 3e — C175 to C186; then the Copilot Ch1-Ch6 review
+(C187/C188), the Ch5-Ch7 review (C189) and two GUI review rounds (C190-C192).
+
+Also new and NOT committed: **`Framework_Handoff/`** — the package prepared for claude.ai to design
+the larger framework (architecture PDF, two block diagrams, technical brief, open items, current
+state, and `07_api_and_engines.json` = 63 endpoints / 18 engines / 38 graph nodes).
 
 ### Next up, in order
 1. **Designer decision from C187:** Table 5.5.2 shows the reference bank FAILS the capacitance
@@ -69,10 +93,15 @@ flow and fixed several real calculation defects found along the way.
 | C174 | `7e89c39` | Re-run buttons passed React's click event as their options — knob values never reached the backend |
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
-### State of the build
+### State of the build (verified at C194)
 - Backend suite: **172 passed / 2 skipped** (the standing baseline — anything else is a regression).
 - Frontend `tsc`: clean.
-- Combined report: **184 pp** without the semiconductor block, **199 pp** with it.
+- Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
+  Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
+  not in the harness report** — to check anything in Ch7, POST `/documentation/generate-report`
+  with `semiconductor` present.
+- Chapters 8+9 standalone: **24 pp**, sections in order 8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.4, 8.5, 8.6,
+  8.6.1, 8.7, 8.8, 8.9.
 
 ---
 
