@@ -7455,3 +7455,75 @@ both labels and renders `_source`; no inline `React.FC` remains anywhere; suite 
 STILL OPEN (unchanged, and now visible in the report rather than silent): the fitted V-I shape is
 not the part's curve. Closing it needs the assisted digitiser discussed on 2026-08-04 — agent
 proposes points, designer confirms against the plot.
+
+## C202 — the plausibility gate (step 1 of "bring your own part")
+
+First piece of the architecture agreed 2026-08-04. The designer's problem: a part that is not in a
+catalogue has to be typed in, and one wrong digit produces a number that is not obviously wrong.
+
+New `backend/app/plausibility.py`. It does NOT check the manufacturer part number — there is no
+authority to check a string against. It checks the VALUES, two ways.
+
+### Rules are measured, not guessed
+Every threshold in the module comes from the residual measured across the real catalogues, so a
+genuine part passes and a slip does not:
+
+| Relation | Catalogue residual | Flag line |
+|---|---|---|
+| toroid `Ve = Ae · le` | ≤ **7%** across all 1923 cores | 12% |
+| `le ≈ π(OD+ID)/2` | ≤ 8.6% | 20% |
+| `A_L = μ0·μ·Ae/le` | ≤ 12.9% (distributed gap, nominal μ) | 30% |
+
+Band rules take the catalogue's own min/max and widen it — ×3 for a single field, ×2 for a
+cross-field combination. Trimming to p1/p99 first was tried and **flagged four legitimate parts**
+sitting in the tail, which is the one outcome that would make a designer stop reading the findings.
+
+### Cross-field relations do the real work
+A single-field band is weak: MOSFET R_DS(on) spans 0.018–0.19 Ω across 1257 parts, so a 10× slip on
+a mid-range part lands inside it. The PRODUCT `R_DS(on)·Q_g` spans only 990–24480 mΩ·nC, so a slip
+in either field moves it clear out. Measured before adding each one; two were added on the evidence
+and two rejected:
+
+| Added | Spread | | Rejected | Spread |
+|---|---|---|---|---|
+| relay `VA / (I·V)` | **6.1×** | | NTC `R25 × I_max` | 182× — too wide to fire |
+| NTC `I_max / D²` | 37× | | NTC `R25 × D` | 78× — too wide to fire |
+
+`I_max/D²` took NTC detection from 26% → 54%; the relay VA rule took relay from 62% → 76%.
+
+### Measured behaviour
+- **False positives: 0 of 8948 catalogue parts** (mosfet 1311, diode 1399, bridge 981, ntc 997,
+  relay 1082, fuse 115, core 1923, mov 1140).
+- **×10 decimal slips caught: 80% overall** — core 100%, mov 100%, bridge 86%, mosfet 79%,
+  diode 79%, relay 76%, fuse 67%, ntc 54%.
+
+### Two things it deliberately does not do
+- **It never blocks.** Findings are advisory; `ok: true` means nothing looked wrong, NOT that the
+  part is right. It cannot tell a correct value from a plausible wrong one — a V_f of 1.1 V typed
+  where the datasheet says 1.4 V is inside every band and always will be.
+- **It never checks a derived field against its own derivation.** `energy_est_J` in the ICL
+  catalogue is computed from the disc diameter at ingest, so "energy vs diameter" holds to 0.3%
+  across all 994 parts and would be a rule that can never fire. A test guards against a future
+  well-meaning addition of exactly that.
+
+### Wiring
+`POST /mode-b/plausibility/check {kind, record}` and `GET /mode-b/plausibility/bands` (the ranges in
+force and how many parts each was measured from — the gate should be inspectable, not an oracle).
+Semiconductor page: a "Sanity-check values" button on the manual form, and an automatic run after a
+datasheet upload — the two paths where a value reaches the engine with no vendor catalogue behind
+it. Findings render as an amber advisory panel; a clean result says so *and* says it does not
+confirm the values are right.
+
+`check()` reports how many rules actually RAN. A rule whose inputs are absent is skipped, not
+passed, and "0 problems from 0 rules" is not reassurance — an empty record now returns a note
+saying so instead of a green tick.
+
+VERIFIED: 20 new tests in `tests/test_plausibility.py` asserting the two properties that matter
+against the REAL catalogues (no false flags; ×10 slips caught above a floor set under the measured
+rate so catalogue growth cannot turn the suite red), plus the specific defects this was built after
+— including C115's geometric volume mistaken for Ve, which `Ve = Ae·le` settles in one line.
+**Suite is now 192 passed / 2 skipped** (was 172; +20 is this file, not a regression).
+Combined report 190 pp; tsc clean; production vite build clean.
+
+NEXT in the agreed order: the provenance-tagged `contributed/` store, which is what makes it safe to
+accept a designer's part into the database at all. See [[bring-your-own-part-architecture]].

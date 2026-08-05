@@ -11,6 +11,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
+import { plausibilityCheck } from '../api/client'
+import type { PlausResult } from '../api/client'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
@@ -332,6 +334,17 @@ export const SemiconductorSelection: React.FC<Props> = ({
       bottom_part: `${r.manufacturer ?? ''} ${r.part_number ?? ''}`.trim(),
     }))
   }
+  // Advisory sanity-check. Runs after an upload and on demand from the manual form — the two
+  // paths where a value reaches the engine without a vendor catalogue behind it. It never blocks:
+  // findings are shown, the designer decides.
+  const [plaus, setPlaus] = useState<Partial<Record<Sub, PlausResult>>>({})
+  const runPlaus = async (which: Sub, block: Record<string, any>) => {
+    try {
+      const res = await plausibilityCheck(which, block)
+      setPlaus(s => ({ ...s, [which]: res }))
+    } catch { /* advisory — a failed check must never interrupt the page */ }
+  }
+
   const onExtract = async (which: Sub, file: File | undefined) => {
     if (!file) return
     setExtBusy(s => ({ ...s, [which]: true })); setErr(null)
@@ -343,6 +356,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         part: `${r.manufacturer ?? ''} ${r.part_number ?? ''}`.trim() } }))
       setDbBlock(s => ({ ...s, [which]: r.block as Record<string, unknown> }))  // keep full extracted block
       setSrcMode(s => ({ ...s, [which]: 'manual' }))   // show populated fields for confirmation
+      runPlaus(which, r.block as Record<string, any>)   // extracted values get checked too
     } catch (e) { setErr((e as Error).message) } finally { setExtBusy(s => ({ ...s, [which]: false })) }
   }
 
@@ -569,6 +583,30 @@ export const SemiconductorSelection: React.FC<Props> = ({
       {mode === 'manual' && (
         <div>
           {fields.map(f => <FieldRow key={f.key} f={f} state={state} onSet={setC(which)} />)}
+          {/* Advisory only. A flagged value is still usable — the designer confirms or corrects. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <Btn onClick={() => runPlaus(which, merged(which, buildBlock(state, fields)) as Record<string, any>)}>
+              ⌕ Sanity-check values</Btn>
+            {plaus[which] && plaus[which]!.ok && (
+              <span style={{ fontSize: 11, color: C.green }}>
+                ✓ nothing looked wrong ({plaus[which]!.checked} checks) — this does not confirm the
+                values are right, only that none is impossible
+              </span>)}
+            {plaus[which] && !plaus[which]!.ok && (
+              <span style={{ fontSize: 11, color: C.amber }}>
+                {plaus[which]!.findings.length} to look at ({plaus[which]!.checked} checks)
+              </span>)}
+          </div>
+          {plaus[which] && plaus[which]!.findings.length > 0 && (
+            <div style={{ background: C.bg3, border: `1px solid ${C.amber}44`, borderRadius: 8,
+              padding: '9px 12px', marginTop: 8 }}>
+              <div style={{ fontSize: 10, color: C.amber, textTransform: 'uppercase', marginBottom: 4 }}>
+                Worth a second look — advisory, nothing is blocked</div>
+              {plaus[which]!.findings.map((f, i) => (
+                <div key={i} style={{ fontSize: 11, color: C.text, lineHeight: 1.65, marginBottom: 3 }}>
+                  <b>{f.fields.join(', ')}</b> — {f.message}
+                </div>))}
+            </div>)}
           {which === 'bridge' && state.topology === 'sync_bottom' && bottomMosfetPanel()}
         </div>
       )}

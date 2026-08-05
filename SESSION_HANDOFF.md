@@ -85,8 +85,8 @@ the larger framework (architecture PDF, two block diagrams, technical brief, ope
 state, and `07_api_and_engines.json` = 63 endpoints / 18 engines / 38 graph nodes).
 
 ### Next up, in order
-0. **The "bring your own part" architecture** — reviewed 2026-08-04, agreed in principle, NOT
-   started. The real problem is not database size but that a number entering the design has no
+0. **The "bring your own part" architecture** — reviewed 2026-08-04. **Step (a) the plausibility
+   gate is DONE (C202)**; steps (b)–(e) not started. The real problem is not database size but that a number entering the design has no
    provenance and no validation. Agreed order: (a) plausibility gate using the existing catalogues
    as the reference distribution — `Ve = Ae·le` alone would have resolved C115 in seconds;
    (b) provenance-tagged `contributed/` store separate from `verified/`; (c) batch MPN compare +
@@ -150,7 +150,8 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **172 passed / 2 skipped** (the standing baseline — anything else is a regression).
+- Backend suite: **192 passed / 2 skipped** (the standing baseline — anything else is a
+  regression). Was 172 until C202 added `tests/test_plausibility.py` (+20).
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is

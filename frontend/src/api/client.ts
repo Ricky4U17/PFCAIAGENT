@@ -452,6 +452,20 @@ export const semiconductorExtract = (kind: string, file: File): Promise<DsExtrac
   return fetch(`${BASE}/mode-b/semiconductor/database/extract`, { method: 'POST', body: fd })
     .then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.json() })
 }
+// ── plausibility gate ────────────────────────────────────────────────────────
+// Advisory sanity-check of a hand-entered or extracted part against physics and the vendor
+// catalogues. It returns findings, never a rejection: `ok` means nothing looked wrong, NOT that
+// the part is right — it cannot tell a correct value from a plausible wrong one.
+export interface PlausFinding {
+  rule: string; fields: string[]; message: string
+  observed?: number | null; expected: string; severity: string
+}
+export interface PlausResult {
+  kind: string; findings: PlausFinding[]; checked: number; ok: boolean; note?: string
+}
+export const plausibilityCheck = (kind: string, record: Record<string, unknown>) =>
+  post<PlausResult>('/mode-b/plausibility/check', { kind, record })
+
 export const semiconductorCalculate = (b: SemiReqBody) =>
   post<SemiCalcResult>('/mode-b/semiconductor/calculate', b)
 export const semiconductorFigures = (b: SemiReqBody) =>

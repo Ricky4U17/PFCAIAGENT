@@ -587,6 +587,30 @@ async def semiconductor_datasheet_extract(kind: str = Form(...), file: UploadFil
     except Exception as e:
         log.exception("datasheet extract"); raise HTTPException(500, str(e))
 
+class _PlausReq(BaseModel):
+    kind:   str                      # core | mosfet | diode | bridge | ntc | relay | fuse | mov
+    record: Dict[str, Any]
+
+
+@app.post("/mode-b/plausibility/check", tags=["mode-b"])
+def plausibility_check(req: _PlausReq):
+    """Sanity-check a hand-entered or extracted part against physics and the catalogue.
+
+    ADVISORY ONLY — it returns findings, never a rejection. `ok: true` means nothing looked wrong,
+    not that the part is correct: it cannot tell a right value from a plausible wrong one."""
+    from app import plausibility
+    return plausibility.check(req.kind, req.record)
+
+
+@app.get("/mode-b/plausibility/bands", tags=["mode-b"])
+def plausibility_bands():
+    """The reference ranges in force and how many catalogue parts each was measured from."""
+    from app import plausibility
+    return {"bands": plausibility.band_report(),
+            "widen_single": plausibility.WIDEN_SINGLE, "widen_cross": plausibility.WIDEN_CROSS,
+            "kinds": list(plausibility.KINDS)}
+
+
 @app.post("/mode-b/semiconductor/calculate", tags=["mode-b"])
 def semiconductor_calculate(req: _SemiReq):
     """Validate the 3 parts, sweep all 9 input voltages, run the design-vs-engine
