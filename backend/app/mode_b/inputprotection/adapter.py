@@ -347,8 +347,11 @@ def calculate_fuse(design: dict, cap: dict | None = None, opts: dict | None = No
         i2t_margin=float(opts.get("fuse_i2t_margin", 2.0)),
         load_factor=float(opts.get("fuse_load_factor", fz.DEFAULT_LOAD_FACTOR)),
         ambient_derate=float(opts.get("fuse_ambient_derate", 1.0)),
-        # gate 6 — thermal implementation (all optional; absent -> OPEN / ESTIMATED, never a silent pass)
-        t_ambient_C=_o("fuse_ambient_C"),
+        # Temperature de-rating: no longer designer inputs (the vendor table publishes the re-rating
+        # slope for NO part, so the gate could never resolve). The ambient falls back to the design's
+        # own worst-case ambient so the report can still state the temperature the fuse sits in.
+        t_ambient_C=(_o("fuse_ambient_C") if _o("fuse_ambient_C") is not None
+                     else _o("ambient_c")),
         t_rating_ref_C=float(opts.get("fuse_rating_ref_C", fz.DEFAULT_T_RATING_REF_C)),
         derate_per_C=_o("fuse_derate_per_C"),
         fuseholder_rise_C=_o("fuseholder_rise_C"),
@@ -455,6 +458,7 @@ def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = N
         except (TypeError, ValueError):
             return None
 
+    tol_ms, tol_basis = _relay_timing_tolerance(opts, design, t_bypass_ms)
     spec = rl.RelaySpec(
         i_rms_worst=i_rms, vin_pk_max=vin_pk, v_bus_precharged=v_bus, r_path_ohm=r_path,
         t_bypass_ms=t_bypass_ms, coil_supply_v=_num_opt("relay_coil_supply_v"),
@@ -480,7 +484,8 @@ def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = N
                  "r_relay_path_ohm": (r_relay or None),
                  "t_bypass_ms": t_bypass_ms, "tau_ms": tau_ms,
                  "coil_supply_v": spec.coil_supply_v, "current_margin": spec.current_margin,
-                 "voltage_margin": spec.voltage_margin},
+                 "voltage_margin": spec.voltage_margin,
+                 "timing_tolerance_ms": tol_ms, "timing_tolerance_basis": tol_basis},
         "requirements": {"i_contact_min_A": req.i_contact_min_A,
                          "v_switch_min_V": req.v_switch_min_V,
                          "i_make_A": req.i_make_A,
@@ -493,95 +498,31 @@ def calculate_relay(design: dict, cap: dict | None = None, opts: dict | None = N
         "gates": gates,
         "gate_status": rl.overall_status(gates),
         "catalog_size": len(parts),
-        "assumed": _relay_assumed_inputs(opts, spec, req, selected, parts, design),
+        # Not gates: figures the DESIGNER confirms against the chosen part (make duty, closure vs
+        # bus charged, minimum coil dwell). Stated, never scored.
+        "confirmation": rl.confirmation_rows(selected, req, spec),
     })
 
 
-def _relay_assumed_inputs(opts, spec, req, selected, parts, design) -> list[dict]:
-    """Safe stand-ins for the relay inputs a designer rarely has to hand.
+def _relay_timing_tolerance(opts, design, t_bypass_ms) -> tuple[float, str]:
+    """Control-timing tolerance, derived rather than asked for.
 
-    None of these five are published in a form that can simply be looked up, so rather than leave
-    them blank (which reports OPEN and tells the designer nothing) each one gets a value DERIVED
-    from the design or from the vendor table, together with what it is derived from and which
-    direction the assumption errs in. They are labelled ASSUMED wherever they are used and never
-    upgrade a verdict to PASS — an assumed input can close a calculation but not prove a part.
+    It is a property of the controller, not of any relay, so no vendor table can supply it and a
+    designer rarely has a figure to hand. Taken as the larger of one line half-cycle — a bypass
+    command timed in line cycles cannot resolve finer than that — and 10% of the commanded delay.
+    Both lengthen the commanded delay, which LOWERS the make current, so the assumption is safe.
     """
-    sel = selected or {}
-    rows = []
-
-    def _typed(key):
-        v = opts.get(key)
-        try:
-            return float(v) if v not in (None, "") else None
-        except (TypeError, ValueError):
-            return None
-
-    # 1. Contact MAKE rating — absent from every part in this table. The part's own continuous
-    #    rating is the accepted stand-in: general-purpose contacts are specified to make their
-    #    rated current, and the make duty here is a fraction of it at a few volts.
-    _mk = _typed("relay_make_rating_a")
-    _ci = sel.get("contact_i_A")
-    rows.append({
-        "param": "Relay make rating", "unit": "A",
-        "supplied": _mk,
-        "assumed": (None if _mk is not None else _ci),
-        "basis": ("designer input" if _mk is not None else
-                  ("the selected part's own continuous contact rating — no part in this catalogue "
-                   "publishes a make/inrush rating" if _ci else "no part selected")),
-        "direction": "verdict stays CONDITIONAL; confirm with the vendor",
-    })
-
-    # 2. The relay's own path resistance — omitting it OVER-states the make current, so zero is the
-    #    conservative assumption and no lookup is needed.
-    _rp = _typed("relay_path_ohm")
-    rows.append({
-        "param": "Relay-path R", "unit": "ohm",
-        "supplied": _rp,
-        "assumed": (None if _rp is not None else 0.0),
-        "basis": ("designer input" if _rp is not None else
-                  "assumed 0: contact + wiring resistance is rarely published"),
-        "direction": "conservative — including it can only reduce the make current",
-    })
-
-    # 3. Operate time — published on nearly every part, so the selected part supplies it. Where a
-    #    part does not, the catalogue's own 95th percentile is a data-derived stand-in rather than
-    #    an invented constant.
-    _op = _typed("relay_operate_ms")
-    _pub = sorted(float(x["t_operate_ms"]) for x in parts if x.get("t_operate_ms"))
-    _p95 = (_pub[int(len(_pub) * 0.95)] if _pub else None)
-    _sel_op = sel.get("t_operate_ms")
-    rows.append({
-        "param": "Relay operate time", "unit": "ms",
-        "supplied": _op,
-        "assumed": (None if _op is not None else (_sel_op if _sel_op else _p95)),
-        "basis": ("designer input" if _op is not None else
-                  (f"selected part datasheet ({len(_pub)} of {len(parts)} parts publish it)"
-                   if _sel_op else
-                   f"95th percentile of the {len(_pub)} parts that publish it — the part chosen "
-                   f"does not")),
-        "direction": ("from the part that will be fitted" if _sel_op and _op is None else
-                      "slower than 95% of the catalogue"),
-    })
-
-    # 4. Control-timing tolerance — a property of the controller, not of any part. The larger of one
-    #    line half-cycle (a bypass command timed in line cycles cannot resolve finer) and 10% of the
-    #    commanded delay.
-    _tol = _typed("relay_delay_tol_ms")
+    typed = opts.get("relay_delay_tol_ms")
     try:
-        _fl = float(design.get("fline") or design.get("f_line") or 50.0)
+        if typed not in (None, ""):
+            return float(typed), "designer input"
     except (TypeError, ValueError):
-        _fl = 50.0
-    _half_cycle_ms = 1000.0 / (2.0 * max(_fl, 1e-9))
-    _tb = float(sel.get("t_bypass_ms") or 0.0) or None
-    _assumed_tol = max(_half_cycle_ms, 0.10 * _tb) if _tb else _half_cycle_ms
-    rows.append({
-        "param": "Control-timing tolerance", "unit": "ms",
-        "supplied": _tol,
-        "assumed": (None if _tol is not None else round(_assumed_tol, 1)),
-        "basis": ("designer input" if _tol is not None else
-                  f"larger of one {_fl:g} Hz line half-cycle ({_half_cycle_ms:.1f} ms — a bypass "
-                  f"command timed in line cycles cannot resolve finer) and 10% of the commanded "
-                  f"delay"),
-        "direction": "lengthens the commanded delay, which lowers the make current",
-    })
-    return rows
+        pass
+    try:
+        f_line = float(design.get("fline") or design.get("f_line") or 50.0)
+    except (TypeError, ValueError):
+        f_line = 50.0
+    half_cycle_ms = 1000.0 / (2.0 * max(f_line, 1e-9))
+    val = max(half_cycle_ms, 0.10 * (t_bypass_ms or 0.0))
+    return round(val, 1), (f"larger of one {f_line:g} Hz line half-cycle ({half_cycle_ms:.1f} ms) "
+                           f"and 10% of the commanded delay")

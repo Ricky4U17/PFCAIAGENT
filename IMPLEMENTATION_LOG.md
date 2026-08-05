@@ -7264,3 +7264,106 @@ SCREEN". The safe limit is tighter than the ~20 I noted in C197 — **keep annot
 12 characters**, matching the ones that have always rendered ("WHAT Rpar IS", "MAKE RATING",
 "OFF-TIME", "NOTE"). Shortened to "SCREEN". Also fixed 3-decimal formatting on every quantity in
 8.4.6 ("35.000 A") — per-unit precision now, and "ohm" renders as Ω.
+
+## C199 — items 22-27 + the redlined review PDF (Chapter 8)
+
+Two agreed sets in one commit: designer items 22-27, and the redlines on
+`specs/PFC_Report_pfc-1785851572747_incl_EMI.pdf` (52 strike annotations + 1 written note across
+pages 210-217, all in Chapter 8).
+
+### 22 — "Relay-path R" -> "Relay contact R"
+GUI label and the Table 8.4.3 row. Overdue: since C196 that field means the relay's OWN contact and
+wiring resistance, and the old name still read like the loop path it stopped being.
+
+### 23 + 24 + 25 — relay selects on THREE gates
+`relay_select.GATES` is now contact current, switching voltage, coil supply — the three the vendor
+table carries for all 1082 parts. Make current and operate timing leave the screen and become
+`confirmation_rows()`: figures the designer confirms, carrying no verdict.
+
+* **Make current** cannot be screened at all — no relay in this catalogue publishes a make/inrush
+  rating, so the old gate compared against the CONTINUOUS rating and reported CONDITIONAL, which
+  told the designer nothing he did not already know.
+* **Operate timing** is system timing, not a property of the part (item 25). The contact closes at
+  `t_bypass + t_operate`; whether that lands after the bus is charged is the designer's to own.
+* **Minimum on/off time** = `2 x t_operate` (MIN_DWELL_MULTIPLE), a settling allowance covering
+  bounce — which is why neither is asked for.
+
+Four inputs off the GUI: make rating, operate time, delay tolerance, min off-time. Nothing is lost:
+operate time comes from the selected part (1076/1082 publish it), the timing tolerance is derived
+(below), and the make rating has no source to come from.
+
+**Consequence worth knowing:** every remaining gate has complete data, so surviving relays read
+PASS rather than CONDITIONAL. The verdict now means "meets the three criteria that can be screened",
+which is what the 8.4.4 intro says.
+
+**Timing tolerance is now derived, not typed.** New `_relay_timing_tolerance()`: the larger of one
+line half-cycle at the design's own `fline` (a bypass command timed in line cycles cannot resolve
+finer) and 10% of the commanded delay. Both lengthen the delay, which LOWERS the make current, so
+the assumption is safe in the right direction. Reference design: 11 ms, and Section 8.5's release
+figure closes without asking for a number the designer would have had to invent.
+
+**Min off-time and the NTC restart are deliberately NOT the same thing.** The relay dwell rule above
+is 2 x 40 ms = 80 ms; NTC thermal recovery is seconds to minutes. Feeding one into the other would
+report "restart policy defined" while the thermistor is still hot — on this design a hot restart
+draws 6437 A against a 400 A bridge. The NTC restart off-time stays where C198 put it: Section 8.5
+computes whether ANY off-time is needed from the hot-restart case, and "Restart protection" remains
+on the Relay tab as the policy dropdown.
+
+### 26 + 27 — fuse selects on TWO gates
+`screen_table_fuse` decides selection on gate 1 (AC voltage) and gate 2 (continuous RMS current)
+only. Gates 3-6 still compute and are reported but no longer set `ok=False`, and FAIL rows are
+dropped from the list (never-empty preserved: the filter lifts if nothing clears both).
+
+The data justifies it: `v_ac_V` 115/115 and `i_rated_A` 115/115, but melting I2t only 90/115 and the
+re-rating slope **0/115**. Gate 6 could never resolve for a single part — those three inputs asked
+the designer for a number to multiply by a slope that does not exist. Removed (item 27): max ambient
+at fuse, fuseholder/PCB rise, re-rating slope.
+
+What is NOT lost: **breaking capacity stays a computed report check** (114/115 publish it, and a
+fuse that cannot interrupt the fault fails destructively) — reported, not filtered on. And the
+ambient now falls back to the design's own worst-case ambient server-side, so the new AMBIENT note
+can state 50 degC and say plainly that the 35.9 A requirement above is NOT de-rated and the
+datasheet curve must be applied by hand.
+
+### The redlines
+| Where | Removed |
+|---|---|
+| 8.1 CONCEPT | source citations "(Step 15)", "(from the shared operating grid)", and the closing sentence — which also carried "(Sections 8.6-8.8)", **dead since C193** |
+| Table 8.1 | "(0 = uncredited)" from the parasitic source cell |
+| 8.2 Rpar annotation | "Entering it as a single number is deliberate…" and "Rpar = 0 means…conservative reading." |
+| Table 8.2 | the entire caption — after C197 gave the table its `x k_margin` and `/ (1-tol)` columns, the caption restated what the headers say |
+| 8.4.2 | the italic "The sizing calculation of Section 8.2 derived…" paragraph, and the "Minimum design timing = …" clause |
+| Table 8.4.3 | "(Section 8.2)" out of the row label; the "Contact make rating" row |
+| 8.4.4 | CONFIRM THE MAKE DUTY tail; "Screened against 1082 catalogue relays" and the DATA-MISSING convention sentence from the caption; `t_operate <= t_bypass` out of the equation box |
+| Table 8.4.6 | **the whole table** (title, caption, header, four rows) and its intro tail — replaced by "Designer Confirmation — Not Screened" |
+| SCREEN annotation | removed from the report; the one-line hidden-count message stays on the GUI, where the choosing happens (designer's call) |
+
+### The written note on p214 — a real bug, and mine
+> *"Why in table t = 10.8 mSec taken while our t = 18.8 mSec?"*
+
+Table 8.4.2 (the N-tau table added in C197) computed on `r['tau']`, the GENERIC R25 pick, while every
+other figure in that section uses the SELECTED part. With a 10.00 ohm part against a 5.74 ohm
+requirement, every row — t_bypass, residual voltage, make current — was short by the ratio of the two
+time constants. **Exactly the defect C157 fixed in this same section** ("precharge timing must be
+quoted for the SELECTED part once one exists"), reintroduced by the table I added. Now driven by the
+selected part's tau, falling back to the generic pick only when nothing is selected, and the caption
+names which basis it used. Reference: 28.2 ms, caption reads "On the SELECTED NTC".
+
+VERIFIED: relay 3 gates all PASS, selection unchanged (Altech RS35-3022-25-1012); fuse list shows
+only parts clearing gates 1+2 (35/40/50 A ratings, gate1+gate2 true on every row); Table 8.4.2 on the
+selected part; release timing 113 + 40 + 11 ms with provenance on both; every redlined string absent
+from the rendered text and every replacement present; table numbers 8.1-8.9c with no duplicates;
+Ch8+9 27 pp, 0 unrenderable glyphs; combined report 190 pp; suite 172 passed / 2 skipped; tsc clean.
+
+TRAP, refined: annotation labels wrap **per WORD**, not per label. "DE-RATING" (9 chars, hyphen is
+not a break point) rendered as "DE-RATIN G", and "CATALOGUE" broke the same way in C198 — while
+"MAKE RATING" and "STEADY IMAX" are fine because they break at the space. **Rule: every WORD in an
+annotation label must be about 8 characters or fewer**; total length does not matter. Renamed to
+"AMBIENT".
+
+PRE-EXISTING, not fixed (cosmetic, outside the redlines): "RELEASE STATEMENT" wraps as "STATEME NT"
+by the same rule, and "CONDITIONAL" wraps in the narrow status column of Table 8.9c.
+
+Also removed three dead GUI keys (`relay_make_rating_a`, `relay_delay_tol_ms`, `off_time_min_ms`)
+now that nothing writes them — a key nothing writes is the trap that hid the `vdc_min_holdup_v`
+discrepancy for months.

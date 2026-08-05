@@ -763,14 +763,23 @@ def _op_temp_max_C(rec):
 
 
 def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
-    """Structured line-fuse screen against the vendor Fuse_Database, SIX gates (fuse_select.GATES):
-      1 voltage rating vs high line;  2 current rating vs margin×I_rms AND the load-factor (75 %) rule,
-      both after thermal de-rating, and not grossly oversized;  3 melting I2t vs margin×startup I2t (the
-      inrush PEAK does NOT gate the rating — see fuse_select);  4 breaking capacity vs available fault
-      current;  5 fault coordination (MOV/GDT fail-short, stuck bypass relay);  6 thermal implementation
-      (body temperature within the part's operating limit).
-    ok=False only for a REAL violated limit; a missing datasheet field or site input -> CONDITIONAL, so the
-    designer can always select a part (see feedback: selection never blocked by DATA MISSING)."""
+    """Structured line-fuse screen against the vendor Fuse_Database.
+
+    SELECTION is decided by TWO gates only, because those are the only two the vendor table carries
+    for every part (v_ac_V 115/115, i_rated_A 115/115):
+      1 AC voltage rating vs the high line
+      2 continuous RMS current — margin rule AND the load-factor (75 %) rule, not grossly oversized
+    A part failing either is not offered.
+
+    Gates 3-6 (melting I2t, breaking capacity, fault coordination, thermal implementation) still
+    COMPUTE and are reported, but they no longer decide selection. Melting I2t is published for only
+    90 of 115 parts, and the re-rating slope for NONE of them, so gating on them silently excluded
+    parts for want of a datasheet column rather than for any electrical reason. They are now stated
+    as designer confirmations against computed figures.
+
+    ok=False only for a REAL violated limit on gate 1 or 2; a missing datasheet field or site input
+    -> CONDITIONAL, so the designer can always select a part (selection never blocked by DATA
+    MISSING)."""
     recs = load_fuse()
     if not recs:
         return []
@@ -818,7 +827,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         else:
             i2t_ok = i2t > req["i2t_min"]
             if not i2t_ok:
-                ok = False
+                conditional = True      # reported, not selected on (gate 3 is a designer check)
             reasons.append(f"[3] melting I2t {i2t:g} A2s {'>' if i2t_ok else '<='} {req['i2t_min']:.1f} A2s (margin x startup)"
                            + (f"; rides inrush peak {_inr:.0f}A" if (i2t_ok and _inr) else ""))
         # ── gate 4: breaking capacity vs available fault current ─────────────
@@ -829,7 +838,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         else:
             bc_ok = bc >= req["bc_min"]
             if not bc_ok:
-                ok = False
+                conditional = True      # reported, not selected on (gate 4 is a designer check)
             reasons.append(f"[4] breaking {bc:g}A {'>=' if bc_ok else '<'} fault {req['bc_min']:.0f}A")
         # ── gate 5: fault coordination (MOV/GDT fail-short, stuck bypass relay) ──
         if not _co["known"]:
@@ -841,7 +850,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         else:
             coord_ok = bc >= _co["i_A"]
             if not coord_ok:
-                ok = False
+                conditional = True      # reported, not selected on (gate 5 is a designer check)
             reasons.append(f"[5] breaking {bc:g}A {'>=' if coord_ok else '<'} {_co['source']} {_co['i_A']:.0f}A")
         # ── gate 6: thermal implementation (de-rating applied above; body temperature here) ──
         t_max = _op_temp_max_C(rec)
@@ -854,7 +863,7 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         else:
             thermal_ok = _th["t_body_C"] <= t_max
             if not thermal_ok:
-                ok = False
+                conditional = True      # reported, not selected on (gate 6 is a designer check)
             if _th["estimated"] or not _th["rise_known"]:
                 conditional = True      # de-rating slope estimated / holder rise unknown -> not a clean PASS
             reasons.append(f"[6] body {_th['t_body_C']:.0f}degC {'<=' if thermal_ok else '>'} limit {t_max:.0f}degC"
@@ -874,7 +883,13 @@ def screen_table_fuse(fs, startup_i2t=None, top: int = 12):
         pass_tier = 0 if verdict == "PASS" else (1 if verdict == "CONDITIONAL" else 2)
         scored.append(((pass_tier, i_rated or BIG, -(i2t or 0)), row))
     scored.sort(key=lambda x: x[0])
-    return [row for _, row in scored[:top]]
+    # A part that fails the voltage or current gate cannot be used at any margin, so it is not
+    # offered rather than ranked last. NEVER-EMPTY still holds: if nothing in the catalogue clears
+    # both gates the filter is lifted, so the shortfall is visible instead of an empty screen.
+    kept = [row for _, row in scored if row["verdict"] != "FAIL"]
+    if not kept:
+        kept = [row for _, row in scored]
+    return kept[:top]
 
 
 if __name__ == "__main__":

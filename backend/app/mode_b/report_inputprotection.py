@@ -85,10 +85,8 @@ def build_ntc_story(story, design, cap=None, opts=None):
     step_h(story, "8.1", "Design Inputs, Limits & Selection Gates", CH)
     annotation(story, "CONCEPT",
         "The inrush element is sized from values already fixed upstream: the high-line peak sets the "
-        "worst-case stress, the approved bulk capacitance (Step 15) sets the charge energy, and the "
-        "worst-case input RMS current (from the shared operating grid) sets the continuous self-heat "
-        "that forces a bypass. This section states ONLY those inputs and the selection gates they imply — "
-        "the NTC part itself is derived and named later (Sections 8.6–8.8), not pre-selected here.", CH)
+        "worst-case stress, the approved bulk capacitance sets the charge energy, and the worst-case "
+        "input RMS current sets the continuous self-heat that forces a bypass.", CH)
     data_table(story, "8.1", "Carried-in Operating Basis", "Each input with its source and status.",
         ["Quantity", "Symbol", "Value", "Source / status"],
         [["High-line RMS", "V<sub>ac,max</sub>", f"{_f(s['vac_max'],0)} V", "design grid"],
@@ -97,7 +95,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
          ["Bulk capacitance", "C<sub>out</sub>", f"{_f(s['cout']*1e6,0)} {_MU}F", "Selected capacitor value"],
          ["Worst-case input RMS", "I<sub>in,rms</sub>", f"{_f(r['i_rms_worst'],2)} A", "operating grid"],
          ["Inrush current target", "I<sub>target</sub>", f"{_f(s['i_inrush_target'],0)} A", "design limit"],
-         ["Known parasitic R", "R<sub>par</sub>", f"{_f(r['r_parasitic'],3)} {_OHM}", "line + EMI + ESR + bridge (0 = uncredited)"],
+         ["Known parasitic R", "R<sub>par</sub>", f"{_f(r['r_parasitic'],3)} {_OHM}", "line + EMI + ESR + bridge"],
          ["R25 tolerance (screen)", "Tol<sub>R25</sub>", f"{_f((r.get('r25_tol_screen') if isinstance(r,dict) else s.get('r25_tol_default',0.2) or 0.2)*100,0)}%",
           "default — replaced by the selected part's datasheet tolerance"]],
         col_widths=[CW*0.30, CW*0.16, CW*0.24, CW*0.30], ch=CH)
@@ -175,13 +173,10 @@ def build_ntc_story(story, design, cap=None, opts=None):
         "+ EMI-filter series + bridge + bulk-capacitor ESR, added together and entered as ONE figure "
         "(GUI: <i>Loop R (total)</i>). It is credited against the requirement: the NTC only has to make up "
         "the difference between R<sub>total,cold</sub> and what the loop already provides, so a larger "
-        "R<sub>par</sub> means a SMALLER required R<sub>25</sub>. Entering it as a single number is "
-        "deliberate — the same resistance counted twice would understate the NTC requirement and can "
-        "select an under-sized part. The same figure is credited in the relay make-current check and in "
-        "the bypassed / stuck-relay case of Section 8.7 &#8212; with the NTC shorted out, this loop "
-        "resistance is the <i>only</i> thing left limiting the current, so it is what that fault case "
-        "divides into. R<sub>par</sub> = 0 means nothing is credited and the NTC carries the whole limit, "
-        "which is the conservative reading.", CH)
+        "R<sub>par</sub> means a SMALLER required R<sub>25</sub>. The same figure is credited in the "
+        "relay make-current check and in the bypassed / stuck-relay case of Section 8.7 &#8212; with the "
+        "NTC shorted out, this loop resistance is the <i>only</i> thing left limiting the current, so it "
+        "is what that fault case divides into.", CH)
     # The final column MUST reproduce the equation chain above, margin included. It used to compute
     # (R_total - R_par)/(1 - tol) and drop k_margin entirely, so the design row printed a nominal
     # floor a factor of k_margin below the one the candidate screen actually filters on (6.53 vs
@@ -195,14 +190,6 @@ def build_ntc_story(story, design, cap=None, opts=None):
                          f"{_f(_mrg/(1.0-_tolp),3)}"])
     data_table(story, "8.2",
         "Inrush-Target Sweep — Required Resistance, Net of Parasitics, Margin and Tolerance",
-        f"How the resistance requirement moves if the inrush target is revised, following the same "
-        f"chain as Equation 8.2 left to right. "
-        f"<b>R<sub>min,total</sub></b> = V<sub>in,pk</sub>/I. "
-        f"<b>&#8722; R<sub>par</sub></b> credits the {_f(r['r_parasitic'],3)} {_OHM} loop parasitic — "
-        f"what the NTC alone must provide. <b>&#215; k<sub>margin</sub></b> applies the "
-        f"{_f(s['r25_margin'],2)} design margin. <b>&#247; (1&#8722;tol)</b> grosses that up to the "
-        f"NOMINAL catalog value needed so the LOW edge of a &#177;{_f(_tolp*100,0)}% band still holds "
-        f"the target — this last column is the floor the candidate screen filters on. "
         f"Design row = {_f(s['i_inrush_target'],0)} A.",
         ["Target I (A)", "R<sub>min,total</sub> (" + _OHM + ")",
          "&#8722; R<sub>par</sub> (" + _OHM + ")",
@@ -349,20 +336,25 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"&#8212; and therefore the make current &#8212; by e &#8776; 2.72, and costs one more &#964; of "
         f"startup delay. So N is not a rule of thumb: it is a direct trade of startup time against "
         f"contact stress.", CH)
+    # Basis must be the SELECTED part once one exists — the rest of this section already is, and a
+    # table on the generic pick understates every row by the ratio of the two time constants.
+    _ntau_tau_ms = float((out.get("selected") or {}).get("tau_ms") or (r["tau"] * 1e3))
+    _ntau_basis = ("the SELECTED NTC" if (out.get("selected") or {}).get("tau_ms")
+                   else "the generic R<sub>25</sub> pick (no part selected yet)")
     _ntau_rows = []
     for _n in (2, 3, 4, 5, 6):
         _vr = r["vin_pk_max"] * exp(-_n)
         _rmk = r["r_parasitic"] + (s.get("relay_path_ohm") or 0.0)
         _ntau_rows.append([
             f"{_n}" + ("  &#8592; design" if abs(_n - s["tau_multiple"]) < 0.01 else ""),
-            f"{_f(_n * (r['tau'] * 1e3), 0)}",
+            f"{_f(_n * _ntau_tau_ms, 0)}",
             f"{_f(100.0 * (1.0 - exp(-_n)), 2)}%",
             f"{_f(_vr, 2)}",
             (f"{_f(_vr / _rmk, 2)}" if _rmk > 0 else "needs Loop R")])
     data_table(story, "8.4.2", "Choice of N&#964; — Settling vs Contact Stress",
-        f"On the generic R<sub>25</sub> pick (&#964; = {_f(r['tau']*1e3,1)} ms). Delay scales with N; the "
+        f"On {_ntau_basis} (&#964; = {_f(_ntau_tau_ms,1)} ms). Delay scales with N; the "
         f"residual voltage and the make current fall by e &#8776; 2.72 per step, so going from N = 2 to "
-        f"N = 4 costs {_f(2*r['tau']*1e3,0)} ms and cuts the contact stress by about 7&#215;. Beyond "
+        f"N = 4 costs {_f(2*_ntau_tau_ms,0)} ms and cuts the contact stress by about 7&#215;. Beyond "
         f"N &#8776; 5 the bus is within 1% of the peak and further delay buys very little.",
         ["N<sub>&#964;</sub>", "t<sub>bypass</sub> (ms)", "Bus charged",
          "V<sub>residual</sub> (V)", "Make current (A)"],
@@ -387,12 +379,6 @@ def build_ntc_story(story, design, cap=None, opts=None):
         f"<b>{_f(_tb_ms,0)} ms</b> lets the bus settle first. The relay contacts must be rated "
         f"&#8805; {_f(r['relay_contact_v'],0)} V (margin over the {_f(s['vout_bus'],1)} V bus) and carry the "
         f"continuous input current &#8805; {_f(r['relay_contact_a'],1)} A (add AC1/DC headroom).", CH)
-    if _sel_ntc.get("r25_ohm") and abs(float(_sel_ntc["r25_ohm"]) - float(r['r25_pick'])) > 0.01:
-        body(story,
-            f"<i>The sizing calculation of Section 8.2 derived a required R<sub>25</sub> of "
-            f"{_f(r['r25_pick'],2)} {_OHM}; the selected part is {_f(_r25_t,2)} {_OHM}. The timing above "
-            f"uses the SELECTED value, which is what the built unit will do — the derived figure is the "
-            f"minimum the part had to clear, not the value to design the relay delay around.</i>", CH)
     if wc:
         _rr = wc.get("r_required_ohm"); _op = wc.get("relay_operate_ms"); _tolm = wc.get("relay_delay_tol_ms")
         # Operate time comes from the relay actually selected unless the designer overrode it. The
@@ -403,17 +389,22 @@ def build_ntc_story(story, design, cap=None, opts=None):
             _op = float(_rsel["t_operate_ms"])
             _op_src = f"{_rsel.get('mfr','')} {_rsel.get('part_number','')} datasheet".strip()
         _sel_ms = (out.get("selected") or {}).get("t_bypass_ms")
-        _min_ms = (_rr * s['cout'] * s['tau_multiple'] * 1e3) if _rr else None
+        # Control-timing tolerance is no longer a designer input: it is derived from the design's own
+        # line frequency and the commanded delay (see the relay result), so the release figure closes
+        # without asking for a number the designer would have to invent.
+        _tol_src = "designer input"
+        if _tolm is None and (_rly or {}).get("spec", {}).get("timing_tolerance_ms"):
+            _tolm = float(_rly["spec"]["timing_tolerance_ms"])
+            _tol_src = str((_rly.get("spec") or {}).get("timing_tolerance_basis") or "derived")
         _final_ms = (_sel_ms or r['t_bypass'] * 1e3) + (_op or 0) + (_tolm or 0)
         body(story,
             "<b>Release timing (selected-part basis).</b> "
-            + (f"Minimum design timing = {_f(_min_ms,0)} ms ({_f(s['tau_multiple'],0)}&#183;&#964; from the "
-               f"required resistance {_f(_rr,2)} {_OHM}); " if _min_ms else "")
-            + f"selected-part timing = {_f(_sel_ms or r['t_bypass']*1e3,0)} ms (from the actual R<sub>25</sub>). "
-            f"The final relay-command delay must be &#8805; the selected-part value plus the relay operate-time "
+            + f"Selected-part timing = {_f(_sel_ms or r['t_bypass']*1e3,0)} ms (from the actual "
+            f"R<sub>25</sub>). The final relay-command delay must be &#8805; that value plus the relay "
+            f"operate-time "
             + (f"({_f(_op,0)} ms, {_op_src}) " if _op else "(TBD) ")
             + "and control-timing tolerance"
-            + (f" ({_f(_tolm,0)} ms)" if _tolm else " (TBD)")
+            + (f" ({_f(_tolm,0)} ms, {_tol_src})" if _tolm else " (TBD)")
             + f" &#8658; <b>&#8805; {_f(_final_ms,0)} ms</b>.", CH)
     annotation(story, "NOTE",
         "Hot-restart caution: a quick OFF/ON leaves the NTC warm (lower R) → higher inrush than the cold "
@@ -452,24 +443,19 @@ def build_ntc_story(story, design, cap=None, opts=None):
                if _imk is not None else
                " needs a loop resistance (Section 8.2 <i>Loop R</i>), which has not been supplied")
             + ".", CH)
-        _mk_rating = wc.get("relay_make_rating_A")
         data_table(story, "8.4.3", "Relay-Make Assessment",
             "The make duty is fully computed. Only the contact's published make rating is outstanding, "
             "and that is a datasheet/vendor confirmation rather than a calculation.",
             ["Item", "Value / Action", "Status"],
             [["Residual voltage at bypass", f"{_f(wc['v_residual_V'],1)} V", "Calculated"],
-             ["Loop parasitic R<sub>par</sub> (Section 8.2)", f"{_f(r['r_parasitic'],3)} {_OHM}", "Input"],
-             ["Relay's own path R<sub>relay</sub>",
+             ["Loop parasitic R<sub>par</sub>", f"{_f(r['r_parasitic'],3)} {_OHM}", "Input"],
+             ["Relay contact R<sub>relay</sub>",
               (f"{_f(s['relay_path_ohm'],3)} {_OHM}" if s.get('relay_path_ohm')
                else "not supplied &#8212; omitted (over-states the current)"),
               "Input" if s.get('relay_path_ohm') else "Optional"],
              ["Relay make current",
               (f"{_f(_imk,2)} A at {_f(wc['v_residual_V'],1)} V" if _imk is not None else "needs Loop R"),
-              "Calculated" if _imk is not None else "Open"],
-             ["Contact make rating",
-              (f"{_f(_mk_rating,1)} A" if _mk_rating
-               else "confirm on the datasheet or with the vendor"),
-              (("PASS" if (_imk is not None and _mk_rating and _imk <= _mk_rating) else "CHECK") if _mk_rating else "Required")]],
+              "Calculated" if _imk is not None else "Open"]],
             col_widths=[CW*0.34, CW*0.42, CW*0.24], ch=CH)
         # Keep this label SHORT: annotation titles render in a ~20 mm cell and wrap per-character
         # once they get long ("...RELAY DA TASHEET"). Same trap as the 47-character label in C185.
@@ -491,13 +477,16 @@ def build_ntc_story(story, design, cap=None, opts=None):
         body(story,
             "The relay is not a general-purpose contactor choice: its duty is ONE make per start into a "
             "partly-charged bus, then continuous conduction of the line current with the NTC out of "
-            "circuit. Every input below comes from the sizing above — nothing is re-derived here.", CH)
+            "circuit. Every input below comes from the sizing above — nothing is re-derived here. "
+            "<b>Three gates select the part</b> — contact current, switching voltage and coil rail — "
+            "because those are the three the vendor table carries for every relay. What cannot be "
+            "screened is listed as a designer confirmation below.", CH)
         eq_box(story, [
             r"I_{contact} \geq k_{I}\,I_{in,rms(worst)}\ ,\qquad "
             r"V_{switch} \geq k_{V}\,V_{in,pk}",
+            r"V_{coil} = \mathrm{board\ rail}",
             r"I_{make}=\dfrac{V_{in,pk}-V_{bus}(t_{bypass})}{R_{par}+R_{relay}}\ ,\qquad "
             r"V_{bus}(t)=V_{in,pk}\left(1-e^{-t/\tau}\right)",
-            r"t_{operate} \leq t_{bypass}",
         ], number="8.4.4", ch=CH)
         body(story,
             f"<b>Worked.</b> The contact must carry the worst-case continuous input RMS "
@@ -515,22 +504,16 @@ def build_ntc_story(story, design, cap=None, opts=None):
             + f") &#8658; a make current of "
             f"<b>{_f(_rrq.get('i_make_A'),2)} A</b>. <b>That small make current is the entire purpose of "
             f"waiting</b>: close too early and the contact makes into a nearly-full line peak.", CH)
-        annotation(story, "CONFIRM THE MAKE DUTY",
+        annotation(story, "MAKE DUTY",
             f"A published make / inrush contact rating is <b>not available for any part in this "
-            f"catalogue</b>, and most relay datasheets state only a continuous rating. Gate 3 therefore "
-            f"clears on the continuous rating and reports CONDITIONAL &#8212; that means <i>nothing here "
-            f"rules the part out</i>, not that the duty is proven. <b>What to confirm:</b> that the "
-            f"chosen relay can make <b>{_f(_rrq.get('i_make_A'),1)} A at "
+            f"catalogue</b>, and most relay datasheets state only a continuous rating &#8212; so there is "
+            f"nothing to screen against and the make duty is not a selection gate. <b>What to confirm:</b> "
+            f"that the chosen relay can make <b>{_f(_rrq.get('i_make_A'),1)} A at "
             f"{_f((_rsp.get('vin_pk_max') or 0) - (_rsp.get('v_bus_precharged') or 0),1)} V</b>, once per "
-            f"start &#8212; from the datasheet, the vendor, or a bench measurement at closure. The duty is "
-            f"light because of the precharge delay, so most contacts of this size will cover it; it is the "
-            f"evidence that is missing, not the margin. This is a release item and never blocks selection.", CH)
+            f"start &#8212; from the datasheet, the vendor, or a bench measurement at closure.", CH)
         data_table(story, "8.4.4", "Bypass-Relay Selection Gates",
-            (f"Screened against {_rly.get('catalog_size', 0)} catalogue relays. "
-             + (f"Selected: <b>{(_rsel.get('mfr') or '')} {(_rsel.get('part_number') or '')}</b>."
-                if _rsel else "No part selected yet — the requirement column still stands.")
-             + " A gate whose input is missing reports DATA MISSING and never removes a part from "
-               "selection (convention: gates block release, not selection)."),
+            ((f"Selected: <b>{(_rsel.get('mfr') or '')} {(_rsel.get('part_number') or '')}</b>."
+              if _rsel else "No part selected yet — the requirement column still stands.")),
             ["#", "Gate", "Requirement", "Selected part", "Status"],
             [[str(g["n"]), g["name"], g["requirement"], g["result"], g["status"]]
              for g in (_rly.get("gates") or [])],
@@ -550,44 +533,24 @@ def build_ntc_story(story, design, cap=None, opts=None):
                  ["Mounting", str(_rsel.get("mounting") or "&#8212;")],
                  ["Operating temperature", str(_rsel.get("op_temp") or "&#8212;")]],
                 col_widths=[CW*0.36, CW*0.64], ch=CH)
-        _asm = _rly.get("assumed") or []
-        if _asm:
+        # REDLINED: Table 8.4.6 ("Inputs Not Supplied — Safe Values Used") and the hidden-count
+        # SCREEN annotation are gone. With the four inputs off the GUI there is no "designer value
+        # vs assumed" to compare, and the report documents the part that was picked rather than the
+        # screening that led to it. The one-line hidden-count message stays on the GUI, where the
+        # choosing happens. What remains is what the designer must CONFIRM.
+        _cfm = _rly.get("confirmation") or []
+        if _cfm:
             body(story,
-                "Four of the relay inputs are not values a designer can simply look up: two are absent "
-                "from every part in the vendor table, one is a property of the control firmware rather "
-                "than of any part, and one depends on the finished layout. Leaving them blank would "
-                "report OPEN and say nothing useful, so each is given a value DERIVED from this design "
-                "or from the vendor table. <b>Every one of them is an assumption, marked as such, and "
-                "none upgrades a verdict to PASS</b> &#8212; an assumed input can close a calculation "
-                "but it cannot prove a part.", CH)
-            # Per-unit precision: 3 decimals on every quantity read as noise ("35.000 A").
-            def _amt(v, unit):
-                if v is None:
-                    return "&#8212;"
-                dp = {"ohm": 3, "A": 1, "ms": 1}.get(unit, 2)
-                return f"{_f(v, dp)} {(_OHM if unit == 'ohm' else unit)}"
-            data_table(story, "8.4.6", "Inputs Not Supplied — Safe Values Used",
-                "Where a designer value is present it is used and the assumption is not applied.",
-                ["Input", "Designer value", "Value used", "Derived from", "Which way it errs"],
-                [[a["param"],
-                  (_amt(a["supplied"], a["unit"]) if a.get("supplied") is not None
-                   else "not supplied"),
-                  (_amt(a["supplied"], a["unit"]) if a.get("supplied") is not None
-                   else (f"<b>{_amt(a['assumed'], a['unit'])}</b> (assumed)"
-                         if a.get("assumed") is not None else "&#8212;")),
-                  a.get("basis", ""), a.get("direction", "")] for a in _asm],
-                col_widths=[CW*0.19, CW*0.14, CW*0.16, CW*0.29, CW*0.22], ch=CH)
-        _scr = _rly.get("screen") or {}
-        if _scr.get("hidden"):
-            annotation(story, "SCREEN",
-                f"{_scr['hidden']} of {_scr.get('considered', 0)} catalogue relays are rated below the "
-                f"{_f(_scr.get('i_contact_min_A'),1)} A contact requirement and are not offered for "
-                f"selection &#8212; they cannot carry the continuous line current at any margin. "
-                + ("<b>No part in the catalogue clears the requirement</b>, so the closest parts are "
-                   "shown instead and the shortfall is the finding."
-                   if _scr.get("fallback") else
-                   "A part that does not PUBLISH a contact rating is still offered: missing data is "
-                   "not a violation."), CH)
+                "Three things about the relay are not screened above. Two of them cannot be: no relay "
+                "in this catalogue publishes a make or inrush rating, so there is nothing to screen "
+                "against, and whether the contact closes after the bus has reached its final value is "
+                "system timing rather than a property of the part. The figures to confirm them against "
+                "are computed here; the confirmation itself is the designer's.", CH)
+            data_table(story, "8.4.6", "Designer Confirmation — Not Screened",
+                "These carry no verdict. A relay is selected on the three gates above.",
+                ["Item", "Figure to confirm against", "What to confirm"],
+                [[c["item"], c["figure"], c["confirm"]] for c in _cfm],
+                col_widths=[CW*0.22, CW*0.30, CW*0.48], ch=CH)
         if (_rrq.get("notes") or []):
             annotation(story, "OPEN ITEMS — RELAY",
                 " ".join(str(n) for n in _rrq["notes"])
@@ -703,24 +666,50 @@ def build_ntc_story(story, design, cap=None, opts=None):
         # Designer review p212: the six gates were one dense paragraph. One gate per line —
         # this is a checklist the reader ticks off against Table 8.6a, not narrative prose.
         body(story,
-            "The line fuse is the upstream protective element for the whole input stage. It is selected from "
-            "the vendor database against <b>six gates</b>:", CH)
+            "The line fuse is the upstream protective element for the whole input stage. "
+            "<b>TWO gates select the part</b>, because those are the only two the vendor table carries "
+            "for every fuse:", CH)
         for _g in [
             "<b>Gate 1 — AC voltage rating.</b> Rating &#8805; the high line.",
             (f"<b>Gate 2 — continuous RMS current.</b> Rating &#8805; "
              f"{_f(_fspec.get('current_margin',1.5),2)}&#215; the worst-case input RMS "
-             f"({_f(fuse.get('i_rms'),1)} A), and the load within {_lf:.0f}% of the rating after "
-             f"temperature de-rating (&#8658; &#8805; {_f(_freq.get('i_rated_min'),1)} A)."),
-            "<b>Gate 3 — melting I&#178;t.</b> Must EXCEED the NTC-limited startup I&#178;t with "
-            "margin, so the fuse does not nuisance-blow at every cold start.",
-            "<b>Gate 4 — breaking capacity.</b> &#8805; the available fault current.",
-            "<b>Gate 5 — fault coordination.</b> The fuse must safely interrupt a MOV/GDT "
-            "fail-short or a stuck bypass relay.",
-            "<b>Gate 6 — thermal implementation.</b> The re-rated current at the real maximum "
-            "ambient, plus fuseholder / PCB rise, must still carry the load, with the fuse body "
-            "inside its temperature limit.",
+             f"({_f(fuse.get('i_rms'),1)} A), and the load within {_lf:.0f}% of the rating "
+             f"(&#8658; &#8805; {_f(_freq.get('i_rated_min'),1)} A)."),
         ]:
             body(story, "&#8226;&nbsp;&nbsp;" + _g, CH)
+        body(story,
+            "Four further checks are COMPUTED AND REPORTED but do not decide selection, because the "
+            "data to decide them does not exist for the whole catalogue: melting I&#178;t is published "
+            "for only 90 of the 115 parts, and the temperature re-rating slope for none of them. "
+            "Screening on them excluded parts for want of a datasheet column rather than for any "
+            "electrical reason. They are confirmations for the designer:", CH)
+        for _g in [
+            "<b>Melting I&#178;t.</b> Must EXCEED the NTC-limited startup I&#178;t with margin, so the "
+            "fuse does not nuisance-blow at every cold start. Where the part does not publish it, take "
+            "it from the datasheet.",
+            "<b>Breaking capacity.</b> &#8805; the available fault current at the installation. This is "
+            "the safety check &#8212; a fuse that cannot interrupt the fault fails destructively.",
+            "<b>Fault coordination.</b> The fuse must safely interrupt a MOV/GDT fail-short or a stuck "
+            "bypass relay.",
+            "<b>Temperature de-rating.</b> The catalog rating is stated at a reference ambient; above "
+            "it the fuse must be re-rated along the datasheet curve. That slope is not in the vendor "
+            "table for any part, so the requirement above is the UN-DE-RATED figure &#8212; apply the "
+            "de-rating by hand.",
+        ]:
+            body(story, "&#8226;&nbsp;&nbsp;" + _g, CH)
+        _famb = _fspec.get("t_ambient_C")
+        # Annotation labels wrap PER WORD, not per label: the cell is ~20 mm and a single unbroken
+        # token longer than ~8 characters splits mid-word ("DE-RATIN G", "CATALOG UE"). Multi-word
+        # labels are fine because they break at the space ("MAKE RATING", "STEADY IMAX").
+        annotation(story, "AMBIENT",
+            (f"Maximum ambient carried in from the design is <b>{_f(_famb,0)}&#176;C</b>. "
+             if _famb else "")
+            + f"The {_f(_freq.get('i_rated_min'),1)} A requirement above is NOT de-rated. A cartridge "
+              f"fuse typically loses of the order of 25% of its rating at elevated ambient, and the "
+              f"fuseholder and PCB add their own rise on top of the ambient &#8212; so the figure a "
+              f"selected part must actually clear is higher than the one stated. Read the re-rating "
+              f"curve from the chosen part's datasheet and confirm the rating at the temperature the "
+              f"fuse body really sees.", CH)
         annotation(story, "Why the inrush PEAK does not set the current rating",
             f"The NTC-limited cold-start peak is {_f(fuse.get('inrush_peak_A'),1)} A, well above any sensible "
             "continuous rating. A fuse survives a high peak when the pulse is SHORT and the melting-I&#178;t "

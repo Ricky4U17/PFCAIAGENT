@@ -109,8 +109,7 @@ export const InputProtection: React.FC<Props> = ({
     i_inrush_target: '60', energy_margin: '1.5', r25_margin: '1.10', vref_pulse: '345',
     tau_multiple: '4', ambient_c: '45', r_loop_ohm: '1',
     // worst-case / coordination inputs (datasheet / layout; blank = open item in the report)
-    fuse_i2t_rating: '', relay_make_rating_a: '', relay_path_ohm: '', off_time_min_ms: '',
-    restart_protection: '', relay_operate_ms: '', relay_delay_tol_ms: '' })
+    fuse_i2t_rating: '', relay_path_ohm: '', restart_protection: '', relay_operate_ms: '' })
   // Gone on purpose: R_wiring / R_PCB (a second path for the resistance `r_loop_ohm` already
   // carries — the engine now uses ONE loop parasitic everywhere) and the Bridge I_FSM box, which
   // is carried in from the bridge selected in Chapter 7 instead of being retyped here.
@@ -200,7 +199,6 @@ export const InputProtection: React.FC<Props> = ({
   const [fuseOpts, setFuseOpts] = useState<Record<string, string>>({
     fuse_current_margin: '1.5', fuse_i2t_margin: '2.0', fuse_ambient_derate: '1.0', fuse_load_factor: '0.75',
     // gate 6 (thermal implementation) + gate 5 (fault coordination) — blank leaves the gate OPEN
-    fuse_ambient_C: '', fuseholder_rise_C: '', fuse_derate_per_C: '',
     mov_fail_short_current_A: '', relay_stuck_fault_current_A: '' })
   const [fuseRes, setFuseRes] = useState<FuseResult | null>(null)
   const [fuseBusy, setFuseBusy] = useState(false)
@@ -230,6 +228,7 @@ export const InputProtection: React.FC<Props> = ({
   // Operate time of the relay actually selected. The catalogue publishes it on 1076 of 1082 parts
   // and the selection gate already screens on it, so typing a second figure here let the gate and
   // the report's relay-command delay disagree silently. A designer entry still wins.
+  // Operate time now comes only from the relay actually selected — it is not an input any more.
   const selRelayOperate = Number(relayRes?.selected?.t_operate_ms) || null
   const ntcOptsEffective = (base?: Record<string, string>): Record<string, string> => {
     const o = { ...(base ?? ntcOpts) }
@@ -483,12 +482,12 @@ export const InputProtection: React.FC<Props> = ({
               <Knob label="Coil supply rail" unit="V" value={relayOpts.relay_coil_supply_v} onChange={v => setR('relay_coil_supply_v', v)} />
               <Knob label="Contact current margin" unit="×" value={relayOpts.relay_current_margin} onChange={v => setR('relay_current_margin', v)} />
               <Knob label="Switching voltage margin" unit="×" value={relayOpts.relay_voltage_margin} onChange={v => setR('relay_voltage_margin', v)} />
-              <Knob label="Relay make rating (if published)" unit="A" value={ntcOpts.relay_make_rating_a} onChange={v => setN('relay_make_rating_a', v)} />
-              <Knob label="Relay-path R (optional)" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
-              <Knob label={`Relay operate${!ntcOpts.relay_operate_ms && selRelayOperate ? ` (${selRelayOperate} from part)` : ''}`}
-                unit="ms" value={ntcOpts.relay_operate_ms} onChange={v => setN('relay_operate_ms', v)} />
-              <Knob label="Delay tolerance" unit="ms" value={ntcOpts.relay_delay_tol_ms} onChange={v => setN('relay_delay_tol_ms', v)} />
-              <Knob label="Min off-time" unit="ms" value={ntcOpts.off_time_min_ms} onChange={v => setN('off_time_min_ms', v)} />
+              {/* Make rating, operate time, timing tolerance and minimum dwell are no longer asked
+                  for: the catalogue publishes the operate time, the tolerance derives from the line
+                  frequency, min on/off is 2x the operate time, and NO relay in the catalogue
+                  publishes a make rating — so the report states the duty to confirm rather than
+                  demanding a number. Relay contact R stays: optional, and blank is conservative. */}
+              <Knob label="Relay contact R (optional)" unit="Ω" value={ntcOpts.relay_path_ohm} onChange={v => setN('relay_path_ohm', v)} />
               <label style={{ fontSize: 10.5, color: C.muted, minWidth: 150 }}>Restart protection<br />
                 <select style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text, padding: '5px 8px', fontSize: 12, width: '100%' }}
                   value={ntcOpts.restart_protection} onChange={e => setN('restart_protection', e.target.value)}>
@@ -511,16 +510,16 @@ export const InputProtection: React.FC<Props> = ({
               <Btn variant="primary" disabled={relayBusy} onClick={() => calcRelay()}>
                 {relayBusy ? '⏳ Selecting…' : '↻ Select relay'}</Btn>
             </div>
-            {/* Leave a box blank and a derived safe value is used instead — the same value and the
-                same wording the report carries (Table 8.4.6), so the two never disagree. */}
-            {(relayRes?.assumed ?? []).some(a => a.supplied == null && a.assumed != null) && (
+            {/* Not gates — the figures the designer confirms against the chosen part. Same three
+                items and the same numbers as report Table 8.4.6, so screen and report agree. */}
+            {(relayRes?.confirmation ?? []).length > 0 && (
               <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 11px', marginBottom: 12 }}>
                 <div style={{ fontSize: 10, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
-                  Left blank — safe values used</div>
-                {(relayRes?.assumed ?? []).filter(a => a.supplied == null && a.assumed != null).map(a => (
-                  <div key={a.param} style={{ fontSize: 11, color: C.text, lineHeight: 1.6 }}>
-                    <b>{a.param}</b> = {a.assumed} {a.unit === 'ohm' ? 'Ω' : a.unit}
-                    <span style={{ color: C.muted }}> — {a.basis}. {a.direction}.</span>
+                  Designer confirms — not screened</div>
+                {(relayRes?.confirmation ?? []).map(cf => (
+                  <div key={cf.item} style={{ fontSize: 11, color: C.text, lineHeight: 1.6 }}>
+                    <b>{cf.item}</b>: {cf.figure}
+                    <span style={{ color: C.muted }}> — confirm {cf.confirm}</span>
                   </div>))}
               </div>)}
 
@@ -902,9 +901,6 @@ export const InputProtection: React.FC<Props> = ({
               <Btn variant="primary" disabled={fuseBusy} onClick={() => calcFuse()}>{fuseBusy ? '⏳ Selecting…' : '↻ Re-select fuse'}</Btn>
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-              <Knob label="Max ambient at fuse" unit="°C" value={fuseOpts.fuse_ambient_C} onChange={v => setF('fuse_ambient_C', v)} />
-              <Knob label="Fuseholder/PCB rise" unit="°C" value={fuseOpts.fuseholder_rise_C} onChange={v => setF('fuseholder_rise_C', v)} />
-              <Knob label="Re-rating slope" unit="%/°C" value={fuseOpts.fuse_derate_per_C} onChange={v => setF('fuse_derate_per_C', v)} />
               <Knob label="MOV/GDT fail-short" unit="A" value={fuseOpts.mov_fail_short_current_A} onChange={v => setF('mov_fail_short_current_A', v)} />
               <Knob label="Stuck-relay fault" unit="A" value={fuseOpts.relay_stuck_fault_current_A} onChange={v => setF('relay_stuck_fault_current_A', v)} />
               <span style={{ fontSize: 9.5, color: C.muted, maxWidth: 230 }}>

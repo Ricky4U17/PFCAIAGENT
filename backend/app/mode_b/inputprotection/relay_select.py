@@ -5,19 +5,25 @@ The relay shorts the NTC out once the bus has precharged, so it is not a general
 choice: the duty is one make per start into a partly-charged bus, then continuous conduction of the
 line current with the NTC out of circuit.
 
-Five gates, in the order they constrain the choice:
+THREE gates select the part, and only three. Each is decided by a value the vendor table carries
+for every part, so the screen is never guessing:
 
   1. Contact current    — the contact must carry the worst-case continuous input RMS with margin.
   2. Switching voltage  — rating >= the highest voltage across the open contact (the line peak).
-  3. Make current       — the current the CONTACT carries at the instant of closure, and welding is
-                          the failure mode. Closing the contact is what shorts the NTC out, so the
-                          NTC is NOT in this path: I_make = (V_in,pk - V_bus)/(R_par + R_relay).
-                          R_relay (the relay's own contact + wiring resistance) is rarely published;
-                          omitting it OVER-states the current, which is the safe direction, so the
-                          requirement can be stated without any datasheet lookup.
-  4. Coil supply        — the coil voltage must be a rail the board actually has.
-  5. Timing             — operate time must fit inside the precharge delay, so the contact does not
-                          close before the bus has charged.
+  3. Coil supply        — the coil voltage must be a rail the board actually has.
+
+Everything else about the relay is CONFIRMED BY THE DESIGNER against figures this module computes,
+not screened here (see `confirmation_rows`):
+
+  * Make current at closure — the current the CONTACT carries the instant it closes. Closing the
+    contact is what shorts the NTC out, so the NTC is NOT in this path:
+    I_make = (V_in,pk - V_bus)/(R_par + R_relay). No relay in this catalogue publishes a make or
+    inrush rating, so there is nothing to screen against; the duty is stated and the designer
+    confirms it with the vendor or on the bench.
+  * Operate timing — the contact closes at t_bypass + t_operate. Whether that lands after the bus
+    has reached its final value is system timing the designer owns, not a property of the part.
+  * Minimum on / off time — taken as 2x the operate time (a settling allowance covering bounce),
+    which is why neither is asked for as an input.
 
 Convention (project rule D0b): a gate whose input is missing reports DATA MISSING and the part
 stays SELECTABLE. Only a gate that is genuinely violated reports FAIL. A missing datasheet value
@@ -32,10 +38,12 @@ from typing import Optional
 GATES = [
     (1, "Contact current rating"),
     (2, "Switching voltage rating"),
-    (3, "Make current at closure"),
-    (4, "Coil supply available"),
-    (5, "Operate timing vs precharge delay"),
+    (3, "Coil supply available"),
 ]
+# Multiple of the operate time taken as the relay's minimum on- and off-time. A contact needs time
+# to settle after bounce before the coil state is changed again; twice the operate time is the
+# conventional allowance and removes two inputs the designer would otherwise have to supply.
+MIN_DWELL_MULTIPLE = 2.0
 
 
 @dataclass
@@ -120,40 +128,47 @@ def gate_rows(part: dict | None, req: RelayRequirement, spec: RelaySpec) -> list
                  "result": (f"{sv:g} V" if sv is not None else "—"),
                  "status": _st(None if (sv is None or not part) else sv >= req.v_switch_min_V)})
 
-    # Gate 3 compares against the CONTACT rating because a published make/inrush rating is rare —
-    # in this catalogue it is absent for every part. Clearing the continuous rating is therefore
-    # CONDITIONAL, never a clean PASS: it means "nothing here rules the part out, now confirm the
-    # make duty against the datasheet or the vendor". It never removes a part from selection.
-    if req.i_make_A is None:
-        rows.append({"n": 3, "name": GATES[2][1], "requirement": "make current must be evaluated",
-                     "result": "path R not supplied", "status": "DATA MISSING"})
-    else:
-        ok = None if (ci is None or not part) else ci >= req.i_make_A
-        rows.append({"n": 3, "name": GATES[2][1],
-                     "requirement": f">= {req.i_make_A:g} A at closure",
-                     "result": (f"{ci:g} A continuous rating" if ci is not None else "—"),
-                     "status": _st(ok, conditional=bool(ok))})
-
     cv = p.get("coil_v_V")
     if req.coil_supply_v is None:
-        rows.append({"n": 4, "name": GATES[3][1], "requirement": "coil rail must be declared",
+        rows.append({"n": 3, "name": GATES[2][1], "requirement": "coil rail must be declared",
                      "result": (f"{cv:g} V coil" if cv is not None else "—"),
                      "status": "DATA MISSING"})
     else:
         ok = None if (cv is None or not part) else abs(cv - req.coil_supply_v) < 0.51
-        rows.append({"n": 4, "name": GATES[3][1],
+        rows.append({"n": 3, "name": GATES[2][1],
                      "requirement": f"coil = {req.coil_supply_v:g} V rail",
                      "result": (f"{cv:g} V" if cv is not None else "—"), "status": _st(ok)})
+    return rows
 
+
+def confirmation_rows(part: dict | None, req: RelayRequirement, spec: RelaySpec) -> list[dict]:
+    """What the DESIGNER confirms about the chosen relay, with the figure to confirm it against.
+
+    These are not gates and carry no verdict. Two of them cannot be screened because the data does
+    not exist (no relay in this catalogue publishes a make rating), and one is system timing rather
+    than a property of the part. Stating the number is the useful thing; deciding is the designer's.
+    """
+    p = part or {}
     to = p.get("t_operate_ms")
-    if req.t_operate_max_ms is None:
-        rows.append({"n": 5, "name": GATES[4][1], "requirement": "precharge delay must be known",
-                     "result": (f"{to:g} ms" if to is not None else "—"), "status": "DATA MISSING"})
-    else:
-        ok = None if (to is None or not part) else to <= req.t_operate_max_ms
-        rows.append({"n": 5, "name": GATES[4][1],
-                     "requirement": f"operate <= {req.t_operate_max_ms:g} ms precharge delay",
-                     "result": (f"{to:g} ms" if to is not None else "—"), "status": _st(ok)})
+    dwell = (to * MIN_DWELL_MULTIPLE) if to else None
+    rows = [
+        {"item": "Contact make current",
+         "figure": (f"{req.i_make_A:g} A at closure" if req.i_make_A is not None
+                    else "needs the loop resistance"),
+         "confirm": "that the contact can make this current once per start — no part in this "
+                    "catalogue publishes a make/inrush rating, so confirm with the vendor or "
+                    "measure at closure"},
+        {"item": "Closure vs bus charged",
+         "figure": (f"contact closes at t_bypass + t_operate = {spec.t_bypass_ms:g} + {to:g} = "
+                    f"{spec.t_bypass_ms + to:g} ms" if (to and spec.t_bypass_ms)
+                    else "needs the operate time"),
+         "confirm": "that the bus has reached its final value by then — this is system timing, "
+                    "not a property of the relay"},
+        {"item": "Minimum on / off time",
+         "figure": (f"{dwell:g} ms each ({MIN_DWELL_MULTIPLE:g} x the {to:g} ms operate time)"
+                    if dwell else "needs the operate time"),
+         "confirm": "that the control never commands the coil to change state inside this window"},
+    ]
     return rows
 
 
