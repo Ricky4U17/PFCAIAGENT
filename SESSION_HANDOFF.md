@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-03**, head = **`cac1cdd` C194**, on `master`.
+**Start here after a restart.** Last updated **2026-08-04**, head = **`4e4c004` C201**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -15,9 +15,48 @@
 
 ---
 
-## Where we are (2026-08-03)
+## Where we are (2026-08-04)
 
-**Just finished:** the designer's 5-item GUI/report batch — ALL FIVE ARE IN.
+**Just finished:** a long Chapter 8 / input-protection arc (C195–C201), driven by the designer
+item-by-item and by a redlined review PDF. Chapter 8 is now the most worked-over chapter in the
+report; treat its conventions as settled.
+
+### What changed, and the three rules that came out of it
+
+| C | Commit | What |
+|---|---|---|
+| C195 | `3a2a1c8` | NTC page: 4 controls to the Relay tab; **R_wiring/R_PCB removed — they were a second sum of the same loop** that omitted the designer's Loop R; bridge I_FSM auto-fed from Ch 7 |
+| C196 | `76769e4` | **Relay make current: one formula, at the right instant.** Three copies spanned 1 A / 7 A / 138 A. The contact shorts the NTC out as it closes, so the NTC is NOT in the make path |
+| C197 | `cfb1751` | Ch 8 legibility: substituted equations, **k_margin restored to Table 8.2** (it disagreed with its own equation by exactly 1.10), why N·τ = 4, what steady I_max is, splash page rebuilt |
+| C198 | `474c399` | Under-rated relays hidden (1038/1082); safe values derived for the inputs nobody publishes |
+| C199 | `395ad2e` | **Relay selects on 3 gates, fuse on 2** — the only ones the vendor tables carry for every part; plus 52 redlines from the review PDF |
+| C200 | `5874f6a` | Annotation-label wraps, all four |
+| C201 | `4e4c004` | **Input focus loss fixed** (component declared inside a component); PDF-fitted curves now labelled in Table 7.2d |
+
+**Three rules worth carrying forward:**
+
+1. **A gate is only worth screening on if the vendor table carries the field for every part.**
+   Melting I²t is 90/115, the fuse re-rating slope is **0/115**, and no relay publishes a make
+   rating — screening on those excluded parts for want of a datasheet column, not for any electrical
+   reason. They are now computed, reported, and confirmed by the designer.
+2. **Annotation labels wrap PER WORD, not per label.** The cell is ~20 mm and breaks on spaces only,
+   so any unbroken token over ~8 characters splits mid-word ("DE-RATIN G", "CATALOG UE",
+   "STATEME NT"). A hyphen is not a break point. "MAKE RATING" is fine.
+3. **Never declare a React component inside another component.** New identity every render →
+   unmount/remount → the `<input>` is recreated on every keystroke and loses focus. `Knob` in
+   `InputProtection.tsx` has always been at module level, which is why that page never had it.
+   There are now no inline `React.FC` declarations left anywhere; keep it that way.
+
+### Where the designer landed on Chapter 8's shape
+- **Candidate lists do not belong in the report.** The GUI is where parts are seen and chosen; the
+  report records the part picked and why. The fuse and relay candidate tables are to come out of the
+  report too, "when we come to that point" — not yet done.
+- **Selection is never blocked by missing data**, and an un-screenable check becomes a stated
+  designer confirmation rather than a permanently-OPEN gate.
+- **The NTC restart off-time and the relay dwell time are different quantities** and must not be
+  conflated: 2 × t_operate is contact settling (~80 ms), thermal recovery is seconds to minutes.
+
+### The earlier 5-item batch (C193–C194) — ALL FIVE ARE IN
 
 | # | Item | Where |
 |---|---|---|
@@ -46,6 +85,17 @@ the larger framework (architecture PDF, two block diagrams, technical brief, ope
 state, and `07_api_and_engines.json` = 63 endpoints / 18 engines / 38 graph nodes).
 
 ### Next up, in order
+0. **The "bring your own part" architecture** — reviewed 2026-08-04, agreed in principle, NOT
+   started. The real problem is not database size but that a number entering the design has no
+   provenance and no validation. Agreed order: (a) plausibility gate using the existing catalogues
+   as the reference distribution — `Ve = Ae·le` alone would have resolved C115 in seconds;
+   (b) provenance-tagged `contributed/` store separate from `verified/`; (c) batch MPN compare +
+   Excel export, running through the SAME engine the report uses; (d) supplier PDFs as the source of
+   record for the curves the Excel spine cannot carry, with an ASSISTED DIGITISER (agent proposes
+   points, designer confirms against the plot) — never a silent extractor; (e) a chatbot scoped to
+   explaining the design from ENGINE OUTPUTS first, part discovery second. Three questions still
+   open: does a contributed part read differently in the report; is a flagged value blocking or
+   advisory (recommendation: advisory + recorded acknowledgement); chatbot scope on day one.
 1. **Designer decision from C187:** Table 5.5.2 shows the reference bank FAILS the capacitance
    requirement at -20% (1920 uF vs 2047 uF, -6.2%). Add capacitance, accept reduced worst-case
    hold-up, or source a tighter part.
@@ -59,6 +109,12 @@ state, and `07_api_and_engines.json` = 63 endpoints / 18 engines / 38 graph node
    materials with no Bsat-vs-T; `data_source` at the wrong nesting level in 67 powder files).
 
 ### Traps this stretch re-taught
+- **The same quantity computed in two places will diverge, and the report will not say so.** C196
+  found three formulas for the relay make current; C195 found two sums of one loop resistance; C199
+  found a table on the generic R25 pick inside a section that otherwise uses the selected part.
+  When adding a table or a worked example, check which basis the rest of the section uses.
+- **`eq_box` renders through matplotlib, so equations never appear in extracted text.** Verifying
+  them needs a page image, not a text extract. Same for anything drawn rather than typeset.
 - **A scripted renumbering can create DUPLICATES that a "does the series start at 'a'" audit cannot
   see.** Always list the RENDERED table captions from a built PDF and check for repeats.
 - **`ast.parse` + the suite are not enough.** Three defects this stretch (the `_ch4` NameError that
@@ -93,15 +149,17 @@ flow and fixed several real calculation defects found along the way.
 | C174 | `7e89c39` | Re-run buttons passed React's click event as their options — knob values never reached the backend |
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
-### State of the build (verified at C194)
+### State of the build (verified at C201)
 - Backend suite: **172 passed / 2 skipped** (the standing baseline — anything else is a regression).
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
   not in the harness report** — to check anything in Ch7, POST `/documentation/generate-report`
   with `semiconductor` present.
-- Chapters 8+9 standalone: **24 pp**, sections in order 8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.4, 8.5, 8.6,
-  8.6.1, 8.7, 8.8, 8.9.
+- Chapters 8+9 standalone: **27 pp** with an NTC selected (25 pp bare), sections in order
+  8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.6, 8.5, 8.6, 8.6.1, 8.7, 8.8, 8.9. Zero unrenderable glyphs and
+  zero mid-word label wraps — both are swept for, not assumed.
+- Frontend production `vite build`: clean (worth running after any component-structure change).
 
 ---
 
