@@ -483,15 +483,26 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "qrr":             "Q<sub>rr</sub> — from t<sub>rr</sub> and I<sub>o</sub>",
         "qc":              "Q<sub>c</sub> — SiC typical",
         "vf_curve(slope)": "V<sub>f</sub>(i) SHAPE — anchored on the datasheet point, knee shape estimated",
+        # Produced by the PDF extractor, which reads text but not plots: these are shapes fitted
+        # through the ONE scalar it could find, so they are labelled separately from the DB
+        # estimates above — the reader should know the plotted curve was never consulted.
+        "vf_curve(pdf)":   ("V<sub>f</sub>(i) SHAPE — a straight two-point line fitted to the single "
+                            "V<sub>F</sub> value read from the uploaded PDF; the datasheet's plotted "
+                            "V-I curve was NOT read"),
+        "eoss_at_v(pdf)":  ("E<sub>oss</sub>(V) — a V<sup>1.5</sup> extrapolation from the single "
+                            "E<sub>oss</sub> value read from the uploaded PDF; the plotted curve was "
+                            "NOT read"),
     }
     _prov_rows = []
     for _lbl, _blk in (("Bridge", bridge), ("MOSFET", mosfet), ("Diode", diode)):
         _est = list((_blk or {}).get("_estimated") or [])
         _pn = (_blk or {}).get("part_number") or "&#8212;"
         _mf = (_blk or {}).get("manufacturer") or "&#8212;"
+        _src = (_blk or {}).get("_source")
         _prov_rows.append([f"<b>{_lbl}</b>", f"{_mf} {_pn}".strip(),
-                           ("datasheet URL on file" if (_blk or {}).get("datasheet_url")
-                            else "<i>no datasheet link</i>"),
+                           (str(_src) if _src else
+                            ("datasheet URL on file" if (_blk or {}).get("datasheet_url")
+                             else "<i>no datasheet link</i>")),
                            ("all model parameters datasheet-backed" if not _est else
                             "; ".join(_EST_LABEL.get(e, e) for e in _est))])
     data_table(story, "7.2d", "Model-Parameter Provenance — Datasheet vs Estimated",

@@ -4,8 +4,16 @@ Datasheet extraction — pull the loss-model parameters from an uploaded PDF dat
 Heuristic, offline extractor: pypdf text → label-anchored regex per parameter. It returns the
 values it can find as an engine block (manufacturer/part guessed from the header), plus the list
 of fields found vs missing, so the GUI can show a confirmation table the designer edits before
-the loss calculation. Curves (Rds(on)-vs-Tj, Eoss-vs-V, Vf-vs-If) are rarely machine-readable, so
-those are left to the DB-style estimate / manual entry; scalar parameters are the target here.
+the loss calculation. Scalar parameters are the target.
+
+CURVES ARE NOT READ. The plotted characteristics (Rds(on)-vs-Tj, Eoss-vs-V, Vf-vs-If) are not
+machine-readable from the PDF, so where the engine needs a curve this module SYNTHESISES a shape
+anchored on the single scalar it did find — a straight two-point line for Vf(i), a V^1.5
+extrapolation for Eoss(V). Those shapes are plausible but they are not the part's. Every field
+produced that way is listed in `_estimated`, which the report renders in Table 7.2d
+(Model-Parameter Provenance), so a reader can always tell a datasheet number from a fitted shape.
+Digitising the real curves needs the designer to confirm points against the plot; until then the
+label is the honest answer.
 """
 from __future__ import annotations
 import io, re
@@ -69,8 +77,10 @@ def extract(pdf_bytes: bytes, kind: str) -> dict:
     text = extract_text(pdf_bytes)
     flat = re.sub(r"[ \t]+", " ", text)
     mfr, part = _header(flat)
-    blk = {"manufacturer": mfr, "part_number": part}
+    blk = {"manufacturer": mfr, "part_number": part,
+           "_source": "uploaded datasheet PDF (heuristic text extraction)"}
     found, missing = [], []
+    estimated = []                      # fields the engine gets as a FITTED SHAPE, not a reading
 
     def take(key, val):
         if val is not None:
@@ -91,12 +101,14 @@ def extract(pdf_bytes: bytes, kind: str) -> dict:
         take("rth_jc",   _rth(flat))
         if "eoss_J" in blk:                            # turn a single Eoss point into the 2-pt curve form
             e = blk.pop("eoss_J"); blk["eoss_at_v"] = [[100, 400], [round(e * 0.25 ** 1.5, 9), round(e, 9)]]
+            estimated.append("eoss_at_v(pdf)")         # a V^1.5 fit through ONE point, not the plot
     elif kind == "diode":
         sic = bool(re.search(r"silicon\s*carbide|\bSiC\b|Schottky", flat, re.I))
         blk["is_sic"] = sic
         vf = _num_after(flat, r"V\s*F\b|Forward [Vv]oltage", "V", prefixed=False)
         if vf is not None:
             blk["vf_curve"] = [[1, 10], [max(0.3, vf - 0.3), vf]]; found.append("vf_curve")
+            estimated.append("vf_curve(pdf)")          # straight line through ONE point, not the plot
         else:
             missing.append("vf_curve")
         if sic:
@@ -109,8 +121,11 @@ def extract(pdf_bytes: bytes, kind: str) -> dict:
         vf = _num_after(flat, r"V\s*F\b|Forward [Vv]oltage", "V", prefixed=False)
         if vf is not None:
             blk["vf_curve"] = [[1, 12], [max(0.3, vf - 0.3), vf]]; found.append("vf_curve")
+            estimated.append("vf_curve(pdf)")          # straight line through ONE point, not the plot
         else:
             missing.append("vf_curve")
 
-    return {"block": blk, "found": found, "missing": missing,
+    if estimated:
+        blk["_estimated"] = estimated
+    return {"block": blk, "found": found, "missing": missing, "estimated": estimated,
             "raw_sample": flat[:600], "manufacturer": mfr, "part_number": part}

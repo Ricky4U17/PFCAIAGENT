@@ -7389,3 +7389,69 @@ keeping the two apart: a label is fixed by shortening the word, a cell by wideni
 VERIFIED by a sweep over the rendered text for `[A-Z]{4,}\\s[A-Z]{1,2}` on two configurations (with
 an NTC selected, 27 pp, and bare, 25 pp): zero mid-word splits remain, "CONDITIONAL" appears whole
 19 times, 0 unrenderable glyphs. Combined report 190 pp; suite 172 passed / 2 skipped.
+
+## C201 — the focus bug, and labelling the curves the PDF extractor invents
+
+Designer: fields on the semiconductor page lose focus after every character, and (from the same
+conversation) the synthesised datasheet curves should be labelled rather than removed.
+
+### The focus bug — a component declared inside a component
+`FieldRow` was declared at line 358 of `SemiconductorSelection.tsx`, INSIDE the component (which
+starts at 157). A component defined in another component's body gets a new function identity on
+every render, so React treats it as a different component TYPE at that position: it unmounts the old
+subtree and mounts a fresh one. The `<input>` is therefore destroyed and recreated on every
+keystroke, and focus goes with it.
+
+**The proof was already in the codebase:** `Knob` in `InputProtection.tsx` is at line 53, MODULE
+level — which is exactly why that page has never had the problem while this one always did.
+
+Four instances hoisted to module level; none of them closed over anything that could not be passed
+as a prop:
+
+| File | Component | Impact before |
+|---|---|---|
+| `SemiconductorSelection.tsx` | `FieldRow` | **the reported bug** — every text field on the page |
+| `SemiconductorSelection.tsx` | `Banner` | no input, so invisible; a wasted remount per render |
+| `IntakeForm.tsx` | `SliderField` | holds `<input type="range">`; a remount mid-drag drops the browser's pointer capture, so a priority slider stops following the mouse after one step |
+| `IntakeForm.tsx` | `FreqBtn` | click-only div, cosmetic |
+
+`FreqBtn` and `SliderField` closed over component state (`lineFreq`/`handleLineFreq`, `d`/`set`), so
+they take `active`/`onSelect` and `value`/`onChange` as props now. `FieldRow` and `Banner` needed
+nothing — `inStyle` was already module level at line 153.
+
+A comment at each site says why they must stay there, because this reverts easily and silently.
+There are now NO inline `React.FC` declarations left in any component file.
+
+### The invented curves are now labelled (designer chose "label, don't remove")
+`datasheet.py` reads TEXT, not plots. Where the engine needs a curve it fits a shape through the one
+scalar it found: a straight two-point line for V_f(i), a V^1.5 extrapolation for E_oss(V). Plausible
+shapes, but not the part's — and nothing said so, while `vf_curve` drives every conduction-loss
+number in Chapter 7.
+
+The mechanism to say so already existed: Table 7.2d "Model-Parameter Provenance — Datasheet vs
+Estimated" renders `_blk["_estimated"]`, used by the DB path since C49-era work. The extractor now
+populates it too, with its OWN keys so the two bases are not conflated:
+
+* `vf_curve(pdf)` — "a straight two-point line fitted to the single V_F value read from the uploaded
+  PDF; the datasheet's plotted V-I curve was NOT read"
+* `eoss_at_v(pdf)` — "a V^1.5 extrapolation from the single E_oss value read from the uploaded PDF;
+  the plotted curve was NOT read"
+
+(The DB's own `vf_curve(slope)` and `eoss_at_v` labels stay as they were — different derivation.)
+
+Also new: `_source` on the block ("uploaded datasheet PDF (heuristic text extraction)"), rendered in
+7.2d's source column where a DB part shows its datasheet URL — so a reader can tell where the part
+came from, not only which of its fields were fitted. Added to `_META_KEYS` in the semiconductor
+adapter, or `_clean_block` would have passed it to the engine dataclass and raised.
+
+The module docstring now states plainly that curves are not read and what happens instead, since the
+old wording ("curves are left to manual entry") described an intention the code does not implement.
+
+VERIFIED: extractor marks `vf_curve(pdf)` on a bridge and `eoss_at_v(pdf)` on a MOSFET, `_source`
+present on both; `_clean_block` routes both to metadata and neither to the engine; report carries
+both labels and renders `_source`; no inline `React.FC` remains anywhere; suite 172 passed /
+2 skipped; combined report 190 pp; tsc clean; production `vite build` clean.
+
+STILL OPEN (unchanged, and now visible in the report rather than silent): the fitted V-I shape is
+not the part's curve. Closing it needs the assisted digitiser discussed on 2026-08-04 — agent
+proposes points, designer confirms against the plot.

@@ -147,6 +147,59 @@ function blockToForm(block: Record<string, any>, fields: Field[], base: Record<s
   }
   return out
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE LEVEL ON PURPOSE. A component declared inside another component body
+// gets a new function identity on every render, so React treats it as a
+// different component type: it unmounts the old subtree and mounts a fresh one.
+// That destroys and recreates the <input> on every keystroke, and focus is lost
+// after each character. `Knob` in InputProtection.tsx has always been at module
+// level, which is exactly why that page never had the problem.
+// ─────────────────────────────────────────────────────────────────────────────
+const FieldRow: React.FC<{ f: Field; state: Record<string, any>; onSet: (k: string, v: any) => void }>
+  = ({ f, state, onSet }) => {
+    if (f.show && !f.show(state)) return null
+    const v = state[f.key]
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <label style={{ fontSize: 11.5, color: C.text }}>{f.label}
+          {f.unit && <span style={{ color: C.hint }}> ({f.unit})</span>}
+          {f.hint && <div style={{ fontSize: 9.5, color: C.muted }}>{f.hint}</div>}
+        </label>
+        {f.kind === 'bool' ? (
+          <input type="checkbox" checked={!!v} onChange={e => onSet(f.key, e.target.checked)} style={{ width: 'auto' }} />
+        ) : f.kind === 'select' ? (
+          <select value={v} style={inStyle} onChange={e => onSet(f.key, e.target.value)}>
+            {f.opts!.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        ) : f.kind === 'curve' ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input style={inStyle} value={(v as Curve).x} placeholder="x1, x2, …"
+              onChange={e => onSet(f.key, { ...(v as Curve), x: e.target.value })} />
+            <input style={inStyle} value={(v as Curve).y} placeholder="y1, y2, …"
+              onChange={e => onSet(f.key, { ...(v as Curve), y: e.target.value })} />
+          </div>
+        ) : (
+          <input style={inStyle} value={v ?? ''} onChange={e => onSet(f.key, e.target.value)} />
+        )}
+      </div>
+    )
+  }
+
+
+const Banner: React.FC<{ ok: boolean; okText: string; badText: string; issues?: any[] }>
+    = ({ ok, okText, badText, issues }) => (
+    <div style={{ background: ok ? 'rgba(45,212,191,.10)' : '#fdf2f2', border: `1px solid ${ok ? C.green : '#e8b4b8'}`,
+      borderRadius: 8, padding: '8px 12px', fontSize: 12, color: ok ? C.green : '#c0392b', marginBottom: 8 }}>
+      {ok ? `✓ ${okText}` : `✗ ${badText}`}
+      {!ok && issues && issues.length > 0 && (
+        <ul style={{ margin: '6px 0 0 16px', color: C.text }}>
+          {issues.slice(0, 12).map((i, k) => <li key={k} style={{ fontSize: 11 }}>{JSON.stringify(i)}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+
+
 const BASE: Record<Sub, Record<string, any>> = { bridge: BRIDGE0, mosfet: MOSFET0, diode: DIODE0, results: {} }
 const FIELDS: Record<Sub, Field[]> = { bridge: BRIDGE_FIELDS, mosfet: MOSFET_FIELDS, diode: DIODE_FIELDS, results: [] }
 
@@ -355,36 +408,6 @@ export const SemiconductorSelection: React.FC<Props> = ({
     set(s => ({ ...s, [k]: v }))
   }
 
-  const FieldRow: React.FC<{ f: Field; state: Record<string, any>; onSet: (k: string, v: any) => void }>
-    = ({ f, state, onSet }) => {
-    if (f.show && !f.show(state)) return null
-    const v = state[f.key]
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-        <label style={{ fontSize: 11.5, color: C.text }}>{f.label}
-          {f.unit && <span style={{ color: C.hint }}> ({f.unit})</span>}
-          {f.hint && <div style={{ fontSize: 9.5, color: C.muted }}>{f.hint}</div>}
-        </label>
-        {f.kind === 'bool' ? (
-          <input type="checkbox" checked={!!v} onChange={e => onSet(f.key, e.target.checked)} style={{ width: 'auto' }} />
-        ) : f.kind === 'select' ? (
-          <select value={v} style={inStyle} onChange={e => onSet(f.key, e.target.value)}>
-            {f.opts!.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        ) : f.kind === 'curve' ? (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input style={inStyle} value={(v as Curve).x} placeholder="x1, x2, …"
-              onChange={e => onSet(f.key, { ...(v as Curve), x: e.target.value })} />
-            <input style={inStyle} value={(v as Curve).y} placeholder="y1, y2, …"
-              onChange={e => onSet(f.key, { ...(v as Curve), y: e.target.value })} />
-          </div>
-        ) : (
-          <input style={inStyle} value={v ?? ''} onChange={e => onSet(f.key, e.target.value)} />
-        )}
-      </div>
-    )
-  }
-
   const critIn: React.CSSProperties = { ...inStyle, width: 80 }
   const critSel: React.CSSProperties = { ...inStyle, width: 'auto', maxWidth: 160 }
   const rcell: React.CSSProperties = { padding: '3px 7px', fontSize: 11, borderBottom: `1px solid ${C.border}`,
@@ -573,19 +596,6 @@ export const SemiconductorSelection: React.FC<Props> = ({
       )}
     </Card>)
   }
-
-  const Banner: React.FC<{ ok: boolean; okText: string; badText: string; issues?: any[] }>
-    = ({ ok, okText, badText, issues }) => (
-    <div style={{ background: ok ? 'rgba(45,212,191,.10)' : '#fdf2f2', border: `1px solid ${ok ? C.green : '#e8b4b8'}`,
-      borderRadius: 8, padding: '8px 12px', fontSize: 12, color: ok ? C.green : '#c0392b', marginBottom: 8 }}>
-      {ok ? `✓ ${okText}` : `✗ ${badText}`}
-      {!ok && issues && issues.length > 0 && (
-        <ul style={{ margin: '6px 0 0 16px', color: C.text }}>
-          {issues.slice(0, 12).map((i, k) => <li key={k} style={{ fontSize: 11 }}>{JSON.stringify(i)}</li>)}
-        </ul>
-      )}
-    </div>
-  )
 
   const cell: React.CSSProperties = { padding: '4px 8px', fontSize: 11.5, borderBottom: `1px solid ${C.border}`,
     fontFamily: 'IBM Plex Mono,monospace', color: C.text, textAlign: 'right' }

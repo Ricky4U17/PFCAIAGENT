@@ -55,6 +55,7 @@ def build_design_ops(design: dict):
 
 # metadata kept with each part for the report but NOT passed to the engine dataclasses
 _META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url", "_estimated",
+              "_source",                            # where the block came from (e.g. an uploaded PDF)
               "ifsm_A", "i2t_A2s", "bottom_part")   # check/rating metadata — not engine loss params
 
 def _clean_block(block: dict):

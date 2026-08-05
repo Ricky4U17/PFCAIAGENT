@@ -72,6 +72,44 @@ function setDeep(obj: IntakeData, path: string, val: unknown): IntakeData {
 
 interface Props { onSubmit: (d: IntakeData, projectName: string) => void; loading: boolean }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE LEVEL ON PURPOSE. A component declared inside another component body
+// gets a new function identity on every render, so React treats it as a
+// different component type: it unmounts the old subtree and mounts a fresh one.
+// That destroys and recreates the <input> on every keystroke, and focus is lost
+// after each character. `Knob` in InputProtection.tsx has always been at module
+// level, which is exactly why that page never had the problem.
+// ─────────────────────────────────────────────────────────────────────────────
+// SliderField holds an <input type="range">: a remount mid-drag drops the browser's pointer
+// capture, so the slider stops following the mouse after the first step. What these two used to
+// reach for in the enclosing scope is passed in as props instead.
+const FreqBtn: React.FC<{ id: '50'|'60'|'400'|'univ'; label: string; sub: string
+                          active: boolean; onSelect: (id: '50'|'60'|'400'|'univ') => void }>
+  = ({ id, label, sub, active, onSelect }) => (
+    <div onClick={() => onSelect(id)} style={{
+      flex: 1, padding: '10px 8px', borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+      background: active ? C.accentL : C.bg3,
+      border: `1px solid ${active ? C.accent : C.border2}`,
+      color: active ? C.accent : C.muted, transition: 'all .15s', userSelect: 'none',
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'IBM Plex Mono,monospace' }}>{label}</div>
+      <div style={{ fontSize: 10, color: active ? C.accent : C.hint, marginTop: 2 }}>{sub}</div>
+    </div>
+  )
+
+const SliderField: React.FC<{ label: string; value: number; onChange: (v: number) => void
+                              min?: number; max?: number }>
+  = ({ label, value, onChange, min = 1, max = 10 }) => (
+    <Field label={`${label}: ${value}/10`}>
+      <input type="range" min={min} max={max} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: C.accent } as React.CSSProperties} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: C.hint, marginTop: 2 }}>
+        <span>{min} — low priority</span><span>{max} — critical</span>
+      </div>
+    </Field>
+  )
+
 export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
   const [d, setD] = useState<IntakeData>(DEFAULT)
   // Human-readable project name for the report cover and Chapter 1 (the project_id is a
@@ -104,32 +142,6 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
   }
 
   const isMedical = d.compliance.application_class === 'Medical'
-
-  const FreqBtn: React.FC<{ id: '50'|'60'|'400'|'univ'; label: string; sub: string }> = ({ id, label, sub }) => (
-    <div onClick={() => handleLineFreq(id)} style={{
-      flex: 1, padding: '10px 8px', borderRadius: 8, cursor: 'pointer', textAlign: 'center',
-      background: lineFreq === id ? C.accentL : C.bg3,
-      border: `1px solid ${lineFreq === id ? C.accent : C.border2}`,
-      color: lineFreq === id ? C.accent : C.muted, transition: 'all .15s', userSelect: 'none',
-    }}>
-      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'IBM Plex Mono,monospace' }}>{label}</div>
-      <div style={{ fontSize: 10, color: lineFreq === id ? C.accent : C.hint, marginTop: 2 }}>{sub}</div>
-    </div>
-  )
-
-  const SliderField: React.FC<{ label: string; path: string; min?: number; max?: number }> = ({ label, path, min=1, max=10 }) => {
-    const val = path.split('.').reduce((o: unknown, k) => (o as Record<string,unknown>)[k], d) as number
-    return (
-      <Field label={`${label}: ${val}/10`}>
-        <input type="range" min={min} max={max} value={val}
-          onChange={e => set(path, Number(e.target.value))}
-          style={{ width: '100%', accentColor: C.accent } as React.CSSProperties} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: C.hint, marginTop: 2 }}>
-          <span>{min} — low priority</span><span>{max} — critical</span>
-        </div>
-      </Field>
-    )
-  }
 
   return (
     <div>
@@ -200,10 +212,10 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
         {/* CORRECTION 1b: 4-option line frequency selector including Universal 47–63 Hz */}
         <Field label="Line frequency">
           <div style={{ display: 'flex', gap: 8 }}>
-            <FreqBtn id="50"   label="50 Hz"    sub="EU / Asia" />
-            <FreqBtn id="60"   label="60 Hz"    sub="US / Japan" />
-            <FreqBtn id="400"  label="400 Hz"   sub="Aviation" />
-            <FreqBtn id="univ" label="47–63 Hz" sub="Universal input" />
+            <FreqBtn active={lineFreq === '50'} onSelect={handleLineFreq} id="50"   label="50 Hz"    sub="EU / Asia" />
+            <FreqBtn active={lineFreq === '60'} onSelect={handleLineFreq} id="60"   label="60 Hz"    sub="US / Japan" />
+            <FreqBtn active={lineFreq === '400'} onSelect={handleLineFreq} id="400"  label="400 Hz"   sub="Aviation" />
+            <FreqBtn active={lineFreq === 'univ'} onSelect={handleLineFreq} id="univ" label="47–63 Hz" sub="Universal input" />
           </div>
           {lineFreq === 'univ' && (
             <div style={{ marginTop: 8, padding: '7px 11px', background: C.accentL,
@@ -265,10 +277,14 @@ export const IntakeForm: React.FC<Props> = ({ onSubmit, loading }) => {
             <Sel value={d.compliance.application_class} onChange={handleAppClass}
               options={['Industrial','IT Equipment','Medical','Telecom','EV Charge']} />
           </Field>
-          <SliderField label="Cost priority"           path="business.cost_priority" />
-          <SliderField label="Efficiency priority"     path="business.efficiency_priority" />
-          <SliderField label="Power density priority"  path="business.power_density_priority" />
-          <SliderField label="Implementation risk"     path="business.implementation_risk_priority" />
+          <SliderField label="Cost priority" value={d.business.cost_priority}
+                       onChange={v => set('business.cost_priority', v)} />
+          <SliderField label="Efficiency priority" value={d.business.efficiency_priority}
+                       onChange={v => set('business.efficiency_priority', v)} />
+          <SliderField label="Power density priority" value={d.business.power_density_priority}
+                       onChange={v => set('business.power_density_priority', v)} />
+          <SliderField label="Implementation risk" value={d.business.implementation_risk_priority}
+                       onChange={v => set('business.implementation_risk_priority', v)} />
         </div>
         <Field label="Switch technology preference">
           <div style={{ display: 'flex', gap: 8 }}>
