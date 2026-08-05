@@ -757,7 +757,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
                 "on an ESTIMATED value (e.g. a typical re-rating slope) and must be confirmed before release.",
                 ["#", "Gate", "Requirement", "Result", "Status"],
                 [[str(g["n"]), g["name"], _deg(g["requirement"]), _deg(g["result"]), g["status"]] for g in _fg],
-                col_widths=[CW*0.05, CW*0.20, CW*0.33, CW*0.28, CW*0.14], ch=CH)
+                col_widths=[CW*0.05, CW*0.20, CW*0.33, CW*0.25, CW*0.17], ch=CH)
             _gopen = fuse.get("gates_open") or []
             _gcond = fuse.get("gates_conditional") or []
             if _gopen or _gcond:
@@ -987,7 +987,7 @@ def build_ntc_story(story, design, cap=None, opts=None):
              ["Pulse-energy confirmation", _cls("pulse_energy", "Ready", "Conditional")],
              ["Phase-angle startup sweep", "Ready"]],
             col_widths=[CW*0.46, CW*0.54], ch=CH)
-        annotation(story, "RELEASE STATEMENT",
+        annotation(story, "RELEASE",
             "The selected NTC passes the nominal cold-start inrush calculation and the minimum-R25 hard "
             "current limit based on the current assumptions. Final electrical release remains CONDITIONAL "
             "until selected-part pulse-energy data, R25 tolerance, hot-restart policy, fuse I²t rating, relay "
@@ -1355,14 +1355,14 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
         _margin = _dec_gate - _dec_vc
         _basis = ("the SELECTED part" if _rc else "the MOV voltage CLASS (no part selected yet)")
         if _dec_est:
-            annotation(story, f"DECISION REQUIRED — Criterion {crit} cannot be settled on estimated data",
+            annotation(story, f"DECISION REQUIRED — Crit. {crit} cannot be settled on estimated data",
                 f"Calculated let-through is {_f(_dec_vc,0)} V against a {_f(_dec_gate,0)} V gate "
                 f"({_margin:+.0f} V) on {_basis}, but the clamp rests on an ESTIMATED varistor exponent "
                 "because no datasheet V<sub>c</sub>@I<sub>n</sub> is available. Status is DATA MISSING, "
                 "not PASS and not FAIL. To close it: add the datasheet clamp, or decide on one of the "
                 "options below in case the verified clamp also exceeds the gate.", CH)
         elif _margin < 0:
-            annotation(story, f"DECISION REQUIRED — Criterion {crit} NOT met (MOV-only)",
+            annotation(story, f"DECISION REQUIRED — Crit. {crit} NOT met (MOV-only)",
                 f"Calculated let-through is {_f(_dec_vc,0)} V against a {_f(_dec_gate,0)} V gate on "
                 f"{_basis} &#8658; margin {_margin:+.0f} V. This is a formal Criterion-{crit} FAIL for the "
                 "MOV-only architecture and gates RELEASE (it does not block part selection).", CH)
@@ -1465,7 +1465,7 @@ def _build_gdt_section(story, design, opts, CH, mov_out=None, mov_verdict="REVIE
         "short. On an L/N-to-PE GDT both must be proven safe — self-extinction or fuse clearing — or the "
         "part cannot be signed off.", CH)
     annotation(story, "FOLLOW-CURRENT" + (" — OK" if fc.get("ok") else " — FAIL / DATA MISSING"), fc.get("note", ""), CH)
-    annotation(story, "FAIL-SHORT" + (" — OK" if fs.get("ok") else " — FAIL / DATA MISSING"), fs.get("note", ""), CH)
+    annotation(story, "FAIL SHORT" + (" — OK" if fs.get("ok") else " — FAIL / DATA MISSING"), fs.get("note", ""), CH)
     annotation(story, "MOV + GDT COORDINATION",
         "Staged protection: the MOV limits the initial/residual voltage while the GDT diverts the high "
         "common-mode current once it fires. Verify MOV MCOV vs continuous L-N voltage, GDT minimum "

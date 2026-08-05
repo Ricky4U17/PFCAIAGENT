@@ -7367,3 +7367,25 @@ by the same rule, and "CONDITIONAL" wraps in the narrow status column of Table 8
 Also removed three dead GUI keys (`relay_make_rating_a`, `relay_delay_tol_ms`, `off_time_min_ms`)
 now that nothing writes them — a key nothing writes is the trap that hid the `vdc_min_holdup_v`
 discrepancy for months.
+
+## C200 — the label wraps, all of them
+
+Cleanup of the two wraps logged in C199, plus two more the sweep found in Chapter 9.
+
+The rule established in C199 is per-WORD, not per-label: an annotation title renders in a ~20 mm
+cell and breaks on spaces only, so any single unbroken token longer than about 8 characters splits
+mid-word. A hyphen is NOT a break point.
+
+| Where | Rendered as | Fix |
+|---|---|---|
+| Ch8 Table 8.6b status column | `CONDITIONA L` | column 0.14 -> 0.17 of the frame (0.03 off Result, which wraps on spaces and is unaffected). 0.17 is what the chapter's other gate tables use |
+| Ch8 annotation "RELEASE STATEMENT" | `RELEASE STATEME NT` | -> "RELEASE" |
+| Ch9 annotation "DECISION REQUIRED — Criterion A …" (x2) | `CRITERI ON` | "Criterion" -> "Crit." |
+| Ch9 annotation "FAIL-SHORT …" | `FAIL-SHOR T` | -> "FAIL SHORT" (the space is a break point, the hyphen was not) |
+
+Note the first is a TABLE-COLUMN width, not a label — same visible symptom, different cause. Worth
+keeping the two apart: a label is fixed by shortening the word, a cell by widening the column.
+
+VERIFIED by a sweep over the rendered text for `[A-Z]{4,}\\s[A-Z]{1,2}` on two configurations (with
+an NTC selected, 27 pp, and bare, 25 pp): zero mid-word splits remain, "CONDITIONAL" appears whole
+19 times, 0 unrenderable glyphs. Combined report 190 pp; suite 172 passed / 2 skipped.
