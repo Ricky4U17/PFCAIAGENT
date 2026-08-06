@@ -160,16 +160,16 @@ class TestNoDisconnects:
         assert R.audit_block(R.expand_to_engine_fields({"V_GS_drive": 18.0})) == []
 
 
-class TestKnownDisconnects:
-    """A frozen baseline of the disconnects that exist right now.
+class TestNoKnownDisconnectsRemain:
+    """The baseline is now EMPTY, and that is the point.
 
-    M0 finds them; M1 fixes them. Until then this test holds the line in both directions: a NEW
-    disconnect fails immediately, and a FIXED one fails too, forcing the baseline to be updated
-    rather than quietly rotting.
+    M0 recorded one disconnect here: `to_block` wrote `vg` and not `vg_drive`. M1 fixed it at
+    source by routing the value through `registry.expand_to_engine_fields`, and the baseline test
+    refused to pass until this list was updated — which is exactly the behaviour it was built for.
+    A new disconnect now fails immediately against an empty set.
     """
 
-    # (canonical key, issue) pairs known to be present in `database.to_block` output as of M0.
-    BASELINE = {("V_GS_drive", "partial_write")}
+    BASELINE: set = set()
 
     def _live_mosfet_block(self, sic: bool = False):
         from app.mode_b.semiconductor import database as sdb
@@ -181,36 +181,30 @@ class TestKnownDisconnects:
         return sdb.to_block(recs[0], "mosfet")
 
     @pytest.mark.parametrize("sic", [False, True])
-    def test_to_block_disconnects_match_the_recorded_baseline(self, sic):
+    def test_to_block_has_no_naming_disconnects(self, sic):
         """Runs on both technologies deliberately — see the masking note below."""
         found = {(f["key"], f["issue"]) for f in R.audit_block(self._live_mosfet_block(sic))}
-        new = found - self.BASELINE
-        fixed = self.BASELINE - found
-        assert not new, f"NEW naming disconnect introduced: {sorted(new)}"
-        assert not fixed, (
-            f"disconnect(s) fixed — good. Remove {sorted(fixed)} from BASELINE so the test keeps "
-            f"protecting the fix.")
+        assert found == self.BASELINE, f"naming disconnect: {sorted(found)}"
 
-    def test_the_baseline_defect_is_the_one_we_documented(self):
-        """The 12 V gate-drive number in the report came from exactly this: `to_block` writes `vg`
-        and not `vg_drive`, so gate loss used the dataclass default while switching used its own
-        value.
+    @pytest.mark.parametrize("sic", [False, True])
+    def test_both_gate_drive_aliases_are_written_and_agree(self, sic):
+        """The defect this whole registry was built after: gate loss ran on the dataclass default
+        of 12 V while the switching model used the value `to_block` chose.
 
         MASKING, and why the structural audit matters more than a value check: on a SILICON part
-        `to_block` writes vg = 12 V, which happens to equal the dataclass default, so vg and
-        vg_drive agree by coincidence and the defect is invisible. It only shows on SiC, where
-        to_block writes 15 V and gate loss silently uses 12 V — a 20 % error. Two thirds of the
-        catalogue would have hidden this from a value-based test, which is precisely why
-        `audit_block` checks whether every alias was WRITTEN rather than comparing values.
+        `to_block` writes 12 V, which happens to equal the dataclass default, so the two agreed by
+        coincidence and the defect was invisible. It only showed on SiC — 15 V written, 12 V used,
+        a 20 % error on gate loss. Two thirds of the catalogue would have hidden it from a
+        value-based test, which is why `audit_block` checks whether every alias was WRITTEN.
         """
-        blk = self._live_mosfet_block(sic=True)
-        assert "vg" in blk and "vg_drive" not in blk, "structure changed; update BASELINE"
+        blk = self._live_mosfet_block(sic)
+        assert "vg" in blk and "vg_drive" in blk, "an alias is missing again"
         m = Mosfet(**{k: v for k, v in blk.items() if k in Mosfet.__dataclass_fields__})
-        assert m.vg != m.vg_drive, "defect appears fixed; update BASELINE and this test"
+        assert m.vg == m.vg_drive
 
-    def test_the_defect_is_masked_on_silicon(self):
-        """Locks in the masking itself, so nobody 'proves' the defect is gone by testing a Si part."""
-        si_blk = self._live_mosfet_block(sic=False)
-        m = Mosfet(**{k: v for k, v in si_blk.items() if k in Mosfet.__dataclass_fields__})
-        assert m.vg == m.vg_drive, "Si masking no longer holds; the reasoning above needs revisiting"
-        assert R.audit_block(si_blk), "structural audit must still flag it even when values agree"
+    def test_sic_gate_drive_is_no_longer_the_dataclass_default(self):
+        """Pins the fix numerically: SiC must carry 15 V through to gate loss, not fall back to 12."""
+        blk = self._live_mosfet_block(sic=True)
+        m = Mosfet(**{k: v for k, v in blk.items() if k in Mosfet.__dataclass_fields__})
+        assert m.vg_drive == 15.0
+        assert m.vg_drive != Mosfet().vg_drive, "gate loss is on the default again"

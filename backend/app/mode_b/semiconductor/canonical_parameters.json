@@ -48,6 +48,7 @@
 
   "device_classes": {
     "si_mosfet": {
+      "engine_dataclass": "Mosfet",
       "label": "Silicon MOSFET",
       "conduction_loss_form": "i2r",
       "has_body_diode": true,
@@ -56,6 +57,7 @@
       "note": "Body-diode reverse recovery usually dominates turn-on."
     },
     "sic_mosfet": {
+      "engine_dataclass": "Mosfet",
       "label": "SiC MOSFET",
       "conduction_loss_form": "i2r",
       "has_body_diode": true,
@@ -64,6 +66,7 @@
       "note": "Strong positive R_DS(on) tempco; small Q_rr."
     },
     "gan_hemt": {
+      "engine_dataclass": "Mosfet",
       "label": "GaN HEMT",
       "conduction_loss_form": "i2r",
       "has_body_diode": false,
@@ -72,6 +75,7 @@
       "note": "No body diode: Q_rr = 0 by construction. Reverse conduction has a gate-dependent offset voltage. Reject any profile asserting non-zero Q_rr."
     },
     "igbt": {
+      "engine_dataclass": null,
       "label": "IGBT",
       "conduction_loss_form": "vce0_plus_rce",
       "has_body_diode": false,
@@ -80,6 +84,7 @@
       "note": "Conduction is V_ce0*I_avg + r_ce*I_rms^2, NOT I^2*R. Reject a profile carrying both V_CE_sat and R_DS_on."
     },
     "sic_schottky": {
+      "engine_dataclass": "Diode",
       "label": "SiC Schottky diode",
       "conduction_loss_form": "vf_plus_rd",
       "has_body_diode": false,
@@ -88,6 +93,7 @@
       "note": "Capacitive charge Q_c instead of reverse recovery."
     },
     "si_diode": {
+      "engine_dataclass": "Diode",
       "label": "Silicon fast-recovery diode",
       "conduction_loss_form": "vf_plus_rd",
       "has_body_diode": false,
@@ -95,6 +101,7 @@
       "active": true
     },
     "bridge_rectifier": {
+      "engine_dataclass": "Bridge",
       "label": "Bridge rectifier",
       "conduction_loss_form": "vf_plus_rd",
       "has_body_diode": false,

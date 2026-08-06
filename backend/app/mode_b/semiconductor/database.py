@@ -196,12 +196,19 @@ def to_block(rec, kind):
         rth = (tjm - 25) / rec["pd_max"] if rec.get("pd_max") else _pkg_rth(rec, 0.9); est.append("rth_jc")
         # Eoss estimate: larger die (lower Rdson) ⇒ more Coss ⇒ more Eoss; ∝ 1/Rdson, ∝ V^1.5
         eoss400 = max(0.5e-6, 0.9e-6 / max(rdson, 1e-3)); est.append("eoss_at_v")
+        # V_GS_drive is ONE physical quantity carried by TWO engine fields (vg for the switching
+        # model, vg_drive for gate loss). Writing only `vg` left gate loss on the dataclass default
+        # of 12 V — invisible on silicon, where the default happens to match, and a 20 % error on
+        # SiC. `expand_to_engine_fields` writes every alias from one value, so the split cannot
+        # come back: this code no longer names the engine fields at all.
+        vgs_drive = 15.0 if sic else 12.0
         blk = {**meta, "tech": "sic" if sic else "si",
                "rdson_25": rdson, "rdson_tj": [[25, 125], [1.0, 1.4]] if sic else [[25, 100], [1.0, 1.8]],
                "qg": qg, "qgd": qg * 0.25, "ciss": rec.get("ciss") or 1500e-12,
                "vth": rec.get("vth") or 4.0, "vpl": (rec.get("vth") or 4.0) + 2.0,
                "eoss_at_v": [[100, 400], [round(eoss400 * (0.25 ** 1.5), 9), round(eoss400, 9)]],
-               "rth_jc": round(rth, 3), "rth_cs": 0.3, "vg": 15.0 if sic else 12.0, "rg": 4.0}
+               "rth_jc": round(rth, 3), "rth_cs": 0.3, "rg": 4.0,
+               **_registry().expand_to_engine_fields({"V_GS_drive": vgs_drive})}
         est += ["rdson_tj", "qgd", "vpl"]
     elif kind == "diode":
         sic = _is_sic(rec)
@@ -221,7 +228,38 @@ def to_block(rec, kind):
                "rth_jc": _pkg_rth(rec, 1.0), "rth_cs": 0.5}
         est += ["rth_jc", "vf_curve(slope)"]
     blk["_estimated"] = est
+    # Where each value came from, keyed by CANONICAL name. A value read from the parametric export
+    # is "extracted"; one the code computed from another field is "derived". `_source` records the
+    # DOCUMENT, and it matters that it says catalogue rather than datasheet: a Digi-Key parametric
+    # row is not the datasheet, and the report should not imply that it is.
+    blk = _stamp_catalogue_provenance(blk, kind, est)
     return blk
+
+
+def _registry():
+    from app.mode_b.semiconductor import registry
+    return registry
+
+
+def _stamp_catalogue_provenance(blk: dict, kind: str, estimated: list) -> dict:
+    """Tag every canonical quantity this block carries: derived when the code computed it,
+    extracted when it came straight off the vendor row."""
+    from app.mode_b.semiconductor import registry, manifest
+    derived_fields = set()
+    for e in estimated:
+        derived_fields.add(str(e).split("(")[0])       # "vf_curve(slope)" -> "vf_curve"
+    prov = {}
+    for field, value in blk.items():
+        if field.startswith("_") or value in (None, "", []):
+            continue
+        try:
+            key = registry.key_for_engine_field(field)
+        except registry.RegistryError:
+            continue                                    # metadata, not a registered parameter
+        prov[key] = "derived" if field in derived_fields else "extracted"
+    return manifest.stamp(
+        blk, prov,
+        source="Digi-Key parametric catalogue (not the part datasheet)")
 
 
 # ── rank filtered candidates by computed loss at the design operating point ────

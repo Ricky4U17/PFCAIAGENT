@@ -7611,3 +7611,93 @@ is accepted by the engine (`Mosfet(**expand(...))` constructs); **suite 219 pass
 
 NEXT: M1 — required-field manifest and provenance enforcement, which turns the audit into a hard
 gate and removes the baseline entry above.
+
+## C204 — M1: required-field manifest, provenance, and defect 1 fixed at source
+
+M0 gave every quantity one name. M1 answers the next two questions before a number is trusted:
+**was it actually supplied, and where did it come from?**
+
+### Why enforcement, not policy
+Every field of `Mosfet` / `Diode` / `Bridge` has a default. Omit one and the engine does not
+complain — it substitutes. `rdson_25` → 45 mΩ, `qgd` → 30 nC, `vg_drive` → 12 V. "No hardcoded
+parameters" therefore cannot be a rule people follow; it has to be a check that fails loudly and
+names the field. New `manifest.py` does three checks:
+
+- **DEFAULTED** — a required quantity was never written, so the engine default fires. Reported with
+  the field AND the value that would be used: "a default was used" is not actionable, "`vg`=12.0,
+  `vg_drive`=12.0 would be used" is.
+- **DISCONNECT** — written to some aliases and not others (delegates to `registry.audit_block`).
+- **PROVENANCE** — a value present with no record of where it came from.
+
+`validate_block(..., strict=True)` raises; off by default. **The gate belongs at GUI approval and
+report release, not inside the engine** — the suite and the report harness legitimately compute
+without a datasheet, and refusing there would make the tool untestable rather than more correct.
+
+### Defect 1 fixed at source
+`to_block` now routes the gate-drive voltage through `registry.expand_to_engine_fields`, so it no
+longer names `vg` or `vg_drive` at all — the split cannot come back:
+
+```python
+**_registry().expand_to_engine_fields({"V_GS_drive": vgs_drive})   # -> vg AND vg_drive
+```
+
+Visible in the report: a SiC part's gate row now reads **"gate drive V_g = 15 V"** where it read
+12 V. The magnitude is small (~25 % of a sub-100 mW line item) but the class is not — this is the
+same silent-default mechanism that made E_oss 3.4× wrong.
+
+**The baseline test did its job.** `TestKnownDisconnects` refused to pass once the defect was fixed
+— *"disconnect(s) fixed — good. Remove [('V_GS_drive', 'partial_write')] from BASELINE so the test
+keeps protecting the fix."* The class is now `TestNoKnownDisconnectsRemain` with an EMPTY baseline,
+so a new disconnect fails against zero rather than against a list someone forgot to prune.
+
+### What validation found immediately, on real data
+Running `validate_block` on live catalogue blocks reported three more genuine gaps beyond defect 1:
+
+| Missing | Consequence |
+|---|---|
+| `R_g_on` / `R_g_off` | fall back to the single `rg` = 4.0 Ω placeholder — defect 3, and switching energy scales roughly linearly with it |
+| `sw_method` | defaults to `analytic`, which is the model measured 2.9× low on the reference SiC part |
+
+Neither is fixed here (M4 owns them); both are now *reported* on every calculation instead of being
+invisible.
+
+### Provenance, and one honesty fix
+Every block carries `_provenance` — canonical key → `extracted` | `derived` | `corrected` | `manual`
+| `default` — and `_source`, the document it came from. A catalogue block is now stamped
+**"Digi-Key parametric catalogue (not the part datasheet)"**, which Table 7.2d renders in place of
+the old "datasheet URL on file". That line was overstating what a parametric row is.
+
+A test asserts `_provenance` and the legacy `_estimated` list cannot contradict each other — two
+structures tracking one fact is the disconnect pattern this project keeps hitting, and adding the
+new one without that guard would have created the next instance of it.
+
+`parameter_audit()` attaches the whole thing to every `calculate_semiconductor_losses` result, so a
+result can always answer *"which of these numbers rest on assumptions?"*.
+
+### `select()` — condition-aware, raises rather than guesses (external spec A8)
+Built now, against a hand-written fixture profile taken from the real IMZA65R033M2H datasheet, so
+the contract is locked before the extractor exists. The part publishes **four** R_DS(on) entries:
+
+| V_GS | T_j | R_DS(on) |
+|---|---|---|
+| 15 V | 25 °C | 43 mΩ |
+| 18 V | 25 °C | 33 mΩ (max 41) |
+| 20 V | 25 °C | 30 mΩ |
+| 18 V | 175 °C | 54 mΩ |
+
+`select(profile, "R_DS_on", V_GS=18, T_j=175)` returns 54 mΩ. Asking for `T_j=150` **raises** and
+lists what is available, rather than returning the first entry — silently receiving the 25 °C value
+for a 150 °C question would have the engine run happily and be 60 % wrong. Omitting conditions
+entirely on a multi-valued parameter also raises.
+
+`provenance_rows()` renders the confirmation-screen view: label, value in display units (`33 mΩ`,
+not `0.033`), provenance, conditions, and whether it was supplied — **sorted so unsupplied and
+defaulted values come first**, because a review screen that buries the problems under forty
+confirmed values is the ceremony of verification without the substance.
+
+VERIFIED: defect 1 gone (`vg` = `vg_drive` = 15.0 on SiC, audit clean on both technologies); Ch7
+renders with "gate drive V_g = 15 V" and the corrected source line, 0 unrenderable glyphs; 25 new
+tests; **suite 244 passed / 2 skipped** (was 219; +25 is this file); combined report 190 pp
+unchanged.
+
+NEXT: M2 — PDF extraction, phase 1 (tables), writing `extracted.json` into the per-part folder.

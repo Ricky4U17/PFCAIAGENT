@@ -55,8 +55,42 @@ def build_design_ops(design: dict):
 
 # metadata kept with each part for the report but NOT passed to the engine dataclasses
 _META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url", "_estimated",
-              "_source",                            # where the block came from (e.g. an uploaded PDF)
+              "_source",                            # which document the block came from
+              "_provenance",                        # canonical key -> extracted|derived|... (M1)
               "ifsm_A", "i2t_A2s", "bottom_part")   # check/rating metadata — not engine loss params
+
+
+def _device_class_of(block: dict, kind: str) -> str:
+    """Which registry device class this block belongs to. Derived from the block's own `tech`
+    flag rather than assumed, because the conduction-loss form and the physics interlocks are
+    properties of the class."""
+    tech = str((block or {}).get("tech") or "").lower()
+    is_sic = "sic" in tech or bool((block or {}).get("is_sic"))
+    if kind == "mosfet":
+        return "sic_mosfet" if is_sic else "si_mosfet"
+    if kind == "diode":
+        return "sic_schottky" if is_sic else "si_diode"
+    return "bridge_rectifier"
+
+
+def parameter_audit(mosfet: dict, diode: dict, bridge: dict) -> dict:
+    """Per-part required-field and provenance check (M1).
+
+    Reported, never enforced here: the gate belongs at GUI approval and report release. The test
+    suite and the report harness legitimately compute without a datasheet, and refusing inside the
+    engine would make the tool untestable rather than more correct. What this guarantees is that a
+    result can always answer "which of these numbers rest on assumptions?".
+    """
+    from app.mode_b.semiconductor import manifest
+    out = {}
+    for kind, blk in (("mosfet", mosfet), ("diode", diode), ("bridge", bridge)):
+        try:
+            out[kind] = manifest.validate_block(dict(blk or {}), _device_class_of(blk, kind))
+        except Exception as e:                          # a broken audit must never break a run
+            out[kind] = {"ok": True, "error": str(e), "defaulted": [], "disconnects": [],
+                         "untagged": [], "summary": {}}
+    out["ok"] = all(v.get("ok") for k, v in out.items() if k != "ok")
+    return out
 
 def _clean_block(block: dict):
     """Split a component block into (engine params, metadata). Drops metadata keys and any
@@ -166,17 +200,22 @@ def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
 
     Returns a dict:
       validation : {ok, issues}            — the intake gate (refuse if not ok)
+      parameters : {mosfet, diode, bridge} — which inputs were supplied vs defaulted, and their
+                                             provenance (M1). Reported, not enforced: see
+                                             `parameter_audit`.
       consistency: {ok, issues}            — design-vs-engine cross-check
       per_point  : [flattened row, ...]    — losses + Tj at EVERY input voltage
       summary    : worst-case losses / temperatures across the sweep
       cfg        : the assembled engine cfg (for the report / debugging)
     """
     cfg, ref = build_semi_cfg(design, mosfet, diode, bridge, thermal)
+    params = parameter_audit(mosfet, diode, bridge)
 
     ok, vissues = intake.validate_design(cfg)
     vissues_list = vissues.to_dict("records") if hasattr(vissues, "to_dict") else vissues
     if not ok:
         return _native({"validation": {"ok": False, "issues": vissues_list},
+                        "parameters": params,
                         "consistency": None, "per_point": [], "summary": None, "cfg": cfg})
 
     rows = [engine.flatten_result(r) for r in engine.simulate_vac_sweep(cfg)]
@@ -201,7 +240,7 @@ def calculate_semiconductor_losses(design: dict, mosfet: dict, diode: dict,
             "diode":  summary["Tj_DIODE_max"] <= tj_limit.get("diode", 1e9),
             "bridge": summary["Tj_BRIDGE_max"]<= tj_limit.get("bridge", 1e9),
         }
-    return _native({"validation": {"ok": True, "issues": []},
+    return _native({"parameters": params, "validation": {"ok": True, "issues": []},
                     "consistency": {"ok": cok, "issues": cissues},
                     "per_point": rows, "summary": summary, "cfg": cfg})
 
