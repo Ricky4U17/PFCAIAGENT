@@ -7701,3 +7701,99 @@ tests; **suite 244 passed / 2 skipped** (was 219; +25 is this file); combined re
 unchanged.
 
 NEXT: M2 — PDF extraction, phase 1 (tables), writing `extracted.json` into the per-part folder.
+
+## C205 — M2: datasheet extraction, phase 1 (tables), and the per-part store
+
+Three new modules, built and tested against a **real vendor datasheet on disk** — Diodes
+Incorporated GBJ40L06, DS44960 Rev 4-2. Every rule below was written after the file forced it; none
+of them was imagined.
+
+### What it recovers, on the real file
+
+| Canonical key | Value | Note |
+|---|---|---|
+| **I_FSM** | **420 A** | absent from the parametric catalogue on EVERY bridge |
+| **I2t** | **732 A²s** | ditto — these two are why the Ch8 bridge-surge gate reports OPEN |
+| V_F_vs_IF | 0.87 typ / 0.90 max **at I_F = 20 A, T_j = 25 °C** | conditions attached |
+| I_rev_vs_Tj | 10 µA → 1e-5 A at V_R = 600 V | unit scaled to SI |
+| Tj_max | −40 … +150 °C | range, both bounds |
+| C_iss | 400 pF → 4e-10 F | |
+| I_F_AV | 40 A, **also 5 A** | with and without a heatsink |
+| V_DSS | 600 V from BOTH the summary block and the detail table | free cross-validation |
+
+`R_DS(on) = 33 mΩ` is not a fact; `33 mΩ at V_GS 18 V, T_j 25 °C` is. Reading tables rather than a
+flattened text blob is what makes the difference, and it is why `manifest.select()` (M1) now has
+data shaped the way it needs.
+
+### Five things the real file taught us
+
+1. **Figure pages produce phantom tables.** Graph axes are drawn as rules, so `find_tables()`
+   returned **12 junk grids** (up to 20×21, almost entirely empty) against 3 real tables. Without a
+   structural filter the parser invents dozens of parameters out of chart gridlines.
+2. **One row can hold several parameters.** `RθJC RθJL RθJA | 5 9 24 | °C/W` is three parameters.
+   Parsed naively it is one parameter *named* "RθJC RθJL RθJA" with the value "5 9 24". Unpacked
+   positionally — and **only when the counts match**; three symbols against two numbers has no safe
+   alignment, so it reports nothing rather than pairing them wrongly.
+3. **One row can hold several conditions.** `IF(AV) | 40 5 | A` is the rating with and without a
+   heatsink. Taking the first number discards an operating point.
+4. **Column sets differ between tables in one document.** Page 2 has
+   `Characteristic|Symbol|Value|Unit`; the next table has
+   `Characteristic|Test Conditions|Symbol|Min|Typ|Max|Unit`. Roles are matched by header text, never
+   by position.
+5. **Look-alike codepoints.** The file carries **U+2103** where the eye sees °C. NFKC folds it;
+   without that every temperature unit misses. Same for the micro sign and the ohm sign.
+
+### A real bug the fixture caught
+`VB | 600 | — | — | V`. Choosing the first NON-EMPTY value column picked `typ`, because a dash is
+truthy — and the parameter vanished. The column must be chosen by whether it **holds a number**.
+Every min/typ/max datasheet is full of these rows, so this was the common case, not an edge one.
+Two parameters (V_DSS, I_rev) were being silently dropped before the fix.
+
+### And a wrong assumption of mine
+I wrote the vendor template for "Comchip Technology". The datasheet is from **Diodes Incorporated** —
+and the visible page header carries only a website, so matching on page text fell back to the
+generic template without saying so. Matching now reads **PDF document metadata** first, which is
+where the vendor name reliably lives.
+
+### The store
+`parts/<MPN>/` with `datasheet.pdf`, `source.json` (sha256, revision, timestamp),
+`extracted_v<N>.json` (**never overwritten**) and `confirmed_v<N>.json` (M3 writes it).
+
+- **Re-adding identical bytes is a no-op** — `changed: False`, no new version. Re-running the
+  pipeline is safe.
+- **Changed bytes are a new revision** carrying `previous_sha256` and the note that every value must
+  be re-approved. A part number is not the identity; vendors revise silently.
+- **`diff_profiles`** lists only what moved, so a revision asks for re-approval of the changed items
+  rather than the whole part.
+- **Aliases**: `gbj40l06`, `GBJ-40L06`, `gbj 40l06`, `GBJ40L06-F` all resolve to one folder. We had
+  already been bitten — the catalogue says `IMZA65R033M2HXKSA1`, the review report says
+  `IMZA65R033M2H`.
+- Only a **confirmed** profile marks a part `ready`; an extraction is evidence, not permission.
+
+### Registry additions M2 forced
+`I_FSM` and `I2t` were consumed by the Chapter 8 surge gate but never registered — they are META
+keys, not engine dataclass fields, so M0's dataclass-driven sweep missed them. Also added `I_F_AV`
+(the diode/bridge counterpart of I_D), plus `T_stg`, `I_GSS`, `E_tot`.
+
+Those last three arrived by a route worth recording: I had put an escape hatch in the template
+validator — a `tolerated` set letting a template map a symbol to a name the registry did not have.
+That is precisely the hole the registry exists to close, so the hatch is gone and **every template
+mapping must now land in the registry**. Registry is 79 parameters.
+
+### Deliberately not done
+**No curve is invented.** The old regex extractor fabricated a V-I curve from a single scalar;
+phase 1 reads tables and a missing curve stays missing until M7 digitises it. A test asserts
+`curves == []`.
+
+VERIFIED against the real datasheet: template matched by metadata; 12 junk tables rejected, 3 kept;
+every extracted key exists in the registry; unmapped symbols (RθJL, RθJA — real parameters our
+engine does not model) land in `unresolved` rather than being dropped; cross-check flags R_th(j-c)
+appearing as both 5 and 2 °C/W (two mounting variants) instead of silently taking whichever parsed
+first. 35 new tests. **Suite 279 passed / 2 skipped** (was 244). Combined report 190 pp unchanged.
+
+`backend/app/mode_b/semiconductor/parts/` is gitignored — the library is local data, not source.
+
+OPEN: the MOSFET acceptance case cannot run yet. `specs/Review/IMZA65R033M2H_...pdf` is the loss
+REPORT, not the datasheet. **The plan's M2 acceptance test (E_oss, Q_gd, R_DS@18 V, E_on/E_off with
+test conditions, g_fs) needs the actual Infineon datasheet PDF.** The `infineon_coolsic_g2` template
+is written from the published structure and untested.

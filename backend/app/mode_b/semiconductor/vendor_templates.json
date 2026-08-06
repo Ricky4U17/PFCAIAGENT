@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "_doc": [
+    "LAYER C — vendor layout adapters. A template declares LOCATORS AND VOCABULARY, never",
+    "coordinates: page numbers and bounding boxes are derived at runtime from the document itself.",
+    "",
+    "The generic template is tried when nothing else matches, and carries the symbol spellings that",
+    "are common across vendors. A vendor-specific template exists only where a layout family needs",
+    "something the generic one cannot express.",
+    "",
+    "Symbol keys are matched after normalisation (lowercase, theta -> th, brackets and separators",
+    "stripped), so 'RthJC', 'R th(j-c)' and 'RθJC' all reach the same entry and only one spelling",
+    "needs to be written here."
+  ],
+
+  "templates": [
+    {
+      "template_id": "generic",
+      "match": {"always": true},
+      "caption_pattern": "^(?:Table|TABLE)\\s+(\\d+)[.:]?\\s*(.*)$",
+      "figure_caption_pattern": "^(?:Figure|Fig\\.?|Diagram)\\s+(\\d+)[.:]?\\s*(.*)$",
+      "symbol_map": {
+        "VDSS": "V_DSS", "V(BR)DSS": "V_DSS", "VDS": "V_DSS", "VDSmax": "V_DSS",
+        "RDS(on)": "R_DS_on", "RDSon": "R_DS_on", "RDS": "R_DS_on",
+        "ID": "I_D", "IDmax": "I_D", "ID25": "I_D",
+        "VGS(th)": "V_GS_th", "VGSth": "V_GS_th", "VTH": "V_GS_th",
+        "Qg": "Q_g", "QG": "Q_g", "Qgtot": "Q_g",
+        "Qgd": "Q_gd", "QGD": "Q_gd",
+        "Ciss": "C_iss", "CISS": "C_iss",
+        "gfs": "g_fs", "gm": "g_fs",
+        "Eoss": "E_oss_vs_VDS", "EOSS": "E_oss_vs_VDS",
+        "Eon": "E_on", "EON": "E_on",
+        "Eoff": "E_off", "EOFF": "E_off",
+        "RG,int": "R_g_int", "RGint": "R_g_int", "Rgint": "R_g_int",
+        "IDSS": "I_DSS_vs_Tj",
+        "VSD": "V_SD", "VSDmax": "V_SD",
+        "Qrr": "Q_rr", "QRR": "Q_rr",
+        "Qc": "Q_c", "QC": "Q_c",
+        "VF": "V_F_vs_IF", "VFM": "V_F_vs_IF", "VFmax": "V_F_vs_IF",
+        "VRRM": "V_DSS", "VR": "V_DSS", "VB": "V_DSS",
+        "IF(AV)": "I_F_AV", "IO": "I_F_AV", "IFAV": "I_F_AV",
+        "IFSM": "I_FSM",
+        "I2t": "I2t",
+        "RthJC": "R_th_jc", "RthJ-C": "R_th_jc", "RthetaJC": "R_th_jc",
+        "RthCS": "R_th_cs", "RthC-S": "R_th_cs",
+        "TJ": "Tj_max", "TJmax": "Tj_max", "Tjmax": "Tj_max"
+      },
+      "column_synonyms": {
+        "parameter": ["Parameter", "Characteristic", "Characteristics", "Description", "Item"],
+        "symbol": ["Symbol", "Sym"],
+        "conditions": ["Test Conditions", "Conditions", "Note/ Test Condition", "Remarks"],
+        "min": ["Min", "Min.", "Minimum"],
+        "typ": ["Typ", "Typ.", "Typical"],
+        "max": ["Max", "Max.", "Maximum"],
+        "value": ["Value", "Rating"],
+        "unit": ["Unit", "Units"]
+      },
+      "footnote_phrases": {
+        "half_bridge": ["half-bridge", "half bridge"],
+        "double_pulse": ["double pulse", "double-pulse"],
+        "no_external_diode": ["without external diode", "no external diode"],
+        "with_external_diode": ["with external diode", "external SiC diode",
+                                "with SiC diode", "freewheeling diode"],
+        "includes_coss": ["including Coss", "incl. Coss", "output capacitance included"]
+      },
+      "note": "Tried when no vendor template matches. Covers the symbol spellings common to most power-semiconductor datasheets."
+    },
+
+    {
+      "template_id": "infineon_coolsic_g2",
+      "match": {"text_markers": ["Infineon", "CoolSiC"]},
+      "caption_pattern": "^Table\\s+(\\d+)\\s+(.*)$",
+      "figure_caption_pattern": "^Diagram\\s+(\\d+):\\s*(.*)$",
+      "symbol_map": {
+        "RDS(on)": "R_DS_on", "VGS(th)": "V_GS_th", "Qg": "Q_g", "Qgd": "Q_gd",
+        "Qgs(pl)": "Q_gd", "Ciss": "C_iss", "gfs": "g_fs", "Eoss": "E_oss_vs_VDS",
+        "Eon": "E_on", "Eoff": "E_off", "Etot": "E_tot", "RG,int": "R_g_int",
+        "IDSS": "I_DSS_vs_Tj", "IGSS": "I_GSS", "VSD": "V_SD",
+        "RthJC": "R_th_jc", "VDSS": "V_DSS", "ID": "I_D", "Tj": "Tj_max"
+      },
+      "summary_block": {"caption_contains": "Key Performance Parameters"},
+      "ordering_table": {"columns_contain": ["Type", "Ordering Code", "Package", "Marking"]},
+      "note": "Layout family used by the CoolSiC G2 series. Declared from the published structure; the acceptance fixture needs the actual PDF (see the plan's M2 note)."
+    },
+
+    {
+      "template_id": "diodes_inc_rectifier",
+      "match": {"metadata_author": "Diodes Incorporated"},
+      "caption_pattern": "^(?:Maximum Ratings|Electrical Characteristics|Thermal)(.*)$",
+      "symbol_map": {
+        "VRRM": "V_DSS", "VB": "V_DSS", "VR": "V_DSS",
+        "IF(AV)": "I_F_AV", "IO": "I_F_AV", "IFSM": "I_FSM", "I2t": "I2t",
+        "VF": "V_F_vs_IF", "IR": "I_rev_vs_Tj", "CT": "C_iss",
+        "RthetaJC": "R_th_jc", "RthJC": "R_th_jc",
+        "TJ": "Tj_max", "TSTG": "T_stg"
+      },
+      "note": "Bridge-rectifier layout: 'Characteristic | Symbol | Value | Unit' for ratings, and a wider set with Test Conditions for electrical characteristics. Verified against GBJ40L06 (Diodes Inc, DS44960 Rev 4-2). Matched on PDF metadata rather than page text: the vendor name appears in the document properties on every page, while the visible header carries only the website."
+    }
+  ]
+}

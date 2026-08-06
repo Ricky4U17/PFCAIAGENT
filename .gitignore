@@ -28,3 +28,4 @@ PFC_Chapter6_*.pdf
 
 # Controller reference DB — derived BM25 index cache (rebuilt from the PDFs/manifest)
 backend/data/controllers/.index.json
+backend/app/mode_b/semiconductor/parts/
