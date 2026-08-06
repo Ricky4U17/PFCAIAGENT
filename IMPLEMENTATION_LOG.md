@@ -7797,3 +7797,88 @@ OPEN: the MOSFET acceptance case cannot run yet. `specs/Review/IMZA65R033M2H_...
 REPORT, not the datasheet. **The plan's M2 acceptance test (E_oss, Q_gd, R_DS@18 V, E_on/E_off with
 test conditions, g_fs) needs the actual Infineon datasheet PDF.** The `infineon_coolsic_g2` template
 is written from the published structure and untested.
+
+## C206 — M2 acceptance: the real Infineon datasheet, and what it took to read it
+
+The designer supplied `specs/Review/IMZA65R033M2HXKSA1.pdf` — CoolSiC 650 V G2, Rev 2.0,
+2024-09-24. This is the part whose numbers started the whole datasheet-first plan.
+
+### The acceptance criteria, all met from the actual PDF
+
+| | Our estimate | Datasheet | Extracted |
+|---|---|---|---|
+| **E_oss @ 400 V** | 30.0 µJ | **8.7 µJ** | 8.7 µJ |
+| **Q_gd** | 8.5 nC | **6.2 nC** | 6.2 nC |
+| R_DS(on) @ 18 V, 25 °C | 0.030 Ω | **0.033 Ω** | 0.033 Ω |
+| R_DS(on) @ 18 V, 175 °C | generic 1.4× curve | **0.054 Ω** | 0.054 Ω |
+| R_th(j-c) | 0.773 (from P_d) | **0.77** | 0.77 |
+| E_on / E_off / E_tot @ 400 V, 27.9 A, R_g 1.8 Ω | — | **35 / 22 / 57 µJ** | 35 / 22 / 57 µJ |
+| Q_g, C_iss, V_GS(th) | | 34 nC, 1214 pF, 3.5/4.5/5.6 V | all correct |
+
+**P_Eoss at 2 channels × 70 kHz: 4.20 W estimated → 1.22 W from the datasheet.**
+
+And the criterion that mattered most — **all four R_DS(on) entries, separately selectable**:
+
+```
+select(profile, "R_DS_on", V_GS=15, T_j=25)  -> 43 mΩ
+select(profile, "R_DS_on", V_GS=18, T_j=25)  -> 33 mΩ  (max 41)
+select(profile, "R_DS_on", V_GS=20, T_j=25)  -> 30 mΩ
+select(profile, "R_DS_on", V_GS=18, T_j=175) -> 54 mΩ
+```
+
+### What it took — five things this file does that the first one did not
+
+The Diodes fixture (C205) got us a working extractor. The Infineon file broke it five ways, each a
+different lesson:
+
+1. **Subscripts arrive as SEPARATE smaller spans**, and the table extractor appends them at the end
+   of the cell. `V_GS = 0 V, I_D = 0.57 mA` came out as `V = 0 V, I = 0.57 mA G DS` — which parses
+   to condition keys `V` and `I`, silently mis-labelling the operating point. Fixed by rebuilding
+   cell text from span geometry: body 10.99 pt, subscript 7.01 pt, **ratio 0.638** — the same
+   figure the external build spec measured independently. Grouping is by **vertical overlap**, not
+   by the PDF's own line objects, because the extractor puts a subscript on its own line.
+2. **The header spans two rows.** `Parameter | Symbol | Values | | | Unit | Note` with
+   `Min. | Typ. | Max.` beneath. Read as data that row is noise; read as header it is what tells
+   min from max. Without merging it, the parser looked only at the column "Values" sits over —
+   which holds "-" on every row whose real number is in the max column.
+3. **ONE BORDERED ROW HOLDS FOUR ENTRIES.** The on-resistance row is typ cell `43 33 30 54`, max
+   cell `- 41 - -`, and four condition sets stacked in the notes. Flattened it is a parameter whose
+   value is "43 33 30 54". Parsing **per visual line within each cell** is what turns it into the
+   four condition-qualified entries. Same for I_DSS (25 °C and 175 °C) and I_D (53 A / 38 A).
+4. **A summary block qualifies the symbol in the cell itself** — `RDS(on),typ`, `RDS(on),max`,
+   `Eoss @ 400 V` — because it has no min/typ/max columns. The qualifier decides the FIELD, not just
+   the symbol: filing `RDS(on),max = 41` under `typ` would put the worst-case number where the
+   design number belongs, and then the summary-vs-detail cross-check would compare max against typ
+   and report a disagreement that does not exist.
+5. **A superscript is not always a footnote marker.** Dropping them turned **I²t into "It"**, which
+   matches nothing — and I²t is one of the two ratings the Chapter 8 surge gate has been missing.
+   A superscript is a marker only when it trails the line AND is a bare number.
+
+### A template error of mine, worth recording
+I had mapped `Q_GS(pl)` → `Q_gd`. They are **different charges**, and mapping both put two
+contradictory values (8.9 nC and 6.2 nC) under one canonical key. Removed. The registry's
+one-name-one-meaning rule catches this class of thing only if the templates respect it.
+
+### Also
+- Every column is split per line, not only the roled ones — the qualifier separating two entries
+  often sits in an UNNAMED column ("With Heatsink / Without Heatsink").
+- `condition_text` now records the text the conditions were actually read from, not just the
+  conditions column.
+- Registry gains `C_oss`, `Q_oss`, `P_tot` (82 parameters). The Infineon file publishes them and
+  "store what you can parse, use what you need" means the profile should be a faithful record.
+- The `diodes_inc_rectifier` extraction IMPROVED as a side effect: I²t recovered, R_th(j-c) split
+  cleanly into its two mounting variants, and I_F(AV) 40 A / 5 A became two selectable entries
+  instead of one entry with a list.
+
+### One advisory kept deliberately noisy
+The cross-check flags `I_F_AV` (40 A and 5 A) as well as `R_th_jc`. Its two ratings share a single
+line of qualifying text, so they cannot be told apart automatically. A reviewer dismisses that in a
+second; tuning the check until it stops firing would risk suppressing a real disagreement. The test
+records that reasoning rather than hiding the finding.
+
+VERIFIED: 14 new MOSFET acceptance tests against the real PDF, 49 in the file, **suite 293 passed /
+2 skipped** (was 279). Combined report 190 pp unchanged. Both fixtures extract with every key
+resolving to the registry and nothing invented.
+
+The `infineon_coolsic_g2` template is no longer speculative — it is verified against the part it
+was written for.

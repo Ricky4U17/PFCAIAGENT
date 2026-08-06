@@ -72,15 +72,17 @@
       "caption_pattern": "^Table\\s+(\\d+)\\s+(.*)$",
       "figure_caption_pattern": "^Diagram\\s+(\\d+):\\s*(.*)$",
       "symbol_map": {
-        "RDS(on)": "R_DS_on", "VGS(th)": "V_GS_th", "Qg": "Q_g", "Qgd": "Q_gd",
-        "Qgs(pl)": "Q_gd", "Ciss": "C_iss", "gfs": "g_fs", "Eoss": "E_oss_vs_VDS",
+        "RDS(on)": "R_DS_on", "VGS(th)": "V_GS_th", "QG": "Q_g", "Qgd": "Q_gd",
+        "Ciss": "C_iss", "Coss": "C_oss", "Crss": "C_rss_vs_VDS", "Qoss": "Q_oss",
+        "gfs": "g_fs", "Eoss": "E_oss_vs_VDS",
         "Eon": "E_on", "Eoff": "E_off", "Etot": "E_tot", "RG,int": "R_g_int",
-        "IDSS": "I_DSS_vs_Tj", "IGSS": "I_GSS", "VSD": "V_SD",
-        "RthJC": "R_th_jc", "VDSS": "V_DSS", "ID": "I_D", "Tj": "Tj_max"
+        "IDSS": "I_DSS_vs_Tj", "IGSS": "I_GSS", "VSD": "V_SD", "Ptot": "P_tot",
+        "Rth(j-c)": "R_th_jc", "RthJC": "R_th_jc", "VDSS": "V_DSS",
+        "ID,pulse": "I_D", "IDDC": "I_D", "Tj": "Tj_max"
       },
       "summary_block": {"caption_contains": "Key Performance Parameters"},
       "ordering_table": {"columns_contain": ["Type", "Ordering Code", "Package", "Marking"]},
-      "note": "Layout family used by the CoolSiC G2 series. Declared from the published structure; the acceptance fixture needs the actual PDF (see the plan's M2 note)."
+      "note": "CoolSiC G2 layout. VERIFIED against IMZA65R033M2HXKSA1 Rev 2.0, 2024-09-24. Q_GS(pl) is deliberately NOT mapped to Q_gd: they are different charges, and mapping both put two contradictory values under one canonical key."
     },
 
     {
