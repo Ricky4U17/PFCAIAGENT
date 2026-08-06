@@ -7527,3 +7527,87 @@ Combined report 190 pp; tsc clean; production vite build clean.
 
 NEXT in the agreed order: the provenance-tagged `contributed/` store, which is what makes it safe to
 accept a designer's part into the database at all. See [[bring-your-own-part-architecture]].
+
+## C203 — M0: the canonical parameter registry
+
+First milestone of the datasheet-first plan (`specs/Improvements/MOSFET_Datasheet_First_Plan.md`).
+Naming only — **no behaviour change anywhere**, by design. The registry has to exist before the
+extractor, because it is what stops a quantity acquiring a second name on the way through.
+
+### What it is
+`canonical_parameters.json` is the source of truth: **72 parameters** covering **every field of all
+three engine dataclasses** (Mosfet 38, Diode 21, Bridge 23), plus 7 device classes, a unit table and
+the measurement-basis vocabulary. Each parameter declares canonical key, SI unit, display unit,
+applicable device classes, source (datasheet | design | derived), which consumers use it, whether it
+is required, whether it is condition-qualified or multi-valued, its engine field(s), its report
+label, and a coarse plausible range.
+
+`registry.py` loads and self-validates it, and provides the lookups: `get`, `key_for_engine_field`,
+`to_si` / `to_display`, `conduction_loss_form`, `required_keys`, and the two audits.
+
+### The structural fix — `expand_to_engine_fields`
+`engine_fields` is a LIST on purpose. `V_GS_drive` maps to **both** `vg` (switching model) and
+`vg_drive` (gate loss), because they are one physical quantity. A caller now writes:
+
+```python
+Mosfet(**registry.expand_to_engine_fields({"V_GS_drive": 18.0}))   # -> vg=18.0, vg_drive=18.0
+```
+
+It never names the engine fields, so it cannot write one and forget the other. That is defect 1
+closed by construction rather than by discipline.
+
+### Two-way audit, both clean
+`audit_engine_dataclasses()` compares registry and engine in BOTH directions — `unregistered` (the
+engine grew a field nobody registered) and `orphaned` (the registry names a field the engine no
+longer has). Both empty, and the tests keep them that way. Adding a parameter to the engine without
+registering it now fails the suite.
+
+### The defect it found on real data, and the masking underneath it
+`audit_block()` on live `to_block` output reports:
+
+> V_GS_drive was written to ['vg'] but not to ['vg_drive']; those fall back to the engine default,
+> so one physical quantity ends up with two values.
+
+**And then something worth recording.** My first version of the test asserted the two values differ.
+It FAILED — because it happened to pick a silicon part:
+
+| | to_block writes vg | engine uses vg_drive | gate-loss error |
+|---|---|---|---|
+| Si `IPD60R180CM8` | 12.0 V | 12.0 V (default) | **0 %** |
+| SiC `IMW65R075M2HXKSA1` | 15.0 V | 12.0 V (default) | **−20 %** |
+
+On silicon `to_block` writes 12 V, which happens to equal the dataclass default, so the two agree by
+coincidence and the defect is **invisible**. It only bites on SiC. Two thirds of the catalogue would
+have hidden it from a value-based test — which is exactly why `audit_block` checks whether every
+alias was WRITTEN rather than comparing values. A test now locks the masking in place so nobody
+later "proves" the defect is gone by checking a silicon part.
+
+### From the external build spec, landed here
+- **Device classes select the conduction-loss form.** `i2r` is a property of `sic_mosfet`, not a
+  global assumption; `igbt` declares `vce0_plus_rce`, `gan_hemt` declares `qrr_expected: zero` and
+  `has_body_diode: false`. Only MOSFET/diode/bridge classes are `active`, but the vocabulary is
+  there so the interlocks have something to check against.
+- **Multi-valued parameters.** `R_DS_on` and `I_D` are declared multi-valued and
+  condition-qualified — the reference part publishes FOUR on-resistance entries (V_GS 15/18/20 V at
+  25 °C, plus 18 V at 175 °C). A test asserts every multi-valued key names its distinguishing
+  conditions, which is what makes M1's `select()` possible.
+- **`requires_measurement_basis`** on `E_on` / `E_off`, and **`requires_anchor`** on the curves that
+  feed calculations. Convention B cannot de-bundle without the first; a curve may not drive a number
+  without the second.
+- **The `bundling` third state** — `raw` / `unknown` / `de_bundled` — recorded in the
+  measurement-basis vocabulary. The external spec's A7.1 had only the first two and would have
+  blocked convention B, which de-bundles deliberately.
+- **Display units.** SI is stored, display is carried separately so a reviewer reads `33 mΩ` and not
+  `0.033`. A test asserts every parameter resolves to a human-scaled number.
+
+### Design-sourced parameters are now marked as such
+`V_GS_drive`, `R_g_on`, `R_g_off`, `R_g_common`, `R_th_cs`, `L_loop` are `source: "design"` — no
+datasheet upload can supply them, and a test enforces the marking. That is what stops them quietly
+becoming defaults again once uploads exist.
+
+VERIFIED: registry self-validates; both audit directions empty; 27 new tests; the alias round-trip
+is accepted by the engine (`Mosfet(**expand(...))` constructs); **suite 219 passed / 2 skipped**
+(was 192; +27 is this file); combined report 190 pp, unchanged.
+
+NEXT: M1 — required-field manifest and provenance enforcement, which turns the audit into a hard
+gate and removes the baseline entry above.

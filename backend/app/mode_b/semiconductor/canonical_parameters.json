@@ -1,0 +1,917 @@
+{
+  "schema_version": "1.0",
+  "_doc": [
+    "CANONICAL PARAMETER REGISTRY — one name, one unit, one meaning, for every semiconductor",
+    "quantity that reaches the loss engine, the requirement check, or the report.",
+    "",
+    "This file is the SOURCE OF TRUTH for naming. Nothing downstream may invent a name: the",
+    "extractor writes canonical keys, the confirmation screen shows report_label, the engine",
+    "consumes engine_fields, and the report prints report_label. A quantity that appears under two",
+    "names in two layers is the defect class this registry exists to prevent (vg vs vg_drive, and",
+    "rdson vs rdson_25, are both live examples recorded below).",
+    "",
+    "engine_fields is a LIST on purpose. More than one entry means the engine currently carries the",
+    "same physical quantity under several field names; every one of them must be written from the",
+    "same canonical value, and registry.audit_engine_block() checks exactly that.",
+    "",
+    "plausible is a coarse order-of-magnitude sanity bound for the KEY. It is not the plausibility",
+    "gate: app/plausibility.py measures per-part bands from the vendor catalogues and checks",
+    "cross-field relations. This bound answers 'is this even the right kind of number', that one",
+    "answers 'is this consistent with 8948 real parts'."
+  ],
+
+  "units": {
+    "ohm":      {"si": "ohm",   "factor": 1.0,    "label": "Ω"},
+    "mohm":     {"si": "ohm",   "factor": 1e-3,   "label": "mΩ"},
+    "V":        {"si": "V",     "factor": 1.0,    "label": "V"},
+    "A":        {"si": "A",     "factor": 1.0,    "label": "A"},
+    "F":        {"si": "F",     "factor": 1.0,    "label": "F"},
+    "pF":       {"si": "F",     "factor": 1e-12,  "label": "pF"},
+    "nF":       {"si": "F",     "factor": 1e-9,   "label": "nF"},
+    "C":        {"si": "C",     "factor": 1.0,    "label": "C"},
+    "nC":       {"si": "C",     "factor": 1e-9,   "label": "nC"},
+    "uC":       {"si": "C",     "factor": 1e-6,   "label": "µC"},
+    "J":        {"si": "J",     "factor": 1.0,    "label": "J"},
+    "uJ":       {"si": "J",     "factor": 1e-6,   "label": "µJ"},
+    "mJ":       {"si": "J",     "factor": 1e-3,   "label": "mJ"},
+    "s":        {"si": "s",     "factor": 1.0,    "label": "s"},
+    "ns":       {"si": "s",     "factor": 1e-9,   "label": "ns"},
+    "H":        {"si": "H",     "factor": 1.0,    "label": "H"},
+    "nH":       {"si": "H",     "factor": 1e-9,   "label": "nH"},
+    "S":        {"si": "S",     "factor": 1.0,    "label": "S"},
+    "degC":     {"si": "degC",  "factor": 1.0,    "label": "°C"},
+    "K_per_W":  {"si": "K_per_W", "factor": 1.0,  "label": "°C/W"},
+    "1":        {"si": "1",     "factor": 1.0,    "label": ""},
+    "per_degC": {"si": "per_degC", "factor": 1.0, "label": "1/°C"},
+    "text":     {"si": "text",  "factor": 1.0,    "label": ""}
+  },
+
+  "device_classes": {
+    "si_mosfet": {
+      "label": "Silicon MOSFET",
+      "conduction_loss_form": "i2r",
+      "has_body_diode": true,
+      "qrr_expected": "significant",
+      "active": true,
+      "note": "Body-diode reverse recovery usually dominates turn-on."
+    },
+    "sic_mosfet": {
+      "label": "SiC MOSFET",
+      "conduction_loss_form": "i2r",
+      "has_body_diode": true,
+      "qrr_expected": "small",
+      "active": true,
+      "note": "Strong positive R_DS(on) tempco; small Q_rr."
+    },
+    "gan_hemt": {
+      "label": "GaN HEMT",
+      "conduction_loss_form": "i2r",
+      "has_body_diode": false,
+      "qrr_expected": "zero",
+      "active": false,
+      "note": "No body diode: Q_rr = 0 by construction. Reverse conduction has a gate-dependent offset voltage. Reject any profile asserting non-zero Q_rr."
+    },
+    "igbt": {
+      "label": "IGBT",
+      "conduction_loss_form": "vce0_plus_rce",
+      "has_body_diode": false,
+      "qrr_expected": "n/a",
+      "active": false,
+      "note": "Conduction is V_ce0*I_avg + r_ce*I_rms^2, NOT I^2*R. Reject a profile carrying both V_CE_sat and R_DS_on."
+    },
+    "sic_schottky": {
+      "label": "SiC Schottky diode",
+      "conduction_loss_form": "vf_plus_rd",
+      "has_body_diode": false,
+      "qrr_expected": "zero",
+      "active": true,
+      "note": "Capacitive charge Q_c instead of reverse recovery."
+    },
+    "si_diode": {
+      "label": "Silicon fast-recovery diode",
+      "conduction_loss_form": "vf_plus_rd",
+      "has_body_diode": false,
+      "qrr_expected": "significant",
+      "active": true
+    },
+    "bridge_rectifier": {
+      "label": "Bridge rectifier",
+      "conduction_loss_form": "vf_plus_rd",
+      "has_body_diode": false,
+      "qrr_expected": "small",
+      "active": true,
+      "note": "Line-frequency commutation; a totem-pole variant carries synchronous bottom FETs, which use the i2r form for those legs only."
+    }
+  },
+
+  "provenance_values": ["extracted", "corrected", "manual", "derived", "default"],
+
+  "measurement_basis_fields": {
+    "_doc": "Mandatory on every energy and charge value. Not metadata - a correctness interlock. Convention B (see the plan) de-bundles E_oss and reverse-recovery charge out of a published E_on, which is only possible when these are known.",
+    "circuit": ["half_bridge", "double_pulse_with_diode", "clamped_inductive", "unknown"],
+    "external_diode": "bool",
+    "includes_coss": ["true", "false", "unknown"],
+    "includes_reverse_recovery": ["true", "false", "unknown"],
+    "reference_device": ["self", "complementary", "external", "unknown"],
+    "confidence": ["stated", "inferred", "unknown"],
+    "bundling": {
+      "_doc": "How the value is used against a separate P_Eoss term. Extends the external spec's A7.1, which had no third state and would have blocked convention B.",
+      "raw": "as published - REFUSE to run alongside a separate E_oss term",
+      "unknown": "REFUSE to run alongside a separate E_oss term",
+      "de_bundled": "E_oss and recovery charge subtracted from the anchor - ALLOWED alongside a separate E_oss term; the report must print the arithmetic"
+    }
+  },
+
+  "parameters": [
+    {
+      "key": "device_class",
+      "si_unit": "text", "display_unit": "text",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["tech"],
+      "db_field": "technology",
+      "report_label": "Device class",
+      "description": "Selects the conduction-loss form and the applicable physics interlocks. The engine field carries the coarse form ('si'/'sic'); the canonical key carries the full class."
+    },
+
+    {
+      "key": "R_DS_on",
+      "si_unit": "ohm", "display_unit": "mohm",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true,
+      "condition_qualified": true, "conditions": ["V_GS", "I_D", "T_j"],
+      "multi_valued": true,
+      "consumed_by": ["loss_engine", "requirement", "report"],
+      "engine_fields": ["rdson_25"],
+      "db_field": "rdson",
+      "report_label": "R<sub>DS(on)</sub>",
+      "plausible": {"min": 1e-4, "max": 10.0},
+      "description": "Static on-resistance. MULTI-VALUED: the reference part publishes four entries (V_GS 15/18/20 V at 25 degC, plus 18 V at 175 degC). The engine field holds only the entry selected for the design's own V_GS at 25 degC; the rest live in the profile and are reached through select()."
+    },
+    {
+      "key": "R_DS_on_vs_Tj",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rdson_tj"],
+      "report_label": "R<sub>DS(on)</sub>(T<sub>j</sub>)",
+      "description": "Normalised on-resistance versus junction temperature. Convex, so linear interpolation between two table endpoints overestimates in the middle - worth about 5.7 % on conduction loss, an order of magnitude less than the switching-energy error."
+    },
+    {
+      "key": "R_DS_on_vs_ID",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["rdson_id_curve"],
+      "report_label": "R<sub>DS(on)</sub>(I<sub>D</sub>)",
+      "description": "Normalised on-resistance versus drain current, evaluated at the local current at each line angle."
+    },
+
+    {
+      "key": "C_iss",
+      "si_unit": "F", "display_unit": "pF",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true, "required_if": "sw_method == analytic",
+      "condition_qualified": true, "conditions": ["V_DS", "f"],
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["ciss"],
+      "db_field": "ciss",
+      "report_label": "C<sub>iss</sub>",
+      "plausible": {"min": 1e-12, "max": 1e-7},
+      "description": "Input capacitance; sets the gate current-rise and fall times in the analytic switching model."
+    },
+    {
+      "key": "C_rss_vs_VDS",
+      "si_unit": "F", "display_unit": "pF",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["crss_curve"],
+      "report_label": "C<sub>rss</sub>(V<sub>DS</sub>)",
+      "description": "Reverse-transfer capacitance versus drain voltage. When present the Miller integral is computed from the curve instead of the Q_gd approximation."
+    },
+    {
+      "key": "Q_g",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true,
+      "condition_qualified": true, "conditions": ["V_GS_swing", "V_DS", "I_D"],
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["qg"],
+      "db_field": "qg",
+      "report_label": "Q<sub>g</sub>",
+      "plausible": {"min": 1e-9, "max": 1e-5},
+      "description": "Total gate charge. MUST carry the V_GS swing it was measured over - a Q_g quoted for 0 to 18 V is not the same part driven 0 to 15 V."
+    },
+    {
+      "key": "Q_gd",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true, "required_if": "sw_method == analytic",
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["qgd"],
+      "report_label": "Q<sub>gd</sub>",
+      "plausible": {"min": 1e-10, "max": 1e-6},
+      "description": "Gate-drain (Miller) charge. Estimated as 0.25*Q_g when absent, which was 37 % high on the reference part."
+    },
+    {
+      "key": "V_GS_th",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true, "required_if": "sw_method == analytic",
+      "condition_qualified": true, "conditions": ["I_D", "T_j"],
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["vth"],
+      "db_field": "vth",
+      "report_label": "V<sub>GS(th)</sub>",
+      "plausible": {"min": 0.5, "max": 10.0},
+      "description": "Gate threshold voltage."
+    },
+    {
+      "key": "V_plateau",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "derived", "required": true, "required_if": "sw_method == analytic",
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vpl"],
+      "report_label": "V<sub>plateau</sub>",
+      "description": "Miller-plateau gate voltage. Derived as V_GS(th) + 2 V unless g_fs is known, in which case it is computed per-current and the switching energy becomes correctly superlinear."
+    },
+    {
+      "key": "g_fs",
+      "si_unit": "S", "display_unit": "S",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["gfs"],
+      "report_label": "g<sub>fs</sub>",
+      "plausible": {"min": 0.5, "max": 500.0},
+      "description": "Transconductance. Usually a table value. Without it the plateau voltage is constant and switching energy comes out strictly proportional to current; with it the plateau rises with current and the energy becomes superlinear."
+    },
+
+    {
+      "key": "V_GS_drive",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["vg", "vg_drive"],
+      "report_label": "V<sub>GS</sub> drive",
+      "plausible": {"min": 5.0, "max": 25.0},
+      "description": "Gate-drive voltage swing. A DESIGN choice, not a datasheet value - no upload can supply it. TWO ENGINE FIELDS carry it: 'vg' in the switching model and 'vg_drive' in the gate-loss term. They are the same physical quantity and must always be written together; writing only one is the defect that put a 12 V gate loss into the report while switching used 15 V."
+    },
+    {
+      "key": "R_g_on",
+      "si_unit": "ohm", "display_unit": "ohm",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rg_on"],
+      "report_label": "R<sub>g,on</sub>",
+      "plausible": {"min": 0.0, "max": 100.0},
+      "description": "Turn-ON gate resistance, external plus driver source. A DESIGN choice. Couples only to E_on. Falls back to R_g_common when unset."
+    },
+    {
+      "key": "R_g_off",
+      "si_unit": "ohm", "display_unit": "ohm",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rg_off"],
+      "report_label": "R<sub>g,off</sub>",
+      "plausible": {"min": 0.0, "max": 100.0},
+      "description": "Turn-OFF gate resistance, external plus driver sink. A DESIGN choice. Couples only to E_off."
+    },
+    {
+      "key": "R_g_common",
+      "si_unit": "ohm", "display_unit": "ohm",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rg"],
+      "report_label": "R<sub>g</sub>",
+      "plausible": {"min": 0.0, "max": 100.0},
+      "description": "Gate resistance used when the on and off paths are not stated separately. Switching energy scales roughly linearly with it, so a placeholder here is a ~2x lever."
+    },
+    {
+      "key": "R_g_int",
+      "si_unit": "ohm", "display_unit": "ohm",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["report"],
+      "engine_fields": [],
+      "report_label": "R<sub>G,int</sub>",
+      "plausible": {"min": 0.0, "max": 50.0},
+      "description": "Internal gate resistance from the datasheet. Adds to the external path; reported so the designer can include it in R_g_on / R_g_off."
+    },
+
+    {
+      "key": "E_on",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false,
+      "condition_qualified": true, "conditions": ["V_DS", "I_D", "R_g", "T_j"],
+      "requires_measurement_basis": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "E<sub>on</sub>",
+      "plausible": {"min": 1e-7, "max": 1e-2},
+      "description": "Published turn-on energy at a stated test point. NOT consumed as a fixed per-cycle energy: it anchors the switching model. A published E_on bundles the device's own C_oss and the freewheeling device's charge, both of which this engine counts separately - so convention B de-bundles it before anchoring. The measurement basis is what makes that possible."
+    },
+    {
+      "key": "E_off",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false,
+      "condition_qualified": true, "conditions": ["V_DS", "I_D", "R_g", "T_j"],
+      "requires_measurement_basis": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "E<sub>off</sub>",
+      "plausible": {"min": 1e-7, "max": 1e-2},
+      "description": "Published turn-off energy at a stated test point. Anchors E_off independently of E_on; the two anchor factors differing widely is a signal that the model shape is wrong, not that the magnitude needs scaling."
+    },
+    {
+      "key": "E_on_vs_ID",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "requires_anchor": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["eon_curve"],
+      "report_label": "E<sub>on</sub>(I<sub>D</sub>)",
+      "description": "Turn-on energy versus drain current. Has a large non-zero intercept - measured at 69 % of the full-current value at 2 A on the reference part - so linear-through-origin scaling understates badly at low current, which is where a sinusoidal converter spends most of the line cycle."
+    },
+    {
+      "key": "E_off_vs_ID",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "requires_anchor": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["eoff_curve"],
+      "report_label": "E<sub>off</sub>(I<sub>D</sub>)",
+      "description": "Turn-off energy versus drain current."
+    },
+    {
+      "key": "E_on_vs_ID_hot",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["eon_curve_hot"],
+      "report_label": "E<sub>on</sub>(I<sub>D</sub>) hot",
+      "description": "Turn-on energy at the elevated junction temperature. When present the engine interpolates linearly in T_j between the two curves instead of applying a scalar tempco."
+    },
+    {
+      "key": "E_off_vs_ID_hot",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["eoff_curve_hot"],
+      "report_label": "E<sub>off</sub>(I<sub>D</sub>) hot",
+      "description": "Turn-off energy at the elevated junction temperature."
+    },
+    {
+      "key": "V_test_sw",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["vref_sw"],
+      "report_label": "V<sub>test</sub> (E<sub>sw</sub>)",
+      "plausible": {"min": 10.0, "max": 2000.0},
+      "description": "Bus voltage the switching-energy curves were measured at. Switching energy is scaled by V_bus / V_test."
+    },
+    {
+      "key": "Tj_ref_sw",
+      "si_unit": "degC", "display_unit": "degC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["tj_ref_sw"],
+      "report_label": "T<sub>j,ref</sub> (E<sub>sw</sub>)",
+      "description": "Junction temperature of the reference switching-energy curve."
+    },
+    {
+      "key": "Tj_hot_sw",
+      "si_unit": "degC", "display_unit": "degC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["tj_hot_sw"],
+      "report_label": "T<sub>j,hot</sub> (E<sub>sw</sub>)",
+      "description": "Junction temperature of the hot switching-energy curve."
+    },
+    {
+      "key": "E_sw_tempco",
+      "si_unit": "per_degC", "display_unit": "per_degC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["esw_tco"],
+      "report_label": "dE<sub>sw</sub>/dT<sub>j</sub>",
+      "description": "Fractional temperature coefficient of switching energy, used only when no hot curve is available."
+    },
+    {
+      "key": "E_oss_vs_VDS",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true, "is_curve": true,
+      "requires_anchor": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["eoss_at_v"],
+      "report_label": "E<sub>oss</sub>(V<sub>DS</sub>)",
+      "plausible": {"min": 1e-8, "max": 1e-2},
+      "description": "Output-capacitance stored energy versus drain voltage, evaluated at the ACTUAL bus voltage. Estimating it from die area (0.9e-6 / R_DS(on)) was 3.4x high on the reference SiC part, because that scaling is calibrated on silicon superjunction."
+    },
+
+    {
+      "key": "I_DSS_vs_Tj",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["idss_curve"],
+      "report_label": "I<sub>DSS</sub>(T<sub>j</sub>)",
+      "description": "Drain leakage versus junction temperature. Absent means the blocking-loss term is zero, which is a placeholder rather than a measurement."
+    },
+    {
+      "key": "V_SD",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vsd"],
+      "report_label": "V<sub>SD</sub>",
+      "plausible": {"min": 0.0, "max": 10.0},
+      "description": "Body-diode forward voltage."
+    },
+    {
+      "key": "Q_rr_body",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_mosfet", "sic_mosfet"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["qrr_body"],
+      "report_label": "Q<sub>rr,body</sub>",
+      "plausible": {"min": 0.0, "max": 1e-4},
+      "description": "Body-diode reverse-recovery charge. Must be zero for gan_hemt."
+    },
+
+    {
+      "key": "V_DSS",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["requirement", "report"],
+      "engine_fields": [],
+      "db_field": "vdss",
+      "report_label": "V<sub>DSS</sub>",
+      "plausible": {"min": 20.0, "max": 2000.0},
+      "description": "Drain-source breakdown rating. Not a loss parameter: it is the requirement the GUI states before a datasheet is uploaded."
+    },
+    {
+      "key": "I_D",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": true,
+      "condition_qualified": true, "conditions": ["T_c"],
+      "multi_valued": true,
+      "consumed_by": ["requirement", "report"],
+      "engine_fields": [],
+      "db_field": "id_25",
+      "report_label": "I<sub>D</sub>",
+      "plausible": {"min": 0.1, "max": 1000.0},
+      "description": "Continuous drain current, usually published at two case temperatures."
+    },
+    {
+      "key": "Tj_max",
+      "si_unit": "degC", "display_unit": "degC",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["thermal", "report"],
+      "engine_fields": [],
+      "db_field": "tj_max",
+      "report_label": "T<sub>j,max</sub>",
+      "plausible": {"min": 80.0, "max": 250.0},
+      "description": "Maximum junction temperature. Consumed by the thermal check, not the loss engine."
+    },
+    {
+      "key": "R_th_jc",
+      "si_unit": "K_per_W", "display_unit": "K_per_W",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["loss_engine", "thermal", "report"],
+      "engine_fields": ["rth_jc"],
+      "report_label": "R<sub>&#952;jc</sub>",
+      "plausible": {"min": 0.01, "max": 50.0},
+      "description": "Junction-to-case thermal resistance."
+    },
+    {
+      "key": "R_th_cs",
+      "si_unit": "K_per_W", "display_unit": "K_per_W",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "thermal", "report"],
+      "engine_fields": ["rth_cs"],
+      "report_label": "R<sub>&#952;cs</sub>",
+      "plausible": {"min": 0.0, "max": 20.0},
+      "description": "Case-to-sink thermal resistance - the mounting interface. A DESIGN choice: no datasheet can supply it."
+    },
+    {
+      "key": "Z_th_foster",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["thermal"],
+      "engine_fields": ["zth_foster"],
+      "report_label": "Z<sub>th</sub>(t)",
+      "description": "Transient thermal impedance as an R-tau Foster ladder, for cycle-by-cycle junction excursion."
+    },
+
+    {
+      "key": "L_loop",
+      "si_unit": "H", "display_unit": "nH",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["ls_loop"],
+      "report_label": "L<sub>loop</sub>",
+      "plausible": {"min": 0.0, "max": 1e-6},
+      "description": "Commutation-loop stray inductance; adds 0.5*L*I_off^2 to turn-off energy. A LAYOUT choice."
+    },
+    {
+      "key": "sw_method",
+      "si_unit": "text", "display_unit": "text",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["sw_method"],
+      "report_label": "Switching model",
+      "allowed": ["analytic", "esw"],
+      "description": "Which switching-energy model is active. A MODEL OPTION, not a measurement - the report must state which one produced the number."
+    },
+    {
+      "key": "k_turnoff",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_turnoff"],
+      "report_label": "k<sub>turnoff</sub>",
+      "description": "Turn-off energy anchor factor. Under convention B this carries E_off,datasheet / E_off,analytic at the test point."
+    },
+    {
+      "key": "k_rdson",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_rdson"],
+      "report_label": "k<sub>Rds</sub>",
+      "description": "Tolerance multiplier: 1.0 for typical, above 1 for a worst-case sign-off run."
+    },
+    {
+      "key": "k_esw",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_esw"],
+      "report_label": "k<sub>Esw</sub>",
+      "description": "Switching-energy tolerance multiplier."
+    },
+    {
+      "key": "k_coss",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_coss"],
+      "report_label": "k<sub>Coss</sub>",
+      "description": "Output-capacitance energy tolerance multiplier."
+    },
+    {
+      "key": "k_qg",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_qg"],
+      "report_label": "k<sub>Qg</sub>",
+      "description": "Gate-charge tolerance multiplier."
+    },
+
+    {
+      "key": "V_F_vs_IF",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true, "is_curve": true,
+      "requires_anchor": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["vf_curve"],
+      "db_field": "vf",
+      "report_label": "V<sub>F</sub>(i)",
+      "plausible": {"min": 0.1, "max": 10.0},
+      "description": "Forward voltage versus forward current at the reference temperature."
+    },
+    {
+      "key": "V_F_vs_IF_hot",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["vf_curve_hot"],
+      "report_label": "V<sub>F</sub>(i) hot",
+      "description": "Forward voltage curve at the elevated junction temperature; enables per-point T_j interpolation instead of a scalar tempco."
+    },
+    {
+      "key": "V_F_tempco",
+      "si_unit": "per_degC", "display_unit": "per_degC",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vf_tco"],
+      "report_label": "dV<sub>F</sub>/dT<sub>j</sub>",
+      "description": "Forward-voltage temperature coefficient, used only when no hot curve exists. Negative for silicon, positive for SiC."
+    },
+    {
+      "key": "V_F_tref",
+      "si_unit": "degC", "display_unit": "degC",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vf_tref"],
+      "report_label": "T<sub>ref</sub> (V<sub>F</sub>)",
+      "description": "Temperature of the reference forward-voltage curve."
+    },
+    {
+      "key": "V_F_thot",
+      "si_unit": "degC", "display_unit": "degC",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vf_thot"],
+      "report_label": "T<sub>hot</sub> (V<sub>F</sub>)",
+      "description": "Temperature of the hot forward-voltage curve."
+    },
+    {
+      "key": "r_d",
+      "si_unit": "ohm", "display_unit": "mohm",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rd"],
+      "report_label": "r<sub>d</sub>",
+      "plausible": {"min": 0.0, "max": 10.0},
+      "description": "Dynamic series resistance of the forward characteristic. Zero understates the benefit of paralleling devices."
+    },
+    {
+      "key": "is_sic",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["is_sic"],
+      "report_label": "SiC",
+      "description": "Selects capacitive charge Q_c over reverse recovery Q_rr. Derived from device_class; kept because the engine dataclass still carries the boolean."
+    },
+    {
+      "key": "Q_c",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["sic_schottky"],
+      "source": "datasheet", "required": true,
+      "condition_qualified": true, "conditions": ["V_R"],
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["qc"],
+      "report_label": "Q<sub>c</sub>",
+      "plausible": {"min": 1e-10, "max": 1e-5},
+      "description": "Capacitive (junction) charge of a Schottky diode. Also the term convention B subtracts out of a published E_on when this device is the fixture's freewheeling element."
+    },
+    {
+      "key": "Q_rr",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true,
+      "condition_qualified": true, "conditions": ["I_F", "diF_dt", "T_j"],
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["qrr"],
+      "db_field": "trr",
+      "report_label": "Q<sub>rr</sub>",
+      "plausible": {"min": 0.0, "max": 1e-3},
+      "description": "Reverse-recovery charge. Estimated as 0.5*t_rr*I_o when only t_rr is published."
+    },
+    {
+      "key": "Q_rr_vs_didt",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["qrr_didt_curve"],
+      "report_label": "Q<sub>rr</sub>(di/dt)",
+      "description": "Reverse-recovery charge versus commutation di/dt."
+    },
+    {
+      "key": "Q_rr_vs_IF",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["qrr_if_curve"],
+      "report_label": "Q<sub>rr</sub>(I<sub>F</sub>)",
+      "description": "Reverse-recovery charge versus forward current."
+    },
+    {
+      "key": "Q_rr_tempco",
+      "si_unit": "per_degC", "display_unit": "per_degC",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["qrr_tco"],
+      "report_label": "dQ<sub>rr</sub>/dT<sub>j</sub>",
+      "description": "Reverse-recovery charge temperature coefficient."
+    },
+    {
+      "key": "rr_fet_frac",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_diode", "sic_schottky"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["rr_fet_frac"],
+      "report_label": "recovery share to FET",
+      "description": "Fraction of the recovery energy dissipated in the MOSFET rather than the diode."
+    },
+    {
+      "key": "E_fr",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["e_fr"],
+      "report_label": "E<sub>fr</sub>",
+      "plausible": {"min": 0.0, "max": 1e-2},
+      "description": "Forward-recovery energy."
+    },
+    {
+      "key": "I_rev_vs_Tj",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["irev_curve"],
+      "report_label": "I<sub>R</sub>(T<sub>j</sub>)",
+      "description": "Reverse leakage versus junction temperature."
+    },
+    {
+      "key": "k_vf",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_vf"],
+      "report_label": "k<sub>Vf</sub>",
+      "description": "Forward-voltage tolerance multiplier."
+    },
+    {
+      "key": "k_qrr",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_qrr"],
+      "report_label": "k<sub>Qrr</sub>",
+      "description": "Reverse-recovery-charge tolerance multiplier."
+    },
+    {
+      "key": "k_qc",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["k_qc"],
+      "report_label": "k<sub>Qc</sub>",
+      "description": "Capacitive-charge tolerance multiplier."
+    },
+
+    {
+      "key": "bridge_topology",
+      "si_unit": "text", "display_unit": "text",
+      "device_classes": ["bridge_rectifier"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["topology"],
+      "report_label": "Bridge topology",
+      "description": "Full-diode bridge, or a synchronous variant whose bottom legs are MOSFETs using the i2r conduction form."
+    },
+    {
+      "key": "n_parallel",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "design", "required": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["n_parallel"],
+      "report_label": "Devices in parallel",
+      "description": "Devices in parallel. A DESIGN choice."
+    },
+    {
+      "key": "n_parallel_top",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["n_parallel_top"],
+      "report_label": "Top legs in parallel",
+      "description": "Devices in parallel on the bridge's top legs."
+    },
+    {
+      "key": "n_parallel_bottom",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["n_parallel_bottom"],
+      "report_label": "Bottom legs in parallel",
+      "description": "Devices in parallel on the bridge's bottom legs."
+    },
+    {
+      "key": "share_worst",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["share_worst"],
+      "report_label": "Worst-case current share",
+      "description": "Worst-case current-sharing fraction between paralleled devices."
+    },
+    {
+      "key": "R_DS_on_bottom",
+      "si_unit": "ohm", "display_unit": "mohm",
+      "device_classes": ["bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["rdson_bottom_25"],
+      "report_label": "R<sub>DS(on)</sub> bottom",
+      "plausible": {"min": 1e-4, "max": 10.0},
+      "description": "On-resistance of the synchronous bottom-leg FETs in a totem-pole bridge."
+    },
+    {
+      "key": "R_DS_on_bottom_vs_Tj",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["rdson_bottom_tj"],
+      "report_label": "R<sub>DS(on)</sub>(T<sub>j</sub>) bottom",
+      "description": "Normalised on-resistance versus temperature for the bottom-leg FETs."
+    },
+    {
+      "key": "Q_g_bottom",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["qg_bottom"],
+      "report_label": "Q<sub>g</sub> bottom",
+      "plausible": {"min": 0.0, "max": 1e-5},
+      "description": "Gate charge of the bottom-leg FETs; they commutate at line frequency, not switching frequency."
+    },
+    {
+      "key": "V_GS_drive_bottom",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["vg_bottom"],
+      "report_label": "V<sub>GS</sub> drive, bottom",
+      "plausible": {"min": 5.0, "max": 25.0},
+      "description": "Gate-drive voltage for the bottom-leg FETs. A DESIGN choice."
+    },
+    {
+      "key": "R_th_jc_bottom",
+      "si_unit": "K_per_W", "display_unit": "K_per_W",
+      "device_classes": ["bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine", "thermal"],
+      "engine_fields": ["rth_jc_bottom"],
+      "report_label": "R<sub>&#952;jc</sub> bottom",
+      "plausible": {"min": 0.01, "max": 50.0},
+      "description": "Junction-to-case thermal resistance of the bottom-leg devices."
+    },
+    {
+      "key": "R_th_cs_bottom",
+      "si_unit": "K_per_W", "display_unit": "K_per_W",
+      "device_classes": ["bridge_rectifier"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine", "thermal"],
+      "engine_fields": ["rth_cs_bottom"],
+      "report_label": "R<sub>&#952;cs</sub> bottom",
+      "plausible": {"min": 0.0, "max": 20.0},
+      "description": "Case-to-sink thermal resistance of the bottom-leg devices. A DESIGN choice."
+    }
+  ]
+}

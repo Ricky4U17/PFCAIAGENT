@@ -150,8 +150,8 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **192 passed / 2 skipped** (the standing baseline — anything else is a
-  regression). Was 172 until C202 added `tests/test_plausibility.py` (+20).
+- Backend suite: **219 passed / 2 skipped** (the standing baseline — anything else is a
+  regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203 (`test_parameter_registry.py`).
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
