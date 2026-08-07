@@ -426,7 +426,12 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     _vo = float(design["vout"])
     def _vf(c): return ", ".join(f"{y:.2f} V&#64;{x:.0f} A".replace("&#64;", "@") for x, y in zip(c[0], c[1]))
     _eoss = float(_np.interp(_vo, _mos.eoss_at_v[0], _mos.eoss_at_v[1]))
-    _tco = _mos._tjcoef(); _khot = float(_np.interp(125, _tco[0], _tco[1])); _thot = float(_tco[0][-1])
+    # The hot factor must be read AT the temperature the label names. This interpolated at a
+    # hardcoded 125 degC while printing the curve's last temperature — invisible while every curve
+    # ended at 125, and wrong the moment a datasheet curve ends at 175: it printed "x1.42 at
+    # 175 degC" where the real ratio there is 1.64.
+    _tco = _mos._tjcoef(); _thot = float(_tco[0][-1])
+    _khot = float(_np.interp(_thot, _tco[0], _tco[1]))
     prows = [
         ["<b>Boost MOSFET</b>", "", ""],
         ["Technology", _mos.tech.upper(), "channel material"],

@@ -100,6 +100,31 @@ _COND = re.compile(r"([A-Za-z][A-Za-z0-9_()θ°]*(?:,[A-Za-z]+)?)\s*=\s*([-+]?[\
                    r"([pnuμmkKMG]?(?:ohm|V|A|F|C|J|s|H|S|W|degC|Hz)?)", re.U)
 
 
+_SWING = re.compile(r"([A-Za-z][A-Za-z0-9_()]*)\s*=\s*([-+]?[\d.]+)\s*(?:to|/)\s*"
+                    r"([-+]?[\d.]+)\s*([pnu\u03bcmkKMG]?[A-Za-z]*)", re.U)
+
+
+def parse_swings(text: Any) -> dict[str, float]:
+    """Conditions stated as a SWING rather than a level: "V_GS = 0 to 18 V", "V_GS = 0/18 V".
+
+    Gate charge is quoted for a swing, and the swing is the thing that matters: Q_g = 34 nC over
+    0-18 V is not 34 nC over 0-15 V. Read as a level the first number wins, which records the swing
+    as 0 V and quietly loses the condition the value depends on.
+    """
+    t = norm_text(text).replace("\u00b0C", "degC").replace("\u2103", "degC")
+    out: dict[str, float] = {}
+    for sym, lo, hi, unit in _SWING.findall(t):
+        try:
+            lo_f, hi_f = float(lo), float(hi)
+        except ValueError:
+            continue
+        base, scale = parse_unit(unit)
+        key = _CONDITION_ALIASES.get(sym.upper().replace("(", "").replace(")", ""), sym)
+        out[f"{key}_swing"] = (hi_f - lo_f) * (scale if base and base != "degC" else 1.0)
+        out[f"{key}_high"] = hi_f * (scale if base and base != "degC" else 1.0)
+    return out
+
+
 def parse_conditions(text: Any) -> dict[str, float]:
     """'V_GS = 18 V, T_j = 175 degC' -> {'V_GS': 18.0, 'T_j': 175.0}, values in SI.
 
@@ -107,7 +132,11 @@ def parse_conditions(text: Any) -> dict[str, float]:
     whichever entry happened to be parsed first — the failure `manifest.select` raises on.
     """
     t = norm_text(text).replace("°C", "degC").replace("℃", "degC")
-    out: dict[str, float] = {}
+    out: dict[str, float] = dict(parse_swings(t))
+    # A swing is consumed first, so its two numbers are not then read as two separate
+    # levels — "V_GS = 0 to 18 V" must not also record V_GS = 0.
+    for _m in _SWING.finditer(t):
+        t = t.replace(_m.group(0), " ")
     for sym, num, unit in _COND.findall(t):
         try:
             val = float(num.replace(",", "."))

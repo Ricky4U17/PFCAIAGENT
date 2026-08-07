@@ -7953,3 +7953,85 @@ components sum to the total at every point and match the engine row for row.
 vite build clean.
 
 NEXT: M4a — the direct-substitution loss terms, now that the values are real.
+
+## C208 — M4a: the direct-substitution loss terms, on real values
+
+Plan sections 5.1 and 5.3–5.6. Same part, same design, same engine — only the inputs change.
+
+### MOSFET loss at 90 Vac, 2 channels × 70 kHz, both channels
+
+| Term | Catalogue estimate | From the datasheet | Change |
+|---|---|---|---|
+| Conduction | 5.561 W | **6.104 W** | **+0.543** |
+| Switching | 2.909 W | 1.011 W | −1.897 |
+| **E_oss** | **4.114 W** | **1.193 W** | **−2.921** |
+| Recovery | 8.769 W | 8.769 W | — |
+| Leakage | 0.000 W | 0.000293 W | first real value |
+| **Total** | **21.352 W** | **17.077 W** | **−4.275** |
+| Gate (driver) | 0.071 W | 0.086 W | +0.014 |
+| T_j | 90.4 °C | 86.0 °C | −4.4 |
+
+**Conduction going UP is the point.** The real R_DS(on) is 33 mΩ, not the catalogue's 30, and the
+real hot curve is **×1.64 at 175 °C**, not the generic ×1.4. Not every correction is favourable,
+and a tool that only ever moved numbers in the flattering direction would be worth less.
+
+**The switching change is two separate things**, and worth decomposing rather than claiming:
+
+| | P_FET_sw |
+|---|---|
+| catalogue, R_g = 4.0 Ω placeholder | 2.909 W |
+| catalogue, R_g = 1.8 Ω (the real schematic value) | 1.309 W |
+| datasheet, Q_gd 6.2 nC + R_g 1.8 Ω | 1.011 W |
+
+So −1.60 W is the gate resistor no longer being a guess, and −0.30 W is Q_gd. **E_oss is the only
+term where the datasheet alone accounts for the whole move**, and it is the largest single change.
+
+### Two things the datasheet forced that the plan had not anticipated
+
+**1. This part does not publish g_fs.** The plan recorded transconductance as "a table value in
+most dynamic-characteristics tables", so phase 1 would restore the superlinear E_sw(I). It is not
+in this datasheet at all. Without it the Miller plateau stays constant and switching energy comes
+out strictly proportional to current — a real limitation, now stated as a `note` on the block
+rather than left as a silent modelling choice. The transfer-characteristic curve is phase 2.
+
+**2. Q_g is quoted for a gate SWING, and the swing was being lost.** The condition reads
+`V_GS = 0 to 18 V`; the parser read the first number and recorded `V_GS = 0`. New `parse_swings`
+captures `V_GS_swing = 18`, and a cross-check fires when the design drives something else:
+
+> Q_g = 34 nC is quoted for a 18 V gate swing, but the design drives 15 V. Gate-drive loss scales
+> with the charge actually moved… Read Q_g at 15 V off the gate-charge curve (phase 2), or accept
+> the difference deliberately.
+
+Reported, never silently scaled — scaling Q_g without the gate-charge curve would be a guess
+wearing the clothes of a correction.
+
+### Leakage is no longer a placeholder
+`P_FET_leak` sat at exactly 0.000 because nothing ever populated `idss_curve`. The datasheet's two
+I_DSS points (1 µA at 25 °C, 3 µA at 175 °C) build a real curve: **0.29 mW**. Small — but honestly
+small rather than assumed away, which is the difference the whole plan is about.
+
+### Deliberately NOT done
+**C_rss is not mapped.** The datasheet publishes one point (7 pF at 400 V) and the engine's
+`crss_curve` expects C_rss(V), which swings by orders of magnitude across the blocking range. A
+two-point fit through a single value would be a shape nobody measured. Without it the engine uses
+the Miller integral Q_gd·V/2 — and Q_gd is now the real 6.2 nC.
+
+### A report bug the datasheet exposed
+Table 7.2b printed the hot-resistance factor interpolated at a **hardcoded 125 °C** while labelling
+it with the curve's last temperature. Invisible while every curve ended at 125; the moment a real
+datasheet curve ends at 175 it printed **"×1.42 at 175 °C"** where the true ratio there is 1.64.
+Now reads ×1.64. Table 7.2d distinguishes the sources properly too: *"all model parameters
+datasheet-backed"* for the MOSFET against *"Digi-Key parametric catalogue (not the part
+datasheet)"* for the others.
+
+### A class of bug closed rather than patched
+`_conduction_form` and then `_checks` each reached the `Mosfet` dataclass and raised, because
+`_META_KEYS` had to be updated in a second place every time. `_clean_block` now treats **any**
+underscore-prefixed key as metadata. A convention that holds for every such key cannot be
+forgotten; an allow-list can.
+
+VERIFIED: 13 new tests, including the catalogue-vs-datasheet comparison on the same part and the
+three cross-checks. **Suite 332 passed / 2 skipped** (was 319). Combined report 190 pp; Ch7 renders
+with ×1.64 and 0 unrenderable glyphs; tsc clean.
+
+NEXT: M4b — switching-energy anchoring under convention B, which is where the remaining error lives.

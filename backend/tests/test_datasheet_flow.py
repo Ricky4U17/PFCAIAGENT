@@ -292,3 +292,126 @@ class TestDatasheetBeatsTheCatalogue:
         assert cat["qgd"] > ds["qgd"]
         # R_DS(on): the catalogue value carries no gate-voltage condition at all.
         assert cat["rdson_25"] != ds["rdson_25"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+#  M4a — the direct-substitution loss terms, once the values are real.
+#  Conduction R_DS(T_j), E_oss at the actual bus, gate on the real V_GS, leakage, thermal.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+def _blocks(pdf_bytes, root, design_inputs=None):
+    """(catalogue block, datasheet block) for the SAME part — the comparison M4a exists to make."""
+    from app.mode_b.semiconductor import database as sdb
+    up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=root)
+    DF.confirm(up["part_number"], {}, "sic_mosfet", root=root)
+    prof = PS.load_profile(up["part_number"], kind="confirmed", root=root)
+    ds = DF.profile_to_block(prof, "sic_mosfet", design_inputs or DESIGN_INPUTS)
+    rec = next((r for r in sdb.load("mosfet")
+                if "IMZA65R033" in (r.get("part_number") or "")), None)
+    return (sdb.to_block(rec, "mosfet") if rec else None), ds
+
+
+def _losses(block):
+    from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+    from app.mode_b.semiconductor import database as sdb
+    d = dict(DESIGN, fsw=70000)
+    return calculate_semiconductor_losses(
+        d, block, sdb.to_block(sdb.load("diode")[0], "diode"),
+        sdb.to_block(sdb.load("bridge")[0], "bridge"),
+        {"t_ambient": 50, "rth_sa": 0.5}, None)["per_point"]
+
+
+class TestM4aSubstitution:
+    def test_eoss_loss_falls_to_the_published_figure(self, pdf_bytes, store_root):
+        """The headline of the whole plan. The die-area estimate gave 30.0 uJ against a published
+        8.7, so E_oss loss was roughly 3.4x too high at every operating point."""
+        cat, ds = _blocks(pdf_bytes, store_root)
+        if cat is None:
+            pytest.skip("part not in the catalogue")
+        c, d = _losses(cat)[0], _losses(ds)[0]
+        assert c["P_FET_coss"] > 3.5 and d["P_FET_coss"] < 1.5
+        assert d["P_FET_coss"] == pytest.approx(1.19, abs=0.15)
+
+    def test_gate_loss_uses_the_real_drive_voltage(self, pdf_bytes, store_root):
+        """f_sw * Q_g * V_g, on 18 V and 34 nC from the datasheet rather than a generic pairing."""
+        _, ds = _blocks(pdf_bytes, store_root)
+        d = _losses(ds)[0]
+        assert d["P_gate_driver"] == pytest.approx(2 * 70e3 * 34e-9 * 18.0, rel=0.02)
+
+    def test_conduction_rises_because_the_real_part_is_worse_than_the_estimate(
+            self, pdf_bytes, store_root):
+        """Not every correction is favourable, and that is the point of using real values:
+        R_DS(on) is 33 mOhm not 30, and the real hot curve is 1.64x at 175 degC, not 1.4x."""
+        cat, ds = _blocks(pdf_bytes, store_root)
+        if cat is None:
+            pytest.skip("part not in the catalogue")
+        assert _losses(ds)[0]["P_FET_cond"] > _losses(cat)[0]["P_FET_cond"]
+
+    def test_the_temperature_curve_is_the_datasheets_own(self, pdf_bytes, store_root):
+        _, ds = _blocks(pdf_bytes, store_root)
+        temps, ratios = ds["rdson_tj"]
+        assert temps[-1] == 175.0 and ratios[-1] == pytest.approx(54.0 / 33.0, rel=1e-3)
+
+    def test_leakage_is_now_a_measurement_rather_than_a_placeholder(self, pdf_bytes, store_root):
+        """The blocking-loss term stood at exactly zero because nothing populated the I_DSS curve.
+        Two published points make it small but real — and honestly small, not assumed away."""
+        _, ds = _blocks(pdf_bytes, store_root)
+        assert ds["idss_curve"][0] == [25.0, 175.0]
+        assert _losses(ds)[0]["P_FET_leak"] > 0.0
+
+    def test_thermal_resistance_is_the_published_one(self, pdf_bytes, store_root):
+        _, ds = _blocks(pdf_bytes, store_root)
+        assert ds["rth_jc"] == pytest.approx(0.77)
+
+    def test_total_loss_and_junction_temperature_both_fall(self, pdf_bytes, store_root):
+        cat, ds = _blocks(pdf_bytes, store_root)
+        if cat is None:
+            pytest.skip("part not in the catalogue")
+        c, d = _losses(cat)[0], _losses(ds)[0]
+        assert d["P_FET_total"] < c["P_FET_total"]
+        assert d["Tj_FET"] < c["Tj_FET"]
+
+
+class TestM4aChecks:
+    def test_a_gate_swing_mismatch_is_reported(self, pdf_bytes, store_root):
+        """Q_g is published for a 0-18 V swing. Driving 15 V moves less charge, so using 34 nC
+        overstates gate loss — reported rather than silently corrected, because scaling it without
+        the gate-charge curve would be a guess."""
+        _, ds = _blocks(pdf_bytes, store_root, dict(DESIGN_INPUTS, V_GS_drive=15.0))
+        msgs = [c["message"] for c in ds["_checks"] if c["key"] == "Q_g"]
+        assert msgs and "18 V gate swing" in msgs[0] and "drives 15 V" in msgs[0]
+
+    def test_no_mismatch_is_reported_when_the_swing_matches(self, pdf_bytes, store_root):
+        _, ds = _blocks(pdf_bytes, store_root)
+        assert not [c for c in ds["_checks"] if c["key"] == "Q_g"]
+
+    def test_a_missing_transconductance_is_stated_not_assumed(self, pdf_bytes, store_root):
+        """This datasheet does not publish g_fs in its tables, so the plan's assumption that it is
+        a phase-1 value does not hold here. Without it the plateau is constant and switching energy
+        is strictly proportional to current — a real limitation, and it is said out loud."""
+        _, ds = _blocks(pdf_bytes, store_root)
+        note = next(c for c in ds["_checks"] if c["key"] == "g_fs")
+        assert note["severity"] == "note" and "superlinearity" in note["message"]
+
+    def test_an_unpublished_gate_voltage_is_flagged(self, pdf_bytes, store_root):
+        """The datasheet publishes 15, 18 and 20 V. A design at 12 V gets the nearest, and is told."""
+        _, ds = _blocks(pdf_bytes, store_root, dict(DESIGN_INPUTS, V_GS_drive=12.0))
+        assert any(c["key"] == "R_DS_on" for c in ds["_checks"])
+
+    def test_crss_is_deliberately_not_fitted_from_one_point(self, pdf_bytes, store_root):
+        """C_rss swings by orders of magnitude across the blocking range; a two-point fit through
+        the single published value would be a shape nobody measured. Without it the engine uses the
+        Miller integral, and Q_gd is now the real 6.2 nC."""
+        _, ds = _blocks(pdf_bytes, store_root)
+        assert "crss_curve" not in ds
+        assert ds["qgd"] == pytest.approx(6.2e-9)
+
+
+class TestMetadataNeverReachesTheEngine:
+    def test_any_underscore_key_is_metadata(self):
+        """Twice a new underscore-prefixed field reached the Mosfet dataclass and raised, because
+        the allow-list had to be updated in a second place. The convention now holds for every
+        such key, so it cannot be forgotten again."""
+        from app.mode_b.semiconductor.adapter import _clean_block
+        params, meta = _clean_block({"rdson_25": 0.033, "_anything_new": "x", "_checks": []})
+        assert params == {"rdson_25": 0.033}
+        assert "_anything_new" in meta and "_checks" in meta

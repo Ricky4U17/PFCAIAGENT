@@ -95,9 +95,16 @@ def parameter_audit(mosfet: dict, diode: dict, bridge: dict) -> dict:
 
 def _clean_block(block: dict):
     """Split a component block into (engine params, metadata). Drops metadata keys and any
-    empty/None values so the engine uses its built-in default for unset optional fields."""
+    empty/None values so the engine uses its built-in default for unset optional fields.
+
+    ANY key beginning with an underscore is metadata, by convention — not only the ones named in
+    `_META_KEYS`. Twice now a new underscore-prefixed field (`_conduction_form`, then `_checks`)
+    reached the engine dataclass and raised, because the list had to be updated in a second place.
+    A convention that holds for every such key cannot be forgotten.
+    """
     block = dict(block or {})
-    meta = {k: block.pop(k) for k in list(block) if k in _META_KEYS}
+    meta = {k: block.pop(k) for k in list(block)
+            if k in _META_KEYS or k.startswith("_")}
     params = {k: v for k, v in block.items() if v not in (None, "", [])}
     return params, meta
 

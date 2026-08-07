@@ -340,6 +340,22 @@ def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
         if ent:
             put(key, ent.get("typ") or ent.get("max") or ent.get("min"))
 
+    # LEAKAGE (plan 5.5). The blocking-loss term has been zero because nothing ever populated the
+    # curve — a placeholder, not a measurement. Two published I_DSS points, at 25 degC and at
+    # T_j,max, give the engine a real curve to interpolate over.
+    idss = [(float((e.get("conditions") or {}).get("T_j")),
+             float(e.get("typ") or e.get("max")))
+            for e in _entries_of(profile, "I_DSS_vs_Tj")
+            if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
+    if len(idss) >= 2:
+        idss.sort()
+        put("I_DSS_vs_Tj", [[t for t, _ in idss], [v for _, v in idss]])
+
+    # C_rss is deliberately NOT mapped. The datasheet publishes ONE point (7 pF at 400 V) and the
+    # engine's crss_curve expects C_rss(V), which swings by orders of magnitude across the blocking
+    # range. A two-point fit through a single value would be a shape nobody measured; without it
+    # the engine uses the Miller integral Q_gd*V/2, and Q_gd is now the real 6.2 nC.
+
     # E_oss: phase 1 has the published point, not the curve. Anchoring a V^1.5 shape ON THE REAL
     # VALUE is not the same as inventing one from die area — that estimate was 3.4x high on this
     # part — but it is still a fitted shape, so it is stamped `derived` and M7 replaces it with the
@@ -370,7 +386,54 @@ def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
 
     blk[M.PROVENANCE_KEY] = prov
     blk["_conduction_form"] = cls["conduction_loss_form"]
+    blk["_checks"] = _consistency_checks(profile, design, blk)
     return blk
+
+
+def _consistency_checks(profile: dict, design: dict, blk: dict) -> list[dict]:
+    """Cross-checks between the datasheet's stated conditions and the design's own choices.
+
+    These are the questions a value cannot answer about itself: Q_g is quoted for a particular gate
+    swing, R_DS(on) for a particular gate voltage. Using one at a different operating point is not
+    wrong provided somebody decided to — so they are reported, never silently corrected.
+    """
+    out = []
+    vgs = design.get("V_GS_drive")
+
+    qg_e = _pick_entry(_entries_of(profile, "Q_g")) or {}
+    swing = (qg_e.get("conditions") or {}).get("V_GS_swing")
+    if vgs and swing and abs(float(swing) - float(vgs)) > 0.5:
+        out.append({
+            "key": "Q_g", "severity": "check",
+            "message": (f"Q_g = {(qg_e.get('typ') or 0) * 1e9:.0f} nC is quoted for a "
+                        f"{float(swing):g} V gate swing, but the design drives {float(vgs):g} V. "
+                        f"Gate-drive loss scales with the charge actually moved, so this over- or "
+                        f"under-states it. Read Q_g at {float(vgs):g} V off the gate-charge curve "
+                        f"(phase 2), or accept the difference deliberately.")})
+
+    rds_conds = [c for c in ((e.get("conditions") or {}).get("V_GS")
+                             for e in _entries_of(profile, "R_DS_on")) if c]
+    if vgs and rds_conds and not any(abs(c - float(vgs)) < 0.5 for c in rds_conds):
+        out.append({
+            "key": "R_DS_on", "severity": "check",
+            "message": (f"No R_DS(on) is published at V_GS = {float(vgs):g} V; the datasheet states "
+                        f"{sorted(set(rds_conds))} V. The value used is the nearest stated "
+                        f"condition, which is an approximation.")})
+
+    if "gfs" not in blk:
+        out.append({
+            "key": "g_fs", "severity": "note",
+            "message": ("Transconductance is not published in this datasheet's tables, so the "
+                        "Miller plateau is treated as constant and switching energy comes out "
+                        "strictly proportional to current. The transfer-characteristic curve "
+                        "restores the correct superlinearity (phase 2).")})
+
+    if "idss_curve" not in blk:
+        out.append({
+            "key": "I_DSS_vs_Tj", "severity": "note",
+            "message": ("Blocking (leakage) loss is reported as zero because no two-point I_DSS "
+                        "curve could be built. That is a placeholder, not a measurement.")})
+    return out
 
 
 def _entries_of(profile: dict, key: str) -> list[dict]:
