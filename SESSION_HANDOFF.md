@@ -41,8 +41,7 @@ report; treat its conventions as settled.
    reason. They are now computed, reported, and confirmed by the designer.
 2. **Annotation labels wrap PER WORD, not per label.** The cell is ~20 mm and breaks on spaces only,
    so any unbroken token over **7 characters** splits mid-word — "ANCHORED" at 8 letters already
-   does (C209), as do ("DE-RATIN G", "CATALOG UE",
-   "STATEME NT"). A hyphen is not a break point. "MAKE RATING" is fine.
+   does (C209), as do "DE-RATIN G", "CATALOG UE" and "STATEME NT". A hyphen is not a break point. "MAKE RATING" is fine.
 3. **Never declare a React component inside another component.** New identity every render →
    unmount/remount → the `<input>` is recreated on every keystroke and loses focus. `Knob` in
    `InputProtection.tsx` has always been at module level, which is why that page never had it.
@@ -151,7 +150,7 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **279 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **343 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209
