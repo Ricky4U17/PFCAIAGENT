@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-07**, head = **`PENDING` C210**, on `master`.
+**Start here after a restart.** Last updated **2026-08-07**, head = **`72ab80b` C210**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
