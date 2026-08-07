@@ -138,7 +138,7 @@ def _bridge_section(story, traces, is_sync):
     _worked(story, "7.3.1", "Bridge Loss — Worked Derivation", steps, traces)
 
 
-def _mosfet_section(story, traces):
+def _mosfet_section(story, traces, mosfet=None):
     nch = int(traces[0][1]["Nch"]) if traces else 1
 
     sub_h(story, "7.4.1", "Conduction loss", CH)
@@ -179,6 +179,55 @@ def _mosfet_section(story, traces):
         ("P<sub>sw</sub> = N<sub>ch</sub>&#183;f<sub>sw</sub>&#183;avg(E<sub>sw</sub>)",
          lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['Esw_avg'])} = <b>{_f(tr['P_sw_fet_tot'])} W</b>"),
     ], traces)
+
+    # M4b. When the switching model is anchored on published energies, the report MUST show the
+    # de-bundling arithmetic: the whole basis for keeping a separate E_oss term alongside a
+    # datasheet E_on is that the bundled parts were subtracted first. A reader has to be able to
+    # check that, not take it on trust.
+    _anch = (mosfet or {}).get("_switching_anchor") or {}
+    if _anch.get("ok"):
+        _b = _anch["basis"]
+        annotation(story, "ANCHOR",
+            f"The switching model is <b>anchored on the datasheet's published energies</b> rather "
+            f"than run open-loop. {_anch['statement']}<br/><br/>"
+            f"<b>Why the subtraction.</b> A published E<sub>on</sub> is measured in a double-pulse "
+            f"fixture and bundles three things: the device's own voltage-current overlap, the "
+            f"discharge of its own C<sub>oss</sub>, and the charge of the freewheeling element. "
+            f"This chapter counts the last two separately, in Sections 7.4.3 and 7.4.4. Anchoring "
+            f"on the raw published figure while keeping those terms would count them twice, so "
+            f"they are removed before the anchor is taken. E<sub>off</sub> needs no such treatment "
+            f"— no C<sub>oss</sub> discharge or recovery charge flows through the device at "
+            f"turn-off — which is what makes it the clean check on the other.", CH)
+        _band = _anch.get("band") or {}
+        if not _band.get("stated"):
+            annotation(story, "ANCHOR BAND",
+                f"The datasheet does not state which freewheeling device its switching-energy "
+                f"fixture used, so the charge it contributed is not known exactly. The anchor uses "
+                f"the midpoint of a {_band.get('q_fw_low_C', 0)*1e9:.0f}&#8211;"
+                f"{_band.get('q_fw_high_C', 0)*1e9:.0f} nC range; across that range k<sub>on</sub> "
+                f"spans {_band.get('k_on_low', 0):.2f} to {_band.get('k_on_high', 0):.2f}, worth "
+                f"about &#177;5% on total MOSFET loss. An independent check &#8212; anchoring on "
+                f"E<sub>off</sub>, which carries no bundled charge, and asking what the fixture "
+                f"must then have contributed &#8212; gives "
+                f"{_anch.get('implied_q_fw_C', 0)*1e9:.0f} nC, inside that range.", CH)
+        data_table(story, "7.4.2b", "Switching-Energy Anchor",
+            "Both factors are shown because their DIVERGENCE is the diagnostic: a magnitude error "
+            "would scale turn-on and turn-off alike, so a large difference after de-bundling points "
+            "at the model's shape rather than its size.",
+            ["Quantity", "Published", "Model, unscaled", "Anchor factor"],
+            [["Turn-on E<sub>on</sub> (de-bundled)",
+              f"{(_b['E_on_ds'] - _b['E_oss_at_test'] - (_band.get('q_fw_used_C', 0) * _b['V_test']))*1e6:.1f} {_MU}J",
+              f"{_b['E_on_analytic']*1e6:.1f} {_MU}J", f"k<sub>on</sub> = {_anch['k_on']:.2f}"],
+             ["Turn-off E<sub>off</sub>", f"{_b['E_off_ds']*1e6:.0f} {_MU}J",
+              f"{_b['E_off_analytic']*1e6:.1f} {_MU}J", f"k<sub>off</sub> = {_anch['k_off']:.2f}"],
+             ["Test conditions",
+              f"{_b['V_test']:.0f} V, {_b['I_test']:.1f} A",
+              f"R<sub>g</sub> {_b['R_g_test']:g} {_OHM}, T<sub>j</sub> {_b['T_j_test']:.0f}{_DEG}C",
+              "&#8212;"]],
+            col_widths=[CW*0.32, CW*0.22, CW*0.22, CW*0.24], ch=CH)
+        for _n in (_anch.get("notes") or []):
+            if "outside" in _n or "differ by" in _n:
+                annotation(story, "ANCHOR CHECK", _n, CH)
 
     sub_h(story, "7.4.3", "Output-capacitance loss (E<sub>oss</sub>)", CH)
     _W(story,
@@ -242,7 +291,7 @@ def _diode_section(story, traces):
        "<b>Model.</b> The boost diode conducts the inductor current during the MOSFET off-time, "
        "i<sub>D</sub> = i<sub>ch</sub>&#183;(1&#8722;d). Its conduction loss is the cycle-average of the "
        "current-dependent forward drop V<sub>f</sub>(i,T<sub>j</sub>) times i<sub>D</sub>.")
-    annotation(story, "REVERSE RECOVERY",
+    annotation(story, "REVERSE Qrr",
         ("<b>Is reverse-recovery loss computed? Yes.</b> It is evaluated at every line angle in CCM only — "
          "in DCM the diode current already reaches zero before the MOSFET turns on, so there is no hard "
          "recovery. " +
@@ -662,7 +711,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "output-capacitance (E<sub>oss</sub>) dissipation, the diode charge dumped into the FET, and "
         "gate-drive + leakage. Each is modelled below in its own sub-section: the equation we use, why "
         "that model is appropriate, and the worked numbers at the 90 V and 180 V corners.", CH)
-    _mosfet_section(story, traces)
+    _mosfet_section(story, traces, mosfet)
     data_table(story, "7.4", "MOSFET Loss Breakdown vs Line Voltage",
         "Per-mechanism MOSFET loss (all channels), at every input voltage.",
         ["V_AC", "Cond", "Switch", "Coss", "RR", "Gate+leak", "FET total"],

@@ -8035,3 +8035,92 @@ three cross-checks. **Suite 332 passed / 2 skipped** (was 319). Combined report 
 with ×1.64 and 0 unrenderable glyphs; tsc clean.
 
 NEXT: M4b — switching-energy anchoring under convention B, which is where the remaining error lives.
+
+## C209 — M4b: switching-energy anchoring, convention B
+
+Plan Section 5.2, settled 2026-08-05. The last piece of the loss-model merge.
+
+### The anchor reproduces the datasheet exactly
+
+```
+E_on  published 35 µJ at 400 V, 27.9 A, R_g 1.8 Ω
+      = 12.7 µJ device overlap  +  8.7 µJ own E_oss  +  13.6 µJ fixture charge  =  35.0 µJ  ✓
+E_off published 22 µJ          =  22.0 µJ                                                  ✓
+```
+
+### Convention B is now empirically confirmed, not just argued
+
+The case for de-bundling was a physical argument. It is now a measurement:
+
+| | k_on | k_off | apart |
+|---|---|---|---|
+| anchored on the RAW published E_on | 4.30 | 1.85 | **2.3×** |
+| after removing E_oss and the fixture charge | **1.72** | **1.56** | **1.10×** |
+
+A magnitude error would have scaled turn-on and turn-off alike. The 2.3× divergence was a
+**definition mismatch**, and removing the parts this engine counts separately removes almost all of
+it. That is the strongest evidence available that convention B was the right call, and it could not
+have been seen before the real datasheet arrived.
+
+### An independent cross-check on the one unknown
+The datasheet shows its switching test fixture only as a circuit diagram, so the freewheeling
+device's charge is not extractable. The anchor uses the midpoint of an 18–50 nC range and prints
+what the ends would give (k_on 0.85 to 2.59, about ±5 % on total loss).
+
+**But E_off carries no bundled charge at all**, so it can be anchored with no assumption. Asking
+what the fixture must then have contributed gives **37 nC** — inside the assumed range, and within
+10 % of the 34 nC midpoint actually used. Two routes to the same unknown, one of which knows
+nothing about the other's assumption. This was not in the plan; it fell out of the E_off anchor
+being clean, and it is worth more than the band alone.
+
+### The loss progression, same part and design throughout
+
+| V_ac | C205 catalogue | C208 M4a | **C209 M4b** |
+|---|---|---|---|
+| 90 | 21.35 W | 17.08 W | **17.70 W** |
+| 180 | 19.78 W | 15.26 W | **15.92 W** |
+| 264 | 15.30 W | 11.08 W | **11.54 W** |
+| T_j max | 93.0 °C | 88.4 °C | **89.1 °C** |
+
+Anchoring RAISES the switching term (P_sw 1.011 → 1.623 W at 90 Vac), which is the expected
+direction: the un-anchored analytic model was measured 2.9× low at the datasheet's own test point.
+
+### How it reaches the engine, without an engine change
+The engine scales both energies by `k_esw` and turn-off again by `k_turnoff`, so:
+
+```
+k_esw     = k_on
+k_turnoff = k_off / k_on      ->  e_off lands on k_off
+```
+
+Easy to get backwards, so a test asserts `k_esw × k_turnoff == k_off` rather than trusting it. Both
+are stamped `derived` in the provenance.
+
+### Bounds, and what happens when they fail
+A negative or wild factor means the de-bundling subtracted too much, or the analytic model does not
+describe the device. Either way it is **not applied**, and the reason is reported. A part with no
+published E_on/E_off is simply not anchored — most catalogue parts, and the model stays unscaled
+rather than inventing a factor.
+
+### The report prints the arithmetic
+The registry's `de_bundled` state permits a separate E_oss term precisely BECAUSE the overlap was
+taken net of it — so a reader has to be able to check the subtraction, not take it on trust. New
+Section 7.4.2 material: an ANCHOR annotation with the worked de-bundling, an ANCHOR BAND annotation
+with the uncertainty and the independent cross-check, and Table 7.4.2b showing both factors side by
+side. A catalogue part with no anchor prints none of it.
+
+### Two smaller things
+- `_mosfet_section` did not have the block in scope; it now takes it as a parameter rather than
+  reaching for a name that happened not to exist.
+- **The annotation-wrap limit is tighter than C200 recorded.** "ANCHORED" (8 letters) split as
+  "ANCHORE D". The rule is **7 characters or fewer per word**, not ~8. Also fixed a pre-existing
+  "REVERSE RECOVERY" that had been wrapping as "RECOVER Y" since C49-era work.
+
+VERIFIED: 11 new tests. The anchor reconstructs the published E_on and E_off within 2 %; the raw
+factors are >2× apart and the de-bundled ones <1.5×; the implied fixture charge lands inside the
+assumed range; `k_esw × k_turnoff == k_off`; anchoring increases the switching term; an unanchorable
+part is left unscaled. **Suite 343 passed / 2 skipped** (was 332). Combined report 190 pp; Ch7
+renders with 0 unrenderable glyphs and no mid-word label wraps.
+
+M4 is complete. NEXT: M5 (remove the Top-10 ranking endpoint — the MOSFET GUI half was already done
+at M3), then M6, M7.

@@ -386,6 +386,17 @@ def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
 
     blk[M.PROVENANCE_KEY] = prov
     blk["_conduction_form"] = cls["conduction_loss_form"]
+
+    # M4b: anchor the switching model on the published energies. Done LAST, because it needs the
+    # rest of the block (E_oss, Q_gd, C_iss) already in place to evaluate the analytic baseline.
+    anchor = switching_anchor(profile, blk, design)
+    blk["_switching_anchor"] = anchor
+    if anchor.get("ok"):
+        blk["k_esw"] = anchor["k_esw"]
+        blk["k_turnoff"] = anchor["k_turnoff"]
+        prov["k_esw"] = "derived"
+        prov["k_turnoff"] = "derived"
+
     blk["_checks"] = _consistency_checks(profile, design, blk)
     return blk
 
@@ -451,6 +462,150 @@ def _hot_entry(profile: dict, vgs: float) -> Optional[dict]:
             if best is None or tj > (best.get("conditions") or {}).get("T_j", 0):
                 best = e
     return best
+
+
+
+
+# ── switching-energy anchoring, convention B (M4b) ────────────────────────────────────────────
+# Plausible freewheeling-device charge in a double-pulse fixture, when the datasheet does not say
+# which device it used. The low end is a bare capacitive Schottky, the high end a larger one; the
+# midpoint is what the anchor uses and the ends give the band that is printed alongside it.
+QFW_RANGE_C = (18e-9, 50e-9)
+
+
+def switching_anchor(profile: dict, block: dict, design: dict) -> dict:
+    """Anchor the analytic switching model on the datasheet's published E_on and E_off.
+
+    CONVENTION B, settled 2026-08-05. A published E_on is measured in a double-pulse fixture and
+    bundles three things: the device's own V-I overlap, the discharge of its own C_oss, and the
+    charge of the freewheeling element. This engine already counts the last two SEPARATELY, as
+    `P_oss_fet` and `P_rr_to_fet`. Anchoring on the raw number while keeping those terms would
+    double-count them, so the bundled parts are subtracted before the anchor is taken:
+
+        k_on  = [E_on,ds - E_oss(V_test) - Q_fw*V_test] / E_overlap,analytic(test conditions)
+        k_off =  E_off,ds                               / E_off,analytic(test conditions)
+
+    E_off needs no de-bundling: turn-off energy is the device's own overlap plus the loop-inductance
+    term, with no C_oss discharge and no recovery charge flowing through it. That makes it the CLEAN
+    anchor, and the difference between the two factors is diagnostic rather than cosmetic — if they
+    stay far apart after de-bundling, the model's SHAPE is wrong, not its magnitude.
+
+    Why the anchor is worth having at all: measured against this part, the un-anchored analytic
+    model gives 20 uJ where the datasheet publishes 57 uJ at its own test point.
+    """
+    from app.mode_b.semiconductor.pfc_loss_model import Mosfet
+    import numpy as np
+
+    on_e = _pick_entry(_entries_of(profile, "E_on"))
+    off_e = _pick_entry(_entries_of(profile, "E_off"))
+    if not on_e or not off_e:
+        return {"ok": False, "reason": "the datasheet publishes no E_on/E_off to anchor on"}
+
+    e_on_ds = float(on_e.get("typ") or on_e.get("max") or 0.0)
+    e_off_ds = float(off_e.get("typ") or off_e.get("max") or 0.0)
+    cond = dict(on_e.get("conditions") or {})
+    v_test = float(cond.get("V_DS") or 400.0)
+    i_test = float(cond.get("I_D") or 0.0)
+    rg_test = float(cond.get("R_g") or 0.0)
+    tj_test = float(cond.get("T_j") or 25.0)
+    if not (e_on_ds and e_off_ds and i_test):
+        return {"ok": False, "reason": "the published switching energies carry no usable test point"}
+
+    # The analytic model AT THE DATASHEET'S OWN CONDITIONS, unscaled. Same part parameters, the
+    # fixture's gate resistor and gate voltage — not the design's.
+    fields = Mosfet.__dataclass_fields__
+    base = {k: v for k, v in block.items() if k in fields}
+    base.update({"k_esw": 1.0, "k_turnoff": 1.0, "ls_loop": 0.0})
+    if rg_test:
+        base.update({"rg": rg_test, "rg_on": rg_test, "rg_off": rg_test})
+    vgs_test = cond.get("V_GS_high") or cond.get("V_GS_swing")
+    if vgs_test:
+        base["vg"] = float(vgs_test)
+    m = Mosfet(**base)
+    zero, one = np.array([0.0]), np.array([i_test])
+    e_on_an = float(m.e_switch(one, zero, v_test, tj_test)[0])
+    e_off_an = float(m.e_switch(zero, one, v_test, tj_test)[0])
+    if e_on_an <= 0 or e_off_an <= 0:
+        return {"ok": False, "reason": "the analytic model returns no switching energy to anchor"}
+
+    # E_oss of THIS device at the test voltage — the part of E_on the engine counts separately.
+    e_oss_test = float(m.eoss(v_test))
+
+    # The fixture's freewheeling device. Datasheets rarely state it in extractable text; this one
+    # shows it only as a circuit diagram. Unknown means a BAND, not a silent assumption.
+    fw = (profile.get("measurement") or {}).get("freewheel_charge_C")
+    stated = fw is not None
+    q_lo, q_hi = QFW_RANGE_C
+    q_mid = fw if stated else 0.5 * (q_lo + q_hi)
+
+    def _k_on(q_fw):
+        return (e_on_ds - e_oss_test - q_fw * v_test) / e_on_an
+
+    k_on = _k_on(q_mid)
+    k_off = e_off_ds / e_off_an
+    band = (_k_on(q_hi), _k_on(q_lo))          # more charge subtracted -> smaller k
+
+    # An independent read on the same unknown: E_off needs no de-bundling, so if its factor also
+    # applied to turn-on, the charge the fixture must have contributed is whatever is left over.
+    # Agreement with the assumed range is a real cross-check; disagreement says the shape is wrong.
+    implied_q_fw = (e_on_ds - e_oss_test - k_off * e_on_an) / v_test
+
+    notes, ok = [], True
+    if not stated:
+        notes.append(
+            f"The datasheet does not state the freewheeling device of its switching-energy test "
+            f"fixture, so the charge it contributed is unknown. The anchor uses the midpoint of a "
+            f"{q_lo*1e9:.0f}-{q_hi*1e9:.0f} nC range; across that range k_on spans "
+            f"{band[0]:.2f} to {band[1]:.2f}, which is about +/-5% on total MOSFET loss.")
+    if not (0.5 <= k_on <= 5.0):
+        ok = False
+        notes.append(
+            f"k_on = {k_on:.2f} is outside the plausible 0.5-5.0 band. Either the de-bundling "
+            f"subtracted too much (check E_oss and the assumed fixture charge) or the analytic "
+            f"model does not describe this device. Not applied.")
+    if not (0.5 <= k_off <= 5.0):
+        ok = False
+        notes.append(f"k_off = {k_off:.2f} is outside the plausible 0.5-5.0 band. Not applied.")
+    if ok and max(k_on, k_off) / max(min(k_on, k_off), 1e-9) > 2.5:
+        notes.append(
+            f"k_on ({k_on:.2f}) and k_off ({k_off:.2f}) differ by more than 2.5x AFTER "
+            f"de-bundling. A magnitude error would scale both alike, so this points at the model's "
+            f"SHAPE rather than its size. Treat the switching term as provisional until the "
+            f"E(I_D) curve is digitised.")
+    if implied_q_fw < 0 or implied_q_fw > 2 * q_hi:
+        notes.append(
+            f"Cross-check: anchoring on E_off alone implies the fixture contributed "
+            f"{implied_q_fw*1e9:.0f} nC, outside the assumed {q_lo*1e9:.0f}-{q_hi*1e9:.0f} nC "
+            f"range. The two anchors disagree about what the published E_on contains.")
+
+    return {
+        "ok": ok,
+        "k_on": round(k_on, 4), "k_off": round(k_off, 4),
+        "k_esw": round(k_on, 6),
+        # The engine scales BOTH energies by k_esw and turn-off again by k_turnoff, so the ratio is
+        # what makes e_off land on k_off. Recorded here because the arithmetic is not obvious.
+        "k_turnoff": round(k_off / k_on, 6) if k_on else 1.0,
+        "bundling": "de_bundled",
+        "band": {"k_on_low": round(band[0], 4), "k_on_high": round(band[1], 4),
+                 "q_fw_low_C": q_lo, "q_fw_high_C": q_hi, "q_fw_used_C": q_mid,
+                 "stated": bool(stated)},
+        "basis": {
+            "E_on_ds": e_on_ds, "E_off_ds": e_off_ds,
+            "E_on_analytic": round(e_on_an, 12), "E_off_analytic": round(e_off_an, 12),
+            "E_oss_at_test": round(e_oss_test, 12),
+            "V_test": v_test, "I_test": i_test, "R_g_test": rg_test, "T_j_test": tj_test,
+        },
+        "implied_q_fw_C": implied_q_fw,
+        "notes": notes,
+        "statement": (
+            f"E_on {e_on_ds*1e6:.0f} uJ published at {v_test:.0f} V, {i_test:.1f} A, "
+            f"R_g {rg_test:g} ohm. Removing this device's own E_oss ({e_oss_test*1e6:.1f} uJ) and "
+            f"the fixture's freewheeling charge ({q_mid*1e9:.0f} nC x {v_test:.0f} V = "
+            f"{q_mid*v_test*1e6:.1f} uJ) leaves {(e_on_ds - e_oss_test - q_mid*v_test)*1e6:.1f} uJ "
+            f"of device overlap, against {e_on_an*1e6:.1f} uJ from the model -> k_on = {k_on:.2f}. "
+            f"E_off needs no de-bundling: {e_off_ds*1e6:.0f} uJ against {e_off_an*1e6:.1f} uJ "
+            f"-> k_off = {k_off:.2f}."),
+    }
 
 
 # ── the loss table the results tab renders ────────────────────────────────────────────────────

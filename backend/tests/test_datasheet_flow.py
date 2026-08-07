@@ -415,3 +415,106 @@ class TestMetadataNeverReachesTheEngine:
         params, meta = _clean_block({"rdson_25": 0.033, "_anything_new": "x", "_checks": []})
         assert params == {"rdson_25": 0.033}
         assert "_anything_new" in meta and "_checks" in meta
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+#  M4b — switching-energy anchoring under CONVENTION B (settled 2026-08-05).
+#
+#  A published E_on bundles the device's own C_oss discharge and the freewheeling element's charge,
+#  both of which this engine counts separately. Anchoring on the raw figure would double-count them.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+class TestSwitchingAnchor:
+    def _anchor(self, pdf_bytes, root, design_inputs=None):
+        _, ds = _blocks(pdf_bytes, root, design_inputs)
+        return ds, ds["_switching_anchor"]
+
+    def test_the_anchor_reproduces_the_datasheet_test_point(self, pdf_bytes, store_root):
+        """The acceptance criterion. Overlap + own E_oss + fixture charge must reconstruct the
+        published E_on, and the anchored E_off must equal the published E_off."""
+        import numpy as np
+        from app.mode_b.semiconductor.pfc_loss_model import Mosfet
+        ds, a = self._anchor(pdf_bytes, store_root)
+        assert a["ok"]
+        b, band = a["basis"], a["band"]
+        m = Mosfet(**{k: v for k, v in ds.items() if k in Mosfet.__dataclass_fields__})
+        one, zero = np.array([b["I_test"]]), np.array([0.0])
+        e_on = float(m.e_switch(one, zero, b["V_test"], b["T_j_test"])[0])
+        e_off = float(m.e_switch(zero, one, b["V_test"], b["T_j_test"])[0])
+        reconstructed = e_on + m.eoss(b["V_test"]) + band["q_fw_used_C"] * b["V_test"]
+        assert reconstructed == pytest.approx(b["E_on_ds"], rel=0.02)
+        assert e_off == pytest.approx(b["E_off_ds"], rel=0.02)
+
+    def test_de_bundling_is_what_brings_the_two_factors_together(self, pdf_bytes, store_root):
+        """The empirical case for convention B. Anchored on the RAW published E_on the factors are
+        about 4.3 and 1.9 — 2.3x apart. Remove the parts the engine counts separately and they
+        become ~1.7 and ~1.6. A magnitude error would have scaled both alike; the divergence was
+        a definition mismatch, and de-bundling removes it."""
+        _, a = self._anchor(pdf_bytes, store_root)
+        b = a["basis"]
+        raw_k_on = b["E_on_ds"] / b["E_on_analytic"]
+        assert raw_k_on / a["k_off"] > 2.0, "the raw factors should be far apart"
+        ratio = max(a["k_on"], a["k_off"]) / min(a["k_on"], a["k_off"])
+        assert ratio < 1.5, f"after de-bundling they should converge, got {ratio:.2f}"
+
+    def test_an_independent_anchor_agrees_about_the_unknown_charge(self, pdf_bytes, store_root):
+        """E_off carries no bundled charge, so it can be anchored without any assumption. Asking
+        what the fixture must then have contributed is a route to the unknown that knows nothing
+        about the assumed range — agreement is real validation, not arithmetic that was arranged."""
+        _, a = self._anchor(pdf_bytes, store_root)
+        q = a["implied_q_fw_C"]
+        lo, hi = a["band"]["q_fw_low_C"], a["band"]["q_fw_high_C"]
+        assert lo <= q <= hi, f"implied {q*1e9:.0f} nC outside the assumed {lo*1e9:.0f}-{hi*1e9:.0f}"
+
+    def test_the_uncertainty_band_is_reported_not_hidden(self, pdf_bytes, store_root):
+        """This datasheet shows its test fixture only as a circuit diagram, so the freewheeling
+        charge is not extractable. The anchor uses a midpoint AND says what the ends would give."""
+        _, a = self._anchor(pdf_bytes, store_root)
+        assert a["band"]["stated"] is False
+        assert a["band"]["k_on_low"] < a["k_on"] < a["band"]["k_on_high"]
+        assert any("does not state" in n for n in a["notes"])
+
+    def test_the_engine_factors_deliver_the_two_anchors(self, pdf_bytes, store_root):
+        """The engine scales both energies by k_esw and turn-off again by k_turnoff, so the ratio
+        is what makes e_off land on k_off. Easy to get backwards; asserted rather than assumed."""
+        ds, a = self._anchor(pdf_bytes, store_root)
+        assert ds["k_esw"] == pytest.approx(a["k_on"], rel=1e-4)
+        assert ds["k_esw"] * ds["k_turnoff"] == pytest.approx(a["k_off"], rel=1e-4)
+
+    def test_the_anchor_is_bounded_and_refuses_absurd_values(self, pdf_bytes, store_root):
+        """A negative or wild factor means the de-bundling subtracted too much, or the model does
+        not describe the device. Either way it must not be applied silently."""
+        ds, a = self._anchor(pdf_bytes, store_root)
+        assert 0.5 <= a["k_on"] <= 5.0 and 0.5 <= a["k_off"] <= 5.0
+
+    def test_a_part_with_no_published_energies_is_not_anchored(self, pdf_bytes, store_root):
+        """Most catalogue parts publish nothing to anchor on. That must leave the model unscaled
+        rather than inventing a factor."""
+        prof = {"parameters": [{"key": "R_DS_on", "entries": [{"typ": 0.033, "conditions": {}}]}]}
+        a = DF.switching_anchor(prof, {"rdson_25": 0.033}, DESIGN_INPUTS)
+        assert a["ok"] is False and "no E_on/E_off" in a["reason"]
+
+    def test_anchoring_raises_switching_loss_towards_the_measured_truth(self, pdf_bytes, store_root):
+        """The un-anchored analytic model was measured 2.9x low at the datasheet's own test point.
+        Anchoring should therefore INCREASE the switching term, not decrease it."""
+        ds, _ = self._anchor(pdf_bytes, store_root)
+        un = dict(ds, k_esw=1.0, k_turnoff=1.0)
+        assert _losses(ds)[0]["P_FET_sw"] > _losses(un)[0]["P_FET_sw"]
+
+    def test_the_separate_gate_resistors_reach_the_engine(self, pdf_bytes, store_root):
+        """Convention B couples R_g,on to E_on and R_g,off to E_off. Both must arrive, and the
+        anchor must be taken at the FIXTURE's resistor, not the design's."""
+        ds, a = self._anchor(pdf_bytes, store_root,
+                             dict(DESIGN_INPUTS, R_g_on=2.2, R_g_off=1.0))
+        assert ds["rg_on"] == 2.2 and ds["rg_off"] == 1.0
+        assert a["basis"]["R_g_test"] == pytest.approx(1.8)
+
+    def test_the_provenance_records_the_factors_as_derived(self, pdf_bytes, store_root):
+        ds, _ = self._anchor(pdf_bytes, store_root)
+        assert ds[M.PROVENANCE_KEY]["k_esw"] == "derived"
+        assert ds[M.PROVENANCE_KEY]["k_turnoff"] == "derived"
+
+    def test_the_bundling_state_permits_a_separate_eoss_term(self, pdf_bytes, store_root):
+        """The registry's third state. `raw` and `unknown` must block a separate E_oss term;
+        `de_bundled` allows it precisely because the overlap was taken net of it."""
+        _, a = self._anchor(pdf_bytes, store_root)
+        assert a["bundling"] == "de_bundled"
