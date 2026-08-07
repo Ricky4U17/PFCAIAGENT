@@ -153,7 +153,8 @@ flow and fixed several real calculation defects found along the way.
 - Backend suite: **279 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
-  and 293 at C206 (`test_datasheet_extract.py`).
+  and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207 (`test_datasheet_flow.py`).
+  The suite now takes ~16 min: the datasheet tests re-extract a 17-page PDF per test.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is

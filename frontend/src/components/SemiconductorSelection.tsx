@@ -11,8 +11,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { plausibilityCheck } from '../api/client'
-import type { PlausResult } from '../api/client'
+import { plausibilityCheck, datasheetRequirements, datasheetUpload, datasheetConfirm } from '../api/client'
+import type { PlausResult, DsRequirement, DsReviewRow, DsUpload, DsConfirm } from '../api/client'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
@@ -149,6 +149,42 @@ function blockToForm(block: Record<string, any>, fields: Field[], base: Record<s
   }
   return out
 }
+// One row of the datasheet review screen. Shows the value WITH its conditions and its
+// destination, because a bare number is not reviewable — the reviewer has to be able to see what
+// it will be used for and under what conditions it was measured.
+const ReviewRow: React.FC<{ r: DsReviewRow; edit?: string
+                            onEdit: (k: string, v: string) => void }> = ({ r, onEdit, edit }) => {
+  const bad = !r.supplied
+  return (
+    <div style={{ borderTop: `1px solid ${C.border}`, padding: '6px 0' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '150px 110px 1fr 130px', gap: 8, alignItems: 'center' }}>
+        <div style={{ fontSize: 11.5, color: bad ? C.amber : C.text }}
+          dangerouslySetInnerHTML={{ __html: r.label }} />
+        <input style={{ ...inStyle, padding: '2px 6px', fontSize: 11.5 }}
+          placeholder={bad ? (r.source_kind === 'design' ? 'you supply' : 'not found') : ''}
+          value={edit ?? (r.display ?? '')} onChange={e => onEdit(r.key, e.target.value)} />
+        <div style={{ fontSize: 10, color: C.muted }}>
+          {Object.entries(r.conditions).length > 0
+            ? Object.entries(r.conditions).map(([k, v]) => `${k} = ${v}`).join(', ')
+            : (r.source_kind === 'design' ? 'a design choice — no datasheet supplies it' : '—')}
+          {r.entries > 1 && <span style={{ color: C.teal }}> · {r.entries} entries</span>}
+        </div>
+        <div style={{ fontSize: 9.5, color: C.hint, textAlign: 'right' }}>
+          → {r.destination}<br />
+          <span style={{ color: r.provenance === 'extracted' ? C.green : C.amber }}>{r.provenance}</span>
+        </div>
+      </div>
+      {r.all_entries.length > 1 && (
+        <div style={{ marginLeft: 8, marginTop: 2 }}>
+          {r.all_entries.map((e, i) => (
+            <div key={i} style={{ fontSize: 9.5, color: C.muted, fontFamily: 'IBM Plex Mono,monospace' }}>
+              {e.value} · {Object.entries(e.conditions).map(([k, v]) => `${k}=${v}`).join(' ') || 'no conditions stated'}
+            </div>))}
+        </div>)}
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE LEVEL ON PURPOSE. A component declared inside another component body
 // gets a new function identity on every render, so React treats it as a
@@ -338,6 +374,54 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // paths where a value reaches the engine without a vendor catalogue behind it. It never blocks:
   // findings are shown, the designer decides.
   const [plaus, setPlaus] = useState<Partial<Record<Sub, PlausResult>>>({})
+
+  // ── datasheet-first flow (M3) ──────────────────────────────────────────────
+  // Requirement -> upload -> review/confirm -> results. Confirming stores the engine block, so the
+  // existing Calculate runs on datasheet values rather than on catalogue estimates.
+  const [dsTab, setDsTab] = useState<'upload' | 'parameters' | 'results'>('upload')
+  const [dsReq, setDsReq] = useState<DsRequirement | null>(null)
+  const [dsUp, setDsUp] = useState<DsUpload | null>(null)
+  const [dsConf, setDsConf] = useState<DsConfirm | null>(null)
+  const [dsBusy, setDsBusy] = useState(false)
+  const [dsEdits, setDsEdits] = useState<Record<string, string>>({})
+  // Design-sourced inputs. No upload can supply these, so they are asked for explicitly rather
+  // than falling through to an engine default nobody chose.
+  const [dsDesign, setDsDesign] = useState<Record<string, string>>({
+    V_GS_drive: '', R_g_on: '', R_g_off: '', R_g_common: '', R_th_cs: '0.3', sw_method: 'analytic' })
+
+  useEffect(() => {
+    datasheetRequirements(design as unknown as Record<string, unknown>, 'mosfet')
+      .then(setDsReq).catch(() => {})
+  }, [design])
+
+  const doUpload = async (file?: File) => {
+    if (!file) return
+    setDsBusy(true); setErr(null); setDsConf(null)
+    try {
+      const r = await datasheetUpload('mosfet', file)
+      setDsUp(r)
+      if (r.ok) setDsTab('parameters')
+      else setErr(r.reason || 'the datasheet could not be read')
+    } catch (e) { setErr((e as Error).message) } finally { setDsBusy(false) }
+  }
+
+  const doConfirm = async () => {
+    if (!dsUp?.part_number) return
+    setDsBusy(true); setErr(null)
+    try {
+      const numeric = (o: Record<string, string>) => Object.fromEntries(
+        Object.entries(o).filter(([, v]) => v !== '')
+          .map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)]))
+      const r = await datasheetConfirm({ part_number: dsUp.part_number, kind: 'mosfet',
+        edits: numeric(dsEdits), design: numeric(dsDesign) })
+      setDsConf(r)
+      // The confirmed block becomes the MOSFET the engine uses. Without this the review would be
+      // theatre: values approved and then not used.
+      setDbBlock(s2 => ({ ...s2, mosfet: r.block }))
+      setWhole('mosfet', blockToForm(r.block as Record<string, any>, MOSFET_FIELDS, mosfet))
+      if (r.validation.ok) setDsTab('results')
+    } catch (e) { setErr((e as Error).message) } finally { setDsBusy(false) }
+  }
   const runPlaus = async (which: Sub, block: Record<string, any>) => {
     try {
       const res = await plausibilityCheck(which, block)
@@ -512,6 +596,169 @@ export const SemiconductorSelection: React.FC<Props> = ({
         {results && dbResultsTable(results, 'FET conduction', pickBottomMosfet, dbCtx['bottom_mosfet'],
           'Conduction loss only (line-frequency commutation). Selecting a part fills the bottom-FET fields above.')}
       </div>
+    )
+  }
+
+  // ── MOSFET: the datasheet-first panel (M3) ──────────────────────────────────
+  // Three tabs: upload the datasheet, review and confirm what was read, then see the loss
+  // breakdown. The old "From database" and "Manual / external" sources are gone for the MOSFET —
+  // both fed the engine from parameters the parametric catalogue does not carry, which is what
+  // made E_oss 3.4x wrong on the reference part.
+  const dsCell: React.CSSProperties = { padding: '4px 8px', fontSize: 11,
+    fontFamily: 'IBM Plex Mono,monospace', textAlign: 'right', color: C.text }
+
+  const mosfetDatasheetPanel = () => {
+    const rows = dsConf?.rows ?? dsUp?.rows ?? []
+    const missing = rows.filter(r => !r.supplied)
+    const perPoint = (res?.per_point ?? []) as Record<string, number>[]
+    return (
+      <Card style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
+          Boost MOSFET — from its datasheet</div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
+          {([['upload', '1 · Upload datasheet'], ['parameters', '2 · Parameters'],
+             ['results', '3 · Results']] as ['upload' | 'parameters' | 'results', string][])
+            .map(([m, lbl]) => (
+              <button key={m} onClick={() => setDsTab(m)} style={{
+                padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                border: `1px solid ${dsTab === m ? C.teal : C.border}`,
+                background: dsTab === m ? 'rgba(45,212,191,.12)' : C.bg3,
+                color: dsTab === m ? C.teal : C.muted }}>{lbl}</button>))}
+        </div>
+
+        {/* ── 1 · upload ────────────────────────────────────────────────────── */}
+        {dsTab === 'upload' && (<>
+          {dsReq && (
+            <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '10px 12px', marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
+                What the part must clear</div>
+              <div style={{ fontSize: 13, color: C.text, fontFamily: 'IBM Plex Mono,monospace' }}>
+                V<sub>DSS</sub> ≥ {dsReq.V_DSS_min} V &nbsp;·&nbsp; I<sub>D</sub> ≥ {dsReq.I_D_min} A
+              </div>
+              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 5, lineHeight: 1.6 }}>
+                {dsReq.statement}
+              </div>
+              <div style={{ fontSize: 10, color: C.hint, marginTop: 5, lineHeight: 1.6 }}>
+                {dsReq.note}
+              </div>
+            </div>)}
+
+          <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
+            Upload the part's PDF datasheet. Its tables are read into the calculation inputs, which
+            you then review before anything is computed. If the PDF has no text layer it is refused
+            rather than returning an empty result — a scanned datasheet and a part with no
+            parameters would otherwise look identical.
+          </div>
+          <input type="file" accept=".pdf" disabled={dsBusy} style={{ fontSize: 11 }}
+            onChange={e => { doUpload(e.target.files?.[0]); e.currentTarget.value = '' }} />
+          {dsBusy && <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>⏳ reading…</span>}
+
+          {dsUp && dsUp.ok && (
+            <div style={{ marginTop: 10, fontSize: 11.5, color: C.green }}>
+              ✓ {dsUp.part_number} — {rows.filter(r => r.supplied).length} values read from{' '}
+              {dsUp.tables_kept} tables ({dsUp.tables_rejected} figure regions rejected)
+              {dsUp.stored && !dsUp.stored.changed &&
+                <span style={{ color: C.muted }}> · identical to the copy already on file</span>}
+            </div>)}
+          {dsUp && dsUp.ok && (dsUp.cross_check?.length ?? 0) > 0 && (
+            <div style={{ marginTop: 8, fontSize: 10.5, color: C.amber }}>
+              {dsUp.cross_check!.map((c, i) => <div key={i}>⚠ {c.message}</div>)}
+            </div>)}
+        </>)}
+
+        {/* ── 2 · parameters ────────────────────────────────────────────────── */}
+        {dsTab === 'parameters' && (rows.length === 0
+          ? <div style={{ fontSize: 11.5, color: C.hint }}>Upload a datasheet first.</div>
+          : (<>
+            <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
+              Only the values this calculation consumes are listed, each with the conditions it was
+              measured at and where it is used. Anything not found is at the top. Correct a value
+              and it is stored as <i>corrected</i> with the extracted original kept beside it.
+            </div>
+
+            <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
+              Your design decides these — no datasheet supplies them</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              {([['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
+                 ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'],
+                 ['R_th_cs', 'R_θcs', '°C/W']] as [string, string, string][]).map(([k, lbl, u]) => (
+                <label key={k} style={{ fontSize: 10.5, color: C.muted }}>{lbl} ({u})<br />
+                  <input style={{ ...inStyle, width: 90, padding: '2px 6px', fontSize: 11.5 }}
+                    value={dsDesign[k] ?? ''}
+                    onChange={e => setDsDesign(d => ({ ...d, [k]: e.target.value }))} /></label>))}
+            </div>
+
+            {missing.length > 0 && (
+              <div style={{ fontSize: 10.5, color: C.amber, marginBottom: 6 }}>
+                {missing.length} value{missing.length > 1 ? 's' : ''} still unsupplied — the engine
+                will not run on a default for any of them.
+              </div>)}
+
+            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {rows.map(r => (
+                <ReviewRow key={r.key} r={r} edit={dsEdits[r.key]}
+                  onEdit={(k, v) => setDsEdits(o => ({ ...o, [k]: v }))} />))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+              <Btn variant="primary" disabled={dsBusy} onClick={doConfirm}>
+                {dsBusy ? '⏳ confirming…' : '✓ Confirm these values'}</Btn>
+              {dsConf && (dsConf.validation.ok
+                ? <span style={{ fontSize: 11, color: C.green }}>
+                    ✓ every engine input has a source — nothing fell back to a default</span>
+                : <span style={{ fontSize: 11, color: C.amber }}>
+                    {dsConf.validation.defaulted.length} input(s) would use an engine default</span>)}
+            </div>
+            {dsConf && dsConf.validation.defaulted.map((d, i) => (
+              <div key={i} style={{ fontSize: 10.5, color: C.amber, marginTop: 3 }}>⚠ {d.message}</div>))}
+          </>))}
+
+        {/* ── 3 · results ───────────────────────────────────────────────────── */}
+        {dsTab === 'results' && (perPoint.length === 0
+          ? <div style={{ fontSize: 11.5, color: C.hint }}>
+              Confirm the parameters, then run Calculate below to fill this table.</div>
+          : (<>
+            <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
+              MOSFET loss by mechanism at every input voltage, for all {design.nch} channels
+              together. These are the engine's own per-point numbers, not a second calculation —
+              a presentation layer that recomputes is how a screen comes to disagree with the report.
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr>{['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss', 'Recovery',
+                             'Leakage', 'TOTAL', 'T_j'].map(h =>
+                  <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {perPoint.map((p, i) => {
+                    const hot = p.Tj_FET === Math.max(...perPoint.map(x => x.Tj_FET ?? 0))
+                    return (
+                      <tr key={i} style={{ background: hot ? 'rgba(245,158,11,.08)' : 'transparent' }}>
+                        <td style={dsCell}>{(p.Vac ?? 0).toFixed(0)} V</td>
+                        <td style={dsCell}>{(p.Po ?? 0).toFixed(0)} W</td>
+                        <td style={dsCell}>{(p.P_FET_cond ?? 0).toFixed(2)}</td>
+                        <td style={dsCell}>{(p.P_FET_sw ?? 0).toFixed(2)}</td>
+                        <td style={dsCell}>{(p.P_FET_coss ?? 0).toFixed(2)}</td>
+                        <td style={dsCell}>{(p.P_FET_rr ?? 0).toFixed(2)}</td>
+                        <td style={dsCell}>{(p.P_FET_leak ?? 0).toFixed(2)}</td>
+                        <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
+                          {(p.P_FET_total ?? 0).toFixed(2)} W</td>
+                        <td style={{ ...dsCell, color: hot ? C.amber : C.text }}>
+                          {(p.Tj_FET ?? 0).toFixed(0)} °C</td>
+                      </tr>)
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 10.5, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
+              Gate-drive loss is <b>{(perPoint[0]?.P_gate_driver ?? 0).toFixed(3)} W</b> and is not
+              in the totals above: it is dissipated in the driver and the gate resistors, not in the
+              MOSFET junction, so it belongs in the efficiency budget but not in the device
+              temperature rise. The highlighted row is the hottest operating point.
+            </div>
+          </>))}
+      </Card>
     )
   }
 
@@ -694,8 +941,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
       {sub === 'bridge' && compForm(BRIDGE_FIELDS, bridge, 'bridge', 'Bridge rectifier (plain diode bridge, or sync-bottom bypass MOSFETs)',
         res?.summary ? ['bridge', fmtW(worst('P_BRIDGE_max'))] : undefined)}
-      {sub === 'mosfet' && compForm(MOSFET_FIELDS, mosfet, 'mosfet', 'Boost MOSFET (Si super-junction or SiC)',
-        res?.summary ? ['FET', fmtW(worst('P_FET_max'))] : undefined)}
+      {/* The MOSFET no longer has "From database" or "Manual / external" sources. Both fed the
+          engine from parameters the parametric catalogue does not carry — E_oss, E_on/E_off, Q_gd
+          and R_DS(on) vs T_j are absent for all 1311 of its MOSFETs — which is what made E_oss
+          3.4x wrong on the reference part. Diode and bridge keep theirs until M8. */}
+      {sub === 'mosfet' && mosfetDatasheetPanel()}
       {sub === 'diode' && compForm(DIODE_FIELDS, diode, 'diode', 'Boost diode (SiC Schottky or Si)',
         res?.summary ? ['diode', fmtW(worst('P_DIODE_max'))] : undefined)}
 

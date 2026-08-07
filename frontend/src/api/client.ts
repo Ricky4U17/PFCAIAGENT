@@ -452,6 +452,57 @@ export const semiconductorExtract = (kind: string, file: File): Promise<DsExtrac
   return fetch(`${BASE}/mode-b/semiconductor/database/extract`, { method: 'POST', body: fd })
     .then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.json() })
 }
+// ── datasheet-first part selection (M3) ──────────────────────────────────────
+// Requirement first, then the designer supplies the datasheet, then the extracted values are
+// reviewed and confirmed. No manufacturer part number is offered before an upload.
+export interface DsRequirement {
+  kind: string; V_DSS_min: number; I_D_min: number
+  basis: Record<string, number>; statement: string; note: string
+}
+export interface DsReviewRow {
+  key: string; label: string; unit: string
+  value: number | string | null; display: string | null
+  conditions: Record<string, number>
+  entries: number
+  all_entries: { value: number | null; min?: number | null; typ?: number | null; max?: number | null
+                 conditions: Record<string, number>; provenance: string }[]
+  supplied: boolean; source_kind: string; provenance: string
+  required: boolean; is_curve: boolean; destination: string; description: string
+}
+export interface DsUpload {
+  ok: boolean; reason?: string; part_number: string | null; device_class?: string
+  rows: DsReviewRow[]
+  triage?: Record<string, unknown>
+  cross_check?: { key: string; field: string; values: number[]; spread_pct: number; message: string }[]
+  unresolved?: { symbol?: string; name?: string }[]
+  tables_kept?: number; tables_rejected?: number
+  stored?: { changed: boolean; sha256: string; note?: string }
+  revision_diff?: { key: string; field: string; was: number | null; now: number | null }[]
+}
+export interface DsConfirm {
+  ok: boolean; part_number: string
+  rows: DsReviewRow[]
+  block: Record<string, unknown>
+  validation: { ok: boolean; defaulted: { key: string; message: string }[]
+                disconnects: { message: string }[]; summary: Record<string, unknown> }
+}
+export const datasheetRequirements = (design: Record<string, unknown>, kind = 'mosfet') =>
+  post<DsRequirement>('/mode-b/semiconductor/datasheet/requirements', { design, kind })
+export const datasheetUpload = (kind: string, file: File, partNumber?: string): Promise<DsUpload> => {
+  const fd = new FormData(); fd.append('kind', kind); fd.append('file', file)
+  if (partNumber) fd.append('part_number', partNumber)
+  return fetch(`${BASE}/mode-b/semiconductor/datasheet/upload`, { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.json() })
+}
+export const datasheetConfirm = (b: { part_number: string; kind: string
+                                      edits?: Record<string, unknown>
+                                      design?: Record<string, unknown> }) =>
+  post<DsConfirm>('/mode-b/semiconductor/datasheet/confirm', b)
+export const datasheetLibrary = () =>
+  get<{ parts: { part_number: string; ready: boolean; sha256?: string
+                 extracted_versions: number[]; confirmed_versions: number[] }[] }>(
+    '/mode-b/semiconductor/datasheet/library')
+
 // ── plausibility gate ────────────────────────────────────────────────────────
 // Advisory sanity-check of a hand-entered or extracted part against physics and the vendor
 // catalogues. It returns findings, never a rejection: `ok` means nothing looked wrong, NOT that

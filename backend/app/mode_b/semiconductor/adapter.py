@@ -57,6 +57,7 @@ def build_design_ops(design: dict):
 _META_KEYS = ("manufacturer", "part_number", "mpn", "notes", "datasheet_url", "_estimated",
               "_source",                            # which document the block came from
               "_provenance",                        # canonical key -> extracted|derived|... (M1)
+              "_conduction_form",                   # i2r | vce0_plus_rce, from the device class
               "ifsm_A", "i2t_A2s", "bottom_part")   # check/rating metadata — not engine loss params
 
 

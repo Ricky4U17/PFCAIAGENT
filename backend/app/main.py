@@ -587,6 +587,85 @@ async def semiconductor_datasheet_extract(kind: str = Form(...), file: UploadFil
     except Exception as e:
         log.exception("datasheet extract"); raise HTTPException(500, str(e))
 
+# ── datasheet-first part selection (M3) ───────────────────────────────────────
+# The flow is: state the requirement -> designer uploads the datasheet -> the extracted values are
+# reviewed and confirmed -> only then does the engine run on them. No part number is offered before
+# an upload, and the Top-10 loss ranking is gone: it ordered candidates by a loss derived from the
+# nine parameters the parametric catalogue does not carry.
+_DEVICE_CLASS_OF = {"mosfet": "sic_mosfet", "diode": "sic_schottky", "bridge": "bridge_rectifier"}
+
+
+class _DsReqReq(BaseModel):
+    design: Dict[str, Any]
+    kind:   str = "mosfet"
+
+
+@app.post("/mode-b/semiconductor/datasheet/requirements", tags=["mode-b"])
+def datasheet_requirements(req: _DsReqReq):
+    """What the part must clear, derived from the design alone — shown BEFORE any part is named."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    return flow.requirements(req.design, req.kind)
+
+
+@app.post("/mode-b/semiconductor/datasheet/upload", tags=["mode-b"])
+async def datasheet_upload(kind: str = Form(...), file: UploadFile = File(...),
+                           device_class: str = Form(None), part_number: str = Form(None)):
+    """Extract a datasheet into a draft profile and return the review rows.
+
+    An unreadable PDF is REFUSED with a reason rather than yielding an empty profile, which would
+    be indistinguishable from a part that genuinely has no parameters."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    try:
+        if kind not in _DEVICE_CLASS_OF:
+            raise HTTPException(404, f"unknown component kind {kind!r}")
+        data = await file.read()
+        return flow.upload(data, kind, device_class or _DEVICE_CLASS_OF[kind],
+                           filename=file.filename or "datasheet.pdf",
+                           part_number=(part_number or None))
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("datasheet upload"); raise HTTPException(500, str(e))
+
+
+class _DsConfirmReq(BaseModel):
+    part_number:  str
+    kind:         str = "mosfet"
+    device_class: Optional[str] = None
+    edits:        Dict[str, Any] = {}          # canonical key -> designer-corrected value
+    design:       Dict[str, Any] = {}          # design-sourced inputs (V_GS drive, R_g, ...)
+    reviewed_by:  str = "designer"
+
+
+@app.post("/mode-b/semiconductor/datasheet/confirm", tags=["mode-b"])
+def datasheet_confirm(req: _DsConfirmReq):
+    """Record what the designer approved and return the engine block it produces.
+
+    A corrected value keeps the extracted original alongside it, so the library can always answer
+    "the machine read X, you confirmed Y"."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    from app.mode_b.semiconductor import parts_store as ps
+    try:
+        dc = req.device_class or _DEVICE_CLASS_OF.get(req.kind, "sic_mosfet")
+        res = flow.confirm(req.part_number, req.edits, dc, reviewed_by=req.reviewed_by)
+        profile = ps.load_profile(req.part_number, kind="confirmed")
+        block = flow.profile_to_block(profile, dc, req.design or {})
+        from app.mode_b.semiconductor import manifest
+        res["block"] = block
+        res["validation"] = manifest.validate_block(block, dc)
+        return res
+    except Exception as e:
+        log.exception("datasheet confirm"); raise HTTPException(400, str(e))
+
+
+@app.get("/mode-b/semiconductor/datasheet/library", tags=["mode-b"])
+def datasheet_library():
+    """Parts already on file. A part with a confirmed profile skips upload and review entirely —
+    which is the payoff of storing anything at all."""
+    from app.mode_b.semiconductor import parts_store as ps
+    return {"parts": ps.library()}
+
+
 class _PlausReq(BaseModel):
     kind:   str                      # core | mosfet | diode | bridge | ntc | relay | fuse | mov
     record: Dict[str, Any]

@@ -7882,3 +7882,74 @@ resolving to the registry and nothing invented.
 
 The `infineon_coolsic_g2` template is no longer speculative — it is verified against the part it
 was written for.
+
+## C207 — M3: the datasheet-first MOSFET screen, three tabs
+
+Requirement → upload → review & confirm → results. The MOSFET now runs on values read from its own
+datasheet, and the review screen is where a machine's reading is checked by the person who can
+recognise a wrong number.
+
+### The three tabs (the third is the designer's addition)
+
+**1 · Upload.** Shows only what the part must clear — **V_DSS ≥ 472 V, I_D ≥ 22.2 A** for the
+reference design — with the arithmetic behind it (393 V bus × 1.20, 14.8 A per-channel peak × 1.50).
+**No manufacturer part number appears anywhere before an upload**, and a test asserts it. Then the
+designer supplies the PDF.
+
+**2 · Parameters.** 23 rows — only what the calculation consumes, not the registry's 80+. Each row
+carries its **conditions** and its **destination** (`R_DS(on) → conduction loss`), because a bare
+number is not reviewable. Unsupplied values sort to the top; a multi-valued parameter lists **all**
+its entries, so a reviewer can see the four on-resistances rather than one chosen arbitrarily.
+Correcting a value stamps it `corrected` and **keeps the extracted original**, so the library can
+always answer "the machine read X, you confirmed Y".
+
+**3 · Results.** MOSFET loss by mechanism at every input voltage — conduction, switching, E_oss,
+recovery, leakage, total, T_j — with the hottest row highlighted. These are the engine's **own
+per-point numbers**, not a second calculation: a presentation layer that recomputes is exactly how
+the Top-10 screen came to disagree with the Results page (C157–C160). Gate-drive loss is listed
+separately, because it is dissipated in the driver and the gate resistors, not in the junction.
+
+### What the engine now receives
+
+| | Catalogue estimate | From the datasheet |
+|---|---|---|
+| R_DS(on) | 0.030 Ω, no gate-voltage condition at all | **0.033 Ω**, selected at the design's own 18 V |
+| R_DS(on) vs T_j | generic "SiC rises 1.4× by 125 °C" | **[[25, 175], [1.0, 1.636]]** — the datasheet's own two points |
+| Q_gd | 8.5 nC (0.25 × Q_g) | **6.2 nC** |
+| E_oss | 30.0 µJ (die-area scaling) | anchored on **8.7 µJ @ 400 V** |
+| R_th(j-c) | 0.773 (from P_d) | **0.77** |
+
+`validate_block` returns **ok with nothing defaulted**: every engine input carries a provenance tag
+— `extracted`, `derived`, or `manual` for the design choices. That is the M1 manifest doing the job
+it was built for, on a real part.
+
+**E_oss is still a fitted shape** — a V^1.5 curve — but anchored on the published value rather than
+invented from die area, and stamped `derived`. M7 replaces it with the digitised curve.
+
+### The old MOSFET sources are gone
+"From database" and "Manual / external" are removed **for the MOSFET only**. Both fed the engine
+from parameters the parametric catalogue does not carry, which is what made E_oss 3.4× wrong. This
+pulls M5's MOSFET half forward, and it is safe because confirming now stores the engine block — so
+Calculate runs on the confirmed values and the path is complete end to end. Diode and bridge keep
+their sources until M8.
+
+### Two things the flow had to be taught
+- **The part number is not a word from the cover.** The first heuristic returned "MOSFET" from the
+  Infineon title page, which would have created a library folder of that name. A part number
+  contains digits, and the one that repeats across pages is the one in the header.
+- **Tolerance multipliers are noise on a review screen.** They default to 1.0 and are only touched
+  for a worst-case run; listing them as "missing" is what turns review into click-through.
+
+### A bug the tests caught
+`_conduction_form` was added to the block but not to `_META_KEYS`, so `_clean_block` passed it
+straight to the `Mosfet` dataclass and the engine raised. The same class of defect M1 guards in the
+other direction — a key that should not reach the engine, rather than one that should.
+
+VERIFIED: 26 new tests running the whole flow against the real datasheet; requirement carries no
+part number; review rows show conditions and destinations; a correction retains its original; the
+block's `rdson_25` is the 18 V entry and its `rdson_tj` is the real 54/33 ratio; the loss table's
+components sum to the total at every point and match the engine row for row.
+**Suite 319 passed / 2 skipped** (was 293). Combined report 190 pp unchanged; tsc clean; production
+vite build clean.
+
+NEXT: M4a — the direct-substitution loss terms, now that the values are real.
