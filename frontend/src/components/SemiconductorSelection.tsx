@@ -33,6 +33,8 @@ interface Props {
 }
 
 type Sub = 'bridge' | 'mosfet' | 'diode' | 'results'
+// the kinds that use the datasheet-first flow (the bridge is still catalogue/manual)
+type DsKind = 'mosfet' | 'diode'
 type Curve = { x: string; y: string }
 type Field = { key: string; label: string; kind: 'text' | 'num' | 'curve' | 'bool' | 'select'
                unit?: string; opts?: string[]; hint?: string; show?: (s: Record<string, any>) => boolean }
@@ -378,49 +380,68 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // ── datasheet-first flow (M3) ──────────────────────────────────────────────
   // Requirement -> upload -> review/confirm -> results. Confirming stores the engine block, so the
   // existing Calculate runs on datasheet values rather than on catalogue estimates.
-  const [dsTab, setDsTab] = useState<'upload' | 'parameters' | 'results'>('upload')
-  const [dsReq, setDsReq] = useState<DsRequirement | null>(null)
-  const [dsUp, setDsUp] = useState<DsUpload | null>(null)
-  const [dsConf, setDsConf] = useState<DsConfirm | null>(null)
-  const [dsBusy, setDsBusy] = useState(false)
-  const [dsEdits, setDsEdits] = useState<Record<string, string>>({})
+  // Keyed by KIND. The MOSFET and the boost diode run the same four-step flow, so they share one
+  // panel and one set of handlers — a second copy of 150 lines is how the two drift apart.
+  const [dsTab, setDsTab] = useState<Record<DsKind, 'upload' | 'parameters' | 'results'>>(
+    { mosfet: 'upload', diode: 'upload' })
+  const [dsReq, setDsReq] = useState<Partial<Record<DsKind, DsRequirement>>>({})
+  const [dsUp, setDsUp] = useState<Partial<Record<DsKind, DsUpload>>>({})
+  const [dsConf, setDsConf] = useState<Partial<Record<DsKind, DsConfirm>>>({})
+  const [dsBusy, setDsBusy] = useState<Partial<Record<DsKind, boolean>>>({})
+  const [dsEdits, setDsEdits] = useState<Record<DsKind, Record<string, string>>>(
+    { mosfet: {}, diode: {} })
   // Design-sourced inputs. No upload can supply these, so they are asked for explicitly rather
-  // than falling through to an engine default nobody chose.
-  const [dsDesign, setDsDesign] = useState<Record<string, string>>({
-    V_GS_drive: '', R_g_on: '', R_g_off: '', R_g_common: '', R_th_cs: '0.3', sw_method: 'analytic' })
+  // than falling through to an engine default nobody chose. The diode needs far fewer of them:
+  // it has no gate.
+  const [dsDesign, setDsDesign] = useState<Record<DsKind, Record<string, string>>>({
+    mosfet: { V_GS_drive: '', R_g_on: '', R_g_off: '', R_g_common: '', R_th_cs: '0.3',
+              sw_method: 'analytic' },
+    diode:  { R_th_cs: '0.3' },
+  })
 
   useEffect(() => {
-    datasheetRequirements(design as unknown as Record<string, unknown>, 'mosfet')
-      .then(setDsReq).catch(() => {})
+    ;(['mosfet', 'diode'] as DsKind[]).forEach(k =>
+      datasheetRequirements(design as unknown as Record<string, unknown>, k)
+        .then(r => setDsReq(s2 => ({ ...s2, [k]: r }))).catch(() => {}))
   }, [design])
 
-  const doUpload = async (file?: File) => {
+  const doUpload = async (kind: DsKind, file?: File) => {
     if (!file) return
-    setDsBusy(true); setErr(null); setDsConf(null)
+    setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
+    setDsConf(s2 => { const n = { ...s2 }; delete n[kind]; return n })
     try {
-      const r = await datasheetUpload('mosfet', file)
-      setDsUp(r)
-      if (r.ok) setDsTab('parameters')
+      const r = await datasheetUpload(kind, file)
+      setDsUp(s2 => ({ ...s2, [kind]: r }))
+      if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))
       else setErr(r.reason || 'the datasheet could not be read')
-    } catch (e) { setErr((e as Error).message) } finally { setDsBusy(false) }
+    } catch (e) { setErr((e as Error).message) }
+    finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
 
-  const doConfirm = async () => {
-    if (!dsUp?.part_number) return
-    setDsBusy(true); setErr(null)
+  const doConfirm = async (kind: DsKind) => {
+    const up = dsUp[kind]
+    if (!up?.part_number) return
+    setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
     try {
       const numeric = (o: Record<string, string>) => Object.fromEntries(
         Object.entries(o).filter(([, v]) => v !== '')
           .map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)]))
-      const r = await datasheetConfirm({ part_number: dsUp.part_number, kind: 'mosfet',
-        edits: numeric(dsEdits), design: numeric(dsDesign) })
-      setDsConf(r)
-      // The confirmed block becomes the MOSFET the engine uses. Without this the review would be
+      const r = await datasheetConfirm({ part_number: up.part_number, kind,
+        edits: numeric(dsEdits[kind] ?? {}),
+        // The diode's V-I curve has to reach the design's peak current, and its Q_c has to be
+        // moved to the design's bus voltage — so the whole design goes down, not just the
+        // interface resistance.
+        design: { ...(design as unknown as Record<string, unknown>),
+                  ...numeric(dsDesign[kind] ?? {}) } })
+      setDsConf(s2 => ({ ...s2, [kind]: r }))
+      // The confirmed block becomes the part the engine uses. Without this the review would be
       // theatre: values approved and then not used.
-      setDbBlock(s2 => ({ ...s2, mosfet: r.block }))
-      setWhole('mosfet', blockToForm(r.block as Record<string, any>, MOSFET_FIELDS, mosfet))
-      if (r.validation.ok) setDsTab('results')
-    } catch (e) { setErr((e as Error).message) } finally { setDsBusy(false) }
+      setDbBlock(s2 => ({ ...s2, [kind]: r.block }))
+      setWhole(kind, blockToForm(r.block as Record<string, any>, FIELDS[kind],
+                                 kind === 'mosfet' ? mosfet : diode))
+      if (r.validation.ok) setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
+    } catch (e) { setErr((e as Error).message) }
+    finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
   const runPlaus = async (which: Sub, block: Record<string, any>) => {
     try {
@@ -447,8 +468,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // Merge a selected/uploaded part's FULL block under the form edits: the form wins for every field it
   // exposes; the stored block supplies the rest (vf_tco, estimated params) so Calculate uses the exact
   // same block the Top-10 screen did — Results == screen for the selected part.
+  // A CONFIRMED DATASHEET BLOCK IS AUTHORITATIVE. Everywhere else the form is the source and the
+  // stored block only fills gaps, but once a datasheet has been reviewed and confirmed the form is
+  // a view of it — and the seed defaults (DIODE0's qc = 20 nC, qrr = 120 nC, vf_tco) would
+  // otherwise win the spread and silently replace a datasheet value with a number nobody chose.
+  // Corrections belong on the review screen, which restamps the block.
   const merged = (which: Sub, formBlock: Record<string, unknown>) =>
-    ({ ...(dbBlock[which] || {}), ...formBlock })
+    dsConf[which as DsKind]
+      ? { ...formBlock, ...(dbBlock[which] || {}) }
+      : { ...(dbBlock[which] || {}), ...formBlock }
   const body = (): SemiReqBody => ({
     design,
     mosfet: merged('mosfet', buildBlock(mosfet, MOSFET_FIELDS)),
@@ -607,41 +635,55 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const dsCell: React.CSSProperties = { padding: '4px 8px', fontSize: 11,
     fontFamily: 'IBM Plex Mono,monospace', textAlign: 'right', color: C.text }
 
-  const mosfetDatasheetPanel = () => {
-    const rows = dsConf?.rows ?? dsUp?.rows ?? []
+  const datasheetPanel = (kind: DsKind) => {
+    const up = dsUp[kind]; const conf = dsConf[kind]; const req = dsReq[kind]
+    const tab = dsTab[kind]; const busy = !!dsBusy[kind]
+    const rows = conf?.rows ?? up?.rows ?? []
     const missing = rows.filter(r => !r.supplied)
     const perPoint = (res?.per_point ?? []) as Record<string, number>[]
+    const isFet = kind === 'mosfet'
+    const blk = (conf?.block ?? {}) as Record<string, any>
+    const tech = blk._technology as Record<string, any> | undefined
+    const checks = (blk._checks ?? []) as { key: string; severity: string; message: string }[]
+    // Design-sourced fields, per kind. The diode has no gate, so asking for R_g would be noise.
+    const designFields: [string, string, string][] = isFet
+      ? [['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
+         ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
+      : [['R_th_cs', 'R_θcs', '°C/W']]
     return (
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
-          Boost MOSFET — from its datasheet</div>
+          {isFet ? 'Boost MOSFET' : 'Boost diode'} — from its datasheet</div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
           {([['upload', '1 · Upload datasheet'], ['parameters', '2 · Parameters'],
              ['results', '3 · Results']] as ['upload' | 'parameters' | 'results', string][])
             .map(([m, lbl]) => (
-              <button key={m} onClick={() => setDsTab(m)} style={{
+              <button key={m} onClick={() => setDsTab(s2 => ({ ...s2, [kind]: m }))} style={{
                 padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
-                border: `1px solid ${dsTab === m ? C.teal : C.border}`,
-                background: dsTab === m ? 'rgba(45,212,191,.12)' : C.bg3,
-                color: dsTab === m ? C.teal : C.muted }}>{lbl}</button>))}
+                border: `1px solid ${tab === m ? C.teal : C.border}`,
+                background: tab === m ? 'rgba(45,212,191,.12)' : C.bg3,
+                color: tab === m ? C.teal : C.muted }}>{lbl}</button>))}
         </div>
 
         {/* ── 1 · upload ────────────────────────────────────────────────────── */}
-        {dsTab === 'upload' && (<>
-          {dsReq && (
+        {tab === 'upload' && (<>
+          {req && (
             <div style={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8,
               padding: '10px 12px', marginBottom: 12 }}>
               <div style={{ fontSize: 10, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
                 What the part must clear</div>
               <div style={{ fontSize: 13, color: C.text, fontFamily: 'IBM Plex Mono,monospace' }}>
-                V<sub>DSS</sub> ≥ {dsReq.V_DSS_min} V &nbsp;·&nbsp; I<sub>D</sub> ≥ {dsReq.I_D_min} A
+                {isFet
+                  ? <>V<sub>DSS</sub> ≥ {req.V_DSS_min} V &nbsp;·&nbsp; I<sub>D</sub> ≥ {req.I_D_min} A</>
+                  : <>V<sub>RRM</sub> ≥ {req.V_RRM_min} V &nbsp;·&nbsp; I<sub>F(AV)</sub> ≥ {req.I_F_AV_min} A
+                      &nbsp;·&nbsp; peak {req.I_F_pk} A</>}
               </div>
               <div style={{ fontSize: 10.5, color: C.muted, marginTop: 5, lineHeight: 1.6 }}>
-                {dsReq.statement}
+                {req.statement}
               </div>
               <div style={{ fontSize: 10, color: C.hint, marginTop: 5, lineHeight: 1.6 }}>
-                {dsReq.note}
+                {req.note}
               </div>
             </div>)}
 
@@ -651,25 +693,25 @@ export const SemiconductorSelection: React.FC<Props> = ({
             rather than returning an empty result — a scanned datasheet and a part with no
             parameters would otherwise look identical.
           </div>
-          <input type="file" accept=".pdf" disabled={dsBusy} style={{ fontSize: 11 }}
-            onChange={e => { doUpload(e.target.files?.[0]); e.currentTarget.value = '' }} />
-          {dsBusy && <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>⏳ reading…</span>}
+          <input type="file" accept=".pdf" disabled={busy} style={{ fontSize: 11 }}
+            onChange={e => { doUpload(kind, e.target.files?.[0]); e.currentTarget.value = '' }} />
+          {busy && <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>⏳ reading…</span>}
 
-          {dsUp && dsUp.ok && (
+          {up && up.ok && (
             <div style={{ marginTop: 10, fontSize: 11.5, color: C.green }}>
-              ✓ {dsUp.part_number} — {rows.filter(r => r.supplied).length} values read from{' '}
-              {dsUp.tables_kept} tables ({dsUp.tables_rejected} figure regions rejected)
-              {dsUp.stored && !dsUp.stored.changed &&
+              ✓ {up.part_number} — {rows.filter(r => r.supplied).length} values read from{' '}
+              {up.tables_kept} tables ({up.tables_rejected} figure regions rejected)
+              {up.stored && !up.stored.changed &&
                 <span style={{ color: C.muted }}> · identical to the copy already on file</span>}
             </div>)}
-          {dsUp && dsUp.ok && (dsUp.cross_check?.length ?? 0) > 0 && (
+          {up && up.ok && (up.cross_check?.length ?? 0) > 0 && (
             <div style={{ marginTop: 8, fontSize: 10.5, color: C.amber }}>
-              {dsUp.cross_check!.map((c, i) => <div key={i}>⚠ {c.message}</div>)}
+              {up.cross_check!.map((c, i) => <div key={i}>⚠ {c.message}</div>)}
             </div>)}
         </>)}
 
         {/* ── 2 · parameters ────────────────────────────────────────────────── */}
-        {dsTab === 'parameters' && (rows.length === 0
+        {tab === 'parameters' && (rows.length === 0
           ? <div style={{ fontSize: 11.5, color: C.hint }}>Upload a datasheet first.</div>
           : (<>
             <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
@@ -681,13 +723,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
               Your design decides these — no datasheet supplies them</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-              {([['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
-                 ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'],
-                 ['R_th_cs', 'R_θcs', '°C/W']] as [string, string, string][]).map(([k, lbl, u]) => (
+              {designFields.map(([k, lbl, u]) => (
                 <label key={k} style={{ fontSize: 10.5, color: C.muted }}>{lbl} ({u})<br />
                   <input style={{ ...inStyle, width: 90, padding: '2px 6px', fontSize: 11.5 }}
-                    value={dsDesign[k] ?? ''}
-                    onChange={e => setDsDesign(d => ({ ...d, [k]: e.target.value }))} /></label>))}
+                    value={dsDesign[kind][k] ?? ''}
+                    onChange={e => setDsDesign(d => ({ ...d,
+                      [kind]: { ...d[kind], [k]: e.target.value } }))} /></label>))}
             </div>
 
             {missing.length > 0 && (
@@ -698,64 +739,114 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
               {rows.map(r => (
-                <ReviewRow key={r.key} r={r} edit={dsEdits[r.key]}
-                  onEdit={(k, v) => setDsEdits(o => ({ ...o, [k]: v }))} />))}
+                <ReviewRow key={r.key} r={r} edit={dsEdits[kind][r.key]}
+                  onEdit={(k, v) => setDsEdits(o => ({ ...o,
+                    [kind]: { ...o[kind], [k]: v } }))} />))}
             </div>
 
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
-              <Btn variant="primary" disabled={dsBusy} onClick={doConfirm}>
-                {dsBusy ? '⏳ confirming…' : '✓ Confirm these values'}</Btn>
-              {dsConf && (dsConf.validation.ok
+              <Btn variant="primary" disabled={busy} onClick={() => doConfirm(kind)}>
+                {busy ? '⏳ confirming…' : '✓ Confirm these values'}</Btn>
+              {conf && (conf.validation.ok
                 ? <span style={{ fontSize: 11, color: C.green }}>
                     ✓ every engine input has a source — nothing fell back to a default</span>
                 : <span style={{ fontSize: 11, color: C.amber }}>
-                    {dsConf.validation.defaulted.length} input(s) would use an engine default</span>)}
+                    {conf.validation.defaulted.length} input(s) would use an engine default</span>)}
             </div>
-            {dsConf && dsConf.validation.defaulted.map((d, i) => (
+            {conf && conf.validation.defaulted.map((d, i) => (
               <div key={i} style={{ fontSize: 10.5, color: C.amber, marginTop: 3 }}>⚠ {d.message}</div>))}
+
+            {/* Which recovery model the datasheet put this diode into, and why. `is_sic` defaults
+                to true in the engine, so a silicon part read as SiC would be computed by the wrong
+                formula with nothing missing to give it away. */}
+            {!isFet && tech && (
+              <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8,
+                border: `1px solid ${tech.override ? C.amber : C.border}`,
+                background: tech.override ? 'rgba(245,158,11,.08)' : C.bg3 }}>
+                <div style={{ fontSize: 11.5, color: tech.override ? C.amber : C.green }}>
+                  {tech.override ? '⚠ ' : '✓ '}
+                  Calculated as <b>{tech.is_sic ? 'SiC Schottky' : 'silicon'}</b>
+                  {tech.override && ' — not the technology this sub-tab assumed'}
+                </div>
+                <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
+                  {tech.basis}. {tech.is_sic
+                    ? 'Its capacitive charge Q_c is swept through the MOSFET at turn-on; the diode itself has no recovery loss.'
+                    : 'Its recovery charge Q_rr is split between the MOSFET and the diode — for a CCM boost PFC this is usually the largest single loss term in the chapter.'}
+                </div>
+              </div>)}
+            {!isFet && checks.filter(c => c.severity === 'check').map((c, i) => (
+              <div key={i} style={{ fontSize: 10.5, color: C.amber, marginTop: 4, lineHeight: 1.6 }}>
+                ⚠ <b>{c.key}</b> — {c.message}</div>))}
+            {!isFet && checks.filter(c => c.severity === 'note').map((c, i) => (
+              <div key={i} style={{ fontSize: 10, color: C.hint, marginTop: 3, lineHeight: 1.6 }}>
+                {c.message}</div>))}
           </>))}
 
         {/* ── 3 · results ───────────────────────────────────────────────────── */}
-        {dsTab === 'results' && (perPoint.length === 0
+        {tab === 'results' && (perPoint.length === 0
           ? <div style={{ fontSize: 11.5, color: C.hint }}>
               Confirm the parameters, then run Calculate below to fill this table.</div>
           : (<>
             <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
-              MOSFET loss by mechanism at every input voltage, for all {design.nch} channels
-              together. These are the engine's own per-point numbers, not a second calculation —
-              a presentation layer that recomputes is how a screen comes to disagree with the report.
+              {isFet ? 'MOSFET' : 'Boost-diode'} loss by mechanism at every input voltage, for all
+              {' '}{design.nch} channels together. These are the engine's own per-point numbers, not
+              a second calculation — a presentation layer that recomputes is how a screen comes to
+              disagree with the report.
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr>{['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss', 'Recovery',
-                             'Leakage', 'TOTAL', 'T_j'].map(h =>
-                  <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <thead><tr>{(isFet
+                  ? ['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss', 'Recovery', 'Leakage',
+                     'TOTAL', 'T_j']
+                  : ['V_ac', 'P_out', 'Conduction', 'Switching / RR', 'Leakage', 'TOTAL', 'T_j',
+                     'into MOSFET']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {perPoint.map((p, i) => {
-                    const hot = p.Tj_FET === Math.max(...perPoint.map(x => x.Tj_FET ?? 0))
+                    const key = isFet ? 'Tj_FET' : 'Tj_DIODE'
+                    const hot = p[key] === Math.max(...perPoint.map(x => x[key] ?? 0))
                     return (
                       <tr key={i} style={{ background: hot ? 'rgba(245,158,11,.08)' : 'transparent' }}>
                         <td style={dsCell}>{(p.Vac ?? 0).toFixed(0)} V</td>
                         <td style={dsCell}>{(p.Po ?? 0).toFixed(0)} W</td>
-                        <td style={dsCell}>{(p.P_FET_cond ?? 0).toFixed(2)}</td>
-                        <td style={dsCell}>{(p.P_FET_sw ?? 0).toFixed(2)}</td>
-                        <td style={dsCell}>{(p.P_FET_coss ?? 0).toFixed(2)}</td>
-                        <td style={dsCell}>{(p.P_FET_rr ?? 0).toFixed(2)}</td>
-                        <td style={dsCell}>{(p.P_FET_leak ?? 0).toFixed(2)}</td>
-                        <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
-                          {(p.P_FET_total ?? 0).toFixed(2)} W</td>
+                        {isFet ? (<>
+                          <td style={dsCell}>{(p.P_FET_cond ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_FET_sw ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_FET_coss ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_FET_rr ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_FET_leak ?? 0).toFixed(2)}</td>
+                          <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
+                            {(p.P_FET_total ?? 0).toFixed(2)} W</td>
+                        </>) : (<>
+                          {/* the engine's own key names — P_DIODE_cond/_sw do not exist and
+                              would have rendered a silent column of zeros beside a correct total */}
+                          <td style={dsCell}>{(p.P_D_cond ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_D_sw ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_D_leak ?? 0).toFixed(3)}</td>
+                          <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
+                            {(p.P_DIODE_total ?? 0).toFixed(2)} W</td>
+                        </>)}
                         <td style={{ ...dsCell, color: hot ? C.amber : C.text }}>
-                          {(p.Tj_FET ?? 0).toFixed(0)} °C</td>
+                          {(p[key] ?? 0).toFixed(0)} °C</td>
+                        {!isFet && <td style={{ ...dsCell, color: C.amber }}>
+                          {(p.P_FET_rr ?? 0).toFixed(2)} W</td>}
                       </tr>)
                   })}
                 </tbody>
               </table>
             </div>
             <div style={{ fontSize: 10.5, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
-              Gate-drive loss is <b>{(perPoint[0]?.P_gate_driver ?? 0).toFixed(3)} W</b> and is not
-              in the totals above: it is dissipated in the driver and the gate resistors, not in the
-              MOSFET junction, so it belongs in the efficiency budget but not in the device
-              temperature rise. The highlighted row is the hottest operating point.
+              {isFet ? (<>
+                Gate-drive loss is <b>{(perPoint[0]?.P_gate_driver ?? 0).toFixed(3)} W</b> and is not
+                in the totals above: it is dissipated in the driver and the gate resistors, not in the
+                MOSFET junction, so it belongs in the efficiency budget but not in the device
+                temperature rise. The highlighted row is the hottest operating point.
+              </>) : (<>
+                The last column is the charge this diode dumps into the <b>MOSFET</b> at every
+                turn-on — it is booked to the MOSFET's junction, not this one, but it is the diode
+                that decides it. For a silicon diode it is typically the largest single loss term in
+                the whole chapter; a SiC Schottky has no recovery charge and only its much smaller
+                junction charge Q_c appears there. The highlighted row is the hottest operating point.
+              </>)}
             </div>
           </>))}
       </Card>
@@ -945,9 +1036,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
           engine from parameters the parametric catalogue does not carry — E_oss, E_on/E_off, Q_gd
           and R_DS(on) vs T_j are absent for all 1311 of its MOSFETs — which is what made E_oss
           3.4x wrong on the reference part. Diode and bridge keep theirs until M8. */}
-      {sub === 'mosfet' && mosfetDatasheetPanel()}
-      {sub === 'diode' && compForm(DIODE_FIELDS, diode, 'diode', 'Boost diode (SiC Schottky or Si)',
-        res?.summary ? ['diode', fmtW(worst('P_DIODE_max'))] : undefined)}
+      {sub === 'mosfet' && datasheetPanel('mosfet')}
+      {sub === 'diode' && datasheetPanel('diode')}
 
       {sub === 'results' && (
         <Card style={{ marginTop: 12 }}>

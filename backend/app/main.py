@@ -652,7 +652,11 @@ def datasheet_confirm(req: _DsConfirmReq):
         block = flow.profile_to_block(profile, dc, req.design or {})
         from app.mode_b.semiconductor import manifest
         res["block"] = block
-        res["validation"] = manifest.validate_block(block, dc)
+        # The class the block RESOLVED to, which for a diode is read off the datasheet and can
+        # differ from the sub-tab it was uploaded under. Validating against the tab would report a
+        # missing Q_c for a silicon part that correctly has none.
+        res["device_class"] = block.get("_device_class", dc)
+        res["validation"] = manifest.validate_block(block, res["device_class"])
         return res
     except Exception as e:
         log.exception("datasheet confirm"); raise HTTPException(400, str(e))

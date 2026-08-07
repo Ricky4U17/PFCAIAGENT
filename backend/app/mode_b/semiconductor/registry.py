@@ -219,6 +219,37 @@ def audit_engine_dataclasses() -> dict[str, list[str]]:
             "orphaned": sorted(registered - engine_fields)}
 
 
+def audit_device_classes() -> list[dict]:
+    """Check every class's declared engine_fields against ITS OWN dataclass.
+
+    `audit_engine_dataclasses` pools Mosfet, Diode and Bridge into one set, so a field that exists
+    on ANY of them looks covered on ALL of them. That pooling hid eleven declarations — `n_parallel`
+    and `share_worst` on the diode classes, the Q_rr curves on the bridge, `tech` on both — where
+    the class claimed a field its dataclass does not have. None of them had fired yet only because
+    no builder had written one; the first that did would have raised TypeError inside the engine
+    constructor, which is the naming disconnect this registry exists to make impossible.
+    """
+    import dataclasses as dc
+    from app.mode_b.semiconductor.pfc_loss_model import Mosfet, Diode, Bridge
+
+    known = {"Mosfet": Mosfet, "Diode": Diode, "Bridge": Bridge}
+    data = load()
+    out: list[dict] = []
+    for name, cls in data["device_classes"].items():
+        engine = cls.get("engine_dataclass")
+        if engine not in known:               # a class with no engine binding yet (e.g. igbt)
+            continue
+        fields = {f.name for f in dc.fields(known[engine])}
+        for p in data["parameters"]:
+            if name not in (p.get("device_classes") or []):
+                continue
+            for ef in p.get("engine_fields", []):
+                if ef not in fields:
+                    out.append({"device_class": name, "key": p["key"],
+                                "engine_field": ef, "engine_dataclass": engine})
+    return out
+
+
 def audit_block(block: dict, strict: bool = False) -> list[dict]:
     """Check one engine block for alias disconnects — the same quantity written under one field
     name but not its siblings, or written with different values.

@@ -456,7 +456,10 @@ export const semiconductorExtract = (kind: string, file: File): Promise<DsExtrac
 // Requirement first, then the designer supplies the datasheet, then the extracted values are
 // reviewed and confirmed. No manufacturer part number is offered before an upload.
 export interface DsRequirement {
-  kind: string; V_DSS_min: number; I_D_min: number
+  kind: string
+  V_DSS_min?: number; I_D_min?: number            // MOSFET: blocking + peak drain current
+  V_RRM_min?: number; I_F_AV_min?: number         // diode: blocking + AVERAGE forward current
+  I_F_pk?: number                                 // diode: repetitive peak, not covered by I_F(AV)
   basis: Record<string, number>; statement: string; note: string
 }
 export interface DsReviewRow {
@@ -481,6 +484,7 @@ export interface DsUpload {
 }
 export interface DsConfirm {
   ok: boolean; part_number: string
+  device_class?: string          // what the block RESOLVED to — for a diode, read off the datasheet
   rows: DsReviewRow[]
   block: Record<string, unknown>
   validation: { ok: boolean; defaulted: { key: string; message: string }[]

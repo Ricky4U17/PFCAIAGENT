@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-04**, head = **`4e4c004` C201**, on `master`.
+**Start here after a restart.** Last updated **2026-08-07**, head = **`PENDING` C210**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -15,7 +15,64 @@
 
 ---
 
-## Where we are (2026-08-04)
+---
+
+## The datasheet-first arc (C202-C210) — where it actually stands
+
+**Why it started.** The Digi-Key MOSFET catalogue carries **0 of 1311 parts with ANY of the nine
+fields the loss engine consumes**. Everything was estimated from eight columns; on IMZA65R033M2H the
+estimated E_oss was 3.4x the published value. The fix is not a bigger database — it is that a number
+entering the design must carry provenance.
+
+| C | What | Verified against |
+|---|---|---|
+| C202 | plausibility gate (advisory, cross-field bands from live catalogues) | 8948 parts, 0 false positives |
+| C203 | canonical parameter registry — one name / one unit / one meaning | two-way dataclass audit |
+| C204 | required-field manifest; `select()` raises rather than guessing a condition | — |
+| C205 | PDF table extractor + per-part immutable profile store + vendor templates | a real Infineon PDF |
+| C206 | extractor hardening (subscripts, packed rows, dash-vs-number columns) | same PDF |
+| C207 | the GUI flow: requirement -> upload -> review -> confirm | — |
+| C208 | **M4a** direct-substitution terms on real values | 21.35 W -> 17.08 W |
+| C209 | **M4b** switching-energy anchoring, convention B | k_on/k_off 2.3x apart -> 1.10x |
+| C210 | **M8-diode** the boost diode from its datasheet | 8.14 W -> 1.33 W on a SiC part |
+
+**Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
+and the fixture's freewheeling charge. This engine counts the last two separately, so they are
+subtracted BEFORE anchoring. Confirmed empirically at C209 — raw anchoring puts k_on and k_off 2.3x
+apart, de-bundling brings them to 1.10x, and a magnitude error would have scaled both alike.
+
+**Settled at C210:** the datasheet outranks the sub-tab. Every diode upload defaults to the
+`sic_schottky` class, so if the tab decided the technology a silicon part would be evaluated by the
+SiC branch — different physics on the largest term in the chapter, with no missing value to give it
+away. Evidence wins, the override is reported everywhere, and the block is validated against the
+class it RESOLVED to rather than the one it arrived under.
+
+### Two traps this arc added to the list
+4. **A pooled audit cannot see a per-class disconnect.** `audit_engine_dataclasses` unions Mosfet +
+   Diode + Bridge, so a field on ANY of them looks present on ALL of them — it reported clean while
+   eleven classes claimed engine fields their own dataclass lacks. Use `audit_device_classes()`
+   (C210); it checks each class against its own dataclass.
+5. **Never re-dump the JSON registries through `json.dump`.** `canonical_parameters.json` and
+   `vendor_templates.json` are hand-aligned for reading. Re-dumping turned a 15-line change into a
+   2242-line diff (caught and reverted at C210). Edit them as TEXT and parse only to validate.
+
+### What is left of the plan
+- **M5** — remove the Top-10 loss-ranking endpoint (the MOSFET GUI half went at C207).
+- **M6** — wire the C202 plausibility gate onto extracted/confirmed profiles. It is built and
+  currently reachable only through its own endpoint.
+- **M7** — the assisted curve digitiser. **Re-prioritise it:** the plan assumed curves mattered for
+  the MOSFET's switching term, but that is now 9 % of the loss. Post-C210 the curves that pay are
+  the diode's Q_rr vs di/dt and vs I_F.
+- **M8-bridge** — the bridge still has neither a datasheet flow nor a correct requirement (its
+  average current is the INPUT current, not the output current; C210 deliberately left it alone
+  rather than hand it the diode's formula).
+- **PENDING A11** — no real diode datasheet has been through the extractor. Everything downstream of
+  extraction is tested; the extraction layer for diodes is not. Ask the designer for a SiC Schottky
+  and a silicon fast-recovery PDF.
+
+---
+
+## Where we are before that (2026-08-04)
 
 **Just finished:** a long Chapter 8 / input-protection arc (C195–C201), driven by the designer
 item-by-item and by a redlined review PDF. Chapter 8 is now the most worked-over chapter in the
@@ -150,11 +207,11 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **343 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **378 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209
-  (`test_datasheet_flow.py`).
+  (`test_datasheet_flow.py`) → 378 at C210 (`test_diode_datasheet.py`).
   The suite now takes ~16 min: the datasheet tests re-extract a 17-page PDF per test.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.

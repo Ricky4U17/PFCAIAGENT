@@ -132,12 +132,59 @@
 
   "parameters": [
     {
+      "key": "V_RRM",
+      "si_unit": "V", "display_unit": "V",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": true,
+      "consumed_by": ["requirement", "report"],
+      "engine_fields": [],
+      "db_field": "vrrm",
+      "report_label": "V<sub>RRM</sub>",
+      "plausible": {"min": 20.0, "max": 3000.0},
+      "description": "Repetitive peak reverse voltage. The diode counterpart of V_DSS: the blocking requirement the GUI states before a datasheet is uploaded, not a loss parameter. The symbol VRRM used to be mapped onto V_DSS, which is a MOSFET-only key, so every diode's blocking rating landed on a name its class does not carry and was silently dropped."
+    },
+    {
+      "key": "t_rr",
+      "si_unit": "s", "display_unit": "ns",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "condition_qualified": true, "conditions": ["I_F", "diF_dt", "T_j"],
+      "consumed_by": ["report"],
+      "engine_fields": [],
+      "db_field": "trr",
+      "report_label": "t<sub>rr</sub>",
+      "plausible": {"min": 1e-9, "max": 1e-5},
+      "description": "Reverse-recovery time. Not consumed directly: it is one of the two published quantities from which Q_rr is reconstructed when Q_rr itself is not stated."
+    },
+    {
+      "key": "I_RRM",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "condition_qualified": true, "conditions": ["I_F", "diF_dt", "T_j"],
+      "consumed_by": ["report"],
+      "engine_fields": [],
+      "report_label": "I<sub>RRM</sub>",
+      "plausible": {"min": 0.01, "max": 500.0},
+      "description": "Peak reverse-recovery current. With t_rr it gives Q_rr = 0.5*t_rr*I_RRM for a triangular recovery, which is a stated approximation rather than a published charge."
+    },
+    {
+      "key": "tech",
+      "si_unit": "text", "display_unit": "text",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "source": "datasheet", "required": false,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": ["tech"],
+      "report_label": "Technology",
+      "description": "si | sic | gan. Selects the MOSFET's default R_DS(on) temperature shape when no measured curve is supplied. The Diode carries is_sic instead and the Bridge has no equivalent, which is why this is declared for the MOSFET classes only."
+    },
+    {
       "key": "device_class",
       "si_unit": "text", "display_unit": "text",
       "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
       "source": "datasheet", "required": true,
       "consumed_by": ["loss_engine", "report"],
-      "engine_fields": ["tech"],
+      "engine_fields": [],
       "db_field": "technology",
       "report_label": "Device class",
       "description": "Selects the conduction-loss form and the applicable physics interlocks. The engine field carries the coarse form ('si'/'sic'); the canonical key carries the full class."
@@ -699,7 +746,7 @@
       "engine_fields": ["qc"],
       "report_label": "Q<sub>c</sub>",
       "plausible": {"min": 1e-10, "max": 1e-5},
-      "description": "Capacitive (junction) charge of a Schottky diode. Also the term convention B subtracts out of a published E_on when this device is the fixture's freewheeling element."
+      "description": "Capacitive (junction) charge of a Schottky diode, published at a stated V_R. The loss engine consumes it AT THE BUS VOLTAGE, so a value stated at a different V_R is scaled there rather than used as published. Also the term convention B subtracts out of a published E_on when this device is the fixture's freewheeling element."
     },
     {
       "key": "Q_rr",
@@ -717,7 +764,7 @@
     {
       "key": "Q_rr_vs_didt",
       "si_unit": "C", "display_unit": "nC",
-      "device_classes": ["si_diode", "bridge_rectifier"],
+      "device_classes": ["si_diode"],
       "source": "datasheet", "required": false, "is_curve": true,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["qrr_didt_curve"],
@@ -727,7 +774,7 @@
     {
       "key": "Q_rr_vs_IF",
       "si_unit": "C", "display_unit": "nC",
-      "device_classes": ["si_diode", "bridge_rectifier"],
+      "device_classes": ["si_diode"],
       "source": "datasheet", "required": false, "is_curve": true,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["qrr_if_curve"],
@@ -737,7 +784,7 @@
     {
       "key": "Q_rr_tempco",
       "si_unit": "per_degC", "display_unit": "per_degC",
-      "device_classes": ["si_diode", "bridge_rectifier"],
+      "device_classes": ["si_diode"],
       "source": "derived", "required": false,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["qrr_tco"],
@@ -752,7 +799,7 @@
       "consumed_by": ["loss_engine"],
       "engine_fields": ["rr_fet_frac"],
       "report_label": "recovery share to FET",
-      "description": "Fraction of the recovery energy dissipated in the MOSFET rather than the diode."
+      "description": "Fraction of the silicon diode's reverse-recovery energy dissipated in the MOSFET rather than in the diode. An ASSUMED partition, not a datasheet quantity: it scales the largest single MOSFET loss term, so it is stamped and reported, never silent."
     },
     {
       "key": "E_fr",
@@ -788,7 +835,7 @@
     {
       "key": "k_qrr",
       "si_unit": "1", "display_unit": "1",
-      "device_classes": ["si_diode", "bridge_rectifier"],
+      "device_classes": ["si_diode"],
       "source": "design", "required": false,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["k_qrr"],
@@ -932,7 +979,7 @@
     {
       "key": "n_parallel",
       "si_unit": "1", "display_unit": "1",
-      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "device_classes": ["bridge_rectifier"],
       "source": "design", "required": true,
       "consumed_by": ["loss_engine", "report"],
       "engine_fields": ["n_parallel"],
@@ -962,7 +1009,7 @@
     {
       "key": "share_worst",
       "si_unit": "1", "display_unit": "1",
-      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "device_classes": ["bridge_rectifier"],
       "source": "design", "required": false,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["share_worst"],

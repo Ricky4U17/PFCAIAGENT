@@ -140,6 +140,8 @@ def _bridge_section(story, traces, is_sync):
 
 def _mosfet_section(story, traces, mosfet=None):
     nch = int(traces[0][1]["Nch"]) if traces else 1
+    # the recovery split the model ACTUALLY used, not a figure typed into the prose
+    _frac = float(traces[0][1].get("rr_fet_frac", 0.85)) if traces else 0.85
 
     sub_h(story, "7.4.1", "Conduction loss", CH)
     _W(story,
@@ -248,20 +250,26 @@ def _mosfet_section(story, traces, mosfet=None):
     _W(story,
        "<b>Model.</b> At MOSFET turn-on the boost diode is commutated off and its charge is removed "
        "<i>through the FET channel</i>, so this energy heats the MOSFET. For a Si diode it is the "
-       "reverse-recovery charge Q<sub>rr</sub> swept out under V<sub>OUT</sub> (&#8776; 85 % of "
+       f"reverse-recovery charge Q<sub>rr</sub> swept out under V<sub>OUT</sub> ({_frac*100:.0f} % of "
        "Q<sub>rr</sub>&#183;V<sub>OUT</sub> to the FET, the rest to the diode). For a SiC Schottky there "
        "is no minority-carrier recovery, but its junction-capacitance charge Q<sub>c</sub> is charged "
-       "through the channel, dissipating &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>. It is counted "
-       "only in CCM (in DCM the diode current is already zero at turn-on).")
+       "through the channel, dissipating &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>. "
+       "<b>The silicon term is gated to CCM</b> — in DCM the diode current already reaches zero "
+       "before the MOSFET turns on, so there is no hard recovery. The SiC junction charge is "
+       "counted at every switching cycle, including the DCM portion near the zero crossings at high "
+       "line; there the drain has already resonated below V<sub>OUT</sub>, so that share is "
+       "slightly overstated. It reaches DCM only at the top of the input range and only for about "
+       "a tenth of the half-cycle, so the effect is well under 0.2 W.")
     eq_box(story, [r"P_{rr\to FET}=N_{ch}\,f_{sw}\,\frac{1}{2} V_{OUT}\,Q_c\ \mathrm{(SiC)}\quad "
                    r"\mathrm{or}\quad N_{ch}\,f_{sw}\,k\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
            number="7.4.4", ch=CH)
     def _qrr_sub(tr):
         if tr["is_sic"]:
             return f"&#189;&#215;{_f(tr['Vo'],1)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
-        return f"&#8776;0.85&#215;{_nc(tr['qrr_eff'])}&#215;{_f(tr['Vo'],1)}V&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
+        return (f"{tr.get('rr_fet_frac', 0.85):.2f}&#215;{_nc(tr['qrr_eff'])}"
+                f"&#215;{_f(tr['Vo'],0)}V&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}")
     _worked(story, "7.4.4", "Diode-Charge-into-FET — Worked Derivation", [
-        ("P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;&#189;V<sub>OUT</sub>Q<sub>c</sub> (SiC) / 0.85&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
+        (f"P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;&#189;V<sub>OUT</sub>Q<sub>c</sub> (SiC) / {_frac:.2f}&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
          lambda tr: f"{_qrr_sub(tr)} = <b>{_f(tr['P_rr_fet_tot'])} W</b>"),
     ], traces)
 
@@ -284,9 +292,12 @@ def _mosfet_section(story, traces, mosfet=None):
     _W(story, f"<b>MOSFET total (all {nch} channels):</b> {tot_txt}. The full 9-point breakdown is Table 7.4.")
 
 
-def _diode_section(story, traces):
+def _diode_section(story, traces, diode=None):
     nch = int(traces[0][1]["Nch"]) if traces else 1
     is_sic = bool(traces[0][1].get("is_sic", True)) if traces else True
+    _frac = float(traces[0][1].get("rr_fet_frac", 0.85)) if traces else 0.85
+    _d = diode or {}
+    _tech = _d.get("_technology") or {}
     _W(story,
        "<b>Model.</b> The boost diode conducts the inductor current during the MOSFET off-time, "
        "i<sub>D</sub> = i<sub>ch</sub>&#183;(1&#8722;d). Its conduction loss is the cycle-average of the "
@@ -301,10 +312,11 @@ def _diode_section(story, traces):
           "is booked to the MOSFET (Section 7.4.4). The diode's own reverse-recovery loss is therefore "
           "0 W — this is a key reason SiC is chosen for the boost diode."
           if is_sic else
-          "For the selected <b>Si</b> diode the recovery energy Q<sub>rr</sub>&#183;V<sub>OUT</sub> is split "
-          "between the two devices: &#8776; 85 % is dissipated in the MOSFET at its hard turn-on (Section 7.4.4) "
-          "and &#8776; 15 % in the diode itself; both shares scale with f<sub>sw</sub>, the recovered "
-          "charge Q<sub>rr</sub>(I<sub>F</sub>, di/dt, T<sub>j</sub>) and V<sub>OUT</sub>.")), CH)
+          f"For the selected <b>Si</b> diode the recovery energy Q<sub>rr</sub>&#183;V<sub>OUT</sub> is "
+          f"split between the two devices: {_frac*100:.0f} % is dissipated in the MOSFET at its hard "
+          f"turn-on (Section 7.4.4) and {(1-_frac)*100:.0f} % in the diode itself; both shares scale "
+          f"with f<sub>sw</sub>, the recovered charge Q<sub>rr</sub>(I<sub>F</sub>, di/dt, "
+          f"T<sub>j</sub>) and V<sub>OUT</sub>.")), CH)
     _W(story,
        "The diode's own switching term is therefore "
        + ("its forward-recovery energy E<sub>fr</sub> only (Q<sub>c</sub> &#8594; FET); usually negligible."
@@ -325,6 +337,65 @@ def _diode_section(story, traces):
         ("Diode total",
          lambda tr: f"<b>{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W</b>"),
     ], traces)
+
+    # ── datasheet-first material (M8). Printed only when the block came from an uploaded
+    # datasheet: a catalogue-sourced diode has none of this to show, and inventing a basis line
+    # for it would be worse than staying silent.
+    if _tech:
+        annotation(story, "DIODE TECH",
+            f"The recovery model above was chosen from the <b>datasheet</b>, not from the tab the "
+            f"file was uploaded under: {_tech.get('basis','')}. This matters because "
+            f"<code>is_sic</code> defaults to true in the loss engine, and the two branches are "
+            f"different physics &#8212; a silicon part evaluated as SiC would have its largest "
+            f"loss term computed by the wrong formula, silently and with no missing value to "
+            f"give it away.", CH)
+        if _tech.get("override"):
+            annotation(story, "TECH CHECK",
+                f"This datasheet was uploaded under the "
+                f"<b>{'SiC Schottky' if _tech.get('declared') else 'silicon'}</b> sub-tab but has "
+                f"been calculated as <b>{'SiC Schottky' if _tech.get('is_sic') else 'silicon'}</b> "
+                f"on the evidence above. Confirm the part is what was intended before this report "
+                f"is used for sign-off.", CH)
+
+    _qcb = _d.get("_qc_basis") or {}
+    if _qcb.get("scaled"):
+        annotation(story, "Qc AT BUS",
+            f"Q<sub>c</sub> is a charge stored at a stated reverse voltage, and Section 7.4.4 "
+            f"spends it at the bus voltage &#8212; so the published figure has to be moved there "
+            f"rather than used as printed. {_qcb.get('note','')}", CH)
+
+    _qrb = _d.get("_qrr_basis") or {}
+    if _qrb.get("note") and not is_sic:
+        annotation(story, "Qrr BASIS", _qrb["note"], CH)
+
+    if _tech and not is_sic and traces:
+        _c = (_qrb.get("conditions") or {})
+        _ds_didt = _c.get("diF_dt")
+        _rows = [["Design di/dt at the current peak",
+                  f"{_f(traces[0][1].get('didt_pk', 0)/1e6, 0)} A/{_MU}s",
+                  "from the MOSFET's own turn-on transition (Section 7.4.2)"]]
+        if _ds_didt:
+            _rows.append(["Datasheet di/dt for Q<sub>rr</sub>", f"{_f(float(_ds_didt),0)} A/{_MU}s",
+                          "the condition the recovery charge was measured at"])
+        _rows.append(["Recovery charge used", f"{_nc(_qrb.get('qrr', 0))}",
+                      "used at its published value, NOT rescaled"])
+        _rows.append([f"Split to the MOSFET", f"{_frac*100:.0f} %",
+                      "an assumed partition, not a datasheet quantity"])
+        data_table(story, "7.5.2", "Reverse-Recovery Basis",
+            "Recovery charge rises with both forward current and di/dt. Where this design switches "
+            "faster than the datasheet's test point, the charge is understated; slower, overstated. "
+            "It is shown rather than rescaled because scaling one published point by an assumed "
+            "shape would look like a correction while being a guess &#8212; the same reason the "
+            "MOSFET's C<sub>rss</sub> is left unmapped in Section 7.4.2.",
+            ["Quantity", "Value", "Basis"], _rows,
+            col_widths=[CW*0.34, CW*0.20, CW*0.46], ch=CH)
+
+    _chk = [c for c in (_d.get("_checks") or []) if c.get("severity") == "check"]
+    if _chk:
+        annotation(story, "DIODE OPEN",
+            "Open points on the diode's own parameters, carried here so they are not lost between "
+            "the selection screen and this chapter: "
+            + " &#183; ".join(f"<b>{c['key']}</b> &#8212; {c['message']}" for c in _chk), CH)
 
 
 def _thermal_section(story, traces, thermal):
@@ -722,7 +793,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
 
     # ── 7.5 Boost diode ──────────────────────────────────────────────────────
     sub_h(story, "7.5", "Boost Diode Loss", CH)
-    _diode_section(story, traces)
+    _diode_section(story, traces, diode)
     data_table(story, "7.5", "Diode Loss vs Line Voltage",
         "Conduction + switching loss of the boost diode(s), at every input voltage.",
         ["V_AC", "Conduction", "Switching", "Diode total"],

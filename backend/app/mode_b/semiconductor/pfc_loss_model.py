@@ -392,6 +392,10 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         "P_FET_total":P_fet_total, "P_FET_cond":Nch*P_cond_fet, "P_FET_sw":Nch*P_sw_fet,
         "P_FET_coss":Nch*P_oss_fet, "P_FET_rr":Nch*P_rr_to_fet, "P_FET_leak":Nch*P_leak_fet,
         "P_DIODE_total":P_dio_total, "P_D_cond":Nch*P_cond_dio, "P_D_sw":Nch*P_sw_dio,
+        # Diode blocking loss. Previously not exposed at all, so P_D_cond + P_D_sw silently fell
+        # short of P_DIODE_total. It was always zero until a datasheet supplied a real I_R(Tj)
+        # curve (M8), which is exactly when a missing column starts to matter.
+        "P_D_leak":Nch*P_leak_dio,
         "P_BRIDGE_total":P_bridge, "P_BRIDGE_top":bl["top"], "P_BRIDGE_bottom":bl["bottom"],
         "P_BRIDGE_bottom_bd":bl.get("bottom_bd",0.0),   # bottom-diode share past the FET knee
         "P_gate_driver":P_gate_total,
@@ -448,6 +452,10 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             "is_sic": dio.is_sic, "vf_d_pk": float(dio.vf(i_d_repr[ipk], Tj_dio)),
             "i_d_avg": i_d_avg, "P_cond_dio_ch": P_cond_dio, "P_cond_dio_tot": Nch * P_cond_dio,
             "qc": dio.qc, "qrr_eff": float(Qrr) if not dio.is_sic else 0.0,
+            # the commutation di/dt the DESIGN achieves, so the report can hold it against the
+            # di/dt the datasheet's Q_rr was measured at (they are rarely the same)
+            "didt_pk": float(np.atleast_1d(didt)[ipk]),
+            "rr_fet_frac": dio.rr_fet_frac,
             "P_sw_dio_ch": P_sw_dio, "P_sw_dio_tot": Nch * P_sw_dio,
             "P_dio_each": P_dio_each, "rth_jc_dio": dio.rth_jc, "rth_cs_dio": dio.rth_cs,
             # ---- BRIDGE ----

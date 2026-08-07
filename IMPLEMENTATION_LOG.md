@@ -8124,3 +8124,126 @@ renders with 0 unrenderable glyphs and no mid-word label wraps.
 
 M4 is complete. NEXT: M5 (remove the Top-10 ranking endpoint — the MOSFET GUI half was already done
 at M3), then M6, M7.
+
+## C210 — M8-diode: the boost diode, from its datasheet
+
+M0–M4 sharpened the MOSFET's own parameters until all of them came from its datasheet, moving the
+total 4.3 W. The largest single term in the chapter never moved at all, because it is not a MOSFET
+number: the charge the boost DIODE dumps into the MOSFET at turn-on was **8.14 W — 48 % of the
+MOSFET's loss — resting on a catalogue `qrr` the loader itself marks estimated**, and it scales that
+term linearly (x0.5 -> 12.7 W total, x2 -> 25.2 W).
+
+### The technology decides the physics, so the datasheet decides the technology
+`Diode.is_sic` defaults to True and the two branches are different physics. The device class arrives
+from whichever sub-tab the file was uploaded under, and that defaults to `sic_schottky` for EVERY
+diode — a UI default, not an assertion by the designer. So published evidence outranks the tab:
+
+| datasheet publishes | resolved as | provenance |
+|---|---|---|
+| Q_c, no recovery charge | SiC Schottky | derived |
+| Q_rr / t_rr / I_RRM, no Q_c | silicon | derived |
+| both, or neither | the tab decides | manual, reported as unverified |
+
+An override is reported on the GUI, in `_checks`, and in the report — never made quietly. A SiC
+block carries no `qrr` and a silicon block no `qc`, so flipping the flag cannot pick up a stale
+number belonging to the other technology.
+
+### What it changes, same MOSFET and design throughout
+
+| boost diode | P_FET_rr | MOSFET total | T_j FET |
+|---|---|---|---|
+| catalogue (estimated Q_rr, silicon) | 8.14 W | 16.88 W | 85.8 |
+| **SiC Schottky, datasheet** | **1.33 W** | **9.90 W** | **77.7** |
+| silicon FRED, datasheet | 7.82 W | 16.53 W | 84.9 |
+
+The catalogue estimate was not badly wrong *for a silicon diode* (8.14 vs 7.82). It was wrong about
+which device a PFC actually uses — and the SiC part it should have been modelling costs **6.5 W less
+in the MOSFET alone**. Nothing in M0–M4 moved a number that far.
+
+### Q_c has to be moved to the bus before it is spent
+The engine spends `0.5*V_bus*Q_c` at every turn-on; vendors publish Q_c at whatever V_R they chose.
+A 600 V figure used on a 393 V bus overstates the term by 24 %. Q_c is now scaled as V^0.5 (the
+abrupt-junction result), and when the datasheet gives TWO points the exponent is fitted from the
+part's own numbers instead of assumed. Within 2 % of the bus it is used as published, because
+scaling that gap moves the charge by less than its own tolerance.
+
+### What was deliberately NOT done
+Q_rr is used at its published conditions and **not rescaled to the design's di/dt**. Recovery charge
+does rise with di/dt, but scaling one point by an invented shape would look like a correction while
+being a guess — the same call made for the MOSFET's C_rss at M4a. Instead the report prints the
+di/dt the design actually achieves beside the di/dt the datasheet measured at (new Table 7.5.2), so
+the exposure is visible rather than hidden. `rr_fet_frac` is likewise declared as an assumed
+partition; it multiplies the biggest term in the chapter and was previously silent.
+
+### Eleven naming disconnects the existing audit could not see
+`audit_engine_dataclasses` pools Mosfet + Diode + Bridge into one set, so a field present on ANY of
+them looks covered on ALL of them. That hid eleven declarations where a class claimed an engine
+field its own dataclass lacks — `n_parallel` and `share_worst` on both diode classes, the Q_rr
+curves and `k_qrr` on the bridge, `tech` on all three. None had fired only because no builder had
+written one; `_diode_block` writing `tech` (as the MOSFET builder does) would have raised TypeError
+inside `Diode(**params)`. New `audit_device_classes()` checks each class against ITS OWN dataclass;
+`device_class` is now metadata and a separate `tech` parameter is declared for the MOSFET classes.
+
+### A test that was asserting the disconnect
+`test_the_summary_and_detail_blocks_agree_on_the_voltage_rating` checked that a **bridge
+rectifier's** 600 V reverse rating parses into `V_DSS`. It passed for the whole life of the
+extractor while the value was landing on a MOSFET-only key and being dropped from every review row
+and requirement check downstream. It now asserts `V_RRM`, plus that nothing lands in `V_DSS` at all.
+
+It only surfaced because the surgical redo of the JSON (below) also fixed the `diodes_inc_rectifier`
+template, which the first pass had left mapping VRRM to V_DSS while the generic template mapped it
+to V_RRM. Making the two consistent is what broke the test — a good sign about the fix, and a
+reminder that a green test can be pinning wrong behaviour in place.
+
+### Smaller things
+- **A diode is not rated like a MOSFET.** `I_F(AV)` is an AVERAGE and the boost diode carries the
+  OUTPUT current. `requirements()` had been deriving an input-peak figure for every kind: at
+  393 V / 3600 W that is 14.8 A demanded where 6.9 A is correct. The peak is reported separately
+  rather than folded into an average rating.
+- **`V_RRM` did not exist.** The generic template mapped `VRRM`/`VR`/`VB` onto `V_DSS`, which is
+  declared for the MOSFET classes only — so every diode's blocking rating landed on a key its class
+  does not carry and was silently dropped. Now a canonical parameter, with t_rr and I_RRM.
+- **A confirmed datasheet block is now authoritative over the GUI form.** `merged()` spread the form
+  last, so `DIODE0`'s seed defaults (qc 20 nC, qrr 120 nC, vf_tco) would have overwritten confirmed
+  datasheet values. Corrections belong on the review screen, which restamps the block.
+- **The diode block is validated against the class it RESOLVED to**, not the tab it arrived under —
+  otherwise a silicon part is audited for a Q_c it correctly does not have.
+- **The JSON registries must be edited as TEXT.** `canonical_parameters.json` and
+  `vendor_templates.json` are hand-aligned for reading (one line per unit, grouped symbol pairs).
+  Re-dumping them through `json.dump(indent=2)` turned a 15-line change into a **2242-line diff**
+  that buried the actual edit. Reverted and redone as text edits; the result is parsed only to prove
+  it is still valid JSON. 65 + 18 lines instead of 2242 + 269.
+- **The forward series resistance was counted twice.** The engine's forward model is
+  `v(i) = vf_curve(i) + rd*i`, and every curve this builder makes already carries the slope — from
+  two published points directly, or from one point plus `r_d` itself. Writing `r_d` to the block as
+  well double-counted the resistive term: **5.86 W against 5.20 W** on the silicon test part, 12.8 %
+  of its conduction loss. Nothing looked wrong because both numbers came off the datasheet. `r_d`
+  now reaches the engine only when no V-I curve could be built; otherwise it is kept as metadata,
+  because it is what built the curve. Found while reviewing the designer's two external diode
+  reviews (2026-08-07), not by the suite — the tests asserted the curve and the slope separately
+  and never their sum.
+- **The engine exposed no diode leakage key**, so `P_D_cond + P_D_sw` fell short of
+  `P_DIODE_total`. Invisible while diode leakage was always zero — which it stopped being the moment
+  a datasheet supplied a real I_R(T_j) curve. `P_D_leak` added, a column added beside it, and a test
+  now asserts the columns sum to the total at every operating point. (Caught by checking the GUI's
+  keys against the engine's: my first draft invented `P_DIODE_cond` / `P_DIODE_sw`, which do not
+  exist and would have rendered a silent column of zeros next to a correct total.)
+- The MOSFET and diode now share ONE datasheet panel (`datasheetPanel(kind)`) rather than a second
+  copy of 150 lines; the 0.85 recovery split is read from the model in all three places the report
+  had it typed in.
+
+VERIFIED: 35 new tests (`test_diode_datasheet.py`), including a mutation check — disabling
+evidence-based technology resolution fails 5 of them. **Suite 378 passed / 2 skipped** (was 343).
+tsc clean. Chapter 7 renders for SiC, silicon, and the mismatched-tab case at 16/16/17 pp with 0
+unrenderable glyphs and no mid-word label wraps.
+
+NOT VERIFIED, and logged as PENDING_ITEMS A11: **no real diode datasheet has been through the
+extractor.** Everything above is tested against constructed profiles; the MOSFET path was verified
+on a vendor PDF and there is no diode equivalent on disk. What that leaves open is the extraction
+layer specifically — whether a real Q_c/Q_rr table's spellings and conditions survive parsing. No
+vendor-specific diode template was added for the same reason: M4b's first Infineon template was
+written for the wrong vendor and only a real file exposed it.
+
+NEXT: M6 (wire the C202 plausibility gate onto extracted/confirmed profiles), M5 (remove the Top-10
+ranking endpoint), M7 (curve digitiser — post-M8 the curves that pay are Q_rr vs di/dt and vs I_F,
+not the MOSFET's E(I_D)), then M8-bridge.

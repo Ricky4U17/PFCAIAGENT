@@ -125,6 +125,27 @@ report currently points at a document the repo does not contain.
 
 ---
 
+### A11. No real diode datasheet has been through the extractor  ⭐ blocks M8 sign-off
+M8 built the whole datasheet-first path for the boost diode — technology resolution, Q_c scaling to
+the bus, Q_rr reconstruction, the GUI sub-tabs, the report sections — and every part of it is tested
+**against constructed profiles, not against a vendor PDF**. The MOSFET path was verified end to end
+on `IMZA65R033M2HXKSA1.pdf`; there is no equivalent diode file on disk.
+
+What that leaves unverified is specifically the **extraction layer**: whether a real SiC Schottky
+table spells its capacitive charge in a way the symbol map catches (`Qc`, `QC`, `Qc(tot)`,
+`Qtotal`), whether `V_R` and `I_F` survive as parsed conditions, and whether the V-I points land as
+several entries rather than one. Everything downstream of extraction is covered by
+`tests/test_diode_datasheet.py`.
+
+The M4b precedent is the reason this is called out rather than assumed: the first Infineon template
+was written for the wrong vendor and silently fell back to generic, and a real file is what exposed
+it. No vendor-specific diode template has been added for exactly that reason — inventing one
+without a PDF to match it against would repeat the mistake.
+
+- **Done when:** a SiC Schottky datasheet and a silicon fast-recovery datasheet have each been
+  uploaded through the Diode tab, the review screen shows Q_c / Q_rr with their conditions, and the
+  extracted values match the printed tables. Add a vendor template only if the generic one misses.
+
 ## B. Report & calculation  `CODE`
 
 ### B1. Chapter 6 appendix BOM values are hardcoded
@@ -440,6 +461,22 @@ sweep created none). Some may point at equations or figures rather than tables; 
 checking individually before any renumbering work touches them.
 
 ---
+
+### B16. SiC Q_c is not gated to CCM, the silicon recovery term is
+`pfc_loss_model.loss()` applies the silicon branch as `fsw*avg(rr_fet_frac*E_rec*rr_active)` — the
+`rr_active` mask is zero wherever the point is in DCM. The SiC branch is
+`P_rr_to_fet = fsw*0.5*Vo*qc*k_qc`, a scalar with no angle dimension and no mask, so the junction
+charge is charged at full V_OUT on every cycle including the DCM portion. In DCM the drain has
+already resonated below V_OUT before turn-on, so that share is overstated.
+
+Measured on the reference design: DCM appears **only at 264 Vac and only for ~10 % of the
+half-cycle**, where the SiC term is ~1.3 W — so the error is under 0.2 W, at an operating point that
+is not the thermal worst case (90 Vac is). Found during C210; the report prose was corrected to
+describe what the code does rather than claim CCM-gating for both branches.
+
+- **Done when:** the SiC branch carries the same per-angle treatment as the silicon one, with the
+  charge taken at the actual pre-turn-on drain voltage in DCM rather than at V_OUT. Needs its own
+  verification pass — it moves numbers, so it does not belong in a datasheet-sourcing milestone.
 
 ## C. GUI  `CODE`
 

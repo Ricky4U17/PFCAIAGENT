@@ -199,9 +199,16 @@ class TestCrossCheck:
 
     def test_the_summary_and_detail_blocks_agree_on_the_voltage_rating(self, extracted):
         """V_RRM in the product summary and V_B in the electrical table are both 600 V. Agreement
-        between an independently-parsed summary and detail is free validation."""
-        vals = {e.get("typ") or e.get("min") for e in _entries(extracted["profile"], "V_DSS")}
+        between an independently-parsed summary and detail is free validation.
+
+        This asserted `V_DSS` until C210. That was the disconnect, not the fixture: the part is a
+        BRIDGE RECTIFIER, and `V_DSS` is declared for the MOSFET classes only — so its blocking
+        rating landed on a key its own class does not carry and was dropped from every review row
+        and requirement check downstream. `V_RRM` is the diode/bridge counterpart."""
+        vals = {e.get("typ") or e.get("min") for e in _entries(extracted["profile"], "V_RRM")}
         assert vals == {600.0}
+        assert not _entries(extracted["profile"], "V_DSS"), (
+            "a rectifier's reverse rating must not be filed under the MOSFET's V_DSS")
 
 
 class TestTemplates:
