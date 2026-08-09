@@ -588,6 +588,26 @@ class of silent failure. Found while analysing C2, 2026-08-01. One-line fix each
 
 ---
 
+### C4. A review-screen correction lands on one entry; the engine may select another
+`confirm(edits)` applies a corrected value to whichever entry `_pick_entry` returns for that
+canonical key — the one the review row was showing. But `profile_to_block` selects by CONDITION:
+`M.select(profile, "R_DS_on", V_GS=<design gate voltage>, T_j=25)`.
+
+On the reference MOSFET those are different rows. R_DS(on) is published at V_GS = 15, 18 and 20 V;
+the review row shows the 15 V entry, so a correction lands there, while a design driving 18 V makes
+the engine select the 18 V entry. The correction is recorded, screened by the M6 plausibility gate,
+and then **not the value the engine uses**. Pinned by
+`test_an_edit_lands_on_one_entry_and_the_engine_may_select_another` (C212) so the behaviour cannot
+change silently.
+
+Not a gate problem and not a naming problem — the edit model is under-specified. Found while adding
+the plausibility screen, which is what made the divergence visible.
+
+- **Done when:** the review screen shows condition-qualified entries separately for a multi-entry
+  parameter and an edit targets the one the designer is looking at; or `confirm` applies the edit to
+  every entry of that key and says so. Either way the screened value and the used value must be the
+  same number.
+
 ## D. Decisions  `DECISION`
 
 ### D0. SETTLED 2026-07-30 — two project-wide conventions

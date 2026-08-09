@@ -186,6 +186,39 @@ def expand_to_engine_fields(values: dict) -> dict:
     return out
 
 
+def to_record_fields(values: dict) -> dict:
+    """Canonical values -> the names this quantity carries OUTSIDE the registry.
+
+        to_record_fields({"V_DSS": 650.0, "I_FSM": 180.0}) -> {"vdss": 650.0, "ifsm_A": 180.0}
+
+    Two such names exist and both are already declared: `db_field` is the vendor catalogue's column
+    and `meta_field` is the part-block metadata key. The plausibility rules read part RECORDS in
+    that shape, so this is what lets a datasheet-sourced profile be screened by the same rules that
+    screen a catalogue row — without a second mapping table living in a module, which is precisely
+    how `vdss`/`vrrm` and `V_DSS`/`V_RRM` drift apart.
+
+    A canonical quantity with neither name is skipped: it exists only inside the registry.
+    """
+    out: dict[str, Any] = {}
+    for key, val in values.items():
+        p = get(key)                       # unknown key raises, by design
+        field = p.get("db_field") or p.get("meta_field")
+        if field:
+            out[field] = val
+    return out
+
+
+def record_field_owners() -> dict[str, str]:
+    """External field name -> the canonical key that owns it. Used to prove every input the
+    plausibility rules read is reachable from the registry."""
+    out: dict[str, str] = {}
+    for p in load()["parameters"]:
+        field = p.get("db_field") or p.get("meta_field")
+        if field:
+            out.setdefault(field, p["key"])
+    return out
+
+
 def aliased_keys() -> dict[str, list[str]]:
     """Canonical keys whose quantity is carried by more than one engine field. Each of these is a
     latent disconnect that `expand_to_engine_fields` closes."""

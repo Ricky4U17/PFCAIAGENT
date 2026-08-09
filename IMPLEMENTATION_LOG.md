@@ -8362,3 +8362,48 @@ NOT CHANGED, deliberately: Q_rr is still used at its published conditions and no
 design's di/dt (C210's reasoning stands), and the V_F curve is still evaluated at the mid-current
 rather than sampled across the ripple triangle — a real second-order refinement, left for when the
 V-I curves are digitised.
+
+## C212 — M6: the plausibility gate reaches the datasheet path
+
+The C202 gate was built against the vendor catalogues and then reachable only through its own
+endpoint. So the one path where a number arrives with NO vendor behind it - a machine reading a
+PDF - was the one path it never saw. It now runs on upload AND on confirm, advisory in both.
+
+It catches what extraction actually gets wrong. Against the real VS-3C40 profile, each injected
+error is caught and the clean baseline passes: V_F read as 13.5 V instead of 1.35 (band), V_F and
+V_RRM swapped between columns (band AND the cross-field vf_lt_vr rule), I_F(AV) read as
+milliamps (band), V_RRM out by a factor of ten (band). On the real MOSFET, seven rules arm and it
+screens clean - `ok` is worthless if nothing ran, so `checked` is asserted alongside it.
+
+THE MAPPING COMES FROM THE REGISTRY, NOT FROM A TABLE IN A MODULE. The rules read catalogue-shaped
+records; a profile speaks canonical keys. The bridge is the already-declared db_field/meta_field, via
+a new to_record_fields() mirroring expand_to_engine_fields, and a test asserts every field the rules
+read is reachable from some canonical key - so a new rule input cannot silently disarm the datasheet
+path while still reporting ok. Writing a second mapping table here is exactly how V_DSS and V_RRM
+drifted apart in the first place.
+
+That immediately surfaced a defect from C210: I declared V_RRM.db_field = "vrrm", but every
+catalogue diode and bridge record calls the field "vr". Nothing read db_field then, so it was inert
+metadata; M6 was about to make it load-bearing. Fixed to "vr".
+
+Two things about the record it builds. It must sit in the same population as a catalogue row or the
+bands do not apply, so a cold entry is preferred over a hot one and a forward-drop CURVE collapses
+to the coldest, highest-current point - the quantity a catalogue `vf` actually is. And a CORRECTED
+value outranks everything: my first attempt took the smallest R_DS(on) across gate voltages for
+determinism, which still returns 30 mOhm after the designer types 330 on a part that publishes
+30/33/43. Catching a hand-entered slip is the whole point, so a hand-entered value is the one
+screened.
+
+The screen never blocks and never raises. A profile that is structurally broken returns ok with a
+note rather than taking the upload down with it, and a flagged confirmation still writes the
+profile and still builds a valid block - the gate reports, the designer decides.
+
+Also pinned by test, and logged as PENDING C4: `confirm(edits)` applies a correction to whichever
+entry the review row was showing - the V_GS = 15 V one - while profile_to_block selects by the
+DESIGN's gate voltage of 18 V. So a correction can be recorded, screened, and then not be the value
+the engine uses. Not a gate problem and not a naming problem: the edit model is under-specified, and
+the fix belongs in the review screen. Found only because the screen made the divergence visible.
+
+Verified: 15 new tests including the reachability audit, the determinism check and the four injected
+extraction errors; suite 409 passed / 2 skipped (was 394); combined report 190 pp; tsc clean and the
+frontend builds.

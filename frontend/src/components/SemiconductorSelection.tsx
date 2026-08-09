@@ -649,6 +649,31 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const tech = blk._technology as Record<string, any> | undefined
     const checks = (blk._checks ?? []) as { key: string; severity: string; message: string }[]
     // Design-sourced fields, per kind. The diode has no gate, so asking for R_g would be noise.
+    // The C202 gate, run over what was just extracted or confirmed (M6). ADVISORY — it is shown
+    // and never enforced: a finding means "this looks wrong", and the designer decides.
+    const plaus = conf?.plausibility ?? up?.plausibility
+    const plausBlock = (p?: typeof plaus) => (!p || !p.checked) ? null : (
+      <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8,
+        border: `1px solid ${p.ok ? C.border : C.amber}`,
+        background: p.ok ? C.bg3 : 'rgba(245,158,11,.08)' }}>
+        <div style={{ fontSize: 11.5, color: p.ok ? C.green : C.amber }}>
+          {p.ok ? '✓ ' : '⚠ '}
+          Plausibility screen: {p.ok
+            ? `nothing looked wrong across ${p.checked} checks`
+            : `${p.findings.length} finding${p.findings.length > 1 ? 's' : ''} in ${p.checked} checks`}
+        </div>
+        {p.findings.map((f, i) => (
+          <div key={i} style={{ fontSize: 10.5, color: C.text, marginTop: 5, lineHeight: 1.6 }}>
+            <b>{f.fields.join(', ')}</b> — {f.message}
+          </div>))}
+        <div style={{ fontSize: 10, color: C.hint, marginTop: 5, lineHeight: 1.6 }}>
+          Advisory only, and it never blocks: these rules compare the extracted values against the
+          range every catalogue part occupies, so they catch a misplaced decimal point or a value
+          taken from the neighbouring column. Passing means nothing looked wrong, not that the
+          extraction is right.
+        </div>
+      </div>)
+
     const designFields: [string, string, string][] = isFet
       ? [['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
          ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
@@ -711,6 +736,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
             <div style={{ marginTop: 8, fontSize: 10.5, color: C.amber }}>
               {up.cross_check!.map((c, i) => <div key={i}>⚠ {c.message}</div>)}
             </div>)}
+          {up && up.ok && plausBlock(up.plausibility)}
         </>)}
 
         {/* ── 2 · parameters ────────────────────────────────────────────────── */}
@@ -758,6 +784,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
             </div>
             {conf && conf.validation.defaulted.map((d, i) => (
               <div key={i} style={{ fontSize: 10.5, color: C.amber, marginTop: 3 }}>⚠ {d.message}</div>))}
+            {plausBlock(plaus)}
 
             {/* Which recovery model the datasheet put this diode into, and why. `is_sic` defaults
                 to true in the engine, so a silicon part read as SiC would be computed by the wrong

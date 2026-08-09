@@ -472,8 +472,16 @@ export interface DsReviewRow {
   supplied: boolean; source_kind: string; provenance: string
   required: boolean; is_curve: boolean; destination: string; description: string
 }
+/** The C202 plausibility gate, run over an extracted or confirmed profile (M6). ADVISORY:
+ *  `ok: true` means nothing looked wrong, not that the extraction is right. It never blocks. */
+export interface DsPlausibility {
+  ok: boolean; checked: number; advisory?: boolean; note?: string
+  findings: PlausFinding[]
+  record: Record<string, number>
+}
 export interface DsUpload {
   ok: boolean; reason?: string; part_number: string | null; device_class?: string
+  plausibility?: DsPlausibility
   rows: DsReviewRow[]
   triage?: Record<string, unknown>
   cross_check?: { key: string; field: string; values: number[]; spread_pct: number; message: string }[]
@@ -485,6 +493,7 @@ export interface DsUpload {
 export interface DsConfirm {
   ok: boolean; part_number: string
   device_class?: string          // what the block RESOLVED to — for a diode, read off the datasheet
+  plausibility?: DsPlausibility
   rows: DsReviewRow[]
   block: Record<string, unknown>
   validation: { ok: boolean; defaulted: { key: string; message: string }[]

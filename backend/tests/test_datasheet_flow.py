@@ -518,3 +518,52 @@ class TestSwitchingAnchor:
         `de_bundled` allows it precisely because the overlap was taken net of it."""
         _, a = self._anchor(pdf_bytes, store_root)
         assert a["bundling"] == "de_bundled"
+
+
+class TestPlausibilityOnTheRealMosfet:
+    """M6 (C212). The gate now runs on the datasheet path — the one place a number arrives with no
+    vendor catalogue behind it, and therefore the one place it was never applied."""
+
+    def test_the_real_datasheet_screens_clean_with_rules_armed(self, pdf_bytes, store_root):
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        p = up["plausibility"]
+        assert p["ok"], p["findings"]
+        assert p["checked"] >= 5, p          # `ok` is worthless if nothing ran
+        assert p["record"]["vdss"] == 650.0
+
+    def test_a_designers_own_correction_is_screened_too(self, pdf_bytes, store_root):
+        """Confirmation is where a hand-typed value enters, and it is the confirmed profile the
+        engine runs on. A 10x slip on R_DS(on) passes the band on its own — 0.33 ohm is a real
+        resistance for some part — and is caught only by the CROSS-FIELD rule against I_D."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        assert up["plausibility"]["ok"]
+        bad = DF.confirm(up["part_number"], {"R_DS_on": 0.33}, "sic_mosfet", root=store_root)
+        assert not bad["plausibility"]["ok"]
+        assert "mosfet.id_x_rdson" in {f["rule"] for f in bad["plausibility"]["findings"]}
+
+    def test_it_never_blocks_the_confirmation(self, pdf_bytes, store_root):
+        """Advisory means advisory: flagged, and the confirmation still succeeds and still builds
+        a valid block. The gate reports; it does not decide."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        res = DF.confirm(up["part_number"], {"R_DS_on": 0.33}, "sic_mosfet", root=store_root)
+        assert res["ok"] is True
+        assert not res["plausibility"]["ok"]                 # flagged...
+        prof = PS.load_profile(up["part_number"], kind="confirmed", root=store_root)
+        blk = DF.profile_to_block(prof, "sic_mosfet", DESIGN_INPUTS)
+        assert M.validate_block(blk, "sic_mosfet")["ok"]     # ...and the flow carries on regardless
+
+    def test_an_edit_lands_on_one_entry_and_the_engine_may_select_another(self, pdf_bytes,
+                                                                          store_root):
+        """Documents a real wrinkle in the edit model, found while testing M6 (PENDING C4).
+
+        `confirm(edits)` applies a correction to whichever entry `_pick_entry` returns — here the
+        V_GS = 15 V row — while `profile_to_block` selects by the DESIGN's gate voltage, 18 V. So a
+        correction can be recorded, screened, and then not be the value the engine uses. Asserted
+        rather than fixed: the fix is to let the review screen target a specific condition, which is
+        a change to the screen, not to the gate."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        res = DF.confirm(up["part_number"], {"R_DS_on": 0.33}, "sic_mosfet", root=store_root)
+        assert res["plausibility"]["record"]["rdson"] == pytest.approx(0.33)   # screened
+        prof = PS.load_profile(up["part_number"], kind="confirmed", root=store_root)
+        blk = DF.profile_to_block(prof, "sic_mosfet", DESIGN_INPUTS)
+        assert blk["rdson_25"] == pytest.approx(0.033)                        # but not used

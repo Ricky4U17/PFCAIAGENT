@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-09**, head = **`cf67c0b` C211**, on `master`.
+**Start here after a restart.** Last updated **2026-08-09**, head = **`PENDING` C212**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -36,6 +36,7 @@ entering the design must carry provenance.
 | C209 | **M4b** switching-energy anchoring, convention B | k_on/k_off 2.3x apart -> 1.10x |
 | C210 | **M8-diode** the boost diode from its datasheet | 8.14 W -> 1.33 W on a SiC part |
 | C211 | capacitive-charge split V*Q_c/(2-m); leakage bound; shared-package thermal | 1.81 W -> 2.29 W on VS-3C40 |
+| C212 | **M6** plausibility gate wired onto extracted/confirmed profiles | catches a decimal slip, a swapped column, a wrong unit |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -66,8 +67,7 @@ class it RESOLVED to rather than the one it arrived under.
 
 ### What is left of the plan
 - **M5** — remove the Top-10 loss-ranking endpoint (the MOSFET GUI half went at C207).
-- **M6** — wire the C202 plausibility gate onto extracted/confirmed profiles. It is built and
-  currently reachable only through its own endpoint.
+- ~~**M6**~~ — DONE at C212. The gate runs on upload and on confirm, advisory in both.
 - **M7** — the assisted curve digitiser. **Re-prioritise it:** the plan assumed curves mattered for
   the MOSFET's switching term, but that is now 9 % of the loss. Post-C210 the curves that pay are
   the diode's Q_rr vs di/dt and vs I_F.
@@ -215,11 +215,11 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **394 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **409 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209
-  (`test_datasheet_flow.py`) → 378 at C210 and 394 at C211 (`test_diode_datasheet.py`).
+  (`test_datasheet_flow.py`) → 378 at C210, 394 at C211 and 409 at C212 (`test_diode_datasheet.py`).
   The suite now takes ~16 min: the datasheet tests re-extract a 17-page PDF per test.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.

@@ -154,6 +154,7 @@ def upload(pdf_bytes: bytes, kind: str, device_class: str, filename: str = "data
         "profile": profile, "stored": stored, "written": written,
         "triage": res["triage"],
         "rows": review_rows(profile, device_class),
+        "plausibility": screen(profile, device_class),
         "cross_check": res["cross_check"],
         "unresolved": profile.get("unresolved", []),
         "tables_kept": len(res["tables"]), "tables_rejected": len(res["rejected"]),
@@ -198,6 +199,87 @@ def _guess_part_number(pdf_bytes: bytes) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+# ── the plausibility screen (M6) ──────────────────────────────────────────────────────────────
+# The C202 gate was built against the vendor catalogues and then reachable only through its own
+# endpoint, so the one path where a number arrives with NO vendor behind it - a machine reading a
+# PDF - was the one path it never saw. Extraction fails in exactly the shapes these rules catch: a
+# decimal point off, a value taken from the neighbouring column, a unit read as milli instead of
+# nano.
+#
+# ADVISORY, ALWAYS. It returns findings and never a rejection, and it cannot block an upload or a
+# confirmation. `ok: true` means nothing looked wrong, not that the extraction is right.
+
+_PLAUSIBILITY_KIND = {"Mosfet": "mosfet", "Diode": "diode", "Bridge": "bridge"}
+
+
+def plausibility_record(profile: dict, device_class: str) -> dict:
+    """Build a part RECORD, in the shape the C202 rules read, from a canonical profile.
+
+    The field names come from the registry (`db_field` / `meta_field`), never from a table written
+    here — that is the whole reason the rules can be shared with the catalogue path at all.
+    """
+    rec: dict[str, Any] = {}
+    for p in R.parameters(device_class):
+        key = p["key"]
+        if not (p.get("db_field") or p.get("meta_field")):
+            continue
+        entries = _entries_of(profile, key)
+        if not entries:
+            continue
+        # The record must sit in the same population as a catalogue row, or the bands do not apply.
+        # Both of these are quoted at 25 degC in every parametric export while a datasheet also
+        # publishes them hot, and `_pick_entry` prefers whichever entry carries the most conditions
+        # — usually the hot one. So prefer a cold entry, and pick DETERMINISTICALLY among several.
+        #
+        # This is an order-of-magnitude screen, not an operating point: a SiC part publishes
+        # R_DS(on) at three gate voltages (30, 33, 43 mOhm here) and any of them screens the same.
+        # What matters is that the choice cannot change with dictionary ordering.
+        # A CORRECTED value outranks everything. The screen exists to catch a hand-entered slip,
+        # and a part publishing R_DS(on) at three gate voltages would otherwise hide one: taking
+        # the smallest of 30, 33, 43 mOhm still returns 30 after the designer typed 330.
+        edited = [e for e in entries
+                  if (e.get("provenance") or "extracted") in ("corrected", "manual")]
+        entries = edited or entries
+        cold = [e for e in entries if ((e.get("conditions") or {}).get("T_j") or 25) < 100]
+        if key == "V_F_vs_IF":
+            # a forward-drop CURVE has no single value; the catalogue's `vf` is the drop at the
+            # rated current, so take the coldest, highest-current published point
+            pick = max(cold or entries,
+                       key=lambda e: (e.get("conditions") or {}).get("I_F") or 0)
+        elif key == "R_DS_on" and cold:
+            pick = min(cold, key=lambda e: e.get("typ") or e.get("max") or float("inf"))
+        else:
+            pick = _pick_entry(entries)
+        val = (pick or {}).get("typ")
+        if val is None:
+            val = (pick or {}).get("max")
+        if val is None:
+            val = (pick or {}).get("min")
+        if isinstance(val, (int, float)):
+            rec.update(R.to_record_fields({key: float(val)}))
+    return rec
+
+
+def screen(profile: dict, device_class: str) -> dict:
+    """Run the plausibility gate over an extracted or confirmed profile. Never raises."""
+    from app import plausibility
+
+    try:
+        cls = R.device_class(device_class)
+        kind = _PLAUSIBILITY_KIND.get(cls.get("engine_dataclass") or "")
+        if not kind:
+            return {"ok": True, "findings": [], "checked": 0, "record": {},
+                    "note": f"no plausibility rules for {device_class!r}"}
+        rec = plausibility_record(profile, device_class)
+        res = plausibility.check(kind, rec)
+        res["record"] = rec
+        res["advisory"] = True
+        return res
+    except Exception as e:                       # a screen must never break an upload
+        return {"ok": True, "findings": [], "checked": 0, "record": {},
+                "note": f"plausibility screen unavailable: {e}"}
 
 
 # ── the review screen ─────────────────────────────────────────────────────────────────────────
@@ -337,7 +419,10 @@ def confirm(part_number: str, edits: dict, device_class: str, reviewed_by: str =
             })
 
     written = PS.write_confirmed(part_number, profile, reviewed_by=reviewed_by, root=root)
+    # Screened AGAIN after confirmation, not only on upload: a designer correcting a value is
+    # exactly when a new decimal slip can enter, and it is the confirmed profile the engine runs on.
     return {"ok": True, "part_number": part_number, "written": written,
+            "plausibility": screen(profile, device_class),
             "rows": review_rows(profile, device_class)}
 
 

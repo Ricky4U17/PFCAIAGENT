@@ -464,3 +464,82 @@ class TestLeakageIsQuotedAtARatedVoltage:
         msg = next(c["message"] for c in blk["_checks"] if c["key"] == "I_rev_vs_Tj")
         assert "UPPER BOUND" in msg and "1200" in msg
         assert blk["irev_curve"] == [[25.0, 175.0], [1.5e-6, 12e-6]]
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# M6 (C212) — the C202 plausibility gate, wired onto extracted and confirmed profiles.
+#
+# The gate was built against the vendor catalogues and then reachable only through its own
+# endpoint, so the one path where a number arrives with NO vendor behind it — a machine reading a
+# PDF — was the one path it never saw.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+import copy
+
+
+def _mutate(profile, key, entries):
+    p = copy.deepcopy(profile)
+    for q in p["parameters"]:
+        if q["key"] == key:
+            q["entries"] = entries
+    return p
+
+
+class TestPlausibilityScreensTheDatasheetPath:
+    def test_the_record_is_built_from_registry_names_not_a_local_table(self):
+        """The rules read catalogue-shaped records; the profile speaks canonical keys. The bridge
+        between them is `db_field`/`meta_field` in the registry, so the two cannot drift apart the
+        way V_DSS and V_RRM did."""
+        from app.mode_b.semiconductor import registry as R
+        rec = DF.plausibility_record(VS3C40, "sic_schottky")
+        assert rec["vr"] == 1200.0 and rec["vf"] == 1.35 and rec["io"] == 20.0
+        owners = R.record_field_owners()
+        assert owners["vr"] == "V_RRM" and owners["vf"] == "V_F_vs_IF"
+
+    def test_every_field_the_semiconductor_rules_read_is_reachable_from_a_canonical_key(self):
+        """If a rule gains an input the registry cannot supply, that rule silently stops arming on
+        the datasheet path — it would still return ok, having checked nothing."""
+        from app.mode_b.semiconductor import registry as R
+        owners = R.record_field_owners()
+        for field in ("rdson", "qg", "vdss", "vth", "id_25",     # mosfet
+                      "vf", "vr", "io", "ifsm_A", "i2t_A2s"):    # diode / bridge
+            assert field in owners, field
+
+    def test_a_real_part_screens_clean_with_rules_actually_armed(self):
+        """`ok` is worthless if nothing ran: `checked` must be non-zero."""
+        res = DF.screen(VS3C40, "sic_schottky")
+        assert res["ok"] and res["checked"] >= 3, res
+
+    @pytest.mark.parametrize("label,key,entries,rule", [
+        ("V_F decimal slip",  "V_F_vs_IF", [_e(13.5, I_F=20, T_j=25)], "diode.vf"),
+        ("columns swapped",   "V_RRM",     [_e(1.35)],                 "diode.vf_lt_vr"),
+        ("unit read as mA",   "I_F_AV",    [_e(0.020, T_c=153)],       "diode.io"),
+        ("a factor of ten",   "V_RRM",     [_e(12000.0)],              "diode.vr"),
+    ])
+    def test_it_catches_the_mistakes_extraction_actually_makes(self, label, key, entries, rule):
+        res = DF.screen(_mutate(VS3C40, key, entries), "sic_schottky")
+        assert not res["ok"], label
+        assert rule in {f["rule"] for f in res["findings"]}, (label, res["findings"])
+
+    def test_the_screen_rides_on_both_upload_and_confirm(self):
+        """Confirmation is where a DESIGNER's own correction can introduce a slip, and it is the
+        confirmed profile the engine runs on."""
+        import inspect
+        src = inspect.getsource(DF.upload) + inspect.getsource(DF.confirm)
+        assert src.count("screen(") == 2
+
+    def test_it_is_advisory_and_cannot_break_the_flow(self):
+        """A screen that can raise is worse than no screen: it would take the upload down with it."""
+        res = DF.screen({"parameters": "not a list at all"}, "sic_schottky")
+        assert res["ok"] is True and res["findings"] == []
+        assert "unavailable" in res.get("note", "") or res["checked"] == 0
+
+    def test_an_unscreenable_class_says_so_rather_than_claiming_a_pass(self):
+        res = DF.screen(VS3C40, "igbt")           # no engine dataclass, so no rules
+        assert res["ok"] is True and res["checked"] == 0 and "no plausibility rules" in res["note"]
+
+    def test_the_record_choice_is_deterministic(self):
+        """A SiC part publishes R_DS(on) at three gate voltages. Which one lands in the record must
+        not depend on dictionary ordering, or a screen result changes between runs."""
+        first = DF.plausibility_record(VS3C40, "sic_schottky")
+        for _ in range(5):
+            assert DF.plausibility_record(VS3C40, "sic_schottky") == first
