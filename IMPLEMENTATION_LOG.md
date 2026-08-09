@@ -8440,3 +8440,56 @@ the two live bridge searches and read accurately; the rest are historical commen
 Verified: 7 new tests (tests/test_ranking_policy.py) covering both kept paths, both refusals, the
 404 for an unknown kind, and the policy being enforced below the endpoint; suite 416 passed /
 2 skipped (was 409).
+
+
+## C214 — M7 part 1: reading the plotted curves off a datasheet
+
+Everything a table cannot carry has been standing in as a fitted shape: a CONSTANT forward drop
+where the datasheet gives V_F at one current per temperature (C210), a Q_c moved to the bus by an
+assumed power law (C211), a V^1.5 E_oss through one published point (C208). All of it is printed on
+the page, in the figures.
+
+THE PLAN'S PREMISE WAS WRONG, IN OUR FAVOUR. M7 was specified as assisted PIXEL digitising -
+threshold the image, trace the ink, guess the axes. These datasheets are VECTOR: the curve is a
+stroked path whose control points are already in page coordinates. The curve is not traced, it is
+read, and the only real error is in the axes. A raster fallback is still needed for scanned
+datasheets and is NOT built here.
+
+That also makes it checkable. Tick labels are text with positions, so the calibration is a fit
+through them and the RESIDUAL is evidence; a frame whose labels do not fit a consistent linear or
+logarithmic scale is refused rather than guessed at. Better still, the digitised curve can be held
+against a value the same datasheet TABULATES - the table and the plot being independent renderings
+of one measurement:
+
+    Fig. 1  V_F at 20 A, 25 C     19.44 A  vs  20.0 A tabulated    2.8 %
+    Fig. 9  Q_c at 800 V          106.6 nC vs  107 nC tabulated    0.36 %
+    Fig. 3  C_j at 800 V                   vs  73 pF tabulated     0.59 %
+
+IT SETTLES THE C211 QUESTION FROM THE PAGE. Q_c and E_c are separately plotted, so the dissipated
+share of the capacitive charge can be MEASURED rather than modelled. At the 393 V bus the two curves
+give 0.620; C211's closed form 1/(2-m) gives 0.632, 1.9 % apart. Using E_c directly, as both
+external reviews recommended, gives 0.357 - 44 % low. That was settled by argument at C211; it is
+now settled by the datasheet.
+
+Two things the reference datasheet forced that a rectangle-and-stroke reader would have missed.
+Figs 8 and 9 draw their axes box as four LINES rather than a rect, and draw the curve as a FILLED
+ribbon rather than a stroke - the renderer outlined the stroke - so the centreline is recovered by
+binning in x and averaging the ribbon's extremes. Those two figures are the capacitive charge and
+energy curves, which is to say the two that matter most. And Fig. 7's data lines are genuinely
+straight, so "straight means gridline" threw them away with the grid; the test is now
+axis-PARALLEL, not straight.
+
+Figures are matched to canonical keys by what the AXES say, never by figure number: "Fig. 1" is a
+forward-voltage plot on one vendor's datasheet and a surge curve on another's. Five usable curves
+are proposed on the reference diode, each carrying its axis titles, its calibration residual and its
+cross-check - and a figure that cannot be checked says so rather than implying a pass.
+
+HALF A MILESTONE, DELIBERATELY. Nothing reaches the engine yet and no number has changed. The
+designer chose "agent proposes, designer confirms against the plot", so applying a curve without
+that confirmation is the one thing this must not do. The remaining half is the review screen - show
+the rendered figure, overlay the proposed points, accept or reject per curve, then write it into the
+profile - and that is where the payoff lands: a real V_F(i) curve replacing the constant drop.
+
+Verified: 15 new tests (tests/test_curve_extract.py), including the two table cross-checks, the
+temperature ordering of the five forward curves, the refusal of an uncalibratable frame, and the
+measured-versus-closed-form share; suite 431 passed / 2 skipped (was 416).

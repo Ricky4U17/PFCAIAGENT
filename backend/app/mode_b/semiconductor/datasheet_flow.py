@@ -201,6 +201,101 @@ def _guess_part_number(pdf_bytes: bytes) -> Optional[str]:
     return None
 
 
+# ── the plotted curves (M7) ───────────────────────────────────────────────────────────────────
+# Everything a table cannot carry has been standing in as a fitted shape: a constant forward drop
+# where the datasheet gives V_F at one current per temperature (C210), a Q_c moved to the bus by an
+# assumed power law (C211), a V^1.5 E_oss through a single point (C208). All of it is printed on
+# the page, in the figures.
+#
+# A proposal is matched to a canonical key by what the AXES say, not by figure number: "Fig. 1" is a
+# forward-voltage plot on one vendor's datasheet and a surge curve on another's, while an axis
+# titled "VF - Forward Voltage Drop (V)" against "IF - Instantaneous Forward Current (A)" is the
+# same plot everywhere.
+
+_FIGURE_TARGETS = [
+    # canonical key,   x axis matches,           y axis matches,             needs a temperature
+    ("V_F_vs_IF",      ("forward voltage",),     ("forward current",),        True),
+    ("Q_c_vs_VR",      ("reverse voltage",),     ("capacitive charge",),      False),
+    ("E_c_vs_VR",      ("reverse voltage",),     ("capacitive energy",),      False),
+    ("C_j_vs_VR",      ("reverse voltage",),     ("junction capacitance",),   False),
+    ("I_rev_vs_VR",    ("reverse voltage",),     ("reverse current",),        True),
+]
+
+
+def _axis_matches(title: str, wants: tuple) -> bool:
+    t = (title or "").lower()
+    return any(w in t for w in wants)
+
+
+def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
+    """Digitise every plot and offer the ones this calculation can actually use.
+
+    Each proposal carries its own evidence: the axis titles it read, the calibration residual, and
+    where possible a CROSS-CHECK against a value the same datasheet tabulates. The table and the
+    plot are independent renderings of one measurement, so their agreement is what says the axes
+    were read correctly — and a proposal that fails it is returned marked, never quietly used.
+    """
+    from app.mode_b.semiconductor import curve_extract as CX
+
+    try:
+        res = CX.digitise(pdf_bytes)
+    except Exception as e:
+        return {"ok": False, "reason": f"the figures could not be read: {e}", "proposals": []}
+
+    out = []
+    for fig in res["figures"]:
+        cal = fig["calibration"]
+        if not cal["ok"] or not fig["curves"]:
+            continue
+        tx, ty = cal["titles"]["x"], cal["titles"]["y"]
+        for key, wx, wy, per_temp in _FIGURE_TARGETS:
+            if not (_axis_matches(tx, wx) and _axis_matches(ty, wy)):
+                continue
+            p = {
+                "key": key, "page": fig["page"], "frame": fig["frame"],
+                "caption": fig["caption"], "axes": cal["titles"],
+                "x_scale": cal["x"]["scale"], "y_scale": cal["y"]["scale"],
+                "x_range": cal["x"]["range"], "y_range": cal["y"]["range"],
+                "residual": max(cal["x"]["residual"], cal["y"]["residual"]),
+                "per_temperature": per_temp,
+                "n_curves": len(fig["curves"]),
+                "curves": fig["curves"],
+            }
+            p["cross_check"] = _figure_cross_check(key, fig["curves"], profile)
+            out.append(p)
+            break
+    return {"ok": True, "proposals": out, "figures_seen": len(res["figures"])}
+
+
+def _figure_cross_check(key: str, curves: list, profile: Optional[dict]) -> dict:
+    """Hold the digitised curves against a point the datasheet's own TABLE states."""
+    from app.mode_b.semiconductor import curve_extract as CX
+
+    if not profile:
+        return {"checked": False, "agrees": False,
+                "note": "no confirmed table values to check the figure against"}
+    if key == "V_F_vs_IF":
+        pts = _vf_points(profile, hot=False)
+        if pts:
+            i_f, v_f, _t = pts[-1]
+            return CX.cross_check(curves, v_f, i_f)
+    if key == "Q_c_vs_VR":
+        e = _pick_entry(_entries_of(profile, "Q_c"))
+        vr = ((e or {}).get("conditions") or {}).get("V_R")
+        q = (e or {}).get("typ") or (e or {}).get("max")
+        if vr and q:
+            return CX.cross_check(curves, float(vr), float(q) * 1e9)   # the plot is in nC
+    if key == "C_j_vs_VR":
+        for e in _entries_of(profile, "C_j"):
+            vr = (e.get("conditions") or {}).get("V_R")
+            c = e.get("typ") or e.get("max")
+            if vr and c and float(vr) > 1:
+                return CX.cross_check(curves, float(vr), float(c) * 1e12)   # pF
+    return {"checked": False, "agrees": False,
+            "note": "this datasheet tabulates no value on this figure's axes, so the digitised "
+                    "curve cannot be checked against the part's own numbers"}
+
+
 # ── the plausibility screen (M6) ──────────────────────────────────────────────────────────────
 # The C202 gate was built against the vendor catalogues and then reachable only through its own
 # endpoint, so the one path where a number arrives with NO vendor behind it - a machine reading a
