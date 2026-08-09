@@ -300,6 +300,33 @@ _RANK_CFG_KEYS = {
 }
 
 
+class RankingUnsupported(ValueError):
+    """Raised when a kind cannot honestly be ranked by loss from the parametric catalogue."""
+
+
+# WHICH KINDS CAN THE CATALOGUE ACTUALLY RANK (M5)
+#
+# Ranking by loss is only meaningful where the catalogue carries the parameters that loss is made
+# of. It does not, for two of the three:
+#
+#   mosfet — the loss is dominated by E_oss, E_on/E_off, Q_gd and R_DS(on)-vs-T_j. The Digi-Key
+#            export carries NONE of them, on any of its 1311 parts; every figure behind the old
+#            ranking was estimated from eight columns. Measured on IMZA65R033M2H, the estimated
+#            E_oss was 3.4x the published value.
+#   diode  — the largest term is the charge dumped into the MOSFET, which needs Q_c or Q_rr. The
+#            export carries neither: `to_block` substitutes a flat 18 nC or 0.5*t_rr*I_o and marks
+#            them `_estimated`. C210 measured the real part at 107 nC, and switching technology
+#            moved the term from 8.14 W to 1.33 W.
+#
+# What remains is genuinely supportable, and is kept:
+#   bridge — conduction-dominated, and `vf` / `vf_if` ARE real catalogue columns.
+#   mosfet in conduction-only mode — the bottom bypass FET commutates at line frequency, so its
+#            loss is I^2*R_DS(on), and `rdson` is a real catalogue column.
+#
+# The rule is one sentence: rank only on quantities the catalogue measures.
+_LOSS_RANKABLE = ("bridge",)
+
+
 def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full", context=None):
     """Filter, then evaluate each candidate's loss across the 9 operating points and return the
     `top` lowest-loss parts. Returns [{part…, block, loss_W, tj_max_C}].
@@ -311,6 +338,16 @@ def rank_by_loss(kind, design, crit, top=10, max_eval=120, mode="full", context=
     FET) is overlaid onto each candidate (its real datasheet Vf/Rds is preserved)."""
     if mode == "conduction" and kind == "mosfet":
         return rank_bottom_mosfets(design, crit, top)
+    if kind not in _LOSS_RANKABLE:
+        raise RankingUnsupported(
+            f"{kind} parts are not ranked by loss from the parametric catalogue, because the "
+            f"catalogue does not carry the parameters that loss is made of — "
+            + ("E_oss, E_on/E_off, Q_gd and R_DS(on) vs T_j are absent from all 1311 MOSFETs"
+               if kind == "mosfet" else
+               "neither Q_c nor Q_rr is present, and both are substituted by an estimate")
+            + ". Ranking on estimates orders candidates by the estimate rather than by the part. "
+              "Upload the datasheet instead: state the requirement, source a part against it, and "
+              "the engine runs on that part's own published values.")
     from app.mode_b.semiconductor.adapter import build_semi_cfg
     from app.mode_b.semiconductor import pfc_loss_model as engine
     from app.mode_b.semiconductor.library import _SEED          # defaults for the other two blocks

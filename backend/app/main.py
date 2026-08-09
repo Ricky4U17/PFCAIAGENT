@@ -555,10 +555,18 @@ def semiconductor_db_options(kind: str):
 
 @app.post("/mode-b/semiconductor/database/{kind}/rank", tags=["mode-b"])
 def semiconductor_db_rank(kind: str, req: _DbRankReq):
-    """Filter the local DB by the designer's criteria and return the top-N lowest-loss parts
-    (loss computed for this design's operating point). Each result carries its engine block."""
+    """Filter the local DB by the designer's criteria and return the top-N lowest-loss parts.
+
+    ONLY WHERE THE CATALOGUE CAN SUPPORT IT (M5). The bridge is conduction-dominated and its V_f
+    curve is a real catalogue column; so is the bottom bypass FET's R_DS(on) in conduction mode.
+    The boost MOSFET and the boost diode are not rankable this way — the parameters their loss is
+    made of are absent from the export and were being estimated — and they now come from an
+    uploaded datasheet instead. Those return 400 with the reason rather than a plausible ordering.
+    """
+    # imported OUTSIDE the try so the except clause can name it
+    from app.mode_b.semiconductor import database as db
+    from app.mode_b.semiconductor.database import RankingUnsupported
     try:
-        from app.mode_b.semiconductor import database as db
         if kind not in ("mosfet", "diode", "bridge"):
             raise HTTPException(404, "unknown component kind")
         _design = dict(req.design)
@@ -570,6 +578,8 @@ def semiconductor_db_rank(kind: str, req: _DbRankReq):
                                            top=int(req.top), mode=req.mode or "full", context=context)}
     except HTTPException:
         raise
+    except RankingUnsupported as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
         log.exception("db rank"); raise HTTPException(500, str(e))
 

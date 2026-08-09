@@ -8407,3 +8407,36 @@ the fix belongs in the review screen. Found only because the screen made the div
 Verified: 15 new tests including the reachability audit, the determinism check and the four injected
 extraction errors; suite 409 passed / 2 skipped (was 394); combined report 190 pp; tsc clean and the
 frontend builds.
+
+
+## C213 — M5: rank only on quantities the catalogue measures
+
+The Top-10 loss ranking ordered candidates by a loss built from parameters the parametric export
+does not carry. For the MOSFET that is E_oss, E_on/E_off, Q_gd and R_DS(on)-vs-T_j, absent on all
+1311 parts, so every figure behind the ordering was estimated from eight columns. For the diode it
+is Q_c and Q_rr, both substituted by an estimate that C210 measured 4-6x off against the real part.
+An ordering computed from estimates ranks the estimates.
+
+NOT A DELETION, A BOUNDARY. The endpoint is still reachable, and legitimately, from the bridge tab:
+compForm now renders for the bridge alone - M3 removed the MOSFET's copy and M8 the diode's - and it
+drives the bridge search plus the bridge's bottom-bypass MOSFET in conduction-only mode. Deleting
+the endpoint would have broken the one tab still on the catalogue, well before M8-bridge. So the cut
+is by what the catalogue actually measures:
+
+  bridge, full        KEPT   - conduction-dominated, and vf / vf_if are real columns
+  mosfet, conduction  KEPT   - the bottom FET is I^2*R, and rdson is a real column
+  mosfet, full        400    - the four switching parameters are absent from every part
+  diode,  full        400    - neither Q_c nor Q_rr is present; both are estimated
+
+The policy lives in rank_by_loss, not in the endpoint, so a second caller cannot route around it; a
+test calls it directly to prove that. And the refusal teaches rather than merely refusing: it names
+which parameters are missing and says to upload the datasheet instead. That reason is the entire
+argument for the datasheet-first flow, so it has to reach the designer - hence a 400 carrying the
+message rather than a 500.
+
+Nothing in the GUI or the docs still promises the removed feature. The surviving "top 10" labels are
+the two live bridge searches and read accurately; the rest are historical comments.
+
+Verified: 7 new tests (tests/test_ranking_policy.py) covering both kept paths, both refusals, the
+404 for an unknown kind, and the policy being enforced below the endpoint; suite 416 passed /
+2 skipped (was 409).
