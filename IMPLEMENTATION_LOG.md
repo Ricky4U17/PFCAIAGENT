@@ -8493,3 +8493,55 @@ profile - and that is where the payoff lands: a real V_F(i) curve replacing the 
 Verified: 15 new tests (tests/test_curve_extract.py), including the two table cross-checks, the
 temperature ordering of the five forward curves, the refusal of an uncalibratable frame, and the
 measured-versus-closed-form share; suite 431 passed / 2 skipped (was 416).
+
+
+## C215 — M7 part 2: a confirmed curve reaches the engine
+
+C214 read the plots and proposed curves; nothing consumed them. This closes the loop: a Curves
+sub-tab shows each proposal BESIDE THE FIGURE IT CAME FROM, the designer accepts per curve, and the
+accepted shape replaces the fitted one the calculation had been standing on.
+
+THE END-TO-END RUN IMMEDIATELY PRODUCED -692 W OF CONDUCTION LOSS AT -645 degC. The canonical key
+V_F_vs_IF means V_F as a FUNCTION OF I_F, so its x is current - but every vendor plots that figure
+the other way up, with voltage on x. Storing the figure's own order put voltage where the engine
+reads current. Orientation is now declared per target rather than inferred, and an interlock refuses
+a forward curve whose drop leaves 0.2-8 V, naming the transpose as the likely cause and falling back
+to the table. A test deliberately re-transposes a curve and asserts it is rejected. Same defect class
+as the naming disconnects, in a new dimension: not the wrong name, the wrong axis ORDER.
+
+What a confirmed curve is worth, on the reference diode at 90 Vac:
+
+    V_F curve      1 point, flat 1.35 V   ->  326 points, 0.85 to 2.42 V
+    P_D_cond               7.186 W        ->  5.862 W   (-18 %)
+    Q_c at the bus     70.8 nC (scaled)   ->  73.4 nC (read off the plot)
+    grading m       0.4188 (two dots)     ->  0.3332 (fitted across the curve)
+
+A CORRECTION TO C210. I recorded that a constant V_F understates conduction at the peak. It does -
+but the constant is the drop at the part's RATED current, which a boost diode reaches only at the
+crest, so across the line cycle it OVERSTATES conduction, by 18 % here. The wording is fixed where
+it was written.
+
+And a second finding, from the tests rather than from reasoning: digitising the cold curve alone
+recovers only 4 % of that error where digitising both recovers 18 %, because the engine interpolates
+the drop BETWEEN the two temperatures and a 326-point shape paired with a flat tabulated point is
+neither. A check now fires when only one of the pair is digitised, and the tab offers "Accept as HOT
+curve" on the same figure - most V-I plots draw every temperature.
+
+Also: four canonical curve keys added (Q_c_vs_VR, E_c_vs_VR, C_j_vs_VR, I_rev_vs_VR) because C214's
+proposal layer had been naming keys the registry did not carry - my own disconnect, caught before
+anything wrote one. `digitised` is a new provenance value: a shape read off a picture is neither a
+table value nor a fit, and the report has to be able to say which.
+
+Q_c is now read AT THE BUS off the plot rather than scaled by any exponent, and the grading
+coefficient is fitted across the whole C_j curve instead of interpolated between the two tabulated
+capacitance points. I_rev_vs_VR is registered for the leakage bound C211 had to leave open, though
+nothing consumes it yet.
+
+Verified: 8 further tests (23 in tests/test_curve_extract.py), including the transpose interlock,
+the cold-only pairing check, Q_c read rather than scaled, and the guard that conduction loss and
+junction temperature stay positive; suite 439 passed / 2 skipped (was 431); combined report 190 pp;
+tsc clean and the frontend builds.
+
+REMAINING IN M7: a raster fallback for genuinely scanned datasheets, which these vector PDFs did not
+need. The MOSFET figures - E_oss(V), R_DS(on) vs T_j, the gate-charge and transfer curves - are not
+yet mapped to targets; the machinery is general, only _FIGURE_TARGETS is diode-only.

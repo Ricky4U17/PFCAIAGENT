@@ -11,8 +11,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
-import { plausibilityCheck, datasheetRequirements, datasheetUpload, datasheetConfirm } from '../api/client'
-import type { PlausResult, DsRequirement, DsReviewRow, DsUpload, DsConfirm } from '../api/client'
+import { plausibilityCheck, datasheetRequirements, datasheetUpload, datasheetConfirm,
+         datasheetFigures, datasheetFigureImage, datasheetFigureConfirm } from '../api/client'
+import type { PlausResult, DsRequirement, DsReviewRow, DsUpload, DsConfirm,
+              DsFigureProposal, DsCurve } from '../api/client'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
@@ -382,8 +384,17 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // existing Calculate runs on datasheet values rather than on catalogue estimates.
   // Keyed by KIND. The MOSFET and the boost diode run the same four-step flow, so they share one
   // panel and one set of handlers — a second copy of 150 lines is how the two drift apart.
-  const [dsTab, setDsTab] = useState<Record<DsKind, 'upload' | 'parameters' | 'results'>>(
+  const [dsTab, setDsTab] = useState<Record<DsKind, 'upload' | 'parameters' | 'curves' | 'results'>>(
     { mosfet: 'upload', diode: 'upload' })
+  // ── M7: the plotted curves ──────────────────────────────────────────────────────────────
+  // Everything a table cannot carry has been standing in as a fitted shape — a constant forward
+  // drop, a Q_c moved to the bus by an assumed power law. The shapes are printed on the page. The
+  // agent proposes; the designer confirms AGAINST THE PLOT, which is why each row shows the figure.
+  const [dsPdf, setDsPdf] = useState<Partial<Record<DsKind, File>>>({})
+  const [curveFigs, setCurveFigs] = useState<Partial<Record<DsKind, DsFigureProposal[]>>>({})
+  const [figImg, setFigImg] = useState<Record<string, string>>({})
+  const [curveBusy, setCurveBusy] = useState(false)
+  const [figDone, setFigDone] = useState<Record<string, string>>({})
   const [dsReq, setDsReq] = useState<Partial<Record<DsKind, DsRequirement>>>({})
   const [dsUp, setDsUp] = useState<Partial<Record<DsKind, DsUpload>>>({})
   const [dsConf, setDsConf] = useState<Partial<Record<DsKind, DsConfirm>>>({})
@@ -415,6 +426,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     try {
       const r = await datasheetUpload(kind, file)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
+      setDsPdf(s2 => ({ ...s2, [kind]: file }))       // the Curves tab reads the plots from it
       if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))
       else setErr(r.reason || 'the datasheet could not be read')
     } catch (e) { setErr((e as Error).message) }
@@ -446,6 +458,39 @@ export const SemiconductorSelection: React.FC<Props> = ({
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
+  const loadFigures = async (kind: DsKind) => {
+    const file = dsPdf[kind]; const part = dsUp[kind]?.part_number
+    if (!file) return
+    setCurveBusy(true); setErr(null)
+    try {
+      const r = await datasheetFigures(file, part || undefined)
+      setCurveFigs(s2 => ({ ...s2, [kind]: r.proposals }))
+      for (const p of r.proposals) {
+        const id = `${p.page}:${p.frame.join(',')}`
+        if (figImg[id]) continue
+        try {
+          const blob = await datasheetFigureImage(file, p.page, p.frame)
+          setFigImg(m => ({ ...m, [id]: URL.createObjectURL(blob) }))
+        } catch { /* the proposal still stands without its picture */ }
+      }
+    } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
+  const acceptCurve = async (kind: DsKind, p: DsFigureProposal, ci: number,
+                             key: string, tj?: string) => {
+    const part = dsUp[kind]?.part_number
+    if (!part) return
+    setCurveBusy(true); setErr(null)
+    try {
+      const c = p.curves[ci]
+      await datasheetFigureConfirm({ part_number: part, key, curve: { x: c.x, y: c.y },
+        conditions: tj ? { T_j: Number(tj) } : {} })
+      setFigDone(m => ({ ...m, [`${p.key}:${ci}`]: key }))
+      // re-confirm so the engine block is rebuilt from the profile that now carries the curve
+      await doConfirm(kind)
+    } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
   const runPlaus = async (which: Sub, block: Record<string, any>) => {
     try {
       const res = await plausibilityCheck(which, block)
@@ -685,7 +730,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
           {([['upload', '1 · Upload datasheet'], ['parameters', '2 · Parameters'],
-             ['results', '3 · Results']] as ['upload' | 'parameters' | 'results', string][])
+             ['curves', '3 · Curves'], ['results', '4 · Results']] as
+             ['upload' | 'parameters' | 'curves' | 'results', string][])
             .map(([m, lbl]) => (
               <button key={m} onClick={() => setDsTab(s2 => ({ ...s2, [kind]: m }))} style={{
                 padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600,
@@ -812,7 +858,93 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 {c.message}</div>))}
           </>))}
 
-        {/* ── 3 · results ───────────────────────────────────────────────────── */}
+        {/* ── 3 · curves ────────────────────────────────────────────────────── */}
+        {tab === 'curves' && (<>
+          <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
+            Values a table cannot carry have been standing in as fitted shapes — a constant forward
+            drop where the datasheet gives V<sub>F</sub> at one current per temperature, a
+            Q<sub>c</sub> moved to the bus by an assumed power law. Those shapes are printed on the
+            page. Each proposal below is read off the plot and shown <b>beside the figure it came
+            from</b>: accept one only if the curve is the one you see.
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+            <Btn variant="primary" disabled={curveBusy || !dsPdf[kind]}
+              onClick={() => loadFigures(kind)}>
+              {curveBusy ? '⏳ reading the plots…' : '📈 Read the datasheet figures'}</Btn>
+            {!dsPdf[kind] && <span style={{ fontSize: 11, color: C.hint }}>
+              Upload the datasheet first.</span>}
+          </div>
+
+          {(curveFigs[kind] ?? []).map((p, pi) => {
+            const id = `${p.page}:${p.frame.join(',')}`
+            const cc = p.cross_check
+            return (
+              <div key={pi} style={{ border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: 12, marginBottom: 12, background: C.bg3 }}>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                  {figImg[id] && <img src={figImg[id]} alt={p.caption}
+                    style={{ width: 280, maxWidth: '100%', borderRadius: 6, background: '#fff' }} />}
+                  <div style={{ flex: 1, minWidth: 260 }}>
+                    <div style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>
+                      {p.caption || `page ${p.page + 1}`}</div>
+                    <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
+                      → <b>{p.key}</b><br />
+                      x: {p.axes.x} <i>({p.x_scale}, {p.x_range[0]}…{p.x_range[1]})</i><br />
+                      y: {p.axes.y} <i>({p.y_scale}, {p.y_range[0]}…{p.y_range[1]})</i><br />
+                      {p.n_curves} curve{p.n_curves > 1 ? 's' : ''} · calibration residual{' '}
+                      {(p.residual * 100).toFixed(2)}%
+                      {p.swapped && <> · axes transposed to {p.key}'s own order</>}
+                    </div>
+                    <div style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.6,
+                      color: cc.checked ? (cc.agrees ? C.green : C.amber) : C.hint }}>
+                      {cc.checked ? (cc.agrees ? '✓ ' : '⚠ ') : ''}{cc.note}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {p.curves.map((c: DsCurve, ci: number) => {
+                    const done = figDone[`${p.key}:${ci}`]
+                    const rgb = c.color?.length === 3
+                      ? `rgb(${c.color.map(v => Math.round(v * 255)).join(',')})` : C.muted
+                    return (
+                      <div key={ci} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                        flexWrap: 'wrap', fontSize: 10.5, color: C.muted }}>
+                        <span style={{ width: 22, height: 3, background: rgb, borderRadius: 2 }} />
+                        <span style={{ fontFamily: 'IBM Plex Mono,monospace' }}>
+                          {c.n_points} pts · x {c.x_span[0].toPrecision(3)}…{c.x_span[1].toPrecision(3)}
+                          {' '}· y {c.y_span[0].toPrecision(3)}…{c.y_span[1].toPrecision(3)}
+                        </span>
+                        {done
+                          ? <span style={{ color: C.green }}>✓ accepted as {done}</span>
+                          : (<>
+                            {p.per_temperature && (
+                              <input placeholder="T_j °C" id={`tj-${p.key}-${ci}`}
+                                style={{ ...inStyle, width: 74, padding: '2px 6px', fontSize: 11 }} />)}
+                            <Btn disabled={curveBusy} onClick={() => acceptCurve(kind, p, ci, p.key,
+                              (document.getElementById(`tj-${p.key}-${ci}`) as HTMLInputElement)?.value)}>
+                              Accept</Btn>
+                            {p.key === 'V_F_vs_IF' && (
+                              <Btn disabled={curveBusy} onClick={() => acceptCurve(kind, p, ci,
+                                'V_F_vs_IF_hot',
+                                (document.getElementById(`tj-${p.key}-${ci}`) as HTMLInputElement)?.value)}>
+                                Accept as HOT curve</Btn>)}
+                          </>)}
+                      </div>)
+                  })}
+                </div>
+              </div>)
+          })}
+
+          {(curveFigs[kind] ?? []).length === 0 && !curveBusy && (
+            <div style={{ fontSize: 10.5, color: C.hint, lineHeight: 1.6 }}>
+              Nothing read yet. A figure is only offered when its tick labels fit a consistent
+              linear or logarithmic scale — a plot whose axes cannot be read is skipped rather than
+              guessed at.
+            </div>)}
+        </>)}
+
+        {/* ── 4 · results ───────────────────────────────────────────────────── */}
         {tab === 'results' && (perPoint.length === 0
           ? <div style={{ fontSize: 11.5, color: C.hint }}>
               Confirm the parameters, then run Calculate below to fill this table.</div>

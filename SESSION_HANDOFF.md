@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-09**, head = **`a38e49a` C214**, on `master`.
+**Start here after a restart.** Last updated **2026-08-09**, head = **`PENDING` C215**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -39,6 +39,7 @@ entering the design must carry provenance.
 | C212 | **M6** plausibility gate wired onto extracted/confirmed profiles | catches a decimal slip, a swapped column, a wrong unit |
 | C213 | **M5** loss ranking restricted to what the catalogue measures | bridge + bottom-FET kept; MOSFET/diode refuse with the reason |
 | C214 | **M7 part 1** vector curve digitiser + proposals | Fig.1 2.8%, Fig.9 0.36% against the part's own table |
+| C215 | **M7 part 2** Curves sub-tab; a confirmed curve reaches the engine | P_D_cond 7.19 -> 5.86 W; caught a transposed-axis -692 W bug |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -71,12 +72,12 @@ class it RESOLVED to rather than the one it arrived under.
 - ~~**M5**~~ — DONE at C213. Not deleted: the bridge and the bottom-FET conduction search
   still use it legitimately, so the ranking is bounded to what the catalogue measures.
 - ~~**M6**~~ — DONE at C212. The gate runs on upload and on confirm, advisory in both.
-- **M7 — HALF DONE at C214.** The digitiser and the proposal layer are in and validated; nothing
-  reaches the engine yet. **The remaining half is the confirm screen**: render the figure, overlay
-  the proposed points, accept/reject per curve, write it into the profile. Open question for the
-  designer: its own sub-tab, or folded into the existing Parameters review screen?
-  NOTE the plan's premise was wrong — these datasheets are VECTOR, so no pixel tracing is needed.
-  A raster fallback for scanned datasheets is still unbuilt.
+- **M7 — DONE for the diode at C214/C215.** Digitiser, proposals, Curves sub-tab, and the
+  confirmed curve reaching the engine. STILL OPEN: (a) a raster fallback for genuinely scanned
+  datasheets — these vector PDFs did not need one; (b) the MOSFET figures (E_oss(V), R_DS(on) vs
+  T_j, gate-charge, transfer) are not mapped — the machinery is general, only `_FIGURE_TARGETS` is
+  diode-only. NOTE the plan's premise was wrong: these datasheets are VECTOR, so the curve is read,
+  not traced.
 - **M8-bridge** — the bridge still has neither a datasheet flow nor a correct requirement (its
   average current is the INPUT current, not the output current; C210 deliberately left it alone
   rather than hand it the diode's formula).
@@ -221,7 +222,7 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **431 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **439 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209

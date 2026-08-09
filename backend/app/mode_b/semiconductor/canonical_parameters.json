@@ -112,7 +112,7 @@
     }
   },
 
-  "provenance_values": ["extracted", "corrected", "manual", "derived", "default"],
+  "provenance_values": ["extracted", "corrected", "manual", "derived", "default", "digitised"],
 
   "measurement_basis_fields": {
     "_doc": "Mandatory on every energy and charge value. Not metadata - a correctness interlock. Convention B (see the plan) de-bundles E_oss and reverse-recovery charge out of a published E_on, which is only possible when these are known.",
@@ -131,6 +131,46 @@
   },
 
   "parameters": [
+    {
+      "key": "Q_c_vs_VR",
+      "si_unit": "C", "display_unit": "nC",
+      "device_classes": ["sic_schottky"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "Q<sub>c</sub>(V<sub>R</sub>)",
+      "description": "Capacitive charge versus reverse voltage, read off the datasheet's own plot. Replaces the power-law scaling of the single tabulated Q_c: the charge at the bus is read directly instead of assumed. Not consumed as a curve by the engine, which wants one number - it supplies Q_c AT THE BUS VOLTAGE."
+    },
+    {
+      "key": "E_c_vs_VR",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["sic_schottky"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "E<sub>c</sub>(V<sub>R</sub>)",
+      "description": "Capacitive ENERGY versus reverse voltage. With Q_c_vs_VR it gives the dissipated share of the capacitive charge directly - E_dissipated = V*Q_c - E_c - instead of through the grading coefficient. Measured this way on the reference part it is 0.620 at the 393 V bus against 0.632 from 1/(2-m), which is what confirmed the C211 correction. NOT the loss on its own: E_c is the energy that stays STORED and is returned at the next turn-off."
+    },
+    {
+      "key": "C_j_vs_VR",
+      "si_unit": "F", "display_unit": "pF",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "C<sub>j</sub>(V<sub>R</sub>)",
+      "description": "Junction capacitance versus reverse voltage. Fits the grading coefficient C_j_grading over the whole plotted range rather than through the two tabulated points, which is the difference between a fit and an interpolation between two dots."
+    },
+    {
+      "key": "I_rev_vs_VR",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "I<sub>R</sub>(V<sub>R</sub>)",
+      "description": "Reverse current versus reverse voltage. Closes the gap C211 had to leave open: the tabulated I_R is quoted at the RATED V_R and was used as a conservative upper bound at the bus, because scaling it needs the barrier-lowering law and the table gives one point. The plot gives the whole curve, so the leakage term can be read at the bus instead of bounded."
+    },
     {
       "key": "C_j",
       "si_unit": "F", "display_unit": "pF",

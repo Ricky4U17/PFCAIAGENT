@@ -511,6 +511,50 @@ export const datasheetConfirm = (b: { part_number: string; kind: string
                                       edits?: Record<string, unknown>
                                       design?: Record<string, unknown> }) =>
   post<DsConfirm>('/mode-b/semiconductor/datasheet/confirm', b)
+// ── M7: the plotted curves ───────────────────────────────────────────────────────────────────
+// A proposal is only ever a proposal. It carries the axis titles the digitiser read, the
+// calibration residual, and where the datasheet tabulates a point on those axes a cross-check
+// against it — the table and the plot being independent renderings of one measurement.
+export interface DsCurve {
+  x: number[]; y: number[]
+  color: number[]; n_points: number
+  drawn_as?: string
+  x_span: number[]; y_span: number[]
+}
+export interface DsFigureProposal {
+  key: string; page: number; frame: number[]
+  caption: string
+  axes: { x: string; y: string }
+  x_scale: string; y_scale: string
+  x_range: number[]; y_range: number[]
+  residual: number
+  per_temperature: boolean; swapped: boolean
+  n_curves: number
+  curves: DsCurve[]
+  cross_check: { checked: boolean; agrees: boolean; error_pct?: number
+                 expected?: number; got?: number; note: string }
+}
+export const datasheetFigures = (file: File, partNumber?: string) => {
+  const fd = new FormData(); fd.append('file', file)
+  if (partNumber) fd.append('part_number', partNumber)
+  return fetch(`${BASE}/mode-b/semiconductor/datasheet/figures`, { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+                       return r.json() as Promise<{ ok: boolean; proposals: DsFigureProposal[]
+                                                    figures_seen: number; reason?: string }> })
+}
+export const datasheetFigureImage = (file: File, page: number, frame: number[]) => {
+  const fd = new FormData(); fd.append('file', file); fd.append('page', String(page))
+  fd.append('x0', String(frame[0])); fd.append('y0', String(frame[1]))
+  fd.append('x1', String(frame[2])); fd.append('y1', String(frame[3]))
+  return fetch(`${BASE}/mode-b/semiconductor/datasheet/figure-image`, { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) throw new Error(`${r.status}`); return r.blob() })
+}
+export const datasheetFigureConfirm = (b: { part_number: string; key: string
+                                            curve: { x: number[]; y: number[] }
+                                            conditions?: Record<string, unknown> }) =>
+  post<{ ok: boolean; key: string; n_points: number }>(
+    '/mode-b/semiconductor/datasheet/figure-confirm', b)
+
 export const datasheetLibrary = () =>
   get<{ parts: { part_number: string; ready: boolean; sha256?: string
                  extracted_versions: number[]; confirmed_versions: number[] }[] }>(

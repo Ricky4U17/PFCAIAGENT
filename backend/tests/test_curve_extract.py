@@ -159,3 +159,134 @@ class TestProposals:
         f = _fig(figures, 1)
         png = CX.render(doc[f["page"]], tuple(f["frame"]))
         assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 5000
+
+
+class TestConfirmingACurveReachesTheEngine:
+    """M7 part 2. A proposal is nothing until the designer accepts it against the plot; once
+    accepted it must actually replace the fitted shape it was proposed for."""
+
+    @pytest.fixture
+    def store(self):
+        import shutil, tempfile
+        from app.mode_b.semiconductor import parts_store as PS
+        from tests.test_diode_datasheet import VS3C40
+        d = tempfile.mkdtemp(prefix="m7_")
+        PS.write_extracted("VS-3C40CP12L-M3", VS3C40, root=d)
+        try:
+            yield d
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _accept(self, pdf, store, which=("V_F_vs_IF", "Q_c_vs_VR", "C_j_vs_VR")):
+        """Fig. 1 plots five temperatures; the designer assigns the 25 degC curve to the cold slot
+        and the 150 degC curve to the hot one. BOTH, because the engine interpolates between them."""
+        from tests.test_diode_datasheet import VS3C40
+        props = {p["key"]: p for p in DF.figure_proposals(pdf, VS3C40)["proposals"]}
+        if "V_F_vs_IF" in which:
+            DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_IF",
+                              props["V_F_vs_IF"]["curves"][1], {"T_j": 25}, root=store)
+            DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_IF_hot",
+                              props["V_F_vs_IF"]["curves"][3], {"T_j": 150}, root=store)
+        for k in ("Q_c_vs_VR", "C_j_vs_VR"):
+            if k in which:
+                DF.confirm_figure("VS-3C40CP12L-M3", k, props[k]["curves"][0], {}, root=store)
+        from app.mode_b.semiconductor import parts_store as PS
+        return PS.load_profile("VS-3C40CP12L-M3", kind="confirmed", root=store)
+
+    def test_the_proposal_is_emitted_in_the_canonical_orientation(self, pdf):
+        """`V_F_vs_IF` is V_F as a function of I_F, so its x is CURRENT — but every vendor plots
+        that figure with voltage on the x axis. Emitting the figure's own order put voltage where
+        the engine reads current and produced -692 W of conduction loss at -645 degC."""
+        from tests.test_diode_datasheet import VS3C40
+        props = {p["key"]: p for p in DF.figure_proposals(pdf, VS3C40)["proposals"]}
+        vf = props["V_F_vs_IF"]
+        assert vf["swapped"] is True
+        c = vf["curves"][1]
+        assert max(c["x"]) > 20                      # x is current, tens of amps
+        assert 0.5 < max(c["y"]) < 5                 # y is the forward drop, volts
+        # ...and a figure already in canonical order is NOT swapped
+        assert props["Q_c_vs_VR"]["swapped"] is False
+
+    def test_a_transposed_curve_is_refused_rather_than_used(self, store, pdf):
+        """The interlock behind the orientation fix: a forward drop of tens of volts is not a
+        forward drop, whatever the calibration says."""
+        from app.mode_b.semiconductor import parts_store as PS
+        from tests.test_diode_datasheet import VS3C40, DESIGN
+        props = {p["key"]: p for p in DF.figure_proposals(pdf, VS3C40)["proposals"]}
+        bad = DF._swap_axes(props["V_F_vs_IF"]["curves"][1])      # put it back the wrong way
+        DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_IF", bad, {"T_j": 25}, root=store)
+        prof = PS.load_profile("VS-3C40CP12L-M3", kind="confirmed", root=store)
+        blk = DF.profile_to_block(prof, "sic_schottky", DESIGN)
+        msg = next(c["message"] for c in blk["_checks"] if c["key"] == "V_F_vs_IF")
+        assert "TRANSPOSED" in msg
+        assert len(blk["vf_curve"][0]) == 1                       # fell back to the table
+
+    def test_digitising_only_one_of_the_temperature_pair_is_flagged(self, store, pdf):
+        """Found by this test suite: digitising the cold curve alone recovers 4 % of the conduction
+        error, where digitising both recovers 18 %. The engine interpolates between them, so a
+        300-point shape paired with a flat tabulated point is neither."""
+        from app.mode_b.semiconductor import parts_store as PS
+        from tests.test_diode_datasheet import VS3C40, DESIGN
+        props = {p["key"]: p for p in DF.figure_proposals(pdf, VS3C40)["proposals"]}
+        DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_IF",
+                          props["V_F_vs_IF"]["curves"][1], {"T_j": 25}, root=store)
+        prof = PS.load_profile("VS-3C40CP12L-M3", kind="confirmed", root=store)
+        blk = DF.profile_to_block(prof, "sic_schottky", DESIGN)
+        msg = next(c["message"] for c in blk["_checks"] if c["key"] == "V_F_vs_IF_hot")
+        assert "Only the cold" in msg
+
+    def test_a_confirmed_forward_curve_replaces_the_constant_drop(self, store, pdf):
+        """C210 could only give this part a CONSTANT forward drop, because it publishes V_F at one
+        current per temperature. The plot gives the shape."""
+        from tests.test_diode_datasheet import DESIGN
+        prof = self._accept(pdf, store)
+        blk = DF.profile_to_block(prof, "sic_schottky", DESIGN)
+        xs, ys = blk["vf_curve"]
+        assert len(xs) > 100
+        assert 0.5 < min(ys) < 1.2 and 2.0 < max(ys) < 3.0
+        assert blk["_provenance"]["V_F_vs_IF"] == "digitised"
+
+    def test_the_constant_drop_was_OVERstating_conduction_not_understating_it(self, store, pdf):
+        """A correction to what C210 recorded. The constant is the drop at the part's RATED
+        current, which a boost diode reaches only at the crest — so holding it across the whole
+        line cycle overstates conduction, and only the peak is understated."""
+        from app.mode_b.semiconductor import database as sdb
+        from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+        from tests.test_diode_datasheet import VS3C40, DESIGN
+        mos = sdb.to_block(sdb.load("mosfet")[0], "mosfet")
+        brg = sdb.to_block(sdb.load("bridge")[0], "bridge")
+        th = {"t_ambient": 50, "rth_sa": 0.5}
+        run = lambda p: calculate_semiconductor_losses(
+            DESIGN, mos, DF.profile_to_block(p, "sic_schottky", DESIGN), brg, th, None)["per_point"][0]
+        flat = run(VS3C40)
+        curved = run(self._accept(pdf, store))
+        assert curved["P_D_cond"] < flat["P_D_cond"]
+        assert 0.10 < (flat["P_D_cond"] - curved["P_D_cond"]) / flat["P_D_cond"] < 0.30
+        assert curved["P_D_cond"] > 0 and curved["Tj_DIODE"] > 0      # the -692 W guard
+
+    def test_q_c_is_read_at_the_bus_instead_of_scaled(self, store, pdf):
+        """C211 moved the tabulated Q_c to the bus with a power law. The plot has the value."""
+        from tests.test_diode_datasheet import DESIGN
+        prof = self._accept(pdf, store, which=("Q_c_vs_VR",))
+        blk = DF.profile_to_block(prof, "sic_schottky", DESIGN)
+        assert blk["_qc_basis"]["from_curve"] is True
+        assert blk["_qc_basis"]["scaled"] is False
+        assert blk["qc"] == pytest.approx(73.4e-9, rel=0.05)
+        assert blk["_provenance"]["Q_c"] == "digitised"
+
+    def test_the_grading_coefficient_is_fitted_across_the_whole_curve(self, store, pdf):
+        """Two tabulated capacitance points give an interpolation between two dots; the plotted
+        curve gives a fit."""
+        from tests.test_diode_datasheet import DESIGN
+        prof = self._accept(pdf, store, which=("C_j_vs_VR",))
+        blk = DF.profile_to_block(prof, "sic_schottky", DESIGN)
+        assert blk["_cj_basis"]["from_curve"] is True
+        assert 0.25 < blk["cj_grading"] < 0.55
+
+    def test_confirming_an_unknown_key_raises(self, store, pdf):
+        from tests.test_diode_datasheet import VS3C40
+        props = {p["key"]: p for p in DF.figure_proposals(pdf, VS3C40)["proposals"]}
+        from app.mode_b.semiconductor.registry import RegistryError
+        with pytest.raises(RegistryError):
+            DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_Invented",
+                              props["V_F_vs_IF"]["curves"][0], root=store)

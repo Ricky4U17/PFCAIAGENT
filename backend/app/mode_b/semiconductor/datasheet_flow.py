@@ -212,13 +212,19 @@ def _guess_part_number(pdf_bytes: bytes) -> Optional[str]:
 # titled "VF - Forward Voltage Drop (V)" against "IF - Instantaneous Forward Current (A)" is the
 # same plot everywhere.
 
+# THE CANONICAL KEY NAMES ITS OWN ORIENTATION, AND THE PLOT NEED NOT AGREE. `V_F_vs_IF` is V_F as
+# a function of I_F, so its x is CURRENT — but every vendor plots that figure the other way up, with
+# voltage on the x axis. Emitting the figure's own order put voltage where the engine reads current
+# and produced -692 W of conduction loss and a junction at -645 degC. `swap` is the fix, and it is
+# declared per target rather than inferred, because a silent transpose is exactly the kind of thing
+# that reads as plausible until something is negative.
 _FIGURE_TARGETS = [
-    # canonical key,   x axis matches,           y axis matches,             needs a temperature
-    ("V_F_vs_IF",      ("forward voltage",),     ("forward current",),        True),
-    ("Q_c_vs_VR",      ("reverse voltage",),     ("capacitive charge",),      False),
-    ("E_c_vs_VR",      ("reverse voltage",),     ("capacitive energy",),      False),
-    ("C_j_vs_VR",      ("reverse voltage",),     ("junction capacitance",),   False),
-    ("I_rev_vs_VR",    ("reverse voltage",),     ("reverse current",),        True),
+    # canonical key,   x axis matches,        y axis matches,            per-temp, swap
+    ("V_F_vs_IF",      ("forward voltage",),  ("forward current",),      True,     True),
+    ("Q_c_vs_VR",      ("reverse voltage",),  ("capacitive charge",),    False,    False),
+    ("E_c_vs_VR",      ("reverse voltage",),  ("capacitive energy",),    False,    False),
+    ("C_j_vs_VR",      ("reverse voltage",),  ("junction capacitance",), False,    False),
+    ("I_rev_vs_VR",    ("reverse voltage",),  ("reverse current",),      True,     False),
 ]
 
 
@@ -248,9 +254,12 @@ def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
         if not cal["ok"] or not fig["curves"]:
             continue
         tx, ty = cal["titles"]["x"], cal["titles"]["y"]
-        for key, wx, wy, per_temp in _FIGURE_TARGETS:
+        for key, wx, wy, per_temp, swap in _FIGURE_TARGETS:
             if not (_axis_matches(tx, wx) and _axis_matches(ty, wy)):
                 continue
+            curves = fig["curves"]
+            if swap:
+                curves = [_swap_axes(c) for c in curves]
             p = {
                 "key": key, "page": fig["page"], "frame": fig["frame"],
                 "caption": fig["caption"], "axes": cal["titles"],
@@ -258,13 +267,26 @@ def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
                 "x_range": cal["x"]["range"], "y_range": cal["y"]["range"],
                 "residual": max(cal["x"]["residual"], cal["y"]["residual"]),
                 "per_temperature": per_temp,
-                "n_curves": len(fig["curves"]),
-                "curves": fig["curves"],
+                "swapped": swap,
+                "n_curves": len(curves),
+                "curves": curves,
             }
+            # the cross-check runs on the FIGURE's own orientation, which is how the table states it
             p["cross_check"] = _figure_cross_check(key, fig["curves"], profile)
             out.append(p)
             break
     return {"ok": True, "proposals": out, "figures_seen": len(res["figures"])}
+
+
+def _swap_axes(curve: dict) -> dict:
+    """Return the curve with x and y exchanged, re-sorted on the new x."""
+    pts = sorted(zip(curve["y"], curve["x"]))
+    out = dict(curve)
+    out["x"] = [round(a, 6) for a, _ in pts]
+    out["y"] = [round(b, 6) for _, b in pts]
+    out["x_span"] = [min(out["x"]), max(out["x"])]
+    out["y_span"] = [min(out["y"]), max(out["y"])]
+    return out
 
 
 def _figure_cross_check(key: str, curves: list, profile: Optional[dict]) -> dict:
@@ -294,6 +316,74 @@ def _figure_cross_check(key: str, curves: list, profile: Optional[dict]) -> dict
     return {"checked": False, "agrees": False,
             "note": "this datasheet tabulates no value on this figure's axes, so the digitised "
                     "curve cannot be checked against the part's own numbers"}
+
+
+def confirm_figure(part_number: str, key: str, curve: dict, conditions: Optional[dict] = None,
+                   reviewed_by: str = "designer", root: Optional[str] = None) -> dict:
+    """Write a curve the designer accepted, against the plot, into the confirmed profile.
+
+    Stamped `digitised`, which is its own provenance: a shape read off a picture is neither a table
+    value nor a fit, and the report has to be able to say so. Everything else about it is ordinary —
+    it lands in the same profile, under a canonical key, and the engine picks it up from there.
+    """
+    R.get(key)                                       # unknown canonical key raises, by design
+    profile = (PS.load_profile(part_number, kind="confirmed", root=root)
+               or PS.load_profile(part_number, kind="extracted", root=root))
+    if profile is None:
+        raise PS.PartsStoreError(f"no profile on file for {part_number!r}; upload the datasheet first")
+    profile = dict(profile)
+
+    entry = {"typ": [list(curve["x"]), list(curve["y"])],
+             "provenance": "digitised",
+             "conditions": dict(conditions or {}),
+             "source": {"figure": curve.get("caption"), "page": curve.get("page")},
+             "n_points": len(curve["x"])}
+    for p in profile.setdefault("parameters", []):
+        if p["key"] == key:
+            p["entries"] = [e for e in p["entries"] if e.get("provenance") != "digitised"]
+            p["entries"].append(entry)
+            break
+    else:
+        profile["parameters"].append({"key": key, "entries": [entry]})
+
+    written = PS.write_confirmed(part_number, profile, reviewed_by=reviewed_by, root=root)
+    return {"ok": True, "part_number": part_number, "key": key, "written": written,
+            "n_points": entry["n_points"]}
+
+
+# A forward drop outside this band is not a forward drop. Silicon sits near 0.7 V, SiC near 1.5,
+# and nothing conducts usefully above a few volts — so a curve that leaves it has been misread,
+# and the commonest way is to have x and y the wrong way round.
+_VF_PLAUSIBLE_V = (0.2, 8.0)
+
+
+def _plausible_vf_curve(curve: dict) -> bool:
+    ys = curve.get("y") or []
+    xs = curve.get("x") or []
+    if not ys or not xs:
+        return False
+    lo, hi = _VF_PLAUSIBLE_V
+    return lo <= min(ys) and max(ys) <= hi and min(xs) >= 0.0
+
+
+def _digitised(profile: dict, key: str) -> Optional[dict]:
+    """The confirmed digitised curve for a key, as {'x': [...], 'y': [...]}, or None."""
+    for e in _entries_of(profile, key):
+        if e.get("provenance") == "digitised" and isinstance(e.get("typ"), (list, tuple)):
+            xy = e["typ"]
+            if len(xy) == 2 and xy[0] and xy[1]:
+                return {"x": list(xy[0]), "y": list(xy[1]), "conditions": e.get("conditions") or {}}
+    return None
+
+
+def _curve_at(curve: dict, x: float) -> Optional[float]:
+    xs, ys = curve["x"], curve["y"]
+    if not xs or x < xs[0] or x > xs[-1]:
+        return None
+    for (xa, ya), (xb, yb) in zip(zip(xs, ys), zip(xs[1:], ys[1:])):
+        if xa <= x <= xb:
+            return ya if xb == xa else ya + (yb - ya) * (x - xa) / (xb - xa)
+    return ys[-1]
 
 
 # ── the plausibility screen (M6) ──────────────────────────────────────────────────────────────
@@ -892,9 +982,12 @@ def _vf_curve_from(pts: list[tuple], rd: Optional[float], i_max: float):
         return ([i1], [v1]), "extracted", (
             "check",
             f"V_F is published at a single current ({i1:g} A) with no slope r_d, so the forward "
-            f"drop is treated as CONSTANT at {v1:g} V. A boost diode's current swings from zero to "
-            f"tens of amps, so this understates conduction loss at the peak. Supply r_d, a second "
-            f"V_F point, or the V-I curve (phase 2).")
+            f"drop is treated as CONSTANT at {v1:g} V — the value quoted at the part's RATED "
+            f"current. A boost diode's current swings from zero to tens of amps and spends most of "
+            f"the line cycle well below its rating, so a constant rated-current drop OVERSTATES "
+            f"conduction over most of the cycle and understates it only at the peak. Measured on "
+            f"this part the net effect is an 18 % overstatement. Supply r_d, a second V_F point, or "
+            f"digitise the V-I curve (M7).")
     return None, None, None
 
 
@@ -938,14 +1031,38 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
     rd_e = _pick_entry(_entries_of(profile, "r_d"))
     rd = float(rd_e.get("typ") or rd_e.get("max")) if rd_e and (rd_e.get("typ") or rd_e.get("max")) else None
 
+    # A DIGITISED forward curve outranks everything the table can give. On this part the table
+    # publishes V_F at ONE current per temperature, so without the plot the drop is a constant
+    # (C210) and conduction is understated at the current peak.
+    dig_vf = _digitised(profile, "V_F_vs_IF")
+    if dig_vf and not _plausible_vf_curve(dig_vf):
+        notes.append({"key": "V_F_vs_IF", "severity": "check", "message": (
+            f"The digitised forward curve is not being used: its drop spans "
+            f"{min(dig_vf['y']):.2g} to {max(dig_vf['y']):.2g} V, which is not a diode forward "
+            f"characteristic. The usual cause is a TRANSPOSED curve — the canonical key is V_F as a "
+            f"function of I_F, so its x is current, while every vendor plots that figure with "
+            f"voltage on the x axis. The tabulated values are used instead.")})
+        dig_vf = None
+    if dig_vf:
+        put("V_F_vs_IF", [list(dig_vf["x"]), list(dig_vf["y"])], "digitised")
+        tj = (dig_vf.get("conditions") or {}).get("T_j")
+        if tj:
+            put("V_F_tref", float(tj))
+        notes.append({"key": "V_F_vs_IF", "severity": "note", "message": (
+            f"The forward drop is the curve read off the datasheet's own plot and confirmed by the "
+            f"designer ({len(dig_vf['x'])} points), not a line through the tabulated point. That "
+            f"approximation held the drop at the value quoted for the RATED current, which the "
+            f"diode exceeds only at the crest — so it overstated conduction over most of the line "
+            f"cycle, by 18 % on this part.")})
+
     cold = _vf_points(profile, hot=False)
     hot = _vf_points(profile, hot=True)
     cv, how, note = _vf_curve_from(cold, rd, i_max)
-    if cv:
+    if cv and not dig_vf:
         put("V_F_vs_IF", [list(cv[0]), list(cv[1])], how)
         if cold and cold[0][2]:
             put("V_F_tref", cold[0][2])
-    if note:
+    if note and not dig_vf:
         notes.append({"key": "V_F_vs_IF", "severity": note[0], "message": note[1]})
 
     # r_d REACHES THE ENGINE ONLY WHEN NO V-I CURVE DID. The engine's forward model is
@@ -960,19 +1077,60 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
         else:
             blk["_r_d_published"] = rd
 
-    hv, hhow, _hnote = _vf_curve_from(hot, rd, i_max)
-    if hv and len(hot) >= 1:
-        put("V_F_vs_IF_hot", [list(hv[0]), list(hv[1])], hhow)
-        put("V_F_thot", hot[0][2] or 125.0)
+    dig_hot = _digitised(profile, "V_F_vs_IF_hot")
+    # The engine interpolates the forward drop BETWEEN the cold and hot curves, so the two have to
+    # be the same kind of object. Digitising one and leaving the other as a single tabulated point
+    # interpolates a 300-point shape against a flat line, and the result is neither: measured on the
+    # reference part, digitising the cold curve alone recovers 4 % of the conduction error where
+    # digitising both recovers 18 %.
+    if bool(dig_vf) != bool(dig_hot):
+        notes.append({"key": "V_F_vs_IF_hot", "severity": "check", "message": (
+            f"Only the {'cold' if dig_vf else 'hot'} forward curve has been digitised. The engine "
+            f"interpolates the drop between the two temperatures, so pairing a digitised shape with "
+            f"a single tabulated point at the other temperature interpolates a curve against a flat "
+            f"line. Digitise both curves from the same figure — most V-I plots draw every "
+            f"temperature — or neither.")})
+    if dig_hot:
+        put("V_F_vs_IF_hot", [list(dig_hot["x"]), list(dig_hot["y"])], "digitised")
+        tj = (dig_hot.get("conditions") or {}).get("T_j")
+        put("V_F_thot", float(tj) if tj else 125.0)
+    else:
+        hv, hhow, _hnote = _vf_curve_from(hot, rd, i_max)
+        if hv and len(hot) >= 1:
+            put("V_F_vs_IF_hot", [list(hv[0]), list(hv[1])], hhow)
+            put("V_F_thot", hot[0][2] or 125.0)
 
     # 3. recovery — the branch that is half the MOSFET's loss
     grading = _cj_grading(profile)
     m = (grading or {}).get("m")
+    # A digitised C_j curve fits the grading coefficient over the WHOLE plotted range, instead of
+    # interpolating between the two tabulated dots.
+    dig_cj = _digitised(profile, "C_j_vs_VR")
+    if dig_cj and len(dig_cj["x"]) >= 4:
+        xs, ys = dig_cj["x"], dig_cj["y"]
+        lo, hi = 0, len(xs) - 1
+        if xs[lo] > 0 and xs[hi] > xs[lo] and ys[lo] > 0 and ys[hi] > 0:
+            m_fit = -math.log(ys[hi] / ys[lo]) / math.log(xs[hi] / xs[lo])
+            if 0.0 <= m_fit <= 0.95:
+                m = round(m_fit, 4)
+                grading = {"m": m, "qc_factor": round(1.0 / (2.0 - m), 4), "from_curve": True,
+                           "note": (f"The grading coefficient m = {m:.3f} is fitted across the "
+                                    f"digitised C_j(V_R) curve ({len(xs)} points), not between the "
+                                    f"two tabulated capacitance values.")}
     if m is not None:
         put("C_j_grading", m, "derived")
         blk["_cj_basis"] = grading
     if tech["is_sic"]:
-        qc = _qc_at_bus(profile, v_bus, m)
+        dig_qc = _digitised(profile, "Q_c_vs_VR")
+        read = _curve_at(dig_qc, v_bus) if dig_qc else None
+        if read is not None:
+            # Read AT THE BUS off the plot: no power law, no assumed exponent, no scaling at all.
+            qc = {"qc": read * 1e-9, "provenance": "digitised", "scaled": False, "from_curve": True,
+                  "note": (f"Q_c = {read:.1f} nC is read directly off the datasheet's Q_c(V_R) plot "
+                           f"at the {v_bus:.0f} V bus, so the published value is not scaled at all "
+                           f"— neither by an assumed exponent nor by one fitted from two points.")}
+        else:
+            qc = _qc_at_bus(profile, v_bus, m)
         if qc:
             put("Q_c", qc["qc"], qc["provenance"])
             blk["_qc_basis"] = qc

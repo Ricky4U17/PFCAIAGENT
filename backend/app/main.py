@@ -6,7 +6,7 @@ Mode B: Steps 1-12 PDF report + Step 6 magnetic design
 from __future__ import annotations
 import logging, math
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -670,6 +670,60 @@ def datasheet_confirm(req: _DsConfirmReq):
         return res
     except Exception as e:
         log.exception("datasheet confirm"); raise HTTPException(400, str(e))
+
+
+class _DsFigConfirmReq(BaseModel):
+    part_number: str
+    key:         str                        # canonical curve key, e.g. V_F_vs_IF
+    curve:       Dict[str, Any]             # {x: [...], y: [...]} as proposed
+    conditions:  Dict[str, Any] = {}        # e.g. {"T_j": 25}
+    reviewed_by: str = "designer"
+
+
+@app.post("/mode-b/semiconductor/datasheet/figures", tags=["mode-b"])
+async def datasheet_figures(file: UploadFile = File(...), part_number: str = Form(None)):
+    """Digitise the datasheet's PLOTS and propose the curves this calculation can use (M7).
+
+    A proposal is only ever a proposal. Each carries the axis titles it read, the calibration
+    residual, and — where the same datasheet tabulates a point on those axes — a cross-check against
+    it, because the table and the plot are independent renderings of one measurement."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    from app.mode_b.semiconductor import parts_store as ps
+    try:
+        data = await file.read()
+        profile = (ps.load_profile(part_number, kind="confirmed")
+                   or ps.load_profile(part_number, kind="extracted")) if part_number else None
+        return flow.figure_proposals(data, profile)
+    except Exception as e:
+        log.exception("datasheet figures"); raise HTTPException(500, str(e))
+
+
+@app.post("/mode-b/semiconductor/datasheet/figure-image", tags=["mode-b"])
+async def datasheet_figure_image(file: UploadFile = File(...), page: int = Form(...),
+                                 x0: float = Form(...), y0: float = Form(...),
+                                 x1: float = Form(...), y1: float = Form(...)):
+    """The figure itself, as a PNG. The designer confirms the proposal against what is printed —
+    a curve is a shape somebody has to recognise, so the picture is part of the contract."""
+    from app.mode_b.semiconductor import curve_extract as cx
+    import fitz
+    try:
+        doc = fitz.open(stream=await file.read(), filetype="pdf")
+        png = cx.render(doc[int(page)], (x0, y0, x1, y1))
+        return Response(content=png, media_type="image/png")
+    except Exception as e:
+        log.exception("figure image"); raise HTTPException(500, str(e))
+
+
+@app.post("/mode-b/semiconductor/datasheet/figure-confirm", tags=["mode-b"])
+def datasheet_figure_confirm(req: _DsFigConfirmReq):
+    """Record a curve the designer accepted. Stamped `digitised`: a shape read off a picture is
+    neither a table value nor a fit, and the report has to be able to say which."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    try:
+        return flow.confirm_figure(req.part_number, req.key, req.curve,
+                                   req.conditions, reviewed_by=req.reviewed_by)
+    except Exception as e:
+        log.exception("figure confirm"); raise HTTPException(400, str(e))
 
 
 @app.get("/mode-b/semiconductor/datasheet/library", tags=["mode-b"])
