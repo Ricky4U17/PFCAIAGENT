@@ -131,6 +131,19 @@ class Diode:
     rd: float = 0.0
     is_sic: bool = True
     qc: float = 23e-9
+    # Junction-capacitance grading coefficient m in C_j(v) = C0 * v^-m. It sets how much of the
+    # capacitive charge is DISSIPATED in the MOSFET rather than stored (see the loss function):
+    #     E_dissipated = V*Q_c / (2 - m)
+    # m = 0 is a LINEAR capacitor, for which the factor is exactly 0.5 - the textbook 1/2*V*Q. That
+    # is the default, so an unknown m reproduces the previous number exactly rather than silently
+    # changing every result. Real junctions run m ~ 0.33-0.5, where the factor is 0.60-0.67, so a
+    # part with no measured m is understated by about a quarter and the flow reports it.
+    cj_grading: float = 0.0
+    # Dies sharing ONE package and therefore one case-to-sink interface. A dual common-cathode
+    # boost diode feeding both interleaved channels puts BOTH legs' loss through that interface,
+    # while each junction sees only its own leg through rth_jc (the datasheet's "per leg" value).
+    # 1 = one die per package, which is what the model assumed before this field existed.
+    dies_per_package: int = 1
     qrr: float = 0.0
     qrr_didt_curve: Optional[tuple] = None
     qrr_if_curve: Optional[tuple] = None        # (If[A], Qrr/Qrr_ref) multiplier
@@ -343,7 +356,11 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             # Qc is charged through the MOSFET channel at the MOSFET's hard turn-on, so that
             # 1/2*Vo*Qc energy is dissipated in the FET (not the diode). The diode keeps only its
             # forward-recovery energy e_fr.
-            P_rr_to_fet = fsw*0.5*Vo*dio.qc*dio.k_qc
+            # The bus supplies V*Q_c to charge the diode's junction capacitance; E_stored stays
+            # in that capacitance and is returned at the next turn-off, when the inductor charges
+            # the switch node. What the MOSFET actually dissipates is the difference, and for
+            # C_j ~ v^-m that difference is exactly V*Q_c/(2-m). At m = 0 this IS 0.5*V*Q_c.
+            P_rr_to_fet = fsw*Vo*dio.qc*dio.k_qc/(2.0 - min(dio.cj_grading, 0.95))
             P_sw_dio = fsw*dio.e_fr
         else:
             E_rec = Qrr*Vo
@@ -369,7 +386,11 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         else:
             sink_br = sink_main
         Tj_fet_n = sink_main + P_fet_each*(mos.rth_jc+mos.rth_cs)
-        Tj_dio_n = sink_main + P_dio_each*(dio.rth_jc+dio.rth_cs)
+        # Each junction sees its own leg through rth_jc, but a shared package passes EVERY
+        # loaded die's loss through the one case-to-sink interface. n_die_shared = 1 reduces to
+        # the previous expression.
+        n_die_shared = max(min(int(dio.dies_per_package), Nch), 1)
+        Tj_dio_n = sink_main + P_dio_each*dio.rth_jc + n_die_shared*P_dio_each*dio.rth_cs
         # Bridge thermal is per PACKAGE: rth_jc on a bridge datasheet (e.g. GBJ: 2 C/W heatsinked)
         # is a package-level number, so it multiplies the loss dissipated in ONE package — the
         # total diode loss (top arms + any bottom-diode share) split across n_packages. The old
@@ -405,7 +426,8 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         "Po":Po, "Pin":Pin, "Iin_rms":Iin_rms, "Ipk_ch":Ipk_ch,
         "L_eff_uH":L_eff*1e6, "ripple_pk_%":100*float(np.max(di))/max(Ipk_ch,1e-9),
         "Vo_ripple_pp":Vo_ripple_pp}
-    t_case_fet = sink_main + P_fet_each*mos.rth_cs; t_case_dio = sink_main + P_dio_each*dio.rth_cs
+    t_case_fet = sink_main + P_fet_each*mos.rth_cs
+    t_case_dio = sink_main + max(min(int(dio.dies_per_package), Nch), 1)*P_dio_each*dio.rth_cs
     pf_t = p_cond_fet_t + p_sw_fet_t + P_oss_fet + (P_rr_to_fet+P_leak_fet)
     pd_t = (dio.vf(i_d_repr,Tj_dio)*i_d_density + dio.rd*ms_dio) + P_sw_dio + P_leak_dio
     span_half = 1.0/(2.0*sp.fline)
@@ -456,6 +478,10 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             # di/dt the datasheet's Q_rr was measured at (they are rarely the same)
             "didt_pk": float(np.atleast_1d(didt)[ipk]),
             "rr_fet_frac": dio.rr_fet_frac,
+            "cj_grading": dio.cj_grading,
+            "qc_factor": 1.0/(2.0 - min(dio.cj_grading, 0.95)),
+            "dies_per_package": int(dio.dies_per_package),
+            "n_die_shared": max(min(int(dio.dies_per_package), Nch), 1),
             "P_sw_dio_ch": P_sw_dio, "P_sw_dio_tot": Nch * P_sw_dio,
             "P_dio_each": P_dio_each, "rth_jc_dio": dio.rth_jc, "rth_cs_dio": dio.rth_cs,
             # ---- BRIDGE ----

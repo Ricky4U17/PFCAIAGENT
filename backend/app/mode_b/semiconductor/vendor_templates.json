@@ -44,6 +44,7 @@
         "IR": "I_rev_vs_Tj", "IRRev": "I_rev_vs_Tj",
         "Efr": "E_fr", "EFR": "E_fr",
         "Qc(tot)": "Q_c", "QCtot": "Q_c",
+        "CT": "C_j", "Cj": "C_j", "CJ": "C_j", "Ct": "C_j",
         "Qrr(tot)": "Q_rr", "QRRtot": "Q_rr",
         "IF(AV)": "I_F_AV", "IO": "I_F_AV", "IFAV": "I_F_AV", "IFM": "I_F_AV",
         "IFSM": "I_FSM", "IFRM": "I_FSM",
@@ -76,6 +77,7 @@
 
     {
       "template_id": "infineon_coolsic_g2",
+      "device_classes": ["sic_mosfet"],
       "match": {"text_markers": ["Infineon", "CoolSiC"]},
       "caption_pattern": "^Table\\s+(\\d+)\\s+(.*)$",
       "figure_caption_pattern": "^Diagram\\s+(\\d+):\\s*(.*)$",
@@ -95,12 +97,13 @@
 
     {
       "template_id": "diodes_inc_rectifier",
+      "device_classes": ["bridge_rectifier"],
       "match": {"metadata_author": "Diodes Incorporated"},
       "caption_pattern": "^(?:Maximum Ratings|Electrical Characteristics|Thermal)(.*)$",
       "symbol_map": {
         "VRRM": "V_RRM", "VB": "V_RRM", "VR": "V_RRM",
         "IF(AV)": "I_F_AV", "IO": "I_F_AV", "IFSM": "I_FSM", "I2t": "I2t",
-        "VF": "V_F_vs_IF", "IR": "I_rev_vs_Tj", "CT": "C_iss",
+        "VF": "V_F_vs_IF", "CT": "C_j",
         "RthetaJC": "R_th_jc", "RthJC": "R_th_jc",
         "TJ": "Tj_max", "TSTG": "T_stg"
       },

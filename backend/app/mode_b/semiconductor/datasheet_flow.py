@@ -575,7 +575,44 @@ def resolve_technology(profile: dict, device_class: str) -> dict:
     }
 
 
-def _qc_at_bus(profile: dict, v_bus: float) -> Optional[dict]:
+def _cj_grading(profile: dict) -> Optional[dict]:
+    """Fit m in C_j(v) = C0*v^-m from the two capacitance points vendors publish.
+
+    This one number does two jobs that were both being assumed:
+      - Q_c scales between the published reverse voltage and the bus as V^(1-m), where the flow
+        had been assuming an abrupt-junction 0.5.
+      - the share of the capacitive charge DISSIPATED in the MOSFET rather than stored is
+        1/(2-m); the engine had been using 0.5, which is the LINEAR-capacitor value (m = 0).
+
+    No curve digitising is needed: Vishay and Toshiba both state C_j at 1 V and at the rated V_R,
+    and those two points pin m. Checked against the published Q_c on three real parts, the fitted
+    power law reproduces it to within 3-6 %.
+    """
+    pts = []
+    for e in _entries_of(profile, "C_j"):
+        c = e.get("typ") or e.get("max")
+        vr = (e.get("conditions") or {}).get("V_R")
+        if c and vr:
+            pts.append((float(vr), float(c)))
+    pts = sorted(set(pts))
+    if len(pts) < 2:
+        return None
+    (v1, c1), (v2, c2) = pts[0], pts[-1]
+    if v1 <= 0 or v2 <= v1 or c1 <= 0 or c2 <= 0:
+        return None
+    m = -math.log(c2 / c1) / math.log(v2 / v1)
+    if not (0.0 <= m <= 0.95):                    # outside this a junction model does not apply
+        return {"m": None, "rejected": round(m, 4), "from": [(v1, c1), (v2, c2)]}
+    return {"m": round(m, 4), "from": [(v1, c1), (v2, c2)],
+            "qc_factor": round(1.0 / (2.0 - m), 4),
+            "note": (f"The junction grading coefficient m = {m:.3f} is fitted from this part's own "
+                     f"two published capacitance points ({c1*1e12:.0f} pF at {v1:g} V and "
+                     f"{c2*1e12:.0f} pF at {v2:g} V). It sets the Q_c voltage scaling as "
+                     f"V^{1-m:.3f} and the dissipated share of the capacitive charge as "
+                     f"1/(2-m) = {1/(2-m):.3f}, against the 0.500 a linear capacitor would give.")}
+
+
+def _qc_at_bus(profile: dict, v_bus: float, m: Optional[float] = None) -> Optional[dict]:
     """Move the published capacitive charge to the voltage the engine actually uses it at.
 
     The engine spends 0.5*V_bus*Q_c at every MOSFET turn-on, so Q_c has to be the charge at V_bus.
@@ -609,6 +646,19 @@ def _qc_at_bus(profile: dict, v_bus: float) -> Optional[dict]:
                          f"part's own two published points.")}
 
     v1, q1 = known[0]
+    if m is not None:                               # the part's OWN exponent, from its C-V points
+        exp = 1.0 - m
+        q_bus = q1 * (v_bus / v1) ** exp
+        if abs(v_bus - v1) / v1 < 0.02:
+            return {"qc": q1, "provenance": "extracted", "scaled": False,
+                    "from": {"V_R": v1, "Q_c": q1}, "exponent": round(exp, 4), "fitted": True,
+                    "note": (f"Q_c is published at {v1:.0f} V and the bus is {v_bus:.0f} V - within "
+                             f"2 %, so it is used as stated.")}
+        return {"qc": q_bus, "provenance": "derived", "scaled": True, "exponent": round(exp, 4),
+                "fitted": True, "from": {"V_R": v1, "Q_c": q1}, "V_bus": v_bus,
+                "note": (f"Q_c scaled from {q1*1e9:.1f} nC at {v1:.0f} V to {q_bus*1e9:.1f} nC at "
+                         f"the {v_bus:.0f} V bus as V^{exp:.3f}, the exponent implied by this "
+                         f"part's own capacitance points rather than an assumed 0.5.")}
     if abs(v_bus - v1) / v1 < 0.02:                 # within rounding of the bus; scaling is noise
         return {"qc": q1, "provenance": "extracted", "scaled": False, "from": {"V_R": v1, "Q_c": q1},
                 "note": (f"Q_c is published at {v1:.0f} V and the bus is {v_bus:.0f} V - within 2 %, "
@@ -736,8 +786,13 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
         put("V_F_thot", hot[0][2] or 125.0)
 
     # 3. recovery — the branch that is half the MOSFET's loss
+    grading = _cj_grading(profile)
+    m = (grading or {}).get("m")
+    if m is not None:
+        put("C_j_grading", m, "derived")
+        blk["_cj_basis"] = grading
     if tech["is_sic"]:
-        qc = _qc_at_bus(profile, v_bus)
+        qc = _qc_at_bus(profile, v_bus, m)
         if qc:
             put("Q_c", qc["qc"], qc["provenance"])
             blk["_qc_basis"] = qc
@@ -768,17 +823,34 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
             put("Q_rr_tempco", tco, "derived")
 
     # 4. thermal and leakage
-    for key in ("R_th_jc", "E_fr"):
-        ent = _pick_entry(_entries_of(profile, key))
-        if ent:
-            put(key, ent.get("typ") or ent.get("max"))
+    # A multi-die package publishes R_th_jc TWICE - per leg and per device. The junction sees the
+    # PER-LEG figure (the larger one); the per-device number describes the whole package and would
+    # halve the predicted rise if it were picked by accident.
+    rth_vals = sorted({float(e.get("max") or e.get("typ"))
+                       for e in _entries_of(profile, "R_th_jc")
+                       if (e.get("max") or e.get("typ"))})
+    if rth_vals:
+        put("R_th_jc", rth_vals[-1])
+        blk["_rth_jc_published"] = rth_vals
+    ent = _pick_entry(_entries_of(profile, "E_fr"))
+    if ent:
+        put("E_fr", ent.get("typ") or ent.get("max"))
 
-    irev = [(float((e.get("conditions") or {}).get("T_j")), float(e.get("typ") or e.get("max")))
+    irev = [(float((e.get("conditions") or {}).get("T_j")), float(e.get("typ") or e.get("max")),
+             (e.get("conditions") or {}).get("V_R"))
             for e in _entries_of(profile, "I_rev_vs_Tj")
             if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
     if len(irev) >= 2:
         irev.sort()
-        put("I_rev_vs_Tj", [[t for t, _ in irev], [v for _, v in irev]])
+        put("I_rev_vs_Tj", [[t for t, _, _ in irev], [v for _, v, _ in irev]])
+        vrs = {float(v) for _, _, v in irev if v}
+        if vrs:
+            blk["_irev_at_VR"] = sorted(vrs)
+
+    # dies sharing one package: a DESIGN fact, not a datasheet field
+    n_die = design.get("dies_per_package")
+    if n_die not in (None, ""):
+        put("dies_per_package", int(n_die), "manual")
 
     # 5. design-sourced, never from any datasheet
     for key in ("R_th_cs", "k_vf", "k_qc", "k_qrr"):
@@ -897,6 +969,54 @@ def _diode_checks(profile: dict, design: dict, blk: dict, tech: dict) -> list[di
             "Only one V-I temperature was found, so the forward drop is corrected by a scalar "
             "tempco. A published hot curve captures the crossover a single coefficient cannot - "
             "the drop falls with temperature at low current and rises at high current.")})
+
+    # ── the capacitive-charge model ───────────────────────────────────────────────────────────
+    if tech["is_sic"]:
+        if "cj_grading" not in blk:
+            out.append({"key": "C_j_grading", "severity": "check", "message": (
+                "This datasheet does not give two junction-capacitance points, so the grading "
+                "coefficient m could not be fitted and the model falls back to m = 0 - a LINEAR "
+                "capacitor, for which the dissipated share of Q_c is exactly the textbook 0.5. Real "
+                "junctions run m = 0.33 to 0.5, where the share is 0.60 to 0.67, so the charge "
+                "dumped into the MOSFET is understated by roughly a quarter. Two C_j values (one "
+                "near 1 V and one at the rated V_R) are enough to remove the assumption entirely - "
+                "no curve digitising is needed.")})
+        else:
+            b = blk.get("_cj_basis") or {}
+            out.append({"key": "C_j_grading", "severity": "note", "message": b.get("note", "")})
+
+    # ── leakage is quoted at a reverse voltage that is not the bus ─────────────────────────────
+    vrs = blk.get("_irev_at_VR") or []
+    if vrs and v_bus:
+        far = [v for v in vrs if abs(v - v_bus) / max(v, 1.0) > 0.10]
+        if far:
+            out.append({"key": "I_rev_vs_Tj", "severity": "note", "message": (
+                f"Reverse current is published at V_R = {', '.join(f'{v:.0f}' for v in far)} V, "
+                f"not at the {v_bus:.0f} V bus, and it is used as published. Schottky leakage rises "
+                f"steeply with reverse voltage, so this is a CONSERVATIVE UPPER BOUND on the "
+                f"blocking term rather than its value here. It is not scaled, because the "
+                f"barrier-lowering law needs two voltage points to fit and this datasheet gives "
+                f"one - and an invented law would look like a correction while being a guess. The "
+                f"term is small, so the cost of the bound is small.")})
+
+    # ── a package whose dies share one interface ──────────────────────────────────────────────
+    rths = blk.get("_rth_jc_published") or []
+    n_die = int(blk.get("dies_per_package") or 1)
+    if len(rths) >= 2 and n_die == 1:
+        ratio = rths[-1] / rths[0] if rths[0] else 0
+        out.append({"key": "dies_per_package", "severity": "check", "message": (
+            f"This datasheet publishes R_th_jc twice - {', '.join(f'{r:g}' for r in rths)} K/W, a "
+            f"ratio of {ratio:.1f} - which is the signature of a MULTI-DIE package quoting both "
+            f"per-leg and per-device figures. The per-leg value ({rths[-1]:g} K/W) is used for the "
+            f"junction, which is correct, but the thermal model is still assuming ONE die per "
+            f"package, so only one leg's loss passes through the case-to-sink interface. If both "
+            f"legs are loaded - one per interleaved channel - set dies/package to {ratio:.0f} and "
+            f"the shared interface will carry both.")})
+    elif n_die > 1:
+        out.append({"key": "dies_per_package", "severity": "note", "message": (
+            f"{n_die} dies share one package, so the case-to-sink interface carries every loaded "
+            f"die's loss while each junction sees only its own leg through R_th_jc. Junction "
+            f"temperature is T_sink + P_leg*R_th_jc + {n_die}*P_leg*R_th_cs.")})
 
     vr = _pick_entry(_entries_of(profile, "V_RRM"))
     v_rated = float(vr.get("typ") or vr.get("max")) if vr and (vr.get("typ") or vr.get("max")) else None

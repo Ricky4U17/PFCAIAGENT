@@ -396,7 +396,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [dsDesign, setDsDesign] = useState<Record<DsKind, Record<string, string>>>({
     mosfet: { V_GS_drive: '', R_g_on: '', R_g_off: '', R_g_common: '', R_th_cs: '0.3',
               sw_method: 'analytic' },
-    diode:  { R_th_cs: '0.3' },
+    // dies/package: a dual common-cathode boost diode feeding both interleaved channels puts
+    // BOTH legs' loss through one case-to-sink interface. The datasheet cannot say whether both
+    // legs are actually loaded — only the designer knows which package is fitted.
+    diode:  { R_th_cs: '0.3', dies_per_package: '1' },
   })
 
   useEffect(() => {
@@ -649,7 +652,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const designFields: [string, string, string][] = isFet
       ? [['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
          ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
-      : [['R_th_cs', 'R_θcs', '°C/W']]
+      : [['R_th_cs', 'R_θcs', '°C/W'], ['dies_per_package', 'Dies / package', '1 or 2']]
     return (
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>

@@ -478,6 +478,39 @@ describe what the code does rather than claim CCM-gating for both branches.
   charge taken at the actual pre-turn-on drain voltage in DCM rather than at V_OUT. Needs its own
   verification pass — it moves numbers, so it does not belong in a datasheet-sourcing milestone.
 
+### B17. Diode V_F is evaluated at the mid-current, not across the ripple triangle
+`pfc_loss_model.loss()` computes diode conduction as `vf(i_d_repr)*i_d_density + rd*ms_dio`, where
+`i_d_repr` is the mid-value of the conducting current. The duty gating and the ripple's contribution
+to the mean square are both correct (`ms_dio = (i_ch^2 + di^2/12)*(1-d)`), so what is missed is only
+the CURVATURE of V_F(i) across the ripple band — the linear part is already carried by `rd`.
+
+Both external diode reviews (2026-08-07) recommend sampling V_F at N points across the off-time
+current ramp instead. That is a genuine refinement, second-order here: V_F is concave, so evaluating
+at the mean understates slightly, and the error grows with ripple depth (dI_L reaches ~12 A on a
+~16 A peak at low line).
+
+It is deferred rather than done because it only pays once the V-I curve is real. On the parts seen
+so far the datasheet publishes V_F at ONE current per temperature, so the "curve" is flat and
+sampling it at ten points returns ten identical values. Do this WITH M7, not before.
+
+- **Done when:** the digitised V_F(i, T_j) curve is available and conduction is integrated across
+  the ripple triangle; compare against the present mid-current result on the same part to show what
+  the refinement was worth.
+
+### B18. The bridge rectifier has no leakage term at all
+`Bridge` (pfc_loss_model.py) has no `irev_curve` and no leakage field of any kind, while `Diode` and
+`Mosfet` both do. So `I_rev_vs_Tj` is declared for the two diode classes only, and a bridge
+datasheet's reverse current has nowhere to go — the `diodes_inc_rectifier` template used to map `IR`
+onto that diode-only key, where the value parsed and was then silently dropped (removed at C211).
+
+**Magnitude: ~16 mW** (400 V bus x ~10 uA x 4 diodes), which is why nobody noticed. It is not worth
+a model on its own; it becomes worth having if a bridge is ever run hot enough for leakage to matter,
+or if the reverse-recovery placeholder in `Bridge.loss()` is ever made real.
+
+- **Done when:** either `Bridge` gains a leakage term and `I_rev_vs_Tj` is declared for
+  `bridge_rectifier` (both, or `audit_device_classes()` will flag it), or the decision to leave it
+  out is recorded as final and the report says so where bridge loss is reported.
+
 ## C. GUI  `CODE`
 
 ### C1. Control Design page redesign

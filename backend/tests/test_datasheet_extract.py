@@ -139,18 +139,39 @@ class TestRealDatasheetValues:
         assert e["typ"] == pytest.approx(0.87) and e["max"] == pytest.approx(0.90)
         assert e["conditions"] == {"I_F": 20.0, "T_j": 25.0}
 
-    def test_a_value_in_the_max_column_is_not_lost_to_a_dash_in_typ(self, extracted):
+    def test_a_value_in_the_max_column_is_not_lost_to_a_dash_in_typ(self):
         """`IR | — | — | 10 | µA`. A dash is truthy, so choosing the first NON-EMPTY value column
-        silently dropped the parameter; the column must be chosen by whether it holds a number."""
-        e = _entries(extracted["profile"], "I_rev_vs_Tj")[0]
+        silently dropped the parameter; the column must be chosen by whether it holds a number.
+
+        Driven by a CONSTRUCTED row rather than off a particular datasheet. It used to read the
+        bridge's reverse-current entry, which stopped existing at C211 when that mapping was removed
+        (a bridge's leakage has no valid key — see PENDING B18). The subject of the test was always
+        the dash, not the leakage, and a synthetic row states that directly and cannot be broken by
+        a template change."""
+        roles = {"symbol": 0, "min": 1, "typ": 2, "max": 3, "unit": 4}
+        row = ["IR", "—", "—", "10", "µA"]
+        cell = lambda r, role: r[roles[role]] if role in roles else ""
+        got = DX._parse_row(row, roles, {"ir": "I_rev_vs_Tj"}, cell)
+        assert len(got) == 1, got
+        e = got[0]
         assert e["max"] == pytest.approx(1e-5)      # 10 µA, scaled to SI
+        assert e.get("typ") is None and e.get("min") is None
 
     def test_a_temperature_range_yields_both_bounds(self, extracted):
         e = _entries(extracted["profile"], "Tj_max")[0]
         assert e["min"] == -40.0 and e["max"] == 150.0
 
     def test_units_are_converted_to_si(self, extracted):
-        assert _entries(extracted["profile"], "C_iss")[0]["min"] == pytest.approx(400e-12)
+        """400 pF -> 4e-10 F.
+
+        This read `C_iss` until C211. That was the same disconnect the V_DSS assertion above had:
+        the part is a BRIDGE RECTIFIER and C_iss is a MOSFET input capacitance, declared for the
+        MOSFET classes only — so its total capacitance landed on a key its class does not carry and
+        was dropped. `C_j` is the diode/bridge counterpart, and it is what the two-point fit for the
+        junction grading coefficient reads."""
+        assert _entries(extracted["profile"], "C_j")[0]["min"] == pytest.approx(400e-12)
+        assert not _entries(extracted["profile"], "C_iss"), (
+            "a rectifier's junction capacitance must not be filed under the MOSFET's C_iss")
 
     def test_several_parameters_packed_into_one_row_are_unpacked(self):
         """`RthJC RthJL RthJA | 5 9 24` is three parameters, not one named
@@ -212,6 +233,35 @@ class TestCrossCheck:
 
 
 class TestTemplates:
+    def test_a_scoped_template_may_only_map_keys_valid_for_its_own_classes(self):
+        """Existence was never the problem; APPLICABILITY was.
+
+        Four defects slipped past the old "is this key in the registry" check: VRRM and VR mapped
+        onto the MOSFET-only V_DSS, CT onto the MOSFET-only C_iss, and IR onto a diode-only leakage
+        key from the BRIDGE template. Each parsed cleanly, landed on a name the part's own class
+        does not carry, and was dropped downstream — and two green tests were asserting the wrong
+        key. A template that declares its device classes must map only to keys valid for them.
+        """
+        import copy
+        from app.mode_b.semiconductor import vendor_templates as VT
+        from app.mode_b.semiconductor import registry as R
+
+        classes_of = {p["key"]: set(p.get("device_classes") or [])
+                      for p in R.load()["parameters"]}
+        for t in VT.templates():
+            scope = set(t.get("device_classes") or [])
+            if not scope:
+                continue                      # generic applies to everything
+            for sym, key in (t.get("symbol_map") or {}).items():
+                assert scope & classes_of[key], (t["template_id"], sym, key)
+
+        # and the rule must actually bite, not just pass because nothing violates it today
+        bad = copy.deepcopy(VT.load())
+        tmpl = next(t for t in bad["templates"] if t["template_id"] == "diodes_inc_rectifier")
+        tmpl["symbol_map"]["IR"] = "I_rev_vs_Tj"        # diode-only key on a bridge template
+        with pytest.raises(ValueError, match="declared only for"):
+            VT._validate(bad)
+
     def test_no_template_may_map_a_symbol_to_an_unregistered_name(self):
         """Inventing a name in a vendor adapter is exactly what the registry exists to prevent, so
         loading the templates validates every mapping against it."""

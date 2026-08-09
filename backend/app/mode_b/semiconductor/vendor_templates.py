@@ -33,17 +33,34 @@ def _validate(data: dict) -> None:
     from app.mode_b.semiconductor import registry as R
     ids = set()
     known = {p["key"] for p in R.load()["parameters"]}
+    classes_of = {p["key"]: set(p.get("device_classes") or []) for p in R.load()["parameters"]}
     for t in data["templates"]:
         tid = t.get("template_id")
         if not tid or tid in ids:
             raise ValueError(f"duplicate or missing template_id: {tid!r}")
         ids.add(tid)
+        # A template may declare the device classes it applies to. Where it does, every mapping
+        # must land on a key VALID FOR THOSE CLASSES — not merely on a key that exists.
+        #
+        # This is the check that four separate defects slipped past: VRRM and VR mapped onto the
+        # MOSFET-only V_DSS, CT onto the MOSFET-only C_iss, and IR onto a diode-only leakage key
+        # from the bridge template. In every case the value parsed cleanly, landed on a name the
+        # part's own class does not carry, and was silently dropped downstream — and in two cases a
+        # green test was asserting the wrong key. Existence was never the problem; APPLICABILITY was.
+        scope = set(t.get("device_classes") or [])
         for sym, key in (t.get("symbol_map") or {}).items():
             if key not in known:
                 raise ValueError(
                     f"template {tid!r} maps {sym!r} to {key!r}, which is not a canonical key. "
                     f"Every mapping must land in the registry — inventing a name here is exactly "
                     f"what the registry exists to prevent.")
+            if scope and not (scope & classes_of[key]):
+                raise ValueError(
+                    f"template {tid!r} applies to {sorted(scope)} but maps {sym!r} to {key!r}, "
+                    f"which is declared only for {sorted(classes_of[key])}. The value would parse, "
+                    f"land on a name this class does not carry, and be dropped. Either the key is "
+                    f"wrong, or the parameter should be declared for this class too — but not if "
+                    f"its engine field does not exist on that class's dataclass.")
     if not any(t.get("match", {}).get("always") for t in data["templates"]):
         raise ValueError("no fallback template: one template must declare match.always")
 

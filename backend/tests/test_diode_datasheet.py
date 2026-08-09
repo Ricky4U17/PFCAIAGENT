@@ -11,6 +11,8 @@ The tests below are organised around the one failure that would be worst: `Diode
 True, and the two recovery branches are different physics. A silicon part evaluated as SiC has its
 biggest loss term computed by the wrong formula, with no missing value to give it away.
 """
+import math
+
 import pytest
 
 from app.mode_b.semiconductor import datasheet_flow as DF
@@ -333,3 +335,132 @@ class TestItChangesTheAnswer:
                          {"t_ambient": 50, "rth_sa": 0.5}, 90.0)
         assert tr["didt_pk"] > 0
         assert tr["rr_fet_frac"] == pytest.approx(0.85)
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# C211 — the four corrections that came out of the designer's two external diode reviews.
+#
+# Both reviewers independently recommended replacing 0.5*V*Q_c with the datasheet's capacitive
+# ENERGY curve E_c(V). That is backwards: E_c is the energy STORED in the junction capacitance,
+# and it is returned at the next turn-off when the inductor charges the switch node. What the
+# MOSFET dissipates is the difference between what the bus supplied and what stayed stored.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+# VS-3C40CP12L-M3, transcribed from the datasheet the designer supplied. Dual common-cathode SiC
+# MPS, TO-247AD 3L, 2 x 20 A, 1200 V. Every electrical value is quoted PER LEG.
+VS3C40 = _prof("VS-3C40CP12L-M3", {
+    "V_RRM":       [_e(1200.0)],
+    "I_F_AV":      [_e(20.0, T_c=153)],
+    "V_F_vs_IF":   [_e(1.35, I_F=20, T_j=25),
+                    _e(1.73, I_F=20, T_j=150), _e(1.85, I_F=20, T_j=175)],
+    "Q_c":         [_e(107e-9, V_R=800)],
+    "C_j":         [_e(1200e-12, V_R=1, f=1e6), _e(73e-12, V_R=800, f=1e6)],
+    "R_th_jc":     [_e(0.8), _e(0.4)],                    # per leg / per device, both max
+    "I_rev_vs_Tj": [_e(1.5e-6, V_R=1200, T_j=25), _e(12e-6, V_R=1200, T_j=175)],
+})
+
+
+class TestCapacitiveChargeIsSplitStoredVersusDissipated:
+    def test_the_grading_coefficient_is_fitted_from_the_two_published_capacitance_points(self):
+        """No curve digitising: vendors state C_j at ~1 V and at the rated V_R, which pins m."""
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        # 1200 pF at 1 V -> 73 pF at 800 V
+        expected = -math.log(73e-12 / 1200e-12) / math.log(800.0 / 1.0)
+        assert blk["cj_grading"] == pytest.approx(expected, abs=1e-3)
+        assert 0.33 < blk["cj_grading"] < 0.5          # a physical junction, not a fit artefact
+
+    def test_the_fitted_law_reproduces_the_published_charge(self):
+        """The check that says the two-point fit is describing this part and not just a line."""
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        m = blk["cj_grading"]
+        c0 = 73e-12 * 800.0 ** m
+        q_modelled = c0 * 800.0 ** (1 - m) / (1 - m)
+        assert q_modelled == pytest.approx(107e-9, rel=0.10)
+
+    def test_the_charge_is_moved_to_the_bus_with_that_same_exponent(self):
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        m = blk["cj_grading"]
+        assert blk["qc"] == pytest.approx(107e-9 * (393 / 800) ** (1 - m), rel=1e-6)
+        assert blk["_qc_basis"]["fitted"] is True
+        assert blk["qc"] < 107e-9                       # an 800 V figure overstates a 393 V bus
+
+    @pytest.mark.parametrize("m", [0.0, 0.33, 0.419, 0.472, 0.5])
+    def test_the_dissipated_share_is_one_over_two_minus_m(self, m):
+        """E_diss = V*Q_c - E_stored, and for C(v) = C0*v^-m that is exactly V*Q_c/(2-m).
+
+        Checked against direct integration rather than trusting the algebra. The grid is
+        LOG-spaced: C ~ v^-m is singular at the origin, and a linear grid misestimates the charge
+        by half a percent at m = 0.5 — enough to hide the very effect being tested."""
+        import numpy as np
+        V = 394.0
+        v = np.geomspace(1e-9, V, 200_001)
+        C = 1.2e-9 * v ** -m
+        q = float(np.trapezoid(C, v)); e_stored = float(np.trapezoid(v * C, v))
+        assert (V * q - e_stored) / (V * q) == pytest.approx(1.0 / (2.0 - m), rel=1e-3)
+
+    def test_m_zero_is_the_linear_capacitor_and_reproduces_the_old_number_exactly(self):
+        """The default. An unknown m must not silently change every existing result."""
+        from app.mode_b.semiconductor import database as sdb
+        from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+        import copy
+        mos = sdb.to_block(sdb.load("mosfet")[0], "mosfet")
+        brg = sdb.to_block(sdb.load("bridge")[0], "bridge")
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        old = copy.deepcopy(blk); old["cj_grading"] = 0.0
+        run = lambda b: calculate_semiconductor_losses(
+            DESIGN, mos, b, brg, {"t_ambient": 50, "rth_sa": 0.5}, None)["per_point"][0]
+        p_old, p_new = run(old), run(blk)
+        fsw, vo, nch = DESIGN["fsw"], DESIGN["vout"], DESIGN["nch"]
+        assert p_old["P_FET_rr"] == pytest.approx(nch * fsw * 0.5 * vo * blk["qc"], rel=1e-6)
+        assert p_new["P_FET_rr"] > p_old["P_FET_rr"] * 1.2      # the correction is not cosmetic
+
+    def test_a_part_with_no_capacitance_points_says_the_term_is_understated(self):
+        blk = DF.profile_to_block(SIC, "sic_schottky", DESIGN)      # SIC fixture has no C_j
+        assert "cj_grading" not in blk
+        msg = next(c["message"] for c in blk["_checks"] if c["key"] == "C_j_grading")
+        assert "linear" in msg.lower() and "understated" in msg
+
+
+class TestSharedPackageThermal:
+    def test_the_per_leg_thermal_resistance_is_used_not_the_per_device_one(self):
+        """A dual package publishes both; the junction sees the per-leg (larger) figure. Picking
+        the per-device number would halve the predicted rise."""
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        assert blk["rth_jc"] == pytest.approx(0.8)
+        assert blk["_rth_jc_published"] == [0.4, 0.8]
+
+    def test_two_thermal_resistances_flag_a_multi_die_package(self):
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        c = next(c for c in blk["_checks"] if c["key"] == "dies_per_package")
+        assert c["severity"] == "check" and "MULTI-DIE" in c["message"]
+
+    def test_a_shared_case_carries_every_loaded_dies_loss(self):
+        from app.mode_b.semiconductor import database as sdb
+        from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+        mos = sdb.to_block(sdb.load("mosfet")[0], "mosfet")
+        brg = sdb.to_block(sdb.load("bridge")[0], "bridge")
+        run = lambda d: calculate_semiconductor_losses(
+            DESIGN, mos, DF.profile_to_block(VS3C40, "sic_schottky", d), brg,
+            {"t_ambient": 50, "rth_sa": 0.5}, None)["per_point"][0]
+        one = run(DESIGN)
+        two = run({**DESIGN, "dies_per_package": 2})
+        assert two["Tj_DIODE"] > one["Tj_DIODE"]
+        assert two["Tj_DIODE"] - one["Tj_DIODE"] == pytest.approx(1.1, abs=0.4)
+
+    def test_declaring_the_dual_replaces_the_warning_with_a_statement(self):
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", {**DESIGN, "dies_per_package": 2})
+        assert blk["dies_per_package"] == 2
+        c = next(c for c in blk["_checks"] if c["key"] == "dies_per_package")
+        assert c["severity"] == "note"
+
+
+class TestLeakageIsQuotedAtARatedVoltage:
+    def test_the_reverse_voltage_is_recorded_and_reported_as_an_upper_bound(self):
+        """I_R is published at the rated V_R (1200 V here), not the 393 V bus. It is used as
+        published and declared a bound, because fitting the barrier-lowering law needs two voltage
+        points and this datasheet gives one."""
+        blk = DF.profile_to_block(VS3C40, "sic_schottky", DESIGN)
+        assert blk["_irev_at_VR"] == [1200.0]
+        msg = next(c["message"] for c in blk["_checks"] if c["key"] == "I_rev_vs_Tj")
+        assert "UPPER BOUND" in msg and "1200" in msg
+        assert blk["irev_curve"] == [[25.0, 175.0], [1.5e-6, 12e-6]]

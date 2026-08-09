@@ -253,23 +253,52 @@ def _mosfet_section(story, traces, mosfet=None):
        f"reverse-recovery charge Q<sub>rr</sub> swept out under V<sub>OUT</sub> ({_frac*100:.0f} % of "
        "Q<sub>rr</sub>&#183;V<sub>OUT</sub> to the FET, the rest to the diode). For a SiC Schottky there "
        "is no minority-carrier recovery, but its junction-capacitance charge Q<sub>c</sub> is charged "
-       "through the channel, dissipating &#189;&#183;V<sub>OUT</sub>&#183;Q<sub>c</sub>. "
+       "through the channel. The bus supplies V<sub>OUT</sub>&#183;Q<sub>c</sub> to do it; part of "
+       "that stays STORED in the junction capacitance and is returned at the next turn-off, when "
+       "the inductor charges the switch node. What the MOSFET dissipates is the difference, which "
+       "for C<sub>j</sub>&#8733;v<sup>&#8722;m</sup> is exactly V<sub>OUT</sub>Q<sub>c</sub>/(2&#8722;m). "
        "<b>The silicon term is gated to CCM</b> — in DCM the diode current already reaches zero "
        "before the MOSFET turns on, so there is no hard recovery. The SiC junction charge is "
        "counted at every switching cycle, including the DCM portion near the zero crossings at high "
        "line; there the drain has already resonated below V<sub>OUT</sub>, so that share is "
        "slightly overstated. It reaches DCM only at the top of the input range and only for about "
        "a tenth of the half-cycle, so the effect is well under 0.2 W.")
-    eq_box(story, [r"P_{rr\to FET}=N_{ch}\,f_{sw}\,\frac{1}{2} V_{OUT}\,Q_c\ \mathrm{(SiC)}\quad "
+    eq_box(story, [r"P_{rr\to FET}=N_{ch}\,f_{sw}\,\frac{V_{OUT}\,Q_c}{2-m}\ \mathrm{(SiC)}\quad "
                    r"\mathrm{or}\quad N_{ch}\,f_{sw}\,k\,\overline{Q_{rr}V_{OUT}}\ \mathrm{(Si)}"],
            number="7.4.4", ch=CH)
+    _m = float(traces[0][1].get("cj_grading", 0.0)) if traces else 0.0
+    _kq = float(traces[0][1].get("qc_factor", 0.5)) if traces else 0.5
+    if traces and traces[0][1].get("is_sic"):
+        if _m > 0:
+            annotation(story, "Qc SPLIT",
+                f"m = {_m:.3f} is this part's junction grading coefficient, fitted from the two "
+                f"capacitance values its datasheet publishes, so the dissipated share of the "
+                f"capacitive charge is 1/(2&#8722;m) = <b>{_kq:.3f}</b>. The familiar &#189; is the "
+                f"m = 0 case &#8212; a LINEAR capacitor &#8212; and no real junction is one. Using "
+                f"&#189; here would understate this term by "
+                f"{100*(_kq/0.5-1):.0f}%.<br/><br/>"
+                f"<b>Not the datasheet's E<sub>c</sub> curve.</b> Vendors also plot capacitive "
+                f"ENERGY against reverse voltage, and it is tempting to read this loss straight off "
+                f"it. That energy is what remains STORED in the capacitance; it is handed back at "
+                f"turn-off, not dissipated. Taking it as the loss would understate this term by "
+                f"about 40%, in the same direction as the &#189; it replaced.", CH)
+        else:
+            annotation(story, "Qc SPLIT",
+                "The dissipated share of the capacitive charge is being taken as &#189;, which is "
+                "the LINEAR-capacitor value. It is used because this datasheet does not publish two "
+                "junction-capacitance points, so the grading coefficient m could not be fitted. "
+                "Real junctions run m = 0.33 to 0.5, where the share is 0.60 to 0.67, so this term "
+                "is understated by roughly a quarter. Two C<sub>j</sub> values &#8212; one near 1 V "
+                "and one at the rated V<sub>R</sub> &#8212; remove the assumption entirely, with no "
+                "curve digitising.", CH)
     def _qrr_sub(tr):
         if tr["is_sic"]:
-            return f"&#189;&#215;{_f(tr['Vo'],1)}V&#215;{_nc(tr['qc'])}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}"
+            return (f"{tr.get('qc_factor', 0.5):.3f}&#215;{_f(tr['Vo'],0)}V&#215;{_nc(tr['qc'])}"
+                    f"&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}")
         return (f"{tr.get('rr_fet_frac', 0.85):.2f}&#215;{_nc(tr['qrr_eff'])}"
                 f"&#215;{_f(tr['Vo'],0)}V&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{nch}")
     _worked(story, "7.4.4", "Diode-Charge-into-FET — Worked Derivation", [
-        (f"P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;&#189;V<sub>OUT</sub>Q<sub>c</sub> (SiC) / {_frac:.2f}&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
+        (f"P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;V<sub>OUT</sub>Q<sub>c</sub>/(2&#8722;m) (SiC) / {_frac:.2f}&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
          lambda tr: f"{_qrr_sub(tr)} = <b>{_f(tr['P_rr_fet_tot'])} W</b>"),
     ], traces)
 
@@ -389,6 +418,30 @@ def _diode_section(story, traces, diode=None):
             "MOSFET's C<sub>rss</sub> is left unmapped in Section 7.4.2.",
             ["Quantity", "Value", "Basis"], _rows,
             col_widths=[CW*0.34, CW*0.20, CW*0.46], ch=CH)
+
+    _nd = int(traces[0][1].get("n_die_shared", 1)) if traces else 1
+    if _nd > 1:
+        annotation(story, "SHARED CASE",
+            f"This package carries <b>{_nd} dies</b>, one per interleaved channel, so every loaded "
+            f"die's loss passes through the single case-to-sink interface while each junction sees "
+            f"only its own leg through R<sub>&#952;jc</sub>. The junction temperature is therefore "
+            f"T<sub>sink</sub> + P<sub>leg</sub>R<sub>&#952;jc</sub> + "
+            f"{_nd}&#183;P<sub>leg</sub>R<sub>&#952;cs</sub>, not "
+            f"P<sub>leg</sub>(R<sub>&#952;jc</sub>+R<sub>&#952;cs</sub>). The per-leg "
+            f"R<sub>&#952;jc</sub> is the one used; a dual datasheet also quotes a per-device figure "
+            f"about {_nd}&#215; smaller, which describes the whole package and would halve the "
+            f"predicted rise if it were taken for the junction.", CH)
+
+    _vrs = _d.get("_irev_at_VR") or []
+    if _vrs:
+        annotation(story, "LEAK BOUND",
+            f"Reverse current is published at V<sub>R</sub> = "
+            f"{', '.join(f'{v:.0f}' for v in _vrs)} V, not at the bus, and is used as published. "
+            f"Schottky leakage rises steeply with reverse voltage, so the blocking term below is a "
+            f"<b>conservative upper bound</b> rather than its value at this bus. It is not scaled: "
+            f"the barrier-lowering law needs two voltage points to fit and this datasheet gives "
+            f"one, and an invented law would read as a correction while being a guess. The term is "
+            f"small, so the cost of carrying the bound is small.", CH)
 
     _chk = [c for c in (_d.get("_checks") or []) if c.get("severity") == "check"]
     if _chk:

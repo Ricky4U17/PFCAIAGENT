@@ -8247,3 +8247,118 @@ written for the wrong vendor and only a real file exposed it.
 NEXT: M6 (wire the C202 plausibility gate onto extracted/confirmed profiles), M5 (remove the Top-10
 ranking endpoint), M7 (curve digitiser — post-M8 the curves that pay are Q_rr vs di/dt and vs I_F,
 not the MOSFET's E(I_D)), then M8-bridge.
+
+## C211 — the capacitive-charge split, and three gaps the external diode reviews found
+
+The designer commissioned two independent reviews of Chapter 7.5 (Copilot and claude.ai) against
+three candidate boost diodes and their datasheets. Both are pointed at the right physics. Between
+them they found three real gaps — and both made the same error on the fourth, the one they led with.
+
+### The error both reviewers made
+Both recommend replacing `0.5*V*Q_c` with the datasheet's capacitive ENERGY curve E_c(V):
+
+> "Use Ec(Vout) directly if digitized. Do not use 0.5 x Vout x Qc." (Copilot)
+> "Pcap = Nch x fsw x Ec(VOUT); fallback = 0.5 x VOUT x Qc." (claude.ai)
+
+**E_c is the energy STORED in the junction capacitance.** It is returned at the next turn-off, when
+the inductor charges the switch node. What the MOSFET dissipates is what the bus supplied minus what
+stayed stored:
+
+```
+E_dissipated = V*Q_c - E_c(V) = V*Q_c / (2 - m)      for C_j(v) = C0*v^-m
+```
+
+Fitting m from the two capacitance points each datasheet publishes, at the 393 V bus:
+
+| | V*Q_c | E_c stored | DISSIPATED | old 0.5*V*Q_c | E_c used directly |
+|---|---|---|---|---|---|
+| VS-3C40 (m=0.419) | 27.9 uJ | 10.3 uJ | **17.7 uJ** | 14.0 uJ, **-26%** | 10.3 uJ, **-42%** |
+| VS-4C16 (m=0.410) | 17.2 uJ | 6.4 uJ | **10.8 uJ** | 8.6 uJ, -26% | 6.4 uJ, -41% |
+
+The engine was already 26% low. Their fix would have taken it to 42% low, in the same direction.
+m = 0 is a LINEAR capacitor, for which 1/(2-m) is exactly 0.5 — which is where the textbook half
+comes from, and why it is the default: an unknown m reproduces the previous number bit-for-bit
+rather than silently changing every result.
+
+**No curve digitising is needed.** Both reviews list "digitize Fig. 8 and Fig. 9" as a prerequisite.
+Vishay and Toshiba both state C_j at ~1 V and at the rated V_R, and those two points pin m. The
+fitted power law reproduces each part's own published Q_c to within 3-6%, which is the check that
+says it is describing the part rather than drawing a line through two dots. M7 is not a blocker.
+
+### What that is worth, both parts real
+Same design, IMZA65R033M2H MOSFET and VS-3C40CP12L-M3 diode, 90 Vac:
+
+| | P_FET_rr | MOSFET total | T_j diode |
+|---|---|---|---|
+| before | 1.808 W | 10.389 W | 76.6 |
+| m fitted from C-V | **2.287 W** | 10.878 W | 76.9 |
+| + shared-package thermal | 2.287 W | 10.878 W | **77.9** |
+
+### The three gaps they were right about
+1. **Q_c scaling used an assumed exponent.** M8 scaled Q_c to the bus as V^0.5; the same C-V fit
+   gives V^(1-m), which is this part's own. 107 nC at 800 V becomes 70.8 nC at 393 V, not 75.1.
+2. **Leakage is quoted at the rated V_R, never the bus** — 1200 V here against a 393 V bus. It is
+   used as published and now DECLARED a conservative upper bound. Not scaled: the barrier-lowering
+   law needs two voltage points and the datasheet gives one, and an invented law would read as a
+   correction while being a guess. The term is small, so the bound costs little.
+3. **A dual-die package shares one case.** VS-3C40 is two legs in one TO-247, common cathode, one
+   per interleaved channel. Each junction sees its own leg through R_th_jc, but BOTH legs' loss
+   crosses the single case-to-sink interface. New `dies_per_package` (a design input — only the
+   designer knows which package is fitted): T_j = T_sink + P_leg*R_th_jc + n*P_leg*R_th_cs. Worth
+   +1.1 degC here, and it grows with die count. The per-leg R_th_jc is now picked deliberately —
+   a dual datasheet also quotes a per-device figure about half the size, and taking that for the
+   junction would halve the predicted rise. Two published R_th_jc values are detected as the
+   multi-die signature and reported.
+
+### What their reviews got right that we already do
+claude.ai's headline finding is that diode current must be gated by D_off(theta) rather than taken
+over the whole switching period. The engine has always done this — `ms_dio = msc*(1-d)` with
+`msc = i_ch**2 + di**2/12`, which is literally their recommended integral, ripple term included.
+Their current derivation is sound (I reproduced ID_rms at 180 Vac as 8.85 A against their 8.892),
+but it describes what is already there. No change.
+
+### Their device ranking should not be acted on
+The three candidates are not computed by the same method — VS-3C40's conduction is "preserved from
+the original report" while the other two are fresh Vth/Rd fits. Worse, VS-4C16's slope is COPIED
+from the Toshiba fit (their own text says "pending final fit"), so the device declared best was
+ranked using another device's parameter; the entire 15.48 vs 15.02 W gap comes from the intercept.
+The spread is under 1 W on ~16 W, smaller than the uncertainty they flag. And a 1200 V part losing
+to two 650 V parts on conduction loss is arithmetic, not a finding — the question is margin.
+
+### Also
+- `CT` (a rectifier's total capacitance) was mapped onto `C_iss`, which is declared for the MOSFET
+  classes only — so it landed on a name its class does not carry and was dropped. Same defect class
+  as C210's VRRM/V_DSS. New canonical `C_j`, and `CT`/`Cj`/`Ct` map to it.
+- The numeric check on 1/(2-m) integrates on a LOG-spaced grid. C ~ v^-m is singular at the origin
+  and a linear grid misestimates the charge by half a percent at m = 0.5 — enough to hide the very
+  effect under test.
+- The GUI diode tab gains a dies/package input beside R_th_cs.
+
+### The symbol map was written before the diode classes existed
+Having hit the same defect twice in two commits, I audited every mapping in every template against
+the device classes its key is declared for. One more: the bridge template mapped `IR` to
+`I_rev_vs_Tj`, which is declared for the two DIODE classes only — so a bridge's reverse leakage
+parsed cleanly, landed on a key its class does not carry, and was dropped. Widening the key would
+have been worse: `Bridge` has no leakage field at all, so the parameter would then declare an engine
+field that dataclass lacks. The gap is in the MODEL, not the naming, and it is worth ~16 mW
+(400 V x 10 uA x 4 diodes) — removed from the template and logged as PENDING B18.
+
+The structural fix is what matters: **templates now declare the device classes they apply to, and
+the validator enforces that every mapping lands on a key valid for those classes.** The old check
+only asked whether the key EXISTED, and all four defects passed it — VRRM/VR onto V_DSS, CT onto
+C_iss, IR onto a diode-only leakage key. Existence was never the problem; applicability was. The
+test asserts the rule holds AND that it bites, by injecting the removed mapping and requiring the
+raise. The generic template is clean.
+
+A third test broke on that fix: it had been using the bridge's leakage entry as its vehicle for
+testing dash-in-typ-column parsing. Its subject was always the dash, so it now runs on a constructed
+row and cannot be broken by a template change.
+
+VERIFIED: 16 new tests, including the closed form checked against direct integration at five values
+of m, and a regression guard that m = 0 reproduces the previous P_FET_rr exactly. Suite 394 passed / 2 skipped (was 378). Combined report 190 pp; Ch7 renders the QC SPLIT, SHARED CASE and LEAK BOUND
+annotations with 0 unrenderable glyphs and no mid-word wraps; tsc clean.
+
+NOT CHANGED, deliberately: Q_rr is still used at its published conditions and not rescaled to the
+design's di/dt (C210's reasoning stands), and the V_F curve is still evaluated at the mid-current
+rather than sampled across the ripple triangle — a real second-order refinement, left for when the
+V-I curves are digitised.

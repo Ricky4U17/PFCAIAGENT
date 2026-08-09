@@ -132,6 +132,41 @@
 
   "parameters": [
     {
+      "key": "C_j",
+      "si_unit": "F", "display_unit": "pF",
+      "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
+      "source": "datasheet", "required": false,
+      "condition_qualified": true, "conditions": ["V_R", "f"],
+      "multi_valued": true,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": [],
+      "report_label": "C<sub>j</sub>",
+      "plausible": {"min": 1e-12, "max": 1e-8},
+      "description": "Total junction capacitance at a stated reverse voltage. Not consumed directly: vendors publish it at TWO voltages (typically 1 V and the rated V_R) and those two points fit C_j_grading, which sets both the Q_c voltage scaling and how much of the capacitive charge is dissipated rather than stored. The symbol CT used to be mapped onto C_iss, which is declared for the MOSFET classes only, so a rectifier's capacitance landed on a name its class does not carry and was dropped."
+    },
+    {
+      "key": "C_j_grading",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "derived", "required": false,
+      "consumed_by": ["loss_engine", "report"],
+      "engine_fields": ["cj_grading"],
+      "report_label": "m",
+      "plausible": {"min": 0.0, "max": 0.95},
+      "description": "Grading coefficient m in C_j(v) = C0 * v^-m, fitted from two published capacitance points. It does two jobs: Q_c scales as V^(1-m) between the published reverse voltage and the bus, and the share of the capacitive charge DISSIPATED in the MOSFET rather than stored is 1/(2-m). m = 0 is a linear capacitor, for which that share is exactly the textbook 0.5 - which is why 0 is the default: an unknown m reproduces the previous result rather than silently changing it."
+    },
+    {
+      "key": "dies_per_package",
+      "si_unit": "1", "display_unit": "1",
+      "device_classes": ["sic_schottky", "si_diode"],
+      "source": "design", "required": false,
+      "consumed_by": ["thermal", "report"],
+      "engine_fields": ["dies_per_package"],
+      "report_label": "dies/package",
+      "plausible": {"min": 1.0, "max": 8.0},
+      "description": "How many diode dies share one package, and therefore one case-to-sink interface. A dual common-cathode boost diode feeding both interleaved channels puts BOTH legs' loss through that interface while each junction sees only its own leg through R_th_jc. A design input, not a datasheet field: the designer knows which package is fitted and whether both legs are loaded."
+    },
+    {
       "key": "V_RRM",
       "si_unit": "V", "display_unit": "V",
       "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],
@@ -565,7 +600,7 @@
       "engine_fields": ["rth_jc"],
       "report_label": "R<sub>&#952;jc</sub>",
       "plausible": {"min": 0.01, "max": 50.0},
-      "description": "Junction-to-case thermal resistance."
+      "description": "Junction-to-case thermal resistance. A multi-die package publishes it TWICE - per leg and per device - and the junction sees the per-leg (larger) figure; the per-device number describes the whole package. Not flagged multi_valued because the two are distinguished by scope rather than by any measurement condition, and see dies_per_package for how the shared case is handled."
     },
     {
       "key": "R_th_cs",
@@ -817,10 +852,11 @@
       "si_unit": "A", "display_unit": "A",
       "device_classes": ["sic_schottky", "si_diode"],
       "source": "datasheet", "required": false, "is_curve": true,
+      "condition_qualified": true, "conditions": ["V_R", "T_j"],
       "consumed_by": ["loss_engine"],
       "engine_fields": ["irev_curve"],
       "report_label": "I<sub>R</sub>(T<sub>j</sub>)",
-      "description": "Reverse leakage versus junction temperature."
+      "description": "Reverse leakage versus junction temperature, quoted AT A STATED REVERSE VOLTAGE which is normally the part's rated V_R, not the bus. Schottky leakage rises steeply with reverse voltage, so a rated-V_R figure used at a lower bus is a conservative upper bound - reported as one rather than scaled by a law nobody measured."
     },
     {
       "key": "k_vf",
