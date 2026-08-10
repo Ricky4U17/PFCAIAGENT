@@ -125,7 +125,136 @@ def find_plots(page, min_w: float = 80.0, min_h: float = 60.0) -> list[dict]:
                abs(r.x1 - o["rect"][2]) < 8 and abs(r.y1 - o["rect"][3]) < 8 for o in out):
             continue                                   # same plot, described twice
         out.append({"rect": (r.x0, r.y0, r.x1, r.y1), "width": r.width, "height": r.height})
+    # Only when no frame was drawn at all. Additive: a vendor that draws frames is untouched.
+    if not out:
+        out.extend(find_plots_by_ticks(page, min_w, min_h))
     out.sort(key=lambda f: (round(f["rect"][1], 1), f["rect"][0]))
+    return out
+
+
+# A superscript is smaller than its base, starts at its right edge, and its centre sits higher.
+_SUP_SIZE_RATIO = 0.85
+_SUP_RISE = 0.8
+_SUP_GAP = 7.0
+
+
+def reassembled_labels(page, clip=None) -> list[tuple[float, float, float]]:
+    """Numeric axis labels as (x_centre, y_centre, value), rebuilt from FRAGMENTED text runs.
+
+    Some vendors position their axis labels rather than typesetting them, so one label arrives as
+    several runs: a decade as a base "10" and a raised "3", a decimal as "0" and ".05". Read run by
+    run, an axis labelled 1 / 10 / 100 / 1000 yields the numbers 10, 1, 10, 2, 10, 3 and fits
+    nothing.
+
+    THIS IS A FALLBACK, NOT A REPLACEMENT. It runs only where the plain reading has already failed
+    to fit — an earlier attempt made it the primary reader and broke 16 of 23 tests on the two
+    vendors that were working, because reassembly changes what a correctly-read label means.
+    """
+    spans = []
+    for b in page.get_text("dict", clip=clip)["blocks"]:
+        for l in b.get("lines", []):
+            for sp in l.get("spans", []):
+                t = sp["text"].strip()
+                if t:
+                    spans.append({"t": t, "bb": sp["bbox"], "size": sp["size"]})
+    spans.sort(key=lambda sp: (round(sp["bb"][1], 1), sp["bb"][0]))
+
+    out: list[tuple[float, float, float]] = []
+    used = set()
+    for i, sp in enumerate(spans):
+        if i in used:
+            continue
+        base = _as_number(sp["t"])
+        bb = sp["bb"]
+        cy = (bb[1] + bb[3]) / 2.0
+        # "0" + ".05" -> 0.05 : a decimal split at the point, same size, same line, touching
+        joined = None
+        for j, nx in enumerate(spans):
+            if j == i or j in used:
+                continue
+            nb = nx["bb"]
+            if (abs(nx["size"] - sp["size"]) < 0.3 and abs(nb[1] - bb[1]) < 1.0
+                    and -1.0 <= nb[0] - bb[2] <= 2.0 and nx["t"].startswith(".")):
+                joined = _as_number(sp["t"] + nx["t"])
+                if joined is not None:
+                    used.add(j)
+                    out.append(((bb[0] + nb[2]) / 2.0, cy, joined))
+                break
+        if joined is not None:
+            continue
+        if base is None:
+            continue
+        # "10" + raised "3" -> 1000
+        for j, ex in enumerate(spans):
+            if j == i or j in used:
+                continue
+            eb, esz = ex["bb"], ex["size"]
+            ev = _as_number(ex["t"])
+            if ev is None or ev != int(ev) or abs(ev) > 12:
+                continue
+            if (esz <= sp["size"] * _SUP_SIZE_RATIO
+                    and -1.5 <= eb[0] - bb[2] <= _SUP_GAP
+                    and cy - (eb[1] + eb[3]) / 2.0 >= _SUP_RISE
+                    and eb[1] < bb[3]):
+                used.add(j)
+                out.append(((bb[0] + eb[2]) / 2.0, cy, base ** ev if base else 0.0))
+                break
+        else:
+            out.append(((bb[0] + bb[2]) / 2.0, cy, base))
+    return out
+
+
+def _tick_clusters(labels, along: int, tol: float, min_n: int, min_span: float):
+    """Group labels that line up along one axis — a tick row or a tick column."""
+    other = 1 - along
+    buckets: dict[int, list] = {}
+    for lab in labels:
+        buckets.setdefault(int(round(lab[other] / tol)), []).append(lab)
+    out = []
+    for group in buckets.values():
+        if len(group) < min_n:
+            continue
+        vals = [g[along] for g in group]
+        if max(vals) - min(vals) < min_span:
+            continue
+        out.append(sorted(group, key=lambda g: g[along]))
+    return out
+
+
+def find_plots_by_ticks(page, min_w: float = 80.0, min_h: float = 60.0) -> list[dict]:
+    """Plot areas inferred from the TICK LABELS, for datasheets that draw no axes box.
+
+    Some vendors draw no frame and no gridline group — just the curves, two axis lines and the
+    labels — so a frame-shaped search finds nothing on them at all. What every plot does have is a
+    ROW of numeric labels beneath it and a COLUMN beside it; the plot is what they bracket. Each row
+    takes the ONE nearest column that belongs to it: pairing every row with every column to its left
+    builds nested frames spanning whole page columns, whose mixed tick sets then fit nothing.
+    """
+    labels = reassembled_labels(page)
+    rows = _tick_clusters(labels, along=0, tol=3.0, min_n=3, min_span=60.0)
+    cols = _tick_clusters(labels, along=1, tol=6.0, min_n=3, min_span=50.0)
+    out = []
+    for r in rows:
+        rx0, rx1 = r[0][0], r[-1][0]
+        ry = sum(l[1] for l in r) / len(r)
+        best, best_d = None, 1e9
+        for c in cols:
+            cx = sum(l[0] for l in c) / len(c)
+            cy0, cy1 = c[0][1], c[-1][1]
+            if not (rx0 - 70.0 <= cx <= rx0 + 12.0):
+                continue
+            if not (0.0 <= ry - cy1 <= 34.0):
+                continue
+            d = (rx0 - cx) + (ry - cy1)
+            if d < best_d:
+                best, best_d = (cx, cy0, cy1), d
+        if best is None:
+            continue
+        cx, cy0, cy1 = best
+        x0, y0, x1, y1 = cx + 6.0, cy0 - 6.0, rx1 + 6.0, ry - 6.0
+        if x1 - x0 < min_w or y1 - y0 < min_h:
+            continue
+        out.append({"rect": (x0, y0, x1, y1), "width": x1 - x0, "height": y1 - y0, "from": "ticks"})
     return out
 
 
@@ -194,7 +323,8 @@ def calibrate(page, frame: tuple) -> dict:
     x0, y0, x1, y1 = frame
 
     bottom, left = [], []
-    for txt, bb in _text_items(page, fitz.Rect(x0 - 60, y0 - 20, x1 + 60, y1 + _TICK_BAND + 14)):
+    clip = fitz.Rect(x0 - 60, y0 - 20, x1 + 60, y1 + _TICK_BAND + 14)
+    for txt, bb in _text_items(page, clip):
         val = _as_number(txt)
         if val is None:
             continue
@@ -207,6 +337,19 @@ def calibrate(page, frame: tuple) -> dict:
             left.append((cy, val))
 
     cal_x, cal_y = _fit_axis(bottom), _fit_axis(left)
+    # FALLBACK, in that order. A label the plain reading got right must keep its meaning; only an
+    # axis that fitted nothing is re-read with fragments reassembled.
+    if not (cal_x and cal_y):
+        b2, l2 = [], []
+        for cx, cy, val in reassembled_labels(page, clip):
+            if y1 - 2 <= cy <= y1 + _TICK_BAND and x0 - _TICK_SPAN_SLACK <= cx <= x1 + _TICK_SPAN_SLACK:
+                b2.append((cx, val))
+            elif cx <= x0 + 4 and x0 - _TICK_BAND - 24 <= cx and y0 - 8 <= cy <= y1 + 8:
+                l2.append((cy, val))
+        cal_x = cal_x or _fit_axis(b2)
+        cal_y = cal_y or _fit_axis(l2)
+        if b2 or l2:
+            bottom, left = bottom or b2, left or l2
     titles = _axis_titles(page, frame)
     return {
         "frame": list(frame),

@@ -40,6 +40,7 @@ entering the design must carry provenance.
 | C213 | **M5** loss ranking restricted to what the catalogue measures | bridge + bottom-FET kept; MOSFET/diode refuse with the reason |
 | C214 | **M7 part 1** vector curve digitiser + proposals | Fig.1 2.8%, Fig.9 0.36% against the part's own table |
 | C215 | **M7 part 2** Curves sub-tab; a confirmed curve reaches the engine | P_D_cond 7.19 -> 5.86 W; caught a transposed-axis -692 W bug |
+| C216 | digitiser measured on 4 vendors + fragmented-label fallback | reads 3 of 5 files; Toshiba is RASTER, Infineon frameless |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -72,12 +73,20 @@ class it RESOLVED to rather than the one it arrived under.
 - ~~**M5**~~ — DONE at C213. Not deleted: the bridge and the bottom-FET conduction search
   still use it legitimately, so the ranking is bounded to what the catalogue measures.
 - ~~**M6**~~ — DONE at C212. The gate runs on upload and on confirm, advisory in both.
-- **M7 — DONE for the diode at C214/C215.** Digitiser, proposals, Curves sub-tab, and the
-  confirmed curve reaching the engine. STILL OPEN: (a) a raster fallback for genuinely scanned
-  datasheets — these vector PDFs did not need one; (b) the MOSFET figures (E_oss(V), R_DS(on) vs
-  T_j, gate-charge, transfer) are not mapped — the machinery is general, only `_FIGURE_TARGETS` is
-  diode-only. NOTE the plan's premise was wrong: these datasheets are VECTOR, so the curve is read,
-  not traced.
+- **M7 — DONE for the diode at C214/C215, coverage measured at C216.** Digitiser, proposals,
+  Curves sub-tab, and the confirmed curve reaching the engine. Coverage across the four datasheets
+  on file: **Vishay x2 and Diodes Inc read (9/10/11 figures); Toshiba and Infineon do not.**
+  STILL OPEN, and the two are NOT the same job:
+  - **(a) Toshiba needs a RASTER tracer.** Its curves are 1638x1289 bitmaps, no vector paths at
+    all. This is the "assisted pixel digitising" the plan originally specified, still unbuilt.
+  - **(b) Infineon needs frameless + fragmented-label support.** C216 added the fallback and it
+    reads 1 of 14 plot regions; the rest refuse. Two stacked plots per row with shared label bands
+    need a focused effort WITH ITS OWN FIXTURES — over-tuning here yields a confident wrong
+    calibration, which is worse than reading nothing.
+  - **(c) THE MOSFET DATASHEET HAS NO CURVES TO MAP.** One figure caption in 17 pages, the package
+    outline. So the C208 gaps (E_oss as a V^1.5 fit, C_rss unmapped, g_fs absent) cannot be closed
+    from this part's datasheet at all — Infineon publishes those curves in a separate application
+    note. `_FIGURE_TARGETS` remains diode-only for that reason, not for want of machinery.
 - **M8-bridge** — the bridge still has neither a datasheet flow nor a correct requirement (its
   average current is the INPUT current, not the output current; C210 deliberately left it alone
   rather than hand it the diode's formula).
@@ -222,7 +231,7 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **439 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **444 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209

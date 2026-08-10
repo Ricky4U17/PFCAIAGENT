@@ -8545,3 +8545,47 @@ tsc clean and the frontend builds.
 REMAINING IN M7: a raster fallback for genuinely scanned datasheets, which these vector PDFs did not
 need. The MOSFET figures - E_oss(V), R_DS(on) vs T_j, the gate-charge and transfer curves - are not
 yet mapped to targets; the machinery is general, only _FIGURE_TARGETS is diode-only.
+
+
+## C216 — the digitiser measured across four vendors, and a fragmented-label fallback
+
+Two questions, in order: does the digitiser generalise beyond the one datasheet it was built on,
+and can the vendors it cannot read be brought in?
+
+IT GENERALISES. Measured over every datasheet on file:
+
+    Vishay VS-3C40  (built on)      9 figures,  44 curves
+    Vishay VS-4C16                 10 figures,  48 curves
+    Diodes Inc GBJ40L06            11 figures,  58 curves   <- never looked at while building it
+    Toshiba TRS12E65H               0
+    Infineon IMZA65R033M2H          0
+
+The Diodes Inc result is the one that matters: an unseen vendor, read correctly, with real axis
+titles and ranges that are right for what they measure (a forward characteristic spanning 0.3 to
+1.5 V, capacitance 1 to 1000 pF). The reader is not Vishay-specific.
+
+THE TWO FAILURES HAVE DIFFERENT CAUSES, which is the useful finding. Toshiba's characteristic
+curves are RASTER IMAGES - 1638 x 1289 bitmaps on pages 3 and 4, no vector paths at all - so no
+amount of text handling reaches them; that is the pixel tracer the plan originally specified, still
+unbuilt, and it is a separate capability rather than a gap in this one. Infineon IS vector, but
+draws no axes box and fragments its axis labels across text runs.
+
+So only Infineon was in scope, and the fallback is built for it: a decade typeset as a base "10"
+and a raised "3" is reassembled to 1000, a decimal split as "0" and ".05" to 0.05, and a plot with
+no frame is located from the ROW of labels beneath it and the COLUMN beside it.
+
+IT IS ADDITIVE, DELIBERATELY. Reassembly runs only where the plain reading has already failed to
+fit, and tick-based detection only where no frame was drawn. An earlier attempt made reassembly the
+primary reader and broke 16 of 23 tests on the two vendors that already worked - reassembly changes
+what a correctly-read label means, so it cannot be allowed to touch one. The guards are unchanged by
+construction and measured identical: 9, 10 and 11 calibrated figures, exactly as before.
+
+Infineon goes from 0 to 1 of its 14 plot regions. That is a partial result and it is left partial:
+two stacked plots per row with shared label bands need a focused effort with their own fixtures, and
+the failure mode of tuning heuristics further is a CONFIDENT WRONG CALIBRATION, which is worse than
+reading nothing. The other thirteen refuse, and a test asserts that they refuse with a reason - the
+residual gate holding is what makes a partial reader safe to ship at all.
+
+Verified: 5 new tests - the unseen vendor read correctly, the raster datasheet refused, a decade
+rebuilt from two text runs, the additive property asserted as an equality rather than a floor, and
+the partial-read-with-refusals behaviour; 28 in tests/test_curve_extract.py.

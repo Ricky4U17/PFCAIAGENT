@@ -290,3 +290,72 @@ class TestConfirmingACurveReachesTheEngine:
         with pytest.raises(RegistryError):
             DF.confirm_figure("VS-3C40CP12L-M3", "V_F_vs_Invented",
                               props["V_F_vs_IF"]["curves"][0], root=store)
+
+
+_MOSFET = os.path.join(os.path.dirname(__file__), "..", "..", "specs", "Review",
+                       "IMZA65R033M2HXKSA1.pdf")
+_BRIDGE = os.path.join(os.path.dirname(__file__), "..", "..", "specs",
+                       "Bridge Rectifier Configuration", "GBJ40L06.pdf")
+
+
+def _read(path):
+    if not os.path.exists(path):
+        pytest.skip(f"{os.path.basename(path)} not available")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+class TestItGeneralisesBeyondTheVendorItWasBuiltOn:
+    """Measured, not assumed. Of four datasheets on file it reads three vendors' vector plots and
+    refuses two files — and the two refusals have DIFFERENT causes, which is the useful part."""
+
+    def test_an_unseen_vendor_reads_correctly(self):
+        """Diodes Inc was never looked at while building this. Real axis titles and plausible
+        ranges are the check — a forward characteristic runs 0.3-1.5 V, not 0-800."""
+        figs = CX.digitise(_read(_BRIDGE))
+        ok = [f for f in figs["figures"] if f["calibration"]["ok"]]
+        assert len(ok) >= 8
+        titles = " ".join(f["calibration"]["titles"]["x"] for f in ok).upper()
+        assert "FORWARD VOLTAGE" in titles and "REVERSE VOLTAGE" in titles
+        vf = next(f for f in ok if "FORWARD VOLTAGE" in f["calibration"]["titles"]["x"].upper())
+        assert 0.2 <= vf["calibration"]["x"]["range"][0] <= 0.5
+        assert 1.0 <= vf["calibration"]["x"]["range"][1] <= 2.0
+
+    def test_a_raster_datasheet_is_refused_rather_than_guessed_at(self):
+        """The Toshiba plots are IMAGES, not vector paths — a different capability entirely (the
+        pixel tracer the plan originally specified, still unbuilt). It must read nothing rather
+        than read something wrong."""
+        path = os.path.join(os.path.dirname(_DIODE), "TRS12E65H_datasheet_en_20230411.pdf")
+        figs = CX.digitise(_read(path))
+        assert not [f for f in figs["figures"] if f["calibration"]["ok"]]
+
+
+class TestFragmentedAxisLabels:
+    """Some vendors POSITION their axis labels rather than typesetting them, so one label arrives
+    as several runs. Read run by run, a log axis labelled 1/10/100/1000 yields 10,1,10,2,10,3."""
+
+    def test_a_decade_split_into_base_and_superscript_is_rebuilt(self):
+        import fitz
+        doc = fitz.open(stream=_read(_MOSFET), filetype="pdf")
+        labs = CX.reassembled_labels(doc[8], fitz.Rect(325, 480, 352, 720))
+        vals = {v for _, _, v in labs}
+        assert 100.0 in vals            # "10" + raised "2", two separate text runs
+        assert not (10.0 in vals and 2.0 in vals and 1.0 in vals)   # not read as fragments
+
+    def test_reassembly_is_a_fallback_and_never_replaces_a_good_reading(self, figures):
+        """An earlier attempt made it the primary reader and broke 16 of 23 tests on the two
+        vendors that already worked. The guards below are the structural check that it cannot."""
+        ok = [f for f in figures["figures"] if f["calibration"]["ok"]]
+        assert len(ok) == 9                                  # exactly as before the fallback
+        assert _fig(figures, 1)["calibration"]["x"]["range"] == [0.5, 4.0]
+
+    def test_a_frameless_datasheet_is_partially_read_and_the_rest_refused(self):
+        """Infineon draws no axes box and fragments its labels; tick-based detection recovers one
+        of its fourteen plot regions. The other thirteen REFUSE — the residual gate holding is what
+        makes a partial reader safe to ship, because a wrong calibration is worse than none."""
+        figs = CX.digitise(_read(_MOSFET))
+        ok = [f for f in figs["figures"] if f["calibration"]["ok"]]
+        assert 1 <= len(ok) < len(figs["figures"])
+        for f in figs["figures"]:
+            if not f["calibration"]["ok"]:
+                assert f["calibration"]["reason"]
