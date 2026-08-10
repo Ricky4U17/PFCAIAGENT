@@ -283,6 +283,48 @@ def audit_device_classes() -> list[dict]:
     return out
 
 
+# Engine fields a class deliberately does NOT claim. Most of these are the point of a design
+# decision rather than an oversight: a SiC Schottky must not carry `qrr` and a silicon diode must
+# not carry `qc`, because that is what stops a wrong `is_sic` from quietly reading a stale number
+# from the other technology (C210). Listing them here is what lets the unclaimed-field report be
+# useful instead of nine lines of noise that pressure someone into breaking the property.
+DELIBERATELY_UNCLAIMED = {
+    "sic_schottky": {"qrr", "qrr_didt_curve", "qrr_if_curve", "qrr_tco", "k_qrr"},
+    "si_diode": {"qc", "k_qc"},
+    "gan_hemt": {"vsd", "qrr_body"},          # no body diode to characterise
+}
+
+
+def unclaimed_engine_fields() -> list[dict]:
+    """Engine fields of a class's dataclass that no parameter of that class supplies.
+
+    INFORMATIONAL, not an error. Such a field can only ever hold its dataclass default, which is
+    fine when that is deliberate and a silent gap when it is not — so each is reported with whether
+    it was declared deliberate. The pooled audit cannot see any of this: the field is normally
+    declared for some OTHER class, which is how `k_rdson` came to be a Bridge field that no bridge
+    parameter claims.
+    """
+    import dataclasses as dc
+    from app.mode_b.semiconductor.pfc_loss_model import Mosfet, Diode, Bridge
+
+    known = {"Mosfet": Mosfet, "Diode": Diode, "Bridge": Bridge}
+    data = load()
+    out: list[dict] = []
+    for name, cls in data["device_classes"].items():
+        engine = cls.get("engine_dataclass")
+        if engine not in known:
+            continue
+        fields = {f.name for f in dc.fields(known[engine])}
+        claimed = {ef for p in data["parameters"]
+                   if name in (p.get("device_classes") or [])
+                   for ef in p.get("engine_fields", [])}
+        for field in sorted(fields - claimed):
+            out.append({"device_class": name, "engine_field": field,
+                        "engine_dataclass": engine,
+                        "deliberate": field in DELIBERATELY_UNCLAIMED.get(name, set())})
+    return out
+
+
 def audit_block(block: dict, strict: bool = False) -> list[dict]:
     """Check one engine block for alias disconnects — the same quantity written under one field
     name but not its siblings, or written with different values.

@@ -349,13 +349,84 @@ class TestFragmentedAxisLabels:
         assert len(ok) == 9                                  # exactly as before the fallback
         assert _fig(figures, 1)["calibration"]["x"]["range"] == [0.5, 4.0]
 
-    def test_a_frameless_datasheet_is_partially_read_and_the_rest_refused(self):
-        """Infineon draws no axes box and fragments its labels; tick-based detection recovers one
-        of its fourteen plot regions. The other thirteen REFUSE — the residual gate holding is what
-        makes a partial reader safe to ship, because a wrong calibration is worse than none."""
+    def test_a_frameless_datasheet_reads_nothing_and_refuses_everything(self):
+        """CORRECTS C216, which reported "0 -> 1 of 14" for this datasheet.
+
+        That single figure was resting on a TWO-TICK fit, and two points fit a line with residual
+        zero whichever labels were picked up — so it was reported as calibrated without anything
+        having been checked, and was almost certainly wrong. Requiring three ticks removes it. The
+        honest result is that the C216 fallback recovers NO Infineon figure: its value was the
+        coverage measurement and the fall-back-never-replace structure, not a reading.
+
+        Fourteen plot regions are found and all fourteen refuse, each with a reason. That is the
+        behaviour worth asserting — a wrong calibration is worse than none."""
         figs = CX.digitise(_read(_MOSFET))
-        ok = [f for f in figs["figures"] if f["calibration"]["ok"]]
-        assert 1 <= len(ok) < len(figs["figures"])
+        assert len(figs["figures"]) >= 10
+        assert not [f for f in figs["figures"] if f["calibration"]["ok"]]
         for f in figs["figures"]:
-            if not f["calibration"]["ok"]:
-                assert f["calibration"]["reason"]
+            assert f["calibration"]["reason"]
+
+    def test_two_ticks_can_never_calibrate_an_axis(self):
+        """The check that makes the residual mean something. Any two points fit a straight line
+        exactly, so a 2-tick axis passed the gate no matter which labels it collected — that is how
+        the LVE5060E's Fig. 3 came back with its Y axis (0, 4, 8 ... W) read as its X axis."""
+        assert CX._fit_axis([(10.0, 1.0), (90.0, 9.0)]) is None
+        assert CX._fit_axis([(10.0, 1.0), (50.0, 5.0), (90.0, 9.0)]) is not None
+
+
+_LVE = os.path.join(os.path.dirname(__file__), "..", "..", "specs", "Review",
+                    "Bridge Rectifier Update", "lve5060e.pdf")
+
+
+class TestConsensusFitting:
+    """A tick row is not clean, and least squares has no defence against that.
+
+    The y axis's bottom label sits at the corner and reads as an x tick; the neighbouring plot's
+    first label sits just past the right edge and reads as one too. ONE outlier drags the line and
+    inflates the residual until a perfectly readable axis is refused — which is what hid the
+    LVE5060E's Fig. 4, the forward characteristic the whole bridge conduction model turns on.
+    """
+
+    @pytest.fixture(scope="class")
+    def lve(self):
+        if not os.path.exists(_LVE):
+            pytest.skip("LVE5060E datasheet not available")
+        with open(_LVE, "rb") as f:
+            return CX.digitise(f.read())
+
+    def _f(self, figs, n):
+        return next(f for f in figs["figures"] if (f["caption"] or "").startswith(f"Fig. {n} "))
+
+    def test_one_stray_label_no_longer_defeats_a_clean_axis(self, lve):
+        f4 = self._f(lve, 4)
+        assert f4["calibration"]["ok"]
+        cal = f4["calibration"]["x"]
+        assert cal["inliers"] < cal["n_ticks"]          # a stray was present and was ignored
+        assert cal["range"] == [0.1, 1.3]               # ...and the axis is the one printed
+
+    def test_the_forward_curve_reproduces_BOTH_tabulated_anchors(self, lve):
+        """The acceptance test. The table states 0.89 V at 25 A / 25 degC and 0.77 V at 25 A /
+        125 degC — two points on two different curves of the same figure. The plot and the table
+        are independent renderings of one measurement, so agreement is what says the axes were
+        read correctly, and this figure was never used to build the reader."""
+        curves = self._f(lve, 4)["curves"]
+        cold = CX.cross_check(curves, 0.89, 25.0)
+        hot = CX.cross_check(curves, 0.77, 25.0)
+        assert cold["checked"] and cold["agrees"] and cold["error_pct"] < 5.0
+        assert hot["checked"] and hot["agrees"] and hot["error_pct"] < 5.0
+
+    def test_a_consensus_must_be_a_majority_that_spans_the_axis(self):
+        """Otherwise a handful of strays that happen to line up would BE the axis — which is the
+        failure this must not trade for the one it fixes."""
+        good = [(10.0, 1.0), (20.0, 2.0), (30.0, 3.0), (40.0, 4.0), (95.0, 99.0)]
+        assert CX._fit_axis(good) is not None                     # 4 of 5 agree, spanning it
+        mostly_noise = [(10.0, 1.0), (11.0, 1.1), (12.0, 1.2),
+                        (50.0, 90.0), (70.0, 4.0), (90.0, 55.0), (95.0, 12.0)]
+        assert CX._fit_axis(mostly_noise) is None                 # 3 of 7, and huddled together
+
+    def test_fig_3_is_no_longer_read_off_its_own_y_axis(self, lve):
+        """It used to come back x:[0, 4] — the first two labels of its Y axis (0, 4, 8 ... W)."""
+        f3 = self._f(lve, 3)
+        assert f3["calibration"]["ok"]
+        assert f3["calibration"]["x"]["range"][1] > 20            # amperes, not the y axis's watts
+        assert "Forward Current" in f3["calibration"]["titles"]["x"]

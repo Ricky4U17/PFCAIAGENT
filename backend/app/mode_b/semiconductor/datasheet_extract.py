@@ -322,6 +322,23 @@ def _role_of(header_cell: str) -> Optional[str]:
     return None
 
 
+def _header_row(rows: list[list], look: int = 3) -> int:
+    """Index of the row that carries the column roles.
+
+    Vendors put the section caption INSIDE the table — "MAXIMUM RATINGS (TA = 25 degC...)" spanning
+    every column — so `find_tables` returns it as row 0 and the real header, "PARAMETER | SYMBOL |
+    <part number> | UNIT", is row 1. Testing row 0 alone rejected every table in the LVE5060E
+    datasheet: 12 of 12, with the reason "header has no parameter or symbol column", while the
+    table underneath was perfectly ordinary.
+    """
+    for i, row in enumerate(rows[:look]):
+        roles = {_role_of(c) for c in row}
+        roles.discard(None)
+        if {"symbol", "parameter"} & roles:
+            return i
+    return 0
+
+
 def _is_parameter_table(rows: list[list]) -> tuple[bool, str]:
     """Reject the phantom tables that figure axes produce.
 
@@ -334,7 +351,8 @@ def _is_parameter_table(rows: list[list]) -> tuple[bool, str]:
     filled = sum(1 for c in cells if norm_text(c))
     if not cells or filled / len(cells) < 0.35:
         return False, f"only {filled}/{len(cells)} cells carry text — this is a figure, not a table"
-    roles = {_role_of(c) for c in rows[0]}
+    h = _header_row(rows)
+    roles = {_role_of(c) for c in rows[h]}
     roles.discard(None)
     if not ({"symbol", "parameter"} & roles):
         return False, f"header has no parameter or symbol column (roles seen: {sorted(roles)})"
@@ -395,13 +413,24 @@ def find_parameter_tables(pdf_bytes: bytes) -> list[dict]:
             if not lgrid:
                 continue
             grid = [[norm_text(" ".join(c)) for c in row] for row in lgrid]
-            header, body = _merge_subheader(grid[0], grid[1:])
+            h = _header_row(grid)
+            header, body = _merge_subheader(grid[h], grid[h + 1:])
             lbody = lgrid[len(lgrid) - len(body):]
             roles: dict[str, int] = {}
             for idx, cell in enumerate(header):
                 role = _role_of(cell)
                 if role and role not in roles:
                     roles[role] = idx
+            # A VALUE COLUMN HEADED BY THE PART NUMBER. Vishay heads the single value column of a
+            # maximum-ratings table with the device name — "PARAMETER | SYMBOL | LVE5060E | UNIT" —
+            # so no value role is recognised and every row parses to nothing. Any unlabelled column
+            # between the symbol and the unit is the value: it is the only thing it can be.
+            if not ({"value", "typ", "max", "min"} & set(roles)):
+                left = max((roles[r] for r in ("symbol", "parameter") if r in roles), default=-1)
+                right = roles.get("unit", len(header))
+                spare = [i for i in range(left + 1, right) if _role_of(header[i]) is None]
+                if len(spare) == 1:
+                    roles["value"] = spare[0]
             found.append({"page": pno, "header": header, "roles": roles, "rows": body,
                           "row_lines": lbody, "bbox": [round(v, 1) for v in t.bbox]})
     return found
@@ -442,6 +471,7 @@ def parse_table(table: dict, symbol_map: dict[str, str]) -> list[dict]:
     than dropped, so a reviewer can see what the parser gave up on."""
     roles = table.get("roles") or {}
     entries: list[dict] = []
+    prev = None                      # the last row that produced an entry, for continuation rows
     if "symbol" not in roles and "parameter" not in roles:
         return entries
 
@@ -476,8 +506,55 @@ def parse_table(table: dict, symbol_map: dict[str, str]) -> list[dict]:
                             sub[i_] = ls[k] if k < len(ls) else (ls[0] if len(ls) == 1 else "")
                     entries.extend(_parse_row(sub, roles, symbol_map, cell))
                 continue
-        entries.extend(_parse_row(row, roles, symbol_map, cell))
+        row = _inherit_continuation(row, roles, prev)
+        got = _parse_row(row, roles, symbol_map, cell)
+        if got:
+            prev = row
+        entries.extend(got)
     return entries
+
+
+def _inherit_continuation(row, roles, prev):
+    """A row with values but no symbol continues the row above it.
+
+    Vendors give a second operating point as a CONTINUATION: the parameter and symbol cells are
+    left blank and only the condition that changed is written.
+
+        Instantaneous forward voltage | IF = 25 A | TJ = 25 degC  | VF (1) | 0.89 | 0.93 | V
+                                      |           | TJ = 125 degC |        | 0.77 | -    |
+
+    Read row by row, the second line has no symbol and is discarded — which is how the LVE5060E's
+    HOT forward voltage went missing, the one value the whole conduction model turns on. Inheriting
+    the symbol keeps the pair, and each keeps its own condition, so the two-temperature V-I curve
+    comes out of the table instead of needing the plot.
+    """
+    if prev is None:
+        return row
+    sym_i, par_i = roles.get("symbol"), roles.get("parameter")
+    has_symbol = sym_i is not None and sym_i < len(row) and norm_text(row[sym_i])
+    has_param = par_i is not None and par_i < len(row) and norm_text(row[par_i])
+    if has_symbol or has_param:
+        return row
+    has_value = any(roles.get(r) is not None and roles[r] < len(row)
+                    and parse_numbers(row[roles[r]]) for r in ("min", "typ", "max", "value"))
+    if not has_value:
+        return row
+    # EVERY EMPTY CELL INHERITS, except the value columns. A continuation states only what
+    # CHANGED, so whatever it leaves blank still holds — the symbol, the unit, and the conditions
+    # that did not vary. Naming the columns individually kept missing one: first the unit, and the
+    # hot reverse current came out as 35 A instead of 35 uA; then the conditions, and the hot
+    # forward voltage arrived with no I_F, so it could not pair with the cold point into a curve.
+    # The value columns are excluded deliberately: a blank max belongs to this row's condition, not
+    # to the row above, and inheriting it would attach the parent's limit to a different operating
+    # point.
+    values = {roles.get(r) for r in ("min", "typ", "max", "value")}
+    out = list(row)
+    for i_ in range(min(len(out), len(prev))):
+        if i_ in values:
+            continue
+        if not norm_text(out[i_]) and norm_text(prev[i_]):
+            out[i_] = prev[i_]
+    return out
 
 
 def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
@@ -593,6 +670,12 @@ def _symbol_lookup(sym: str) -> str:
     """Normalise a datasheet symbol for map lookup: case, spaces, punctuation and the theta glyph
     all vary between vendors and even between tables in one file."""
     t = norm_text(sym).lower()
+    # FOOTNOTE MARKERS FIRST, while the brackets are still there to identify them. Vendors tag a
+    # symbol with the note that qualifies it — "VF (1)", "RthJA (1)(2)", "IO (1)" — and stripping
+    # brackets before the digits turned those into vf1, rthja12 and io1, which match nothing. That
+    # is why the LVE5060E's forward voltage and thermal resistance did not extract even once its
+    # tables parsed. A DIGIT-ONLY group is a footnote; "(AV)" in IF(AV) is part of the symbol.
+    t = re.sub(r"\(\s*\d+\s*\)", "", t)
     t = t.replace("θ", "th").replace("(", "").replace(")", "")
     return re.sub(r"[\s._\-/]", "", t)
 

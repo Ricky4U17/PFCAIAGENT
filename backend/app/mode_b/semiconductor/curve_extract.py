@@ -277,7 +277,12 @@ def _fit_axis(ticks: list[tuple[float, float]]) -> Optional[dict]:
     a legend full of numbers, produces a bad fit rather than a confident wrong answer.
     """
     ticks = sorted(set(ticks))
-    if len(ticks) < 2:
+    # THREE, NOT TWO. Any two points fit a straight line with residual exactly zero, so a 2-tick
+    # axis passes the residual gate no matter which labels were picked up — the check cannot fail,
+    # which means it is not a check. Found on the LVE5060E: Fig. 3's x axis came back [0, 4], which
+    # is its Y axis (0, 4, 8 ... W) read as X, and it was reported as calibrated with residual 0.
+    # A third tick is what makes the residual able to reject anything.
+    if len(ticks) < 3:
         return None
 
     def _lsq(pairs):
@@ -297,19 +302,68 @@ def _fit_axis(ticks: list[tuple[float, float]]) -> Optional[dict]:
         resid = max(abs((m * p + c) - v) for p, v in pairs) / span
         return {"m": m, "c": c, "residual": resid}
 
-    lin = _lsq(ticks)
+    def _consensus(pairs):
+        """Fit the largest set of ticks that agree, and ignore the rest.
+
+        A tick row is not clean. The y axis's bottom label sits at the corner and reads as an x
+        tick; the neighbouring plot's first label sits just past the right edge and reads as one
+        too. Least squares has no defence against either — ONE outlier drags the line and inflates
+        the residual until a perfectly readable axis is refused. That is what hid the LVE5060E's
+        Fig. 4, the forward characteristic: twelve ticks spaced exactly 13.4 pt apart, plus two
+        strays, fitting nothing.
+
+        So the line is chosen by CONSENSUS: every pair of ticks proposes one, and the proposal
+        that the most ticks agree with wins. The agreeing set must still be a clear majority and
+        must still span most of the axis, because a handful of strays that happen to line up is
+        exactly what this must not accept.
+        """
+        n = len(pairs)
+        span = max(v for _, v in pairs) - min(v for _, v in pairs)
+        if span <= 0:
+            return None
+        tol = 0.02 * span
+        best_in = None
+        for i in range(n):
+            for j in range(i + 1, n):
+                (p1, v1), (p2, v2) = pairs[i], pairs[j]
+                if p2 == p1:
+                    continue
+                m = (v2 - v1) / (p2 - p1)
+                c = v1 - m * p1
+                inl = [(p, v) for p, v in pairs if abs(m * p + c - v) <= tol]
+                if best_in is None or len(inl) > len(best_in):
+                    best_in = inl
+        if best_in is None or len(best_in) < 3 or len(best_in) < 0.6 * n:
+            return None
+        pos = [p for p, _ in best_in]
+        allpos = [p for p, _ in pairs]
+        if (max(pos) - min(pos)) < 0.5 * (max(allpos) - min(allpos)):
+            return None
+        out = _lsq(best_in)
+        if out is not None:
+            # the range is what the AGREEING ticks cover — reporting it over all of them would
+            # advertise an axis reaching values the fit deliberately ignored
+            out["inliers"] = len(best_in)
+            out["_range"] = [min(v for _, v in best_in), max(v for _, v in best_in)]
+        return out
+
+    lin = _consensus(ticks)
     log = None
     if all(v > 0 for _, v in ticks):
-        log = _lsq([(p, math.log10(v)) for p, v in ticks])
+        log = _consensus([(p, math.log10(v)) for p, v in ticks])
 
     best, scale = lin, "linear"
     if log and (best is None or log["residual"] < best["residual"]):
         best, scale = log, "log"
     if best is None or best["residual"] > _MAX_FIT_RESIDUAL:
         return None
+    rng = best.get("_range") or [min(v for _, v in ticks), max(v for _, v in ticks)]
+    if scale == "log":
+        rng = [10.0 ** rng[0], 10.0 ** rng[1]]
     return {"scale": scale, "m": best["m"], "c": best["c"],
             "residual": round(best["residual"], 5), "n_ticks": len(ticks),
-            "range": [min(v for _, v in ticks), max(v for _, v in ticks)]}
+            "inliers": best.get("inliers", len(ticks)),
+            "range": [round(rng[0], 6), round(rng[1], 6)]}
 
 
 def _apply(cal: dict, pos: float) -> float:

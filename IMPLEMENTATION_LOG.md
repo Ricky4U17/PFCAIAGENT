@@ -8589,3 +8589,112 @@ residual gate holding is what makes a partial reader safe to ship at all.
 Verified: 5 new tests - the unseen vendor read correctly, the raster datasheet refused, a decade
 rebuilt from two text runs, the additive property asserted as an equality rather than a floor, and
 the partial-read-with-refusals behaviour; 28 in tests/test_curve_extract.py.
+
+
+## C217 — M8-bridge steps 0-2 and 5: the LVE5060E extracts, and Fig. 4 reads
+
+The checkpoint and the extraction work landed together rather than separately: the bridge block was
+built, found to have almost no data to work with, and the reason turned out to be the table reader
+rather than the bridge. Both are here.
+
+A CORRECTNESS FIX FIRST, INDEPENDENT OF THE BRIDGE. `_fit_axis` accepted TWO ticks, and any two
+points fit a straight line with residual exactly zero — so a 2-tick axis passed the residual gate no
+matter which labels it had collected. The check could not fail, which means it was not a check. It
+is how the LVE5060E's Fig. 3 came back with its Y axis (0, 4, 8 ... W) read as its X axis, reported
+as calibrated. Three ticks are now required.
+
+That also CORRECTS C216, which reported "0 -> 1 of 14" for the Infineon datasheet. That single
+figure was itself a 2-tick fit and was almost certainly wrong. The honest result is that the C216
+fallback recovers NO Infineon figure; its value was the coverage measurement and the
+fall-back-never-replace structure, not a reading. The test now asserts that all fourteen refuse.
+
+THE DISPATCH BUG. `profile_to_block` routed Diode to the diode builder and EVERYTHING ELSE to the
+MOSFET one, while its docstring promised that adding a class could not fall through. A bridge has
+engine_dataclass "Bridge", so a bridge profile went to `_mosfet_block` and was searched for R_DS(on)
+and gate charge. Nothing had hit it only because the bridge had no upload path. All three are now
+named explicitly and an unknown dataclass raises.
+
+The per-class audit now looks BOTH ways. A dataclass field that no parameter of that class claims
+can only ever hold its default — but most such cases are deliberate, and saying so matters: a SiC
+Schottky must not claim `qrr` and a silicon diode must not claim `qc`, because that is exactly what
+stops a wrong `is_sic` from reading a stale number from the other technology. So the unclaimed
+direction is reported separately, with the deliberate ones declared, rather than as errors that
+would pressure someone into undoing the property. One real gap surfaced and is closed: `k_rdson` is
+a Bridge field that no bridge parameter declared.
+
+_bridge_block, with sync-bottom handled as the designer asked: the bypass FET is an ordinary
+confirmed MOSFET profile named by the design, and its values are mapped onto the bridge's `_bottom`
+parameters. One upload path, used twice, rather than a second extractor. Q_rr is optional for a
+bridge — it commutates at LINE frequency, its datasheet does not publish a recovery charge, and the
+engine's bridge recovery is an acknowledged placeholder, so demanding it reported a gap that is not
+one. Bridge leakage is left unmodelled for the same reason the reference method leaves it out.
+
+THE LVE5060E EXTRACTED ZERO PARAMETERS. It now extracts eleven. Four layout habits, none exotic,
+each of which silently produced nothing:
+
+  - the section caption sits INSIDE the table, so `find_tables` returns "MAXIMUM RATINGS (TA = 25
+    degC...)" as row 0 and the real header as row 1. Testing row 0 alone rejected 12 of 12 tables.
+  - the value column is headed by the PART NUMBER — "PARAMETER | SYMBOL | LVE5060E | UNIT" — so no
+    value role matched and every row parsed to nothing.
+  - footnote markers destroyed the symbol: "VF (1)" normalised to `vf1` because brackets were
+    stripped before the digits. A digit-only group is a footnote; the "(AV)" in IF(AV) is not.
+  - a second operating point is a CONTINUATION row stating only what changed, so the HOT forward
+    voltage had no symbol, no unit and no current of its own.
+
+Every headline value now extracts and matches the datasheet: V_F 0.89 typ / 0.93 max at 25 A and
+25 degC, V_F 0.77 V at 125 degC, R_thJC 1.2 (the report had been using 1.0), I_F(AV) 50 A, V_RRM
+600 V, I_FSM 600 A, I2t 1490 A^2s, I_R 10 uA.
+
+The continuation fix took three passes, each exposing the next thing it should have inherited —
+first the unit, and the hot reverse current came out as 35 A instead of 35 uA; then the conditions,
+and the hot forward voltage arrived with no I_F so it could not pair with the cold point into a
+curve. The rule is now "every empty cell inherits EXCEPT the value columns", because a blank max
+belongs to this row's condition rather than to the row above.
+
+A FINDING THAT REORDERS THE REST OF M8. The current-sharing sensitivity the reference report asks
+for — 50/50, 60/40, 70/30 — returns 27.87 W for all three. Not a bug: with only the table's single
+V_F point the curve is FLAT, so V_F(i) is 0.89 V whatever the split and the derate cancels out. The
+sensitivity is meaningless until Fig. 4 is digitised, which makes step 5 a prerequisite for the
+sensitivity table (step 7) rather than an independent nicety. The same shape
+as the diode at C215, where a flat drop overstated conduction by 18 %.
+
+Bridge loss from the datasheet: 27.87 W at 50/50 across two packages, 26.94 W single-path against
+26.79 W from the catalogue, and R_thJC 1.2 against 1.0 moves the junction to 142.8 degC from
+137.1 degC on the single-path comparison.
+
+STEP 5, AND IT WAS NOT THE PROBLEM I PLANNED FOR. Fig. 4's x tick row looked like one joined text
+object, so the plan was to split it by character geometry. It is not joined: each tick IS its own
+span, and only the line-level dump made it look otherwise. The real obstacle is that a tick row is
+never clean. The y axis's bottom label sits at the corner and reads as an x tick; the neighbouring
+plot's first label sits just past the right edge and reads as one too. Twelve ticks spaced exactly
+13.4 pt apart, plus two strays - and ONE outlier is enough to drag a least-squares line and inflate
+the residual until a perfectly readable axis is refused.
+
+The fit is now chosen by CONSENSUS: every pair of ticks proposes a line and the proposal the most
+ticks agree with wins, with the agreeing set required to be a clear majority AND to span most of the
+axis. That second condition is the one that matters - a handful of strays that happen to line up is
+exactly the failure this must not trade for the one it fixes, and there is a test for it.
+
+Both of the reference report's anchors now reproduce off the plot, on a figure never used to build
+the reader: the table states V_F = 0.89 V at 25 A / 25 degC and the digitised curve gives 24.35 A,
+2.6 % apart; it states 0.77 V at 25 A / 125 degC and the curve gives 24.95 A, 0.21 % apart. Fig. 4
+yields nine curves - the seven temperatures the reference report asks to be digitised by hand with
+an external tool.
+
+Consensus also fixed Fig. 3, which had been silently reading its own Y axis: x came back [0, 4],
+those being the first two labels of the watts axis, and is now [0, 56] amperes with the right axis
+title. And it rescues contaminated axes generally rather than only this file - VS-4C16 goes from 10
+calibrated figures to 12 and the GBJ40L06 from 11 to 14, while the VS-3C40 stays at 9 with its
+exact-range assertions untouched.
+
+That is what makes the sharing sensitivity real. It collapsed to an identical 27.87 W for 50/50,
+60/40 and 70/30 because a single tabulated V_F point is a FLAT curve; Fig. 4 supplies V_F(I_F) at
+seven temperatures, so the bridge can now get the same correction the diode got at C215.
+
+Verified: 16 new tests — the 3-tick rule, the corrected Infineon expectation, and one per layout
+habit including the value column a continuation must NOT inherit; the three datasheets that already
+worked are asserted at their exact parameter counts, not floors.
+
+STILL TO DO in M8-bridge: the bridge requirement (step 4), the GUI sub-tabs including the
+sync-bottom selector (3, 6), and the report section with the sharing sensitivity and the derating
+gate (7) - which step 5 has now made worth writing.

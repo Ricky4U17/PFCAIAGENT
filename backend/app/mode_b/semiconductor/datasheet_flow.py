@@ -619,9 +619,18 @@ def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
     name, so adding a class cannot silently fall through to the MOSFET builder.
     """
     cls = R.device_class(device_class)
-    if cls["engine_dataclass"] == "Diode":
-        return _diode_block(profile, device_class, design, cls)
-    return _mosfet_block(profile, device_class, design, cls)
+    engine = cls.get("engine_dataclass")
+    # EXPLICIT, and no default. The docstring above used to promise that adding a class could not
+    # fall through to the MOSFET builder while the code did exactly that for anything that was not
+    # a Diode — so a bridge profile went to `_mosfet_block` and was searched for R_DS(on) and gate
+    # charge. Nothing had hit it only because the bridge had no upload path.
+    builder = {"Mosfet": _mosfet_block, "Diode": _diode_block, "Bridge": _bridge_block}.get(engine)
+    if builder is None:
+        raise R.RegistryError(
+            f"device class {device_class!r} has engine_dataclass {engine!r}, which has no block "
+            f"builder. Add one rather than letting it default: the builders read different "
+            f"parameters, so the wrong one produces a block that is confidently empty.")
+    return builder(profile, device_class, design, cls)
 
 
 def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict) -> dict:
@@ -1206,6 +1215,214 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
     blk["_declared_class"] = device_class
     blk["_checks"] = notes + _diode_checks(profile, design, blk, tech)
     return blk
+
+
+def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> dict:
+    """Turn a confirmed bridge profile into a `Bridge` engine block.
+
+    The bridge's conduction model needs no new physics: the engine already integrates the
+    current-dependent forward drop over the line cycle, doubles it for the two diodes in series at
+    any instant, and derates for imperfect sharing between paralleled packages. What it has been
+    missing is DATASHEET NUMBERS - the catalogue supplies a V_f anchor and estimates the curve shape
+    and the thermal resistance around it.
+
+    SYNC-BOTTOM IS A SECOND PART. In that topology the bottom two positions are MOSFETs, with their
+    own R_DS(on), gate charge and thermal path. Rather than invent a second extractor, the bypass
+    FET is an ordinary confirmed MOSFET profile named by the design, and its values are mapped onto
+    the bridge's `_bottom` parameters here. One upload path, used twice.
+    """
+    v_pk = math.sqrt(2.0) * float(design.get("vin_max") or 0.0)
+    blk: dict[str, Any] = {
+        "manufacturer": profile.get("manufacturer"),
+        "part_number": profile.get("part_number"),
+        M.SOURCE_KEY: f"datasheet {profile.get('datasheet', {}).get('filename', '')}"
+                      f" (sha {str(profile.get('datasheet', {}).get('sha256', ''))[:12]})",
+    }
+    prov: dict[str, str] = {}
+    notes: list[dict] = []
+
+    def put(key, value, how="extracted"):
+        if value is None:
+            return
+        blk.update(R.expand_to_engine_fields({key: value}))
+        prov[key] = how
+
+    # 1. conduction — the same curve machinery the diode uses, digitised curve preferred
+    i_max = 0.0
+    try:
+        from app.mode_b.semiconductor.adapter import build_design_ops
+        _, s2, *_ = build_design_ops(design)
+        i_max = float(max(s2["Iin_pk"]))
+    except Exception:
+        pass
+
+    rd_e = _pick_entry(_entries_of(profile, "r_d"))
+    rd = float(rd_e.get("typ") or rd_e.get("max")) if rd_e and (rd_e.get("typ") or rd_e.get("max")) else None
+
+    dig_vf = _digitised(profile, "V_F_vs_IF")
+    if dig_vf and not _plausible_vf_curve(dig_vf):
+        notes.append({"key": "V_F_vs_IF", "severity": "check", "message": (
+            "The digitised forward curve is not being used: its drop is not a diode forward "
+            "characteristic. The usual cause is a transposed curve — the canonical key is V_F as a "
+            "function of I_F, so its x is current, while vendors plot it with voltage on x.")})
+        dig_vf = None
+
+    if dig_vf:
+        put("V_F_vs_IF", [list(dig_vf["x"]), list(dig_vf["y"])], "digitised")
+        tj = (dig_vf.get("conditions") or {}).get("T_j")
+        if tj:
+            put("V_F_tref", float(tj))
+    else:
+        cold = _vf_points(profile, hot=False)
+        cv, how, note = _vf_curve_from(cold, rd, i_max)
+        if cv:
+            put("V_F_vs_IF", [list(cv[0]), list(cv[1])], how)
+            if cold and cold[0][2]:
+                put("V_F_tref", cold[0][2])
+        if note:
+            notes.append({"key": "V_F_vs_IF", "severity": note[0], "message": note[1]})
+
+    dig_hot = _digitised(profile, "V_F_vs_IF_hot")
+    if dig_hot:
+        put("V_F_vs_IF_hot", [list(dig_hot["x"]), list(dig_hot["y"])], "digitised")
+        tj = (dig_hot.get("conditions") or {}).get("T_j")
+        put("V_F_thot", float(tj) if tj else 125.0)
+    else:
+        hot = _vf_points(profile, hot=True)
+        hv, hhow, _n = _vf_curve_from(hot, rd, i_max)
+        if hv and hot:
+            put("V_F_vs_IF_hot", [list(hv[0]), list(hv[1])], hhow)
+            put("V_F_thot", hot[0][2] or 125.0)
+    if bool(dig_vf) != bool(dig_hot):
+        notes.append({"key": "V_F_vs_IF_hot", "severity": "check", "message": (
+            f"Only the {'cold' if dig_vf else 'hot'} forward curve has been digitised. The engine "
+            f"interpolates the drop between the two temperatures, so pairing a digitised shape with "
+            f"a single tabulated point at the other interpolates a curve against a flat line.")})
+
+    # r_d reaches the engine only when no V-I curve did — the curve already carries the slope
+    if rd is not None:
+        if "vf_curve" not in blk:
+            put("r_d", rd)
+        else:
+            blk["_r_d_published"] = rd
+
+    # 2. thermal — the per-package figure, and the largest published value where several are given
+    rth_vals = sorted({float(e.get("max") or e.get("typ"))
+                       for e in _entries_of(profile, "R_th_jc")
+                       if (e.get("max") or e.get("typ"))})
+    if rth_vals:
+        put("R_th_jc", rth_vals[-1])
+        blk["_rth_jc_published"] = rth_vals
+
+    # 3. recovery — optional for a bridge, and reported as such rather than as a gap
+    qrr = _qrr_for_design(profile)
+    if qrr:
+        put("Q_rr", qrr["qrr"], qrr["provenance"])
+        blk["_qrr_basis"] = qrr
+    else:
+        notes.append({"key": "Q_rr", "severity": "note", "message": (
+            "No reverse-recovery charge is published, which is normal for a mains bridge: it "
+            "commutates at LINE frequency, so the term is negligible beside conduction and the "
+            "engine treats it as a placeholder rather than a model. It is not counted as a gap.")})
+
+    # 4. the design's own configuration — none of this is on any datasheet
+    topo = design.get("bridge_topology") or design.get("topology") or "diode"
+    put("bridge_topology", topo, "manual")
+    for key in ("n_parallel", "n_parallel_top", "n_parallel_bottom", "share_worst",
+                "R_th_cs", "k_vf", "k_rdson"):
+        val = design.get(key)
+        if val not in (None, ""):
+            put(key, val, "manual")
+
+    # 5. sync-bottom: the bypass FET is an ordinary confirmed MOSFET profile
+    if topo == "sync_bottom":
+        blk.update(_bottom_fet(design, notes, put))
+
+    resolved = device_class
+    blk[M.PROVENANCE_KEY] = prov
+    blk["_conduction_form"] = cls["conduction_loss_form"]
+    blk["_device_class"] = resolved
+    blk["_checks"] = notes + _bridge_checks(profile, design, blk, v_pk)
+    return blk
+
+
+def _bottom_fet(design: dict, notes: list, put) -> dict:
+    """Map a confirmed bypass-MOSFET profile onto the bridge's `_bottom` parameters.
+
+    The bottom devices of a sync-bottom bridge are MOSFETs, so they are selected the same way every
+    other MOSFET is — requirement, upload, review, confirm — and named here by part number. Reusing
+    that path is the difference between one selection flow and two.
+    """
+    part = design.get("bottom_mosfet_part")
+    if not part:
+        notes.append({"key": "R_DS_on_bottom", "severity": "check", "message": (
+            "The topology is sync_bottom, so the two bottom positions are MOSFETs — but no bypass "
+            "MOSFET has been named. Their conduction loss will fall back to the engine's default "
+            "R_DS(on), which is not this design's part. Select and confirm the bypass FET on the "
+            "MOSFET tab, then name it here.")})
+        return {}
+    prof = PS.load_profile(part, kind="confirmed") or PS.load_profile(part, kind="extracted")
+    if prof is None:
+        notes.append({"key": "R_DS_on_bottom", "severity": "check", "message": (
+            f"No confirmed profile is on file for the bypass MOSFET {part!r}. Upload and confirm "
+            f"its datasheet on the MOSFET tab first.")})
+        return {}
+
+    vgs = float(design.get("V_GS_drive_bottom") or design.get("V_GS_drive") or 0.0)
+    e = None
+    try:
+        e = M.select(prof, "R_DS_on", V_GS=vgs, T_j=25) if vgs else None
+    except M.MissingParameterError:
+        e = None
+    e = e or _pick_entry(_entries_of(prof, "R_DS_on"))
+    if e:
+        put("R_DS_on_bottom", e.get("typ") or e.get("max"), "extracted")
+    hot = _hot_entry(prof, vgs)
+    if hot and e and e.get("typ"):
+        t_hot = (hot.get("conditions") or {}).get("T_j", 175.0)
+        put("R_DS_on_bottom_vs_Tj", [[25.0, float(t_hot)],
+                                     [1.0, round(float(hot["typ"]) / float(e["typ"]), 4)]], "derived")
+    qg = _pick_entry(_entries_of(prof, "Q_g"))
+    if qg:
+        put("Q_g_bottom", qg.get("typ") or qg.get("max"), "extracted")
+    rth = _pick_entry(_entries_of(prof, "R_th_jc"))
+    if rth:
+        put("R_th_jc_bottom", rth.get("typ") or rth.get("max"), "extracted")
+    if vgs:
+        put("V_GS_drive_bottom", vgs, "manual")
+    if design.get("R_th_cs_bottom") not in (None, ""):
+        put("R_th_cs_bottom", design["R_th_cs_bottom"], "manual")
+    return {"_bottom_part": part}
+
+
+def _bridge_checks(profile: dict, design: dict, blk: dict, v_pk: float) -> list[dict]:
+    """What the bridge's own numbers cannot say about themselves."""
+    out = []
+    vr = _pick_entry(_entries_of(profile, "V_RRM"))
+    v_rated = float(vr.get("typ") or vr.get("max")) if vr and (vr.get("typ") or vr.get("max")) else None
+    if v_rated and v_pk and v_rated < v_pk * DEFAULT_V_MARGIN:
+        out.append({"key": "V_RRM", "severity": "check", "message": (
+            f"V_RRM = {v_rated:.0f} V is below the {v_pk * DEFAULT_V_MARGIN:.0f} V this design asks "
+            f"for ({v_pk:.0f} V line peak at high line x {DEFAULT_V_MARGIN:g}). Note the bridge "
+            f"blocks the LINE peak, not the boost bus.")})
+
+    n_par = int(blk.get("n_parallel") or 1)
+    if n_par > 1 and blk.get("share_worst") in (None, ""):
+        out.append({"key": "share_worst", "severity": "check", "message": (
+            f"{n_par} bridge packages are declared in parallel but no sharing derate is given, so "
+            f"the calculation assumes they split the current EQUALLY. Paralleled rectifiers do not "
+            f"share equally — the hotter one takes more, and its own loss makes it hotter. Chapter "
+            f"7.3 reports 50/50, 60/40 and 70/30 alongside the nominal for exactly this reason; "
+            f"set the derate to make the assumption explicit rather than implicit.")})
+
+    for key, label in (("I_FSM", "I_FSM"), ("I2t", "I2t")):
+        if _entries_of(profile, key):
+            out.append({"key": key, "severity": "note", "message": (
+                f"{label} is read from the datasheet and used ONLY for the inrush and fuse-"
+                f"coordination checks in Chapter 8. It has no part in steady-state conduction "
+                f"loss, and is listed here so its absence from the loss table is not mistaken for "
+                f"an oversight.")})
+    return out
 
 
 def _qrr_for_design(profile: dict) -> Optional[dict]:

@@ -699,7 +699,7 @@
     {
       "key": "k_rdson",
       "si_unit": "1", "display_unit": "1",
-      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "bridge_rectifier"],
       "source": "design", "required": false,
       "consumed_by": ["loss_engine"],
       "engine_fields": ["k_rdson"],
@@ -827,14 +827,14 @@
       "key": "Q_rr",
       "si_unit": "C", "display_unit": "nC",
       "device_classes": ["si_diode", "bridge_rectifier"],
-      "source": "datasheet", "required": true,
+      "source": "datasheet", "required": false,
       "condition_qualified": true, "conditions": ["I_F", "diF_dt", "T_j"],
       "consumed_by": ["loss_engine", "report"],
       "engine_fields": ["qrr"],
       "db_field": "trr",
       "report_label": "Q<sub>rr</sub>",
       "plausible": {"min": 0.0, "max": 1e-3},
-      "description": "Reverse-recovery charge. Estimated as 0.5*t_rr*I_o when only t_rr is published."
+      "description": "Reverse-recovery charge. Estimated as 0.5*t_rr*I_o when only t_rr is published. NOT required: a mains bridge rectifier commutates at LINE frequency, its datasheet normally does not publish a recovery charge, and the engine's bridge recovery term is an acknowledged placeholder rather than a model - so demanding it reports a gap that is not one. It stays required in spirit for the boost diode, where recovery is the largest term in the chapter."
     },
     {
       "key": "Q_rr_vs_didt",

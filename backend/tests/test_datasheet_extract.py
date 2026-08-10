@@ -465,3 +465,80 @@ class TestMosfetAcceptance:
         rather than fitting a shape through one point as the old extractor did."""
         assert mosfet_profile["curves"] == []
         assert mosfet_profile["extraction"]["phase"] == "tables_only"
+
+
+_LVE = os.path.join(os.path.dirname(__file__), "..", "..", "specs", "Review",
+                    "Bridge Rectifier Update", "lve5060e.pdf")
+
+
+@pytest.fixture(scope="module")
+def lve():
+    """The bridge the designer actually uses. It extracted ZERO parameters until C217 — four
+    separate layout habits, none of them exotic, each of which silently produced nothing."""
+    if not os.path.exists(_LVE):
+        pytest.skip("LVE5060E datasheet not available")
+    with open(_LVE, "rb") as f:
+        return DX.extract(f.read(), "bridge_rectifier")["profile"]
+
+
+def _e(profile, key):
+    return _entries(profile, key)
+
+
+class TestLayoutHabitsThatProducedNothing:
+    def test_the_header_is_found_below_a_spanning_title_row(self, lve):
+        """Vendors put the section caption INSIDE the table, so `find_tables` returns
+        "MAXIMUM RATINGS (TA = 25 degC...)" as row 0 and the real header as row 1. Testing row 0
+        alone rejected 12 of 12 tables in this file."""
+        assert _e(lve, "V_RRM")[0]["typ"] == 600.0
+
+    def test_a_value_column_headed_by_the_part_number_is_recognised(self, lve):
+        """"PARAMETER | SYMBOL | LVE5060E | UNIT" — the value column carries the device name, so no
+        value role matched and every row parsed to nothing. An unlabelled column between the symbol
+        and the unit can only be the value."""
+        assert _e(lve, "R_th_jc")[0]["typ"] == pytest.approx(1.2)
+
+    def test_a_footnote_marker_does_not_destroy_the_symbol(self, lve):
+        """"VF (1)" normalised to `vf1`, which is in no symbol map, because brackets were stripped
+        before the digits. A DIGIT-ONLY group is a footnote; "(AV)" in IF(AV) is part of the name."""
+        assert DX._symbol_lookup("VF (1)") == DX._symbol_lookup("VF")
+        assert DX._symbol_lookup("RθJA (1)(2)") == DX._symbol_lookup("RthJA")
+        assert DX._symbol_lookup("IF(AV) (1)") == "ifav"        # the (AV) survives
+        assert _e(lve, "V_F_vs_IF")[0]["typ"] == pytest.approx(0.89)
+
+    def test_a_continuation_row_inherits_everything_it_left_blank(self, lve):
+        """A second operating point states only what CHANGED:
+
+            Instantaneous forward voltage | IF = 25 A | TJ = 25 C  | VF (1) | 0.89 | 0.93 | V
+                                          |           | TJ = 125 C |        | 0.77 | -    |
+
+        Read alone the second line has no symbol, no unit and no current — and it is the HOT
+        forward voltage, the one value the conduction model turns on."""
+        vf = {e["conditions"].get("T_j"): e for e in _e(lve, "V_F_vs_IF")}
+        assert vf[125.0]["typ"] == pytest.approx(0.77)
+        assert vf[125.0]["conditions"]["I_F"] == 25.0          # inherited from the row above
+        ir = {e["conditions"].get("T_j"): e for e in _e(lve, "I_rev_vs_Tj")}
+        assert ir[125.0]["typ"] == pytest.approx(35e-6)        # the UNIT was inherited too
+        assert ir[125.0]["conditions"]["V_R"] == 600.0
+
+    def test_a_continuation_row_does_not_inherit_a_value(self, lve):
+        """The one thing it must NOT take. A blank max belongs to this row's condition, not to the
+        row above; inheriting it would attach the cold limit to the hot point."""
+        vf = {e["conditions"].get("T_j"): e for e in _e(lve, "V_F_vs_IF")}
+        assert vf[25.0]["max"] == pytest.approx(0.93)
+        assert vf[125.0].get("max") is None
+
+    def test_the_datasheets_that_already_worked_still_do(self, lve):
+        """Every fix above is additive. These counts are equalities, not floors."""
+        spec = os.path.join(os.path.dirname(__file__), "..", "..", "specs")
+        for path, cls, n in (
+                (os.path.join(spec, "Review", "IMZA65R033M2HXKSA1.pdf"), "sic_mosfet", 20),
+                (os.path.join(spec, "Bridge Rectifier Configuration", "GBJ40L06.pdf"),
+                 "bridge_rectifier", 9),
+                (os.path.join(spec, "Review", "PFC Boost Diode", "vs-3c40cp12l-m3.pdf"),
+                 "sic_schottky", 8)):
+            if not os.path.exists(path):
+                continue
+            with open(path, "rb") as f:
+                got = DX.extract(f.read(), cls)["profile"]["parameters"]
+            assert len(got) == n, (path, len(got))
