@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-09**, head = **`7dee85d` C217**, on `master`.
+**Start here after a restart.** Last updated **2026-08-09**, head = **`PENDING` C218**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -42,6 +42,7 @@ entering the design must carry provenance.
 | C215 | **M7 part 2** Curves sub-tab; a confirmed curve reaches the engine | P_D_cond 7.19 -> 5.86 W; caught a transposed-axis -692 W bug |
 | C216 | digitiser measured on 4 vendors + fragmented-label fallback | reads 3 of 5 files; Toshiba is RASTER, Infineon frameless |
 | C217 | **M8-bridge** steps 0-2 + 5; LVE5060E extraction; consensus axis fitting | 0 -> 11 params; Fig. 4 matches BOTH table anchors |
+| C218 | **M8-bridge** steps 3, 4, 6, 7 — requirement, sync-bottom, GUI, §7.3 | bridge leaves the catalogue; I_F(AV) 22.2 -> 28.3 A |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -88,9 +89,17 @@ class it RESOLVED to rather than the one it arrived under.
     outline. So the C208 gaps (E_oss as a V^1.5 fit, C_rss unmapped, g_fs absent) cannot be closed
     from this part's datasheet at all — Infineon publishes those curves in a separate application
     note. `_FIGURE_TARGETS` remains diode-only for that reason, not for want of machinery.
-- **M8-bridge** — the bridge still has neither a datasheet flow nor a correct requirement (its
-  average current is the INPUT current, not the output current; C210 deliberately left it alone
-  rather than hand it the diode's formula).
+- ~~**M8-bridge**~~ — DONE at C217/C218. The bridge is selected the way the MOSFET and the diode
+  are, and **nothing in Chapter 7 now comes from the parametric catalogue.** Its requirement is its
+  own (blocks the LINE peak, carries the RECTIFIED MEAN against an average rating), sync-bottom
+  names an ordinary confirmed MOSFET as the bypass FET, and §7.3 runs a real sharing sweep.
+  TWO FOLLOW-UPS, both small:
+  - the sharing sensitivity is **currently degenerate** — 50/50, 60/40 and 70/30 all return
+    29.27 W, because a single tabulated V_F point is a FLAT curve and the derate cancels. It
+    becomes real the moment the LVE5060E's Fig. 4 is confirmed through the Curves tab, which C217
+    made possible. The report says this in the table rather than leaving it to be discovered.
+  - the derating gate (datasheet Fig. 1, allowed current vs case temperature) is described in
+    §7.3 but not yet computed — it needs the confirmed Fig. 1 curve.
 - **PENDING A11** — no real diode datasheet has been through the extractor. Everything downstream of
   extraction is tested; the extraction layer for diodes is not. Ask the designer for a SiC Schottky
   and a silicon fast-recovery PDF.
@@ -232,7 +241,7 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **455 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **467 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209

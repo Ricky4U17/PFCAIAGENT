@@ -70,9 +70,47 @@ def requirements(design: dict, kind: str = "mosfet",
     # and the average current it carries is the OUTPUT current -- not the input current the MOSFET
     # sees. Comparing an average rating against an input peak is the mistake this branch exists to
     # avoid: at 393 V / 3600 W it is the difference between requiring ~7 A and requiring ~39 A.
-    # DIODE ONLY, deliberately. A bridge rectifier also carries an average current, but it is the
-    # INPUT current, not the output current — so this branch would give it a confidently wrong
-    # number. The bridge keeps its existing requirement until M8-bridge derives its own.
+    # A BRIDGE BLOCKS THE LINE PEAK AND CARRIES THE RECTIFIED MEAN. Neither is what it was being
+    # told. It had been handed the MOSFET's requirement, which asks it to block the BUS (472 V here
+    # against the 448 V it actually needs — conservative by accident, and wrong on any design whose
+    # bus is not near the line peak) and to carry the per-channel input PEAK, 22.2 A, where the
+    # rating it is compared against is an AVERAGE and the correct figure is 28.3 A. That second
+    # error understates by 27 %, which is the direction that passes an under-rated part.
+    if kind == "bridge":
+        v_pk = math.sqrt(2.0) * float(design.get("vin_max") or 0.0)
+        # 2*sqrt(2)/pi. Vendors rate a bridge by its total DC output current, not per diode, so
+        # this is the quantity the datasheet's I_F(AV) is to be compared against.
+        i_rect = 0.9003 * iin_rms
+        n_par = max(int(design.get("n_parallel") or 1), 1)
+        v_min_br = v_pk * v_margin
+        i_min_br = i_rect * i_margin
+        return {
+            "kind": kind,
+            "V_RRM_min": round(v_min_br, 1),
+            "I_F_AV_min": round(i_min_br, 2),
+            "I_rect_avg": round(i_rect, 2),
+            "I_per_package": round(i_rect / n_par, 2),
+            "basis": {
+                "V_line_pk": round(v_pk, 1), "v_margin": v_margin,
+                "I_in_rms_worst": round(iin_rms, 3), "i_margin": i_margin,
+                "form_factor": 0.9003, "n_parallel": n_par, "V_bus": vout,
+            },
+            "statement": (
+                f"The bridge must block at least {v_min_br:.0f} V "
+                f"({v_pk:.0f} V line peak at {design.get('vin_max')} Vac x {v_margin:g} margin) and "
+                f"carry at least {i_min_br:.1f} A average "
+                f"({i_rect:.1f} A rectified mean x {i_margin:g} margin)"
+                + (f", or {i_rect / n_par:.1f} A per package across {n_par} packages"
+                   if n_par > 1 else "")
+                + ". Source a part meeting these, then upload its datasheet."),
+            "note": ("The bridge blocks the LINE peak, not the boost bus — it sits before the "
+                     "inductor. And its rating is an AVERAGE: vendors quote I_F(AV) as the total "
+                     "DC output current of the bridge, which is why the rectified mean is the "
+                     "quantity compared against it rather than any peak or per-diode figure."),
+        }
+
+    # DIODE ONLY below. A bridge rectifier also carries an average current, but it is the INPUT
+    # current, not the output current, which is why it has its own branch above.
     if kind == "diode":
         iout_ch = (pout / vout / max(nch, 1)) if vout else 0.0
         return {
@@ -1324,6 +1362,23 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
             "No reverse-recovery charge is published, which is normal for a mains bridge: it "
             "commutates at LINE frequency, so the term is negligible beside conduction and the "
             "engine treats it as a placeholder rather than a model. It is not counted as a gap.")})
+
+    # 3b. the surge figures. Not loss parameters — they are the Chapter 8 inrush and fuse-
+    # coordination inputs, and they were being extracted and then dropped because nothing carried
+    # them onto the block. `meta_field` is how a non-engine quantity travels.
+    # `meta_field` ONLY, not `db_field`. The two are different external names for different
+    # audiences: `meta_field` is what the block carries, `db_field` is the vendor catalogue's
+    # column. `to_record_fields` returns either, so using it here wrote V_RRM as `vr` — a
+    # catalogue name that is not a Bridge field, and Bridge(**params) refused it outright.
+    for key in ("I_FSM", "I2t"):
+        field = R.get(key).get("meta_field")
+        ent = _pick_entry(_entries_of(profile, key))
+        val = (ent or {}).get("typ")
+        if val is None:
+            val = (ent or {}).get("max")
+        if field and isinstance(val, (int, float)):
+            blk[field] = float(val)
+            prov[key] = "extracted"
 
     # 4. the design's own configuration — none of this is on any datasheet
     topo = design.get("bridge_topology") or design.get("topology") or "diode"

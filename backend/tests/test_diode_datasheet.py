@@ -240,12 +240,20 @@ class TestRequirement:
         assert req["I_F_pk"] > req["I_F_AV_min"]
         assert "V_DSS_min" not in req
 
-    @pytest.mark.parametrize("kind", ["mosfet", "bridge"])
-    def test_no_other_kind_is_given_the_diode_requirement(self, kind):
-        """A bridge also carries an average current, but it is the INPUT current — this branch
-        would hand it a confidently wrong number. It keeps its own until M8-bridge."""
-        req = DF.requirements(DESIGN, kind)
+    def test_the_mosfet_keeps_its_own_requirement(self):
+        req = DF.requirements(DESIGN, "mosfet")
         assert "V_DSS_min" in req and "I_F_AV_min" not in req
+
+    def test_the_bridge_has_its_own_requirement_now(self):
+        """Until C218 this asserted that the bridge still received the MOSFET's requirement — true
+        while M8-bridge was outstanding, and wrong the moment it landed. A bridge blocks the LINE
+        peak and carries the RECTIFIED MEAN, and it does not have the diode's per-channel peak,
+        which is a per-phase quantity that means nothing for a device in front of the inductor."""
+        req = DF.requirements(DESIGN, "bridge")
+        assert "V_DSS_min" not in req and "I_D_min" not in req
+        assert req["V_RRM_min"] > 0 and req["I_F_AV_min"] > 0
+        assert "I_F_pk" not in req                      # the diode's, not the bridge's
+        assert "I_rect_avg" in req
 
     def test_a_part_below_the_blocking_margin_is_reported(self):
         p = _prof("LOWV", {"V_RRM": [_e(400.0)], "Q_c": [_e(50e-9, V_R=400)],

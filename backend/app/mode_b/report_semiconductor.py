@@ -96,7 +96,45 @@ def _worked(story, num, title, step_rows, traces, ch=CH):
                headers, rows, col_widths, ch=ch)
 
 
-def _bridge_section(story, traces, is_sync):
+def _sharing_sweep(design, mosfet, diode, bridge, thermal):
+    """Bridge loss at 50/50, 60/40, 70/30 and single-path sharing.
+
+    Paralleled rectifiers do not share equally: the hotter package takes more current, and its own
+    loss makes it hotter. The nominal number assumes they split evenly, which is the assumption a
+    reviewer most wants to see tested — so the alternatives are computed rather than asserted.
+
+    It is a genuine sweep, not a formula: each case re-runs the engine with the derate applied, so
+    it picks up the V-I curve and the thermal iteration exactly as the headline number does.
+    """
+    from app.mode_b.semiconductor.adapter import calculate_semiconductor_losses
+    import copy
+
+    n_par = int((bridge or {}).get("n_parallel") or 1)
+    if n_par < 2:
+        return None
+    out = []
+    for label, k in (("50 / 50 (ideal)", 0.5), ("60 / 40", 0.6),
+                     ("70 / 30", 0.7), ("single path", 1.0)):
+        b = copy.deepcopy(bridge)
+        if k >= 1.0:
+            b["n_parallel"] = 1
+            b.pop("share_worst", None)
+        else:
+            b["share_worst"] = k
+        try:
+            res = calculate_semiconductor_losses(design, mosfet, diode, b, thermal, None)
+            rows = res["per_point"]
+            if not rows:
+                continue
+            worst = max(rows, key=lambda r: r["P_BRIDGE_total"])
+            out.append({"case": label, "P": worst["P_BRIDGE_total"],
+                        "Tj": worst["Tj_BRIDGE_top"], "Vac": worst["Vac"]})
+        except Exception:
+            continue
+    return out or None
+
+
+def _bridge_section(story, traces, is_sync, bridge=None, sharing=None):
     _W(story,
        "<b>Model.</b> The bridge rectifies the AC line; at every instant two devices in series carry "
        "the full rectified current i<sub>in</sub>(&#952;) = &#8730;2&#183;I<sub>in,rms</sub>&#183;sin&#952;. "
@@ -136,6 +174,66 @@ def _bridge_section(story, traces, is_sync):
                       lambda tr: (f"{_f(tr['P_bridge_top'])} W / {_f(tr['P_bridge_bottom'])} W"
                                   + (f" + {_f(float(tr.get('P_bridge_bd_share', 0) or 0))} W" if _show_bd else ""))))
     _worked(story, "7.3.1", "Bridge Loss — Worked Derivation", steps, traces)
+
+    _b = bridge or {}
+    _est = list(_b.get("_estimated") or [])
+    _src = _b.get("_source") or ""
+    if _b.get("part_number"):
+        annotation(story, "BRIDGE PART",
+            f"<b>{_b.get('manufacturer') or ''} {_b['part_number']}</b>. "
+            + (f"Its model parameters come from {_src}. " if _src else "")
+            + ("Every one of them is datasheet-backed."
+               if not _est else
+               f"Estimated by the engine rather than read: {', '.join(str(e) for e in _est)}."),
+            CH)
+
+    _rths = _b.get("_rth_jc_published")
+    if _rths and len(_rths) > 1:
+        annotation(story, "THERMAL",
+            f"The datasheet publishes more than one junction-to-case resistance "
+            f"({', '.join(f'{r:g}' for r in _rths)} K/W). The LARGEST is used, because that is the "
+            f"per-die figure the junction actually sees; a smaller one describes the whole package "
+            f"and would halve the predicted rise.", CH)
+
+    if sharing:
+        rows = [[c["case"], f"{_f(c['P'])} W", f"{_f(c['Tj'],1)}{_DEG}C", f"{_f(c['Vac'],0)} V<sub>AC</sub>"]
+                for c in sharing]
+        # Only the SHARING cases. The single-path fallback is a different circuit — one package
+        # carrying everything — so it legitimately differs and including it hides the very thing
+        # this is testing for.
+        shared = [c["P"] for c in sharing if "single" not in c["case"]]
+        collapsed = len(shared) > 1 and (max(shared) - min(shared)) < 0.05
+        data_table(story, "7.3.2", "Bridge Current-Sharing Sensitivity",
+            "Paralleled rectifiers do not share equally — the hotter package takes more current, "
+            "and its own loss makes it hotter. The nominal figure assumes an even split, so the "
+            "alternatives are computed here rather than asserted. Each case re-runs the engine with "
+            "the derate applied, so it carries the same V-I curve and thermal iteration as the "
+            "headline number." + (
+                "<br/><br/><b>These cases are currently indistinguishable, and that is a statement "
+                "about the DATA rather than about the hardware.</b> The forward drop is being taken "
+                "from a single tabulated point, which makes V<sub>f</sub>(i) a constant — and a "
+                "constant drop gives the same loss however the current divides, because the derate "
+                "cancels. Digitising the datasheet's forward-characteristic curve is what makes "
+                "this table mean anything."
+                if collapsed else ""),
+            ["Sharing case", "Worst-case bridge loss", "T<sub>j</sub>", "at"],
+            rows, col_widths=[CW*0.28, CW*0.26, CW*0.20, CW*0.26], ch=CH)
+
+    _surge = [k for k in ("ifsm_A", "i2t_A2s") if _b.get(k) not in (None, "")]
+    if _surge or _b.get("_provenance", {}).get("I_FSM") or _b.get("_provenance", {}).get("I2t"):
+        annotation(story, "SURGE ONLY",
+            "I<sub>FSM</sub> and I&#178;t are read from the bridge datasheet and used ONLY for the "
+            "cold-start inrush and fuse-coordination checks in Chapter 8. They take no part in "
+            "steady-state conduction loss, and are named here so their absence from the loss table "
+            "reads as deliberate rather than as an oversight.", CH)
+
+    annotation(story, "DERATE",
+        "The datasheet's output-rectified-current derating curve bounds the allowable average "
+        "current against case temperature. It is a SEPARATE check from loss: a bridge can be "
+        "comfortably inside its dissipation budget and still sit outside that curve once the case "
+        "is hot. Chapter 7.6 computes the case temperature this design reaches; the comparison "
+        "against the derating curve is stated there once the curve has been confirmed from the "
+        "datasheet figure.", CH)
 
 
 def _mosfet_section(story, traces, mosfet=None):
@@ -730,7 +828,8 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     if _cfg_img is not None:
         story.append(_cfg_img)
         body(story, f"<i>Figure 7.3 — Selected bridge configuration. {_cfg_cap}</i>", CH)
-    _bridge_section(story, traces, is_sync)
+    _bridge_section(story, traces, is_sync, bridge, _sharing_sweep(design, mosfet, diode,
+                                                                  bridge, thermal))
     # #9 - the sync-bottom arrangement is not obvious from the schematic alone: the bottom
     # diodes sit in PARALLEL with the bypass-FET channel and can take back part of the current.
     # Spell out the path so a reviewer can follow where each term in Table 7.3 comes from.

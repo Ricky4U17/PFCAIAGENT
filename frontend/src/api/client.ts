@@ -458,8 +458,9 @@ export const semiconductorExtract = (kind: string, file: File): Promise<DsExtrac
 export interface DsRequirement {
   kind: string
   V_DSS_min?: number; I_D_min?: number            // MOSFET: blocking + peak drain current
-  V_RRM_min?: number; I_F_AV_min?: number         // diode: blocking + AVERAGE forward current
+  V_RRM_min?: number; I_F_AV_min?: number         // diode/bridge: blocking + AVERAGE forward current
   I_F_pk?: number                                 // diode: repetitive peak, not covered by I_F(AV)
+  I_rect_avg?: number; I_per_package?: number     // bridge: rectified mean, and its share per package
   basis: Record<string, number>; statement: string; note: string
 }
 export interface DsReviewRow {

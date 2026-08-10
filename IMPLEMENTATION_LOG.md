@@ -8698,3 +8698,61 @@ worked are asserted at their exact parameter counts, not floors.
 STILL TO DO in M8-bridge: the bridge requirement (step 4), the GUI sub-tabs including the
 sync-bottom selector (3, 6), and the report section with the sharing sensitivity and the derating
 gate (7) - which step 5 has now made worth writing.
+
+
+## C218 — M8-bridge steps 3, 4, 6 and 7: the last component leaves the catalogue
+
+With this the bridge is selected the way the MOSFET and the diode are: state the requirement, upload
+the datasheet, review and confirm, and only then compute. Nothing in Chapter 7 is now chosen from
+the parametric export.
+
+THE REQUIREMENT IS THE BRIDGE'S OWN. It had been handed the MOSFET's, and both halves were wrong.
+A bridge sits BEFORE the inductor, so it blocks the LINE peak - 448 V here, not the 472 V derived
+from the boost bus, which was conservative only by accident and would be wrong in either direction
+on a design whose bus is not near the line peak. And vendors quote I_F(AV) as the bridge's total DC
+OUTPUT current, so the rectified mean is the quantity to compare against it: 28.3 A, where it had
+been given the per-channel input PEAK of 22.2 A. That second error understates by 27 %, which is the
+direction that passes an under-rated part.
+
+SECTION 7.3 gains a real sharing sweep. Paralleled rectifiers do not share equally - the hotter
+package takes more current and its own loss makes it hotter - so 50/50, 60/40, 70/30 and the
+single-path fallback are each RE-RUN through the engine rather than scaled by a formula, picking up
+the same V-I curve and thermal iteration as the headline number. Also a bridge provenance
+annotation, a note when the datasheet publishes more than one junction-to-case resistance, and
+I_FSM / I2t named explicitly as inrush and fuse-coordination inputs so their absence from the loss
+table reads as deliberate.
+
+THE SENSITIVITY TABLE REPORTS ITS OWN LIMITATION. All three sharing cases return 29.27 W, and the
+table says why: a single tabulated V_F point is a FLAT curve, so the forward drop is the same
+whatever the current split and the derate cancels exactly. That is a statement about the DATA and
+not about the hardware, and it becomes a real sensitivity the moment Fig. 4 is confirmed through the
+Curves tab - which C217 made possible. The same shape as the diode at C215.
+
+THE GUI. The bridge moves to Upload / Parameters / Curves / Results, retiring the last
+catalogue-driven selector on the page. A topology selector sits on its Parameters tab, and choosing
+sync-bottom asks for the bypass MOSFET by part number - selected through the ordinary MOSFET flow
+and mapped onto the bridge's `_bottom` parameters, so there is one upload path used twice rather
+than a second extractor.
+
+I MADE THE NAMING MISTAKE AGAIN AND THE ENGINE CAUGHT IT. Carrying the surge figures onto the block
+I reached for `to_record_fields`, which returns `db_field` OR `meta_field` - so V_RRM was written as
+`vr`, the vendor CATALOGUE's column name, which is not a Bridge field, and Bridge(**params) refused
+it outright. Two external names exist for a quantity and they are not interchangeable: `meta_field`
+is what a block carries, `db_field` is what a catalogue row calls it. A test now constructs the
+dataclass from the block for exactly this.
+
+Found on the way: I_FSM and I2t were being extracted from the datasheet and then dropped, because
+nothing carried them onto the block - so Chapter 8's inrush and fuse-coordination checks never saw
+the datasheet's own numbers.
+
+Bridge loss from the LVE5060E datasheet: 29.27 W at 50/50 across two packages against 26.79 W from
+the catalogue, with R_thJC 1.2 rather than the 1.0 that had been assumed.
+
+Verified: 12 new tests (tests/test_bridge_datasheet.py) covering both halves of the requirement, the
+builder dispatch, the dataclass accepting the block, the surge metadata, the unnamed bypass FET, and
+the sweep including its collapse; combined report 190 pp and Chapter 7 renders at 15 pp with no
+unrenderable glyphs and no mid-word wraps; tsc clean and the frontend builds.
+
+Also corrected: `test_no_other_kind_is_given_the_diode_requirement[bridge]`, written at C210, asserted that the bridge still received the MOSFET's requirement. Its own docstring said "it keeps its own until M8-bridge" — so it was pinning a deliberately temporary state and it failed at exactly the moment that state ended, which is the behaviour wanted. It is now two tests: the MOSFET keeps V_DSS, and the bridge asserts V_RRM_min / I_F_AV_min / I_rect_avg present, V_DSS_min / I_D_min gone, and I_F_pk ABSENT — the diode's per-channel peak is a per-phase quantity and means nothing for a device sitting in front of the inductor.
+
+Suite 467 passed / 2 skipped (was 455).

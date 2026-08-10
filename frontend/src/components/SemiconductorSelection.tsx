@@ -36,7 +36,7 @@ interface Props {
 
 type Sub = 'bridge' | 'mosfet' | 'diode' | 'results'
 // the kinds that use the datasheet-first flow (the bridge is still catalogue/manual)
-type DsKind = 'mosfet' | 'diode'
+type DsKind = 'mosfet' | 'diode' | 'bridge'
 type Curve = { x: string; y: string }
 type Field = { key: string; label: string; kind: 'text' | 'num' | 'curve' | 'bool' | 'select'
                unit?: string; opts?: string[]; hint?: string; show?: (s: Record<string, any>) => boolean }
@@ -385,7 +385,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // Keyed by KIND. The MOSFET and the boost diode run the same four-step flow, so they share one
   // panel and one set of handlers — a second copy of 150 lines is how the two drift apart.
   const [dsTab, setDsTab] = useState<Record<DsKind, 'upload' | 'parameters' | 'curves' | 'results'>>(
-    { mosfet: 'upload', diode: 'upload' })
+    { mosfet: 'upload', diode: 'upload', bridge: 'upload' })
   // ── M7: the plotted curves ──────────────────────────────────────────────────────────────
   // Everything a table cannot carry has been standing in as a fitted shape — a constant forward
   // drop, a Q_c moved to the bus by an assumed power law. The shapes are printed on the page. The
@@ -400,7 +400,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [dsConf, setDsConf] = useState<Partial<Record<DsKind, DsConfirm>>>({})
   const [dsBusy, setDsBusy] = useState<Partial<Record<DsKind, boolean>>>({})
   const [dsEdits, setDsEdits] = useState<Record<DsKind, Record<string, string>>>(
-    { mosfet: {}, diode: {} })
+    { mosfet: {}, diode: {}, bridge: {} })
   // Design-sourced inputs. No upload can supply these, so they are asked for explicitly rather
   // than falling through to an engine default nobody chose. The diode needs far fewer of them:
   // it has no gate.
@@ -411,10 +411,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
     // BOTH legs' loss through one case-to-sink interface. The datasheet cannot say whether both
     // legs are actually loaded — only the designer knows which package is fitted.
     diode:  { R_th_cs: '0.3', dies_per_package: '1' },
+    // The bridge blocks the LINE peak and carries the rectified mean, so its configuration is the
+    // current PATH: how many packages share it, how badly they share, and whether the bottom two
+    // positions are diodes or bypass MOSFETs.
+    bridge: { R_th_cs: '0.5', n_parallel: '1', share_worst: '',
+              bridge_topology: 'diode', bottom_mosfet_part: '' },
   })
 
   useEffect(() => {
-    ;(['mosfet', 'diode'] as DsKind[]).forEach(k =>
+    ;(['mosfet', 'diode', 'bridge'] as DsKind[]).forEach(k =>
       datasheetRequirements(design as unknown as Record<string, unknown>, k)
         .then(r => setDsReq(s2 => ({ ...s2, [k]: r }))).catch(() => {}))
   }, [design])
@@ -453,7 +458,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
       // theatre: values approved and then not used.
       setDbBlock(s2 => ({ ...s2, [kind]: r.block }))
       setWhole(kind, blockToForm(r.block as Record<string, any>, FIELDS[kind],
-                                 kind === 'mosfet' ? mosfet : diode))
+                                 kind === 'mosfet' ? mosfet : kind === 'diode' ? diode : bridge))
       if (r.validation.ok) setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
@@ -722,6 +727,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const designFields: [string, string, string][] = isFet
       ? [['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
          ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
+      : kind === 'bridge'
+      ? [['R_th_cs', 'R_θcs', '°C/W'], ['n_parallel', 'Packages in parallel', '1 or 2'],
+         ['share_worst', 'Worst-package share', '0.5–1.0']]
       : [['R_th_cs', 'R_θcs', '°C/W'], ['dies_per_package', 'Dies / package', '1 or 2']]
     return (
       <Card style={{ marginTop: 12 }}>
@@ -750,6 +758,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
               <div style={{ fontSize: 13, color: C.text, fontFamily: 'IBM Plex Mono,monospace' }}>
                 {isFet
                   ? <>V<sub>DSS</sub> ≥ {req.V_DSS_min} V &nbsp;·&nbsp; I<sub>D</sub> ≥ {req.I_D_min} A</>
+                  : kind === 'bridge'
+                  ? <>V<sub>RRM</sub> ≥ {req.V_RRM_min} V &nbsp;·&nbsp; I<sub>F(AV)</sub> ≥ {req.I_F_AV_min} A
+                      {(req.I_per_package ?? 0) > 0 && (req.basis?.n_parallel ?? 1) > 1 &&
+                        <> &nbsp;·&nbsp; {req.I_per_package} A per package</>}</>
                   : <>V<sub>RRM</sub> ≥ {req.V_RRM_min} V &nbsp;·&nbsp; I<sub>F(AV)</sub> ≥ {req.I_F_AV_min} A
                       &nbsp;·&nbsp; peak {req.I_F_pk} A</>}
               </div>
@@ -850,6 +862,41 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     : 'Its recovery charge Q_rr is split between the MOSFET and the diode — for a CCM boost PFC this is usually the largest single loss term in the chapter.'}
                 </div>
               </div>)}
+            {kind === 'bridge' && (
+              <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
+                border: `1px solid ${C.border}`, background: C.bg3 }}>
+                <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase',
+                  marginBottom: 6 }}>Bridge topology</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {([['diode', 'Four diodes'],
+                     ['sync_bottom', 'Sync bottom (bypass MOSFETs)']] as [string, string][])
+                    .map(([v, lbl]) => (
+                      <button key={v} onClick={() => setDsDesign(d => ({ ...d,
+                        bridge: { ...d.bridge, bridge_topology: v } }))} style={{
+                        padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                        fontWeight: 600,
+                        border: `1px solid ${dsDesign.bridge.bridge_topology === v ? C.teal : C.border}`,
+                        background: dsDesign.bridge.bridge_topology === v
+                          ? 'rgba(45,212,191,.12)' : C.bg3,
+                        color: dsDesign.bridge.bridge_topology === v ? C.teal : C.muted }}>{lbl}</button>))}
+                </div>
+                {dsDesign.bridge.bridge_topology === 'sync_bottom' && (
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ fontSize: 10.5, color: C.muted }}>
+                      Bypass MOSFET — part number, as confirmed on the MOSFET tab<br />
+                      <input style={{ ...inStyle, width: 260, padding: '2px 6px', fontSize: 11.5 }}
+                        value={dsDesign.bridge.bottom_mosfet_part ?? ''}
+                        placeholder={dsUp.mosfet?.part_number || 'e.g. IMZA65R033M2H'}
+                        onChange={e => setDsDesign(d => ({ ...d,
+                          bridge: { ...d.bridge, bottom_mosfet_part: e.target.value } }))} /></label>
+                    <div style={{ fontSize: 10, color: C.hint, marginTop: 5, lineHeight: 1.6 }}>
+                      In this topology the bottom two positions are MOSFETs, so they are selected the
+                      same way every other MOSFET is — requirement, upload, review, confirm — and
+                      named here. One upload path used twice, rather than a second extractor.
+                    </div>
+                  </div>)}
+              </div>)}
+
             {!isFet && checks.filter(c => c.severity === 'check').map((c, i) => (
               <div key={i} style={{ fontSize: 10.5, color: C.amber, marginTop: 4, lineHeight: 1.6 }}>
                 ⚠ <b>{c.key}</b> — {c.message}</div>))}
@@ -960,17 +1007,24 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 <thead><tr>{(isFet
                   ? ['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss', 'Recovery', 'Leakage',
                      'TOTAL', 'T_j']
+                  : kind === 'bridge'
+                  ? ['V_ac', 'P_out', 'Top (diodes)', 'Bottom', 'TOTAL', 'T_j']
                   : ['V_ac', 'P_out', 'Conduction', 'Switching / RR', 'Leakage', 'TOTAL', 'T_j',
                      'into MOSFET']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {perPoint.map((p, i) => {
-                    const key = isFet ? 'Tj_FET' : 'Tj_DIODE'
+                    const key = isFet ? 'Tj_FET' : kind === 'bridge' ? 'Tj_BRIDGE_top' : 'Tj_DIODE'
                     const hot = p[key] === Math.max(...perPoint.map(x => x[key] ?? 0))
                     return (
                       <tr key={i} style={{ background: hot ? 'rgba(245,158,11,.08)' : 'transparent' }}>
                         <td style={dsCell}>{(p.Vac ?? 0).toFixed(0)} V</td>
                         <td style={dsCell}>{(p.Po ?? 0).toFixed(0)} W</td>
-                        {isFet ? (<>
+                        {kind === 'bridge' ? (<>
+                          <td style={dsCell}>{(p.P_BRIDGE_top ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_BRIDGE_bottom ?? 0).toFixed(2)}</td>
+                          <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
+                            {(p.P_BRIDGE_total ?? 0).toFixed(2)} W</td>
+                        </>) : isFet ? (<>
                           <td style={dsCell}>{(p.P_FET_cond ?? 0).toFixed(2)}</td>
                           <td style={dsCell}>{(p.P_FET_sw ?? 0).toFixed(2)}</td>
                           <td style={dsCell}>{(p.P_FET_coss ?? 0).toFixed(2)}</td>
@@ -1192,7 +1246,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
         })}
       </div>
 
-      {sub === 'bridge' && compForm(BRIDGE_FIELDS, bridge, 'bridge', 'Bridge rectifier (plain diode bridge, or sync-bottom bypass MOSFETs)',
+      {sub === 'bridge' && datasheetPanel('bridge')}
+      {false && compForm(BRIDGE_FIELDS, bridge, 'bridge', 'Bridge rectifier (plain diode bridge, or sync-bottom bypass MOSFETs)',
         res?.summary ? ['bridge', fmtW(worst('P_BRIDGE_max'))] : undefined)}
       {/* The MOSFET no longer has "From database" or "Manual / external" sources. Both fed the
           engine from parameters the parametric catalogue does not carry — E_oss, E_on/E_off, Q_gd
