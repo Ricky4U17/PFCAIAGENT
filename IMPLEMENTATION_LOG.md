@@ -8846,3 +8846,49 @@ STILL OPEN from C218: the derating gate (Fig. 1, allowed current vs case tempera
 Section 7.3 and still not computed. The figure READS correctly now - x "Case Temperature (degC)",
 y "Average Forward Rectified Current (A)", 0-175 degC / 0-50 A - so what is left is a canonical key
 for it, a `_FIGURE_TARGETS` entry, and the gate itself.
+
+## C221 - the bridge derating gate, computed instead of promised
+
+Section 7.3 had DESCRIBED this check since C218 and left an annotation saying the comparison "is
+stated there once the curve has been confirmed from the datasheet figure". C220 made the figure
+confirmable, so the promise is now kept and the annotation is retired - leaving it would have had
+the chapter point forward to a table sitting directly above it.
+
+WHAT THE GATE IS. Not a loss question and not a junction-temperature question. A bridge can sit
+comfortably inside its dissipation budget AND inside its Tj limit while being operated outside the
+current its vendor permits at that case temperature. A room-temperature I_F(AV) rating does not
+answer it: this part is a 50 A bridge at 50 degC case and carries no rating at all at 175 degC.
+
+    at 102 degC case      allowed 30.0 A/package   drawn 9.4 A/package   PASS, 218 % headroom
+
+CASE, NOT AMBIENT. Vendors publish both derating curves side by side and they differ by nearly an
+order of magnitude - the LVE5060E is rated 50 A against case (Fig. 1) and 6 A in free air (Fig. 2).
+The figure target matches "case temperature" exactly for that reason; matching "temperature" loosely
+would have silently taken the wrong curve and passed a part on an 8x optimistic rating.
+
+A BUG MY OWN TEST CAUGHT. The gate called `requirements(design, "bridge")` with the bare design,
+which has no `n_parallel`, so it compared the TOTAL rectified current (18.87 A) against a PER-PACKAGE
+allowance. Overstated the draw by the number of packages - the conservative direction, but wrong, and
+it would have failed a legitimately-sized two-package design. `n_parallel` now comes from the BLOCK,
+which is what the engine actually ran, and is fed back into the requirement so the per-package figure
+keeps ONE derivation.
+
+THREE VERDICTS, AND NO SILENT PASS. PASS / FAIL / DATA MISSING, where a part whose curve has not been
+digitised reports DATA MISSING rather than reading as an approved one - the failure this check exists
+to prevent. Off the end of the published curve is a FAIL and not DATA MISSING: beyond its last point
+the part carries no rating at all, and "no data" would read as "not yet checked".
+
+The derating curve rides as `_i_f_av_vs_tc`, UNDERSCORE-PREFIXED. The adapter treats any such key as
+metadata by convention, where `_META_KEYS` is a second place its own docstring says has been forgotten
+twice - and a curve reaching Bridge(**params) is exactly how V_RRM broke at C218.
+
+Also fixed while writing it: the table description carried this part's own numbers ("rated 50 A at
+50 degC") into prose that every design gets. The values belong in the table, read from whichever
+curve was confirmed; a test now asserts the prose stays part-agnostic.
+
+Verified: 12 new tests (tests/test_derating_gate.py) covering curve selection, the metadata route,
+all three verdicts, the requirement-shared derivation, the thermal path, and the report; Chapter 7
+renders 16 pp with 0 glyph boxes; registry audits 72 passed.
+Suite 503 passed / 2 skipped (was 491).
+
+Both C218 follow-ups are now closed.

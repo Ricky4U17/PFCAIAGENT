@@ -263,6 +263,10 @@ _FIGURE_TARGETS = [
     ("E_c_vs_VR",      ("reverse voltage",),  ("capacitive energy",),    False,    False),
     ("C_j_vs_VR",      ("reverse voltage",),  ("junction capacitance",), False,    False),
     ("I_rev_vs_VR",    ("reverse voltage",),  ("reverse current",),      True,     False),
+    # CASE temperature, not ambient. Vendors publish both derating curves side by side and they
+    # differ by nearly an order of magnitude - the LVE5060E is rated 50 A against case and 6 A in
+    # free air - so matching "temperature" loosely here would silently pick the wrong one.
+    ("I_F_AV_vs_Tc",   ("case temperature",), ("rectified current",),    False,    False),
 ]
 
 
@@ -1484,6 +1488,19 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
         if field and isinstance(val, (int, float)):
             blk[field] = float(val)
             prov[key] = "extracted"
+
+    # 3c. the DERATING curve. Also not a loss parameter - the loss comes from the V-I curve either
+    # way. This is what Section 7.3's gate reads: whether the part is ALLOWED to carry this current
+    # at the case temperature it will actually run at, which a room-temperature I_F(AV) rating does
+    # not answer. Its meta_field is UNDERSCORE-PREFIXED on purpose: the adapter treats any such key
+    # as metadata by convention, where `_META_KEYS` is a second place that its own docstring says
+    # has been forgotten twice.
+    dig_dr = _digitised(profile, "I_F_AV_vs_Tc")
+    if dig_dr:
+        field = R.get("I_F_AV_vs_Tc").get("meta_field")
+        if field:
+            blk[field] = [list(dig_dr["x"]), list(dig_dr["y"])]
+            prov["I_F_AV_vs_Tc"] = "digitised"
 
     # 4. the design's own configuration — none of this is on any datasheet
     topo = design.get("bridge_topology") or design.get("topology") or "diode"

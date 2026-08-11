@@ -1017,6 +1017,19 @@
       "description": "Average rectified forward current. The diode/bridge counterpart of I_D: it is the requirement the GUI states before a datasheet is uploaded, not a loss parameter. MULTI-VALUED - vendors publish it with and without a heatsink, and taking the first number silently discards an operating point."
     },
     {
+      "key": "I_F_AV_vs_Tc",
+      "si_unit": "A", "display_unit": "A",
+      "device_classes": ["bridge_rectifier"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "condition_qualified": true, "conditions": ["mounting"],
+      "consumed_by": ["derating_check", "report"],
+      "engine_fields": [],
+      "meta_field": "_i_f_av_vs_tc",
+      "report_label": "I<sub>F(AV)</sub>(T<sub>C</sub>)",
+      "plausible": {"min": 0.1, "max": 1000.0},
+      "description": "Derating curve: the maximum average rectified forward current the part is ALLOWED to carry as a function of case temperature. Not a loss parameter - the loss is computed from the V-I curve either way. This is the Section 7.3 gate that asks whether the part is permitted to carry the current at the temperature it will actually run at, which a room-temperature I_F_AV rating does not answer. CASE temperature specifically: vendors publish a second curve against AMBIENT for free-air mounting (the LVE5060E's Fig. 2, rated 6 A against Fig. 1's 50 A), and the two are not interchangeable. Declared for the bridge only because that is where the gate runs; diodes publish the same curve and the key extends to them when their gate does."
+    },
+    {
       "key": "I_FSM",
       "si_unit": "A", "display_unit": "A",
       "device_classes": ["sic_schottky", "si_diode", "bridge_rectifier"],

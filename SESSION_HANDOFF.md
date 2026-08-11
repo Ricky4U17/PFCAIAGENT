@@ -45,6 +45,7 @@ entering the design must carry provenance.
 | C218 | **M8-bridge** steps 3, 4, 6, 7 — requirement, sync-bottom, GUI, §7.3 | bridge leaves the catalogue; I_F(AV) 22.2 -> 28.3 A |
 | C219 | 3 GUI defects; parts are **provisional until published**; Ch7-only PDF | re-upload no longer calculates the OLD part |
 | C220 | per-temperature traces NAMED (order + table anchor); 1-based `page`; leader filter | sharing sweep no longer degenerate; 29.27 -> 25.71 W |
+| C221 | bridge **derating gate** computed (Table 7.3.3), PASS/FAIL/DATA MISSING | 30.0 A allowed vs 9.4 A drawn at 102 °C case |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -99,11 +100,13 @@ class it RESOLVED to rather than the one it arrived under.
   - ~~the sharing sensitivity is degenerate~~ — CLOSED at C220. Fig. 4 is confirmable now that
     its traces are named, and with the real V-I curve the cases separate: 25.71 / 26.40 / 27.04 W
     at 50/50, 60/40, 70/30 (all were 29.27). The headline falls 29.27 -> 25.71 W.
-  - **the derating gate (Fig. 1) is STILL OPEN.** Described in Section 7.3, not computed. The
-    figure itself reads correctly as of C220 — x "Case Temperature (°C)", y "Average Forward
-    Rectified Current (A)", 0–175 °C / 0–50 A, one trace — so what is missing is a canonical key
-    for it, a `_FIGURE_TARGETS` entry, and the gate: read the allowed current at the computed case
-    temperature and compare it with the actual per-package I_F(AV). **This is the next task.**
+  - ~~the derating gate (Fig. 1)~~ — CLOSED at C221. Canonical key `I_F_AV_vs_Tc`, matched on
+    "case temperature" EXACTLY (the free-air curve on the same page is rated 6 A against this
+    one's 50 A), carried as `_i_f_av_vs_tc` metadata, computed as Table 7.3.3 with PASS / FAIL /
+    DATA MISSING. A part with no curve on file reports DATA MISSING and never reads as approved.
+
+  **BOTH C218 follow-ups are now closed.** Chapter 7 takes nothing from the parametric catalogue,
+  and the bridge is selected, verified, loss-modelled and derating-checked from its own datasheet.
 - **PENDING A11** — no real diode datasheet has been through the extractor. Everything downstream of
   extraction is tested; the extraction layer for diodes is not. Ask the designer for a SiC Schottky
   and a silicon fast-recovery PDF.
@@ -245,13 +248,14 @@ flow and fixed several real calculation defects found along the way.
 | C175–C177 | `1ba399e` `b73d9c6` `3cbc633` | Inductor loss on TWO bases: **crest → saturation, cycle-average → thermal + efficiency**. Naming collision (`Pcore_W` meant average at top level, crest per row) resolved; per-point averages for core AND copper; Tables 4.2 / 4.5a / 4.5b / 4.6 / 7.8b and the Review page all on one basis |
 
 ### State of the build (verified at C201)
-- Backend suite: **491 passed / 2 skipped** (the standing baseline — anything else is a
+- Backend suite: **503 passed / 2 skipped** (the standing baseline — anything else is a
   regression). 172 → 192 at C202 (`test_plausibility.py`) → 219 at C203
   (`test_parameter_registry.py`) → 244 at C204 (`test_parameter_manifest.py`) → 279 at C205
   and 293 at C206 (`test_datasheet_extract.py`) → 319 at C207, 332 at C208, 343 at C209
   (`test_datasheet_flow.py`) → 378 at C210, 394 at C211 and 409 at C212 (`test_diode_datasheet.py`)
   → 442 at C214 (`test_curve_extract.py`), 455 at C217, 467 at C218 (`test_bridge_datasheet.py`)
-  and 478 at C219 (`test_parts_library.py`), 491 at C220 (`test_figure_temperatures.py`).
+  and 478 at C219 (`test_parts_library.py`), 491 at C220 (`test_figure_temperatures.py`),
+  503 at C221 (`test_derating_gate.py`).
   The suite now takes ~25 min: the datasheet tests re-extract a 17-page PDF per test.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.

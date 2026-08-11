@@ -134,7 +134,92 @@ def _sharing_sweep(design, mosfet, diode, bridge, thermal):
     return out or None
 
 
-def _bridge_section(story, traces, is_sync, bridge=None, sharing=None):
+def _derating_check(design, bridge, worst_row, thermal=None):
+    """Is the part ALLOWED to carry this current at the case temperature it will run at?
+
+    Section 7.3 has described this gate since C218 without computing it. A room-temperature I_F(AV)
+    rating does not answer it: the LVE5060E is a 50 A bridge at 50 degC case and a 21 A bridge at
+    140 degC, and the operating point that matters sits between them. The loss calculation is
+    unaffected either way - this is a PERMISSION check, and a part can be thermally fine on its own
+    junction temperature while being operated outside what the vendor allows.
+
+    The current compared is the one the REQUIREMENT already derived (`I_per_package`), not a second
+    derivation of the same quantity. Two expressions for one number is how they come to disagree.
+
+    Returns None when the design has no bridge to check; a DATA MISSING verdict when the curve has
+    not been digitised, because an ungated part must not read as a passing one.
+    """
+    from app.mode_b.semiconductor import curve_extract as CX
+    from app.mode_b.semiconductor.datasheet_flow import requirements
+
+    if not bridge or not worst_row:
+        return None
+    n_par = max(int((bridge or {}).get("n_parallel") or 1), 1)
+    curve = (bridge or {}).get("_i_f_av_vs_tc")
+
+    try:
+        # n_parallel comes from the BLOCK, which is what the engine actually ran, and is fed back
+        # into the requirement so the per-package figure has ONE derivation. Calling it with the
+        # bare design compared the TOTAL rectified current against a PER-PACKAGE allowance, which
+        # overstated the draw by the number of packages.
+        actual = float(requirements({**design, "n_parallel": n_par}, "bridge")["I_per_package"])
+    except Exception:
+        return None
+
+    p_pkg = float(worst_row.get("P_BRIDGE_top") or 0.0) / n_par
+    t_j = worst_row.get("Tj_BRIDGE_top")
+    rth_jc = float((bridge or {}).get("rth_jc") or 0.0)
+    # T_case from the junction the engine solved for, back down the SAME junction-to-case path the
+    # engine used. Deriving it from the sink instead would be a second thermal model.
+    t_case = (float(t_j) - p_pkg * rth_jc) if t_j is not None else None
+
+    out = {"I_allowed_A": None, "I_actual_A": round(actual, 2), "T_case_C": None,
+           "n_parallel": n_par, "P_per_package_W": round(p_pkg, 2),
+           "Vac": worst_row.get("Vac")}
+    if t_case is not None:
+        out["T_case_C"] = round(t_case, 1)
+
+    if not curve or not curve[0]:
+        out["verdict"] = "DATA MISSING"
+        out["statement"] = (
+            "The derating curve has not been read from the datasheet, so whether the part is "
+            "permitted to carry {:.1f} A at {} is UNKNOWN. Confirm the curve of allowed average "
+            "rectified current against CASE temperature on the Curves tab.".format(
+                actual, "{:.0f}°C case".format(t_case) if t_case is not None
+                else "its operating temperature"))
+        return out
+
+    pts = {"x": list(curve[0]), "y": list(curve[1])}
+    allowed = CX.value_at(pts, t_case) if t_case is not None else None
+    if allowed is None:
+        # Off the end of the published curve. Beyond its last point the part is not rated at all,
+        # which is a FAIL and not a missing number.
+        t_max = max(pts["x"]) if pts["x"] else None
+        out["verdict"] = "FAIL" if (t_case is not None and t_max is not None
+                                    and t_case > t_max) else "DATA MISSING"
+        out["T_curve_max_C"] = round(t_max, 1) if t_max is not None else None
+        out["statement"] = (
+            "The case temperature {:.0f}°C is beyond the end of the published derating "
+            "curve ({:.0f}°C), where the part carries no rating at all.".format(t_case, t_max)
+            if out["verdict"] == "FAIL" else
+            "The derating curve could not be read at the operating case temperature.")
+        return out
+
+    out["I_allowed_A"] = round(allowed, 2)
+    out["headroom_pct"] = round((allowed - actual) / actual * 100.0, 1) if actual else None
+    out["verdict"] = "PASS" if allowed >= actual else "FAIL"
+    out["statement"] = (
+        "At {:.0f}°C case the datasheet allows {:.1f} A average rectified current per "
+        "package; "
+        "the design draws {:.1f} A across {} package(s). {}".format(
+            t_case, allowed, actual, n_par,
+            "Permitted, with {:.0f} % headroom.".format(out["headroom_pct"])
+            if out["verdict"] == "PASS" else
+            "NOT permitted - the part is being operated outside its derating curve."))
+    return out
+
+
+def _bridge_section(story, traces, is_sync, bridge=None, sharing=None, derating=None):
     _W(story,
        "<b>Model.</b> The bridge rectifies the AC line; at every instant two devices in series carry "
        "the full rectified current i<sub>in</sub>(&#952;) = &#8730;2&#183;I<sub>in,rms</sub>&#183;sin&#952;. "
@@ -219,6 +304,37 @@ def _bridge_section(story, traces, is_sync, bridge=None, sharing=None):
             ["Sharing case", "Worst-case bridge loss", "T<sub>j</sub>", "at"],
             rows, col_widths=[CW*0.28, CW*0.26, CW*0.20, CW*0.26], ch=CH)
 
+    if derating:
+        v = derating.get("verdict")
+        drows = [
+            ["Case temperature at the worst point",
+             f"{_f(derating.get('T_case_C'), 1)}{_DEG}C"],
+            ["Average rectified current per package",
+             f"{_f(derating.get('I_actual_A'), 2)} A"],
+            ["Allowed at that case temperature",
+             (f"{_f(derating.get('I_allowed_A'), 2)} A" if derating.get("I_allowed_A") is not None
+              else "&#8212; not read")],
+            ["Headroom",
+             (f"{_f(derating.get('headroom_pct'), 0)} %" if derating.get("headroom_pct") is not None
+              else "&#8212;")],
+            ["Verdict", f"<b>{v}</b>"],
+        ]
+        data_table(story, "7.3.3", "Bridge Derating Check",
+            "A room-temperature I<sub>F(AV)</sub> rating does not say whether the part may carry "
+            "this current at the temperature it actually runs at, and the two answers diverge "
+            "sharply &#8212; every rectifier's allowed current falls away above its knee and "
+            "reaches zero at its maximum rated case temperature. The values below are read from "
+            "this part's own published curve. The loss calculation is unaffected either way "
+            "&#8212; this is a "
+            "PERMISSION check, and a device can sit comfortably inside its junction-temperature "
+            "limit while being operated outside what the vendor allows. The current compared is "
+            "the same per-package figure the sourcing requirement derived, not a second "
+            "derivation of it; the case temperature comes back down the same junction-to-case "
+            "path the loss model used.",
+            ["Quantity", "Value"], drows,
+            col_widths=[CW*0.62, CW*0.38], ch=CH)
+        annotation(story, "DERATING", derating.get("statement") or "")
+
     _surge = [k for k in ("ifsm_A", "i2t_A2s") if _b.get(k) not in (None, "")]
     if _surge or _b.get("_provenance", {}).get("I_FSM") or _b.get("_provenance", {}).get("I2t"):
         annotation(story, "SURGE ONLY",
@@ -227,13 +343,6 @@ def _bridge_section(story, traces, is_sync, bridge=None, sharing=None):
             "steady-state conduction loss, and are named here so their absence from the loss table "
             "reads as deliberate rather than as an oversight.", CH)
 
-    annotation(story, "DERATE",
-        "The datasheet's output-rectified-current derating curve bounds the allowable average "
-        "current against case temperature. It is a SEPARATE check from loss: a bridge can be "
-        "comfortably inside its dissipation budget and still sit outside that curve once the case "
-        "is hot. Chapter 7.6 computes the case temperature this design reaches; the comparison "
-        "against the derating curve is stated there once the curve has been confirmed from the "
-        "datasheet figure.", CH)
 
 
 def _mosfet_section(story, traces, mosfet=None):
@@ -828,8 +937,10 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     if _cfg_img is not None:
         story.append(_cfg_img)
         body(story, f"<i>Figure 7.3 — Selected bridge configuration. {_cfg_cap}</i>", CH)
-    _bridge_section(story, traces, is_sync, bridge, _sharing_sweep(design, mosfet, diode,
-                                                                  bridge, thermal))
+    _worst_br = max(rows, key=lambda r: r.get("P_BRIDGE_total") or 0.0) if rows else None
+    _bridge_section(story, traces, is_sync, bridge,
+                    _sharing_sweep(design, mosfet, diode, bridge, thermal),
+                    _derating_check(design, bridge, _worst_br, thermal))
     # #9 - the sync-bottom arrangement is not obvious from the schematic alone: the bottom
     # diodes sit in PARALLEL with the bypass-FET channel and can take back part of the current.
     # Spell out the path so a reviewer can follow where each term in Table 7.3 comes from.
