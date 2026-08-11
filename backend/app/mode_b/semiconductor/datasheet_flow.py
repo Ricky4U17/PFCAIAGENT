@@ -266,6 +266,103 @@ _FIGURE_TARGETS = [
 ]
 
 
+# How far a digitised trace may sit from the value the same datasheet TABULATES before the
+# temperature assignment behind it is called unproven. The figure and the table are independent
+# renderings of one measurement, so a few percent is reading error and 30 % is a wrong trace.
+_TEMP_ANCHOR_TOL_PCT = 12.0
+
+
+def _temperature_anchors(profile: Optional[dict], key: str) -> list[tuple]:
+    """(T_j, x, y) points the TABLE states, in the same orientation as the proposal's curves."""
+    if not profile or key != "V_F_vs_IF":
+        return []                      # only the forward drop is tabulated per temperature today
+    out = []
+    for hot in (False, True):
+        for i_f, v_f, tj in _vf_points(profile, hot):
+            if tj is not None:
+                out.append((float(tj), float(i_f), float(v_f)))
+    return out
+
+
+def _assign_temperatures(curves: list, temps: list, anchors: list) -> dict:
+    """Match the traces of a per-temperature family to the temperatures printed on the plot.
+
+    PROXIMITY DOES NOT DO IT. The labels sit off to one side with a hairline leader pointing at
+    the trace, and on the reference bridge datasheet five of the seven labels are nearest to the
+    same curve. What does work is ORDER: the traces of one family do not cross over the readable
+    range, so sorting them by value at a common x puts them in temperature order. That leaves only
+    WHICH END IS WHICH, and the datasheet's own table settles it — a forward drop falls with
+    temperature and a reverse current rises, but neither has to be assumed when two tabulated
+    points can be read off the plot and compared.
+
+    With no tabulated point to check against, the ordering is still returned and is still probably
+    right — but it is marked unverified, because a family read back to front is a plausible-looking
+    curve set that is wrong by the full temperature span.
+    """
+    from app.mode_b.semiconductor import curve_extract as CX
+    n = len(curves)
+    if n < 2 or len(temps) != n:
+        return {"ok": False, "verified": False, "reason": (
+            f"the plot names {len(temps)} temperatures and {n} traces were read; a trace cannot be "
+            f"given a temperature unless the two agree")}
+
+    lo = max(min(c["x"]) for c in curves)
+    hi = min(max(c["x"]) for c in curves)
+    if not (hi > lo):
+        return {"ok": False, "verified": False,
+                "reason": "the traces do not share an x range, so they cannot be ordered"}
+    ref_x = (lo * hi) ** 0.5 if lo > 0 else 0.5 * (lo + hi)
+    vals = [CX.value_at(c, ref_x) for c in curves]
+    if any(v is None for v in vals):
+        return {"ok": False, "verified": False,
+                "reason": "at least one trace could not be read at a common x"}
+
+    order = sorted(range(n), key=lambda i: vals[i])
+    ts = sorted(temps)
+    best = None
+    for rising in (True, False):                 # does the quantity RISE or FALL with temperature?
+        m = {order[k]: ts[k] if rising else ts[n - 1 - k] for k in range(n)}
+        err, used = 0.0, 0
+        for tj, ax, ay in anchors:
+            idx = next((i for i, t in m.items() if abs(t - tj) < 1e-6), None)
+            if idx is None or not ay:
+                continue
+            got = CX.value_at(curves[idx], ax)
+            if got is None:
+                continue
+            err = max(err, abs(got - ay) / abs(ay) * 100.0)
+            used += 1
+        # `used`, not `err`: an anchor that lands EXACTLY on the trace scores zero, and reading
+        # that as "nothing was checked" would throw away the strongest evidence there is.
+        best = (err, used, rising, m) if best is None or err < best[0] else best
+
+    err, used, rising, m = best
+    if not used:
+        # The ORDER is known and the DIRECTION is not. Returning a mapping anyway would be a coin
+        # flip dressed as a reading, and getting it backwards mislabels the family by its whole
+        # temperature span — so the traces are handed back in order with no temperature on them.
+        return {
+            "ok": True, "verified": False, "by": {},
+            "order": order, "temperatures": ts, "ref_x": round(ref_x, 6),
+            "worst_anchor_error_pct": None,
+            "reason": ("the traces are in temperature order, but this datasheet tabulates no value "
+                       "at a named temperature, so which end of that order is the hottest cannot "
+                       "be established here - say which trace is the hot one"),
+        }
+    return {
+        "ok": True,
+        "verified": err <= _TEMP_ANCHOR_TOL_PCT,
+        "by": {int(i): m[i] for i in sorted(m)},
+        "order": order,
+        "rises_with_temperature": rising,
+        "ref_x": round(ref_x, 6),
+        "worst_anchor_error_pct": round(err, 3),
+        "reason": (f"checked against {used} tabulated point(s); worst {err:.2f} % "
+                   f"({'within' if err <= _TEMP_ANCHOR_TOL_PCT else 'OUTSIDE'} "
+                   f"{_TEMP_ANCHOR_TOL_PCT:g} %)"),
+    }
+
+
 def _axis_matches(title: str, wants: tuple) -> bool:
     t = (title or "").lower()
     return any(w in t for w in wants)
@@ -308,7 +405,15 @@ def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
                 "swapped": swap,
                 "n_curves": len(curves),
                 "curves": curves,
+                "temperatures": fig.get("temperatures") or [],
             }
+            if per_temp:
+                a = _assign_temperatures(
+                    curves, [d["T_j"] for d in (fig.get("temperatures") or [])],
+                    _temperature_anchors(profile, key))
+                p["assignment"] = a
+                for i, c in enumerate(curves):
+                    c["T_j"] = a["by"].get(i) if a.get("ok") else None
             # the cross-check runs on the FIGURE's own orientation, which is how the table states it
             p["cross_check"] = _figure_cross_check(key, fig["curves"], profile)
             out.append(p)

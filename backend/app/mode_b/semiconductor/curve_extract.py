@@ -509,6 +509,15 @@ def curves_in(page, frame: tuple, cal: dict, min_points: int = 4) -> list[dict]:
                    (max(p[1] for p in pts) - min(p[1] for p in pts)) / max(y1 - y0, 1e-9))
         if span < 0.15:
             continue
+        # An ANNOTATION LEADER is a single straight segment in hairline black, drawn from a text
+        # label to the curve it names. Fig. 4 of the reference bridge datasheet has one per
+        # temperature, and they were being offered as extra "curves" for the designer to confirm.
+        # A trace that is genuinely ONE segment (Fig. 3's power-loss lines) is COLOURED and drawn
+        # at full width; the leaders are neither, so the two do not overlap.
+        stroke = tuple(a.get("color") or ())
+        if (len(pts) == 2 and (a.get("width") or 0.0) <= 0.5
+                and (not stroke or all(c < 0.15 for c in stroke))):
+            continue
         if len(pts) < min_points and len(a.get("items", [])) > 1:
             continue
         if filled:
@@ -595,12 +604,44 @@ def digitise(pdf_bytes: bytes, page_no: Optional[int] = None) -> dict:
         page = doc[pi]
         for f in find_plots(page):
             cal = calibrate(page, tuple(f["rect"]))
-            entry = {"page": pi, "frame": list(f["rect"]), "calibration": cal, "curves": []}
+            # `page` is what a citation prints, so it is 1-BASED. It used to carry the loop
+            # index, which meant every "Fig. 4, page 2" in a confirmed profile pointed one page
+            # short of the figure. `page_index` is the same number as fitz wants it.
+            entry = {"page": pi + 1, "page_index": pi,
+                     "frame": list(f["rect"]), "calibration": cal, "curves": []}
             if cal["ok"]:
                 entry["curves"] = curves_in(page, tuple(f["rect"]), cal)
             entry["caption"] = _caption_for(page, tuple(f["rect"]))
+            entry["temperatures"] = legend_temperatures(page, tuple(f["rect"]))
             figures.append(entry)
     return {"figures": figures, "pages": doc.page_count}
+
+
+# "TJ = 125 °C", "Tj = -40 C", "T_J = 25 °C" — the degree sign is frequently mojibake by the
+# time it reaches here, so it is matched as "some non-word character, optionally", never literally.
+_TEMP_LABEL = re.compile(r"^T\s*_?\s*[Jj]?\s*=\s*(-?\d+(?:\.\d+)?)\s*[^\w\s]?\s*C\b")
+
+
+def legend_temperatures(page, frame: tuple) -> list[dict]:
+    """The temperature labels printed INSIDE a plot frame, with where each one sits.
+
+    A per-temperature figure names its traces in the plot itself rather than in a legend box, with
+    a leader line from each label to its curve. Reading the labels is easy and reading the leaders
+    is not — they are hairlines a few points long — so this returns WHAT was named and WHERE the
+    name sits, and leaves matching names to curves to the caller, which has the table to check
+    itself against. Proximity alone does not do it: on the reference bridge datasheet five of the
+    seven labels are nearest to the same curve.
+    """
+    import fitz
+    x0, y0, x1, y1 = frame
+    out = []
+    for txt, bb in _text_items(page, fitz.Rect(x0 - 2, y0 - 2, x1 + 2, y1 + 2)):
+        m = _TEMP_LABEL.match(txt.strip())
+        if m:
+            out.append({"T_j": float(m.group(1)), "label": txt.strip(),
+                        "anchor": [round((bb[0] + bb[2]) / 2, 2), round((bb[1] + bb[3]) / 2, 2)]})
+    out.sort(key=lambda d: d["T_j"])
+    return out
 
 
 def _caption_for(page, frame: tuple) -> str:

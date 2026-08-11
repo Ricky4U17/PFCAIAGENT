@@ -521,6 +521,17 @@ export interface DsCurve {
   color: number[]; n_points: number
   drawn_as?: string
   x_span: number[]; y_span: number[]
+  /** Which temperature this trace is, once the order has been checked against the table. Null
+   *  means the traces are in temperature order but which end is the hot one is not established. */
+  T_j?: number | null
+}
+export interface DsAssignment {
+  ok: boolean; verified: boolean
+  by?: Record<string, number>
+  order?: number[]
+  rises_with_temperature?: boolean
+  worst_anchor_error_pct?: number | null
+  reason: string
 }
 export interface DsFigureProposal {
   key: string; page: number; frame: number[]
@@ -534,6 +545,8 @@ export interface DsFigureProposal {
   curves: DsCurve[]
   cross_check: { checked: boolean; agrees: boolean; error_pct?: number
                  expected?: number; got?: number; note: string }
+  temperatures?: { T_j: number; label: string; anchor: number[] }[]
+  assignment?: DsAssignment
 }
 export const datasheetFigures = (file: File, partNumber?: string) => {
   const fd = new FormData(); fd.append('file', file)

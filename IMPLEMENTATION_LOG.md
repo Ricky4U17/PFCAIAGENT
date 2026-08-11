@@ -8793,3 +8793,56 @@ the preview cannot drift from the chapter it previews. 15 pages.
 
 Verified: 11 new tests (tests/test_parts_library.py); Ch7 endpoint 200 / application/pdf / 15 pp;
 tsc clean and the frontend builds. Suite 478 passed / 2 skipped (was 467).
+
+## C220 - naming the traces of a per-temperature figure, and the page a citation prints
+
+THE SHARING SWEEP WAS DEGENERATE AND C218 SAID SO IN THE TABLE. 50/50, 60/40 and 70/30 all returned
+29.27 W, because one tabulated V_F point is a FLAT curve and against a flat curve the sharing derate
+cancels exactly. Closing it needed Fig. 4 confirmed through the Curves tab, and Fig. 4 could not
+usefully be confirmed, because the screen offered "curve 3 of 9, 339 points" seven times over and
+the engine wants exactly two of them - a cold anchor and a hot one.
+
+PROXIMITY DOES NOT NAME THEM. The temperature labels sit off to one side with a hairline leader
+pointing at the trace, and I measured it before building on it: FIVE OF THE SEVEN labels are nearest
+to the same curve. ORDER does name them - the traces of one family do not cross over the readable
+range, so sorting them by value at a common x puts them in temperature order. That leaves only which
+END of the order is the hot one, and the datasheet's own table settles it: V_F at 25 A is tabulated
+at 25 degC and at 125 degC, so both candidate directions can be scored against real numbers. The
+winner is checked, not assumed - worst anchor error 0.36 %, and the direction comes back "a forward
+drop FALLS with temperature" as a RESULT rather than as a hardcoded assumption, which matters because
+the reverse-current family on the same datasheet runs the other way.
+
+WITH NO TABULATED ANCHOR IT NOW REFUSES TO PICK AN END. My first cut still chose a direction and
+marked it unverified; on this part that guess was BACKWARDS, which is a plausible-looking curve set
+wrong by the entire temperature span. It returns the order and no temperatures instead.
+
+TWO DEFECTS FOUND ON THE WAY, BOTH MINE:
+- `page` carried the 0-based loop index under a 1-based name, so every "Fig. 4, page 2" written into
+  a confirmed profile pointed one page SHORT of the figure. Fig. 4 is on page 3 of five. `page` is
+  now what a citation prints and `page_index` is what fitz wants.
+- An ANNOTATION LEADER was being offered as a curve. Fig. 4 has one per temperature: a single
+  straight segment, hairline width, black. They passed the span filter because they are long enough.
+  The filter keys on hairline-BLACK-single-segment and not on straightness, because Fig. 3's
+  power-loss lines are genuinely one straight segment each and are real data.
+
+WHAT IT BUYS. Fig. 4 confirmed as cold (25 degC, 339 pts) + hot (125 degC, 50 pts):
+
+    sharing        BEFORE      AFTER
+    50/50          29.265 W    25.707 W
+    60/40          29.265 W    26.403 W
+    70/30          29.265 W    27.039 W
+    single path    28.243 W    27.694 W
+
+The cases separate and rise monotonically with imbalance - a real sensitivity instead of a statement
+about the data. The headline falls 29.27 -> 25.71 W (-12.2 %) for the same reason the diode did at
+C215: a single tabulated V_F is the value AT RATED CURRENT, so it overstates across the whole cycle.
+
+Verified: 13 new tests (tests/test_figure_temperatures.py) covering the 1-based page and that the
+index still indexes, the leader filter and that it keeps Fig. 3's straight coloured traces, all seven
+labels, the table-checked assignment, both refusals, and the sweep separating; tsc clean.
+Suite 491 passed / 2 skipped (was 478).
+
+STILL OPEN from C218: the derating gate (Fig. 1, allowed current vs case temperature) is described in
+Section 7.3 and still not computed. The figure READS correctly now - x "Case Temperature (degC)",
+y "Average Forward Rectified Current (A)", 0-175 degC / 0-50 A - so what is left is a canonical key
+for it, a `_FIGURE_TARGETS` entry, and the gate itself.

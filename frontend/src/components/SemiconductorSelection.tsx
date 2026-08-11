@@ -989,7 +989,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     style={{ width: 280, maxWidth: '100%', borderRadius: 6, background: '#fff' }} />}
                   <div style={{ flex: 1, minWidth: 260 }}>
                     <div style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>
-                      {p.caption || `page ${p.page + 1}`}</div>
+                      {p.caption || `page ${p.page}`}</div>
                     <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
                       → <b>{p.key}</b><br />
                       x: {p.axes.x} <i>({p.x_scale}, {p.x_range[0]}…{p.x_range[1]})</i><br />
@@ -1002,6 +1002,13 @@ export const SemiconductorSelection: React.FC<Props> = ({
                       color: cc.checked ? (cc.agrees ? C.green : C.amber) : C.hint }}>
                       {cc.checked ? (cc.agrees ? '✓ ' : '⚠ ') : ''}{cc.note}
                     </div>
+                    {p.assignment && (
+                      <div style={{ fontSize: 10.5, marginTop: 4, lineHeight: 1.6,
+                        color: p.assignment.verified ? C.green : C.amber }}>
+                        {p.assignment.verified ? '✓ ' : '⚠ '}
+                        {p.assignment.verified ? 'Temperatures matched to traces — ' : ''}
+                        {p.assignment.reason}
+                      </div>)}
                   </div>
                 </div>
 
@@ -1014,6 +1021,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
                       <div key={ci} style={{ display: 'flex', gap: 8, alignItems: 'center',
                         flexWrap: 'wrap', fontSize: 10.5, color: C.muted }}>
                         <span style={{ width: 22, height: 3, background: rgb, borderRadius: 2 }} />
+                        {c.T_j != null && (
+                          <span style={{ color: C.text, fontWeight: 600, minWidth: 62 }}>
+                            T<sub>J</sub> = {c.T_j}&nbsp;°C</span>)}
                         <span style={{ fontFamily: 'IBM Plex Mono,monospace' }}>
                           {c.n_points} pts · x {c.x_span[0].toPrecision(3)}…{c.x_span[1].toPrecision(3)}
                           {' '}· y {c.y_span[0].toPrecision(3)}…{c.y_span[1].toPrecision(3)}
@@ -1023,6 +1033,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
                           : (<>
                             {p.per_temperature && (
                               <input placeholder="T_j °C" id={`tj-${p.key}-${ci}`}
+                                defaultValue={c.T_j != null ? String(c.T_j) : ''}
                                 style={{ ...inStyle, width: 74, padding: '2px 6px', fontSize: 11 }} />)}
                             <Btn disabled={curveBusy} onClick={() => acceptCurve(kind, p, ci, p.key,
                               (document.getElementById(`tj-${p.key}-${ci}`) as HTMLInputElement)?.value)}>

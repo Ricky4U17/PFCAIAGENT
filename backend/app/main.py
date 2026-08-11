@@ -708,7 +708,8 @@ async def datasheet_figure_image(file: UploadFile = File(...), page: int = Form(
     import fitz
     try:
         doc = fitz.open(stream=await file.read(), filetype="pdf")
-        png = cx.render(doc[int(page)], (x0, y0, x1, y1))
+        # `page` is 1-BASED, the number a citation prints; fitz indexes from zero.
+        png = cx.render(doc[int(page) - 1], (x0, y0, x1, y1))
         return Response(content=png, media_type="image/png")
     except Exception as e:
         log.exception("figure image"); raise HTTPException(500, str(e))
