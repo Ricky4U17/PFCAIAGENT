@@ -8756,3 +8756,40 @@ unrenderable glyphs and no mid-word wraps; tsc clean and the frontend builds.
 Also corrected: `test_no_other_kind_is_given_the_diode_requirement[bridge]`, written at C210, asserted that the bridge still received the MOSFET's requirement. Its own docstring said "it keeps its own until M8-bridge" — so it was pinning a deliberately temporary state and it failed at exactly the moment that state ended, which is the behaviour wanted. It is now two tests: the MOSFET keeps V_DSS, and the bridge asserts V_RRM_min / I_F_AV_min / I_rect_avg present, V_DSS_min / I_D_min gone, and I_F_pk ABSENT — the diode's per-channel peak is a per-phase quantity and means nothing for a device sitting in front of the inductor.
 
 Suite 467 passed / 2 skipped (was 455).
+
+## C219 - three defects the designer found on the bridge tab, and two things he asked for
+
+THE HEADING SAID "Boost diode" ON THE BRIDGE TAB. My own C218 bug: the panel became three-way when
+the bridge joined it and the heading stayed a two-way ternary, so anything that was not the MOSFET
+was labelled the diode. Cosmetic, but on a screen whose whole job is to say which part you are
+looking at, and it was the first thing the designer saw.
+
+THE SECOND ONE WAS NOT COSMETIC. Uploading a replacement datasheet cleared the review screen but not
+`dbBlock`, and `dbBlock` is what the engine reads. So: confirm part A, notice it was the wrong PDF,
+upload part B, press Calculate - and the losses come back for A while the screen shows B. Silent,
+and wrong in the direction that matters, because the designer had already done the thing that was
+supposed to fix it. An unconfirmed upload now means NO confirmed part rather than quietly the one
+before it; the figure state goes with it, since digitised curves belong to the file they came from.
+
+THE THIRD WAS THE SAME QUESTION ASKED THREE TIMES. Bridge topology appeared in the selector, in the
+design row and again in the review list; R_theta_cs and n_parallel twice each. The review list exists
+to check what the machine READ against the datasheet it read it from, which a design decision never
+has - there is nothing to check it against. Design-sourced rows are now filtered out of it and the
+one editable input carries the "- needed" flag instead. Not new at C218: the MOSFET has had six
+duplicated fields since C207, and nobody had said so.
+
+ADDED - A PART IS PROVISIONAL UNTIL PUBLISHED. Uploading has to write the file somewhere, because
+the review screen, the confirm step and the digitiser all read the stored profile. But writing is
+not adding to the library, and it had been both: a datasheet uploaded by mistake was in the shared
+store before anyone had looked at it. Publishing is now an explicit click on the Results tab, after
+the losses are on screen. Discard is offered for a provisional part and refused for a published one
+- the stored profile is what lets the report answer "the machine read X, you confirmed Y", so
+un-publishing is offered and deleting is not. Re-uploading a corrected file resets it to provisional:
+a revision has not been vouched for because its predecessor was.
+
+ADDED - CHAPTER 7 ON ITS OWN. The combined document is ~190 pages and takes minutes; confirming a
+loss calculation should need neither. Same builder the combined report calls, asserted by a test, so
+the preview cannot drift from the chapter it previews. 15 pages.
+
+Verified: 11 new tests (tests/test_parts_library.py); Ch7 endpoint 200 / application/pdf / 15 pp;
+tsc clean and the frontend builds. Suite 478 passed / 2 skipped (was 467).

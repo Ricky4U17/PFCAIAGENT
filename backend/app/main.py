@@ -726,6 +726,64 @@ def datasheet_figure_confirm(req: _DsFigConfirmReq):
         log.exception("figure confirm"); raise HTTPException(400, str(e))
 
 
+class _DsPublishReq(BaseModel):
+    part_number: str
+    published:   bool = True
+
+
+@app.post("/mode-b/semiconductor/datasheet/publish", tags=["mode-b"])
+def datasheet_publish(req: _DsPublishReq):
+    """Add a reviewed part to the shared library, or take it back out.
+
+    Uploading writes the PDF somewhere — the review screen, the confirm step and the figure
+    digitiser all read the stored profile — but writing is not the same as publishing. A datasheet
+    uploaded by mistake stays PROVISIONAL and never reaches the library, which is the whole point of
+    a store whose value is its provenance."""
+    from app.mode_b.semiconductor import parts_store as ps
+    try:
+        return ps.publish(req.part_number, req.published)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/mode-b/semiconductor/datasheet/discard", tags=["mode-b"])
+def datasheet_discard(req: _DsPublishReq):
+    """Delete a provisional part. Refuses a published one — the stored profile is what lets the
+    report say what was read and what was confirmed."""
+    from app.mode_b.semiconductor import parts_store as ps
+    try:
+        return ps.discard(req.part_number)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+class _SemiReportReq(BaseModel):
+    design:   Dict[str, Any]
+    mosfet:   Dict[str, Any] = {}
+    diode:    Dict[str, Any] = {}
+    bridge:   Dict[str, Any] = {}
+    thermal:  Dict[str, Any] = {}
+    tj_limit: Optional[Dict[str, Any]] = None
+    extra:    Dict[str, Any] = {}
+
+
+@app.post("/mode-b/semiconductor/report", tags=["mode-b"])
+def semiconductor_report(req: _SemiReportReq):
+    """Chapter 7 on its own, as a PDF.
+
+    The full document is ~190 pages and takes minutes to build; checking a loss calculation should
+    not require either. This is the same builder the combined report calls, so the two cannot
+    disagree — it is the same chapter, not a second rendering of it."""
+    from app.mode_b.report_semiconductor import build_semiconductor_report
+    try:
+        pdf = build_semiconductor_report(req.design, req.mosfet, req.diode, req.bridge,
+                                         req.thermal, req.tj_limit, req.extra or None)
+        return Response(content=pdf, media_type="application/pdf", headers={
+            "Content-Disposition": 'attachment; filename="PFC_Ch7_Semiconductor_Loss.pdf"'})
+    except Exception as e:
+        log.exception("semiconductor report"); raise HTTPException(500, str(e))
+
+
 @app.get("/mode-b/semiconductor/datasheet/library", tags=["mode-b"])
 def datasheet_library():
     """Parts already on file. A part with a confirmed profile skips upload and review entirely —

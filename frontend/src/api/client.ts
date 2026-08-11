@@ -556,6 +556,18 @@ export const datasheetFigureConfirm = (b: { part_number: string; key: string
   post<{ ok: boolean; key: string; n_points: number }>(
     '/mode-b/semiconductor/datasheet/figure-confirm', b)
 
+export const datasheetPublish = (b: { part_number: string; published?: boolean }) =>
+  post<{ part_number: string; published: boolean }>(
+    '/mode-b/semiconductor/datasheet/publish', b)
+export const datasheetDiscard = (b: { part_number: string }) =>
+  post<{ part_number: string; discarded: boolean }>(
+    '/mode-b/semiconductor/datasheet/discard', b)
+/** Chapter 7 alone. The same builder the combined report calls, so the two cannot disagree. */
+export const semiconductorReport = (b: SemiReqBody) =>
+  fetch(`${BASE}/mode-b/semiconductor/report`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+  }).then(async r => { if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`); return r.blob() })
+
 export const datasheetLibrary = () =>
   get<{ parts: { part_number: string; ready: boolean; sha256?: string
                  extracted_versions: number[]; confirmed_versions: number[] }[] }>(

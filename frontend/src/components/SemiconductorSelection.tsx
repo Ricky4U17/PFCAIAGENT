@@ -12,7 +12,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { plausibilityCheck, datasheetRequirements, datasheetUpload, datasheetConfirm,
-         datasheetFigures, datasheetFigureImage, datasheetFigureConfirm } from '../api/client'
+         datasheetFigures, datasheetFigureImage, datasheetFigureConfirm,
+         datasheetPublish, datasheetDiscard, semiconductorReport } from '../api/client'
 import type { PlausResult, DsRequirement, DsReviewRow, DsUpload, DsConfirm,
               DsFigureProposal, DsCurve } from '../api/client'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
@@ -395,6 +396,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [figImg, setFigImg] = useState<Record<string, string>>({})
   const [curveBusy, setCurveBusy] = useState(false)
   const [figDone, setFigDone] = useState<Record<string, string>>({})
+  // Which stored parts the designer has actually vouched for. A part is PROVISIONAL until
+  // then, so a datasheet uploaded by mistake never reaches the shared library.
+  const [published, setPublished] = useState<Record<string, boolean>>({})
   const [dsReq, setDsReq] = useState<Partial<Record<DsKind, DsRequirement>>>({})
   const [dsUp, setDsUp] = useState<Partial<Record<DsKind, DsUpload>>>({})
   const [dsConf, setDsConf] = useState<Partial<Record<DsKind, DsConfirm>>>({})
@@ -427,7 +431,13 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const doUpload = async (kind: DsKind, file?: File) => {
     if (!file) return
     setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
+    // A NEW UPLOAD RETIRES THE PREVIOUS PART, not just its review screen. `dbBlock` is what the
+    // engine reads, so clearing only `dsConf` left the old part still being calculated with while
+    // the screen showed the new one — confirm A, upload B, press Calculate, and the numbers are
+    // still A's. An unconfirmed upload means NO confirmed part, not silently the one before it.
     setDsConf(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+    setDbBlock(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+    setFigDone({}); setCurveFigs(s2 => ({ ...s2, [kind]: [] }))
     try {
       const r = await datasheetUpload(kind, file)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
@@ -494,6 +504,43 @@ export const SemiconductorSelection: React.FC<Props> = ({
       // re-confirm so the engine block is rebuilt from the profile that now carries the curve
       await doConfirm(kind)
     } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
+  const publishPart = async (kind: DsKind, published: boolean) => {
+    const part = dsUp[kind]?.part_number
+    if (!part) return
+    setCurveBusy(true); setErr(null)
+    try {
+      await datasheetPublish({ part_number: part, published })
+      setPublished(m => ({ ...m, [part]: published }))
+    } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
+  const discardPart = async (kind: DsKind) => {
+    const part = dsUp[kind]?.part_number
+    if (!part) return
+    setCurveBusy(true); setErr(null)
+    try {
+      await datasheetDiscard({ part_number: part })
+      setPublished(m => { const n = { ...m }; delete n[part]; return n })
+      setDsUp(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+      setDsConf(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+      setDbBlock(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+      setDsTab(s2 => ({ ...s2, [kind]: 'upload' }))
+    } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
+  const downloadCh7 = async () => {
+    setRptBusy(true); setErr(null)
+    try {
+      const b = body()
+      const blob = await semiconductorReport({ design: b.design, mosfet: b.mosfet, diode: b.diode,
+        bridge: b.bridge, thermal: b.thermal, tj_limit: b.tj_limit } as any)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'PFC_Ch7_Semiconductor_Loss.pdf'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 
   const runPlaus = async (which: Sub, block: Record<string, any>) => {
@@ -692,7 +739,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const up = dsUp[kind]; const conf = dsConf[kind]; const req = dsReq[kind]
     const tab = dsTab[kind]; const busy = !!dsBusy[kind]
     const rows = conf?.rows ?? up?.rows ?? []
-    const missing = rows.filter(r => !r.supplied)
+    const missing = rows.filter(r => !r.supplied && r.source_kind !== 'design')
+    const designGaps = new Set(rows.filter(r => !r.supplied && r.source_kind === 'design')
+                                   .map(r => r.key))
     const perPoint = (res?.per_point ?? []) as Record<string, number>[]
     const isFet = kind === 'mosfet'
     const blk = (conf?.block ?? {}) as Record<string, any>
@@ -734,7 +783,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     return (
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
-          {isFet ? 'Boost MOSFET' : 'Boost diode'} — from its datasheet</div>
+          {isFet ? 'Boost MOSFET' : kind === 'bridge' ? 'Bridge rectifier' : 'Boost diode'} — from its datasheet</div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
           {([['upload', '1 · Upload datasheet'], ['parameters', '2 · Parameters'],
@@ -811,8 +860,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
               Your design decides these — no datasheet supplies them</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
               {designFields.map(([k, lbl, u]) => (
-                <label key={k} style={{ fontSize: 10.5, color: C.muted }}>{lbl} ({u})<br />
-                  <input style={{ ...inStyle, width: 90, padding: '2px 6px', fontSize: 11.5 }}
+                <label key={k} style={{ fontSize: 10.5,
+                  color: designGaps.has(k) && !(dsDesign[kind][k] ?? '') ? C.amber : C.muted }}>
+                  {lbl} ({u}){designGaps.has(k) && !(dsDesign[kind][k] ?? '') ? ' — needed' : ''}<br />
+                  <input style={{ ...inStyle, width: 90, padding: '2px 6px', fontSize: 11.5,
+                    borderColor: designGaps.has(k) && !(dsDesign[kind][k] ?? '') ? C.amber : undefined }}
                     value={dsDesign[kind][k] ?? ''}
                     onChange={e => setDsDesign(d => ({ ...d,
                       [kind]: { ...d[kind], [k]: e.target.value } }))} /></label>))}
@@ -824,8 +876,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 will not run on a default for any of them.
               </div>)}
 
+            {/* Design-sourced parameters are the editable row ABOVE; listing them again here
+                asked for the same thing two and three times over (bridge topology appeared in the
+                selector, the design row and this list). A review row exists to check a value
+                against the datasheet it came from, which a design decision never has. */}
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-              {rows.map(r => (
+              {rows.filter(r => r.source_kind !== 'design').map(r => (
                 <ReviewRow key={r.key} r={r} edit={dsEdits[kind][r.key]}
                   onEdit={(k, v) => setDsEdits(o => ({ ...o,
                     [kind]: { ...o[kind], [k]: v } }))} />))}
@@ -1050,6 +1106,33 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 </tbody>
               </table>
             </div>
+            {dsUp[kind]?.part_number && (
+              <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
+                border: `1px solid ${published[dsUp[kind]!.part_number!] ? C.green : C.border}`,
+                background: C.bg3 }}>
+                <div style={{ fontSize: 11.5, color: C.text, marginBottom: 6 }}>
+                  {published[dsUp[kind]!.part_number!]
+                    ? <>✓ <b>{dsUp[kind]!.part_number}</b> is in the parts library.</>
+                    : <><b>{dsUp[kind]!.part_number}</b> is stored for this design only.</>}
+                </div>
+                <div style={{ fontSize: 10, color: C.hint, marginBottom: 8, lineHeight: 1.6 }}>
+                  Uploading writes the file so it can be reviewed, but that is not the same as
+                  adding it to the shared library. Add it once the losses above look right — a
+                  datasheet uploaded by mistake should never end up as a part everyone else builds
+                  on.
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Btn variant={published[dsUp[kind]!.part_number!] ? undefined : 'primary'}
+                    disabled={curveBusy}
+                    onClick={() => publishPart(kind, !published[dsUp[kind]!.part_number!])}>
+                    {published[dsUp[kind]!.part_number!]
+                      ? '↩ Remove from library' : '➕ Add this part to the library'}</Btn>
+                  {!published[dsUp[kind]!.part_number!] && (
+                    <Btn disabled={curveBusy} onClick={() => discardPart(kind)}>
+                      🗑 Wrong datasheet — discard it</Btn>)}
+                </div>
+              </div>)}
+
             <div style={{ fontSize: 10.5, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
               {isFet ? (<>
                 Gate-drive loss is <b>{(perPoint[0]?.P_gate_driver ?? 0).toFixed(3)} W</b> and is not
@@ -1332,6 +1415,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
           <Btn variant="ghost" onClick={onRestart}>↺ New design</Btn>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Chapter 7 alone. The full document is ~190 pages and takes minutes to build;
+              checking a loss calculation should need neither. */}
+          <Btn disabled={rptBusy || !res?.validation.ok} onClick={downloadCh7}>
+            {rptBusy ? '⏳ Generating…' : '📄 Download Chapter 7 only (semiconductor loss)'}</Btn>
           <Btn variant="success" disabled={rptBusy || !res?.validation.ok} onClick={downloadReport}>
             {rptBusy ? '⏳ Generating…' : '📥 Download full report (Ch 1–7)'}
           </Btn>

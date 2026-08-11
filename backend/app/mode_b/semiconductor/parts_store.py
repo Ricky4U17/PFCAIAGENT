@@ -123,6 +123,14 @@ def store_datasheet(mpn: str, pdf_bytes: bytes, filename: str = "datasheet.pdf",
         "bytes": len(pdf_bytes), "revision": revision,
         "stored_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "previous_sha256": prev.get("sha256"),
+        # PROVISIONAL UNTIL PUBLISHED. Uploading a PDF has to write it somewhere — the review
+        # screen, the confirm step and the figure digitiser all work from the stored profile — but
+        # writing it is not the same as adding it to the library. A datasheet uploaded by mistake
+        # would otherwise be in the shared parts database before anyone had looked at it, and a
+        # store whose provenance is its whole purpose cannot afford to fill with wrong parts.
+        # Re-uploading a corrected file for the same part number resets this: a new revision has
+        # not been vouched for just because its predecessor was.
+        "published": False,
     }
     with open(src_path, "w", encoding="utf-8") as f:
         json.dump(rec, f, indent=1)
@@ -193,6 +201,50 @@ def load_profile(mpn: str, kind: str = "confirmed", version: Optional[int] = Non
         return json.load(f)
 
 
+def publish(mpn: str, published: bool = True, root: Optional[str] = None) -> dict:
+    """Add a part to the library, or take it back out.
+
+    Deliberately an explicit act. Everything up to here — upload, review, confirm, digitise — is
+    about ONE design; publishing says the part is worth keeping for the next one.
+    """
+    d = part_dir(mpn, root, create=False)
+    src = os.path.join(d, "source.json")
+    if not os.path.exists(src):
+        raise PartsStoreError(f"no datasheet on file for {mpn!r}")
+    with open(src, encoding="utf-8") as f:
+        rec = json.load(f)
+    rec["published"] = bool(published)
+    rec["published_utc"] = (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                            if published else None)
+    with open(src, "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=1)
+    return {**rec, "dir": d}
+
+
+def discard(mpn: str, root: Optional[str] = None) -> dict:
+    """Delete a PROVISIONAL part and everything under it.
+
+    Guarded to unpublished parts only. A published part is in the library precisely so the report
+    can answer "the machine read X, you confirmed Y" later, and deleting one would break the
+    provenance trail the store exists to keep. A provisional part was never in the library, so a
+    datasheet uploaded by mistake can be taken back without leaving a hole.
+    """
+    import shutil
+    d = part_dir(mpn, root, create=False)
+    src = os.path.join(d, "source.json")
+    if not os.path.exists(src):
+        raise PartsStoreError(f"no datasheet on file for {mpn!r}")
+    with open(src, encoding="utf-8") as f:
+        rec = json.load(f)
+    if rec.get("published"):
+        raise PartsStoreError(
+            f"{mpn!r} is published, so it stays. Un-publish it first if it should leave the "
+            f"library — but the stored profile is what lets the report say what was read and what "
+            f"was confirmed, so removing it outright is not offered.")
+    shutil.rmtree(d, ignore_errors=True)
+    return {"part_number": mpn, "discarded": True}
+
+
 def library(root: Optional[str] = None) -> list[dict]:
     """What the library holds — the payoff of storing anything at all. If the flow always demands a
     PDF the library never accumulates value."""
@@ -208,10 +260,13 @@ def library(root: Optional[str] = None) -> list[dict]:
             with open(src, encoding="utf-8") as f:
                 s = json.load(f)
             rec.update({"sha256": s.get("sha256"), "revision": s.get("revision"),
-                        "stored_utc": s.get("stored_utc")})
+                        "stored_utc": s.get("stored_utc"),
+                        "published": bool(s.get("published")),
+                        "published_utc": s.get("published_utc")})
         rec["extracted_versions"] = _versions(d, "extracted")
         rec["confirmed_versions"] = _versions(d, "confirmed")
         rec["ready"] = bool(rec["confirmed_versions"])
+        rec.setdefault("published", False)
         out.append(rec)
     return out
 
