@@ -165,12 +165,19 @@ def upload(pdf_bytes: bytes, kind: str, device_class: str, filename: str = "data
     A PDF that cannot be read is REFUSED with a reason rather than yielding an empty profile that
     looks like a part with no parameters.
     """
-    res = DX.extract(pdf_bytes, device_class)
+    # A SERIES datasheet covers several parts and bands the values that differ between them. The
+    # part number the designer gives IS the variant — no second concept, and nothing to infer.
+    # Uploaded without one, the banded rows all survive and `variant_required` asks for it, rather
+    # than a band being silently chosen: the reference silicon file would otherwise report 0.975 V
+    # for a part whose forward drop is 1.700 V.
+    res = DX.extract(pdf_bytes, device_class, variant=(part_number or None))
     profile = res["profile"]
 
     if not res["ok"]:
         return {"ok": False, "reason": res["reason"], "triage": res["triage"],
-                "profile": profile, "rows": [], "part_number": None}
+                "profile": profile, "rows": [], "part_number": None,
+                "variants": res.get("variants") or [],
+                "variant_required": bool(res.get("variant_required"))}
 
     mpn = part_number or _guess_part_number(pdf_bytes) or "UNKNOWN"
     profile["part_number"] = mpn
@@ -196,6 +203,9 @@ def upload(pdf_bytes: bytes, kind: str, device_class: str, filename: str = "data
         "cross_check": res["cross_check"],
         "unresolved": profile.get("unresolved", []),
         "tables_kept": len(res["tables"]), "tables_rejected": len(res["rejected"]),
+        "variants": res.get("variants") or [],
+        "variant": res.get("variant"),
+        "variant_required": bool(res.get("variant_required")),
         "revision_diff": (PS.diff_profiles(prev, profile) if prev else []),
     }
 
@@ -1101,8 +1111,37 @@ def _qc_at_bus(profile: dict, v_bus: float, m: Optional[float] = None) -> Option
                      f"the exponent with this part's own.")}
 
 
+def _carry_meta(profile: dict, blk: dict, prov: dict, keys) -> None:
+    """Put non-engine ratings onto a block under their registry `meta_field`.
+
+    `meta_field` ONLY, never `db_field`: the two are different external names for different
+    audiences, and confusing them is how V_RRM reached Bridge(**params) as `vr` at C218. Without
+    this the diode's surge ratings and its junction limit were EXTRACTED AND THEN DROPPED - the
+    same defect C218 fixed for the bridge, still open for the diode because nothing carried them.
+    """
+    for key in keys:
+        field = R.get(key).get("meta_field")
+        if not field:
+            continue
+        ent = _pick_entry(_entries_of(profile, key))
+        val = (ent or {}).get("typ")
+        if val is None:
+            val = (ent or {}).get("max")
+        if isinstance(val, (int, float)):
+            blk[field] = float(val)
+            prov[key] = "extracted"
+
+
 def _vf_points(profile: dict, hot: bool) -> list[tuple]:
-    """(I_F, V_F) pairs at 25 degC, or at the hot measurement temperature."""
+    """(I_F, V_F) pairs at 25 degC, or at ONE hot measurement temperature.
+
+    ONE temperature, not all of them. The reference SiC part publishes its forward drop at 150 degC
+    AND at 175 degC, both at 16 A, and returning both built a "curve" whose x was [16, 16] — two
+    points at the same current with different voltages, which is not a function and cannot be
+    interpolated. The engine models a hot curve AT a stated temperature (`V_F_thot`), so the set has
+    to be self-consistent: the group with the most points wins, and the HIGHEST temperature breaks a
+    tie, because that is the vendor's own worst case.
+    """
     pts = []
     for e in _entries_of(profile, "V_F_vs_IF"):
         c = e.get("conditions") or {}
@@ -1112,6 +1151,12 @@ def _vf_points(profile: dict, hot: bool) -> list[tuple]:
         tj = c.get("T_j")
         if (tj is not None and float(tj) >= 100.0) == hot:
             pts.append((float(i), float(v), float(tj) if tj is not None else None))
+    if hot and pts:
+        groups: dict = {}
+        for p in pts:
+            groups.setdefault(p[2], []).append(p)
+        best = max(groups, key=lambda t: (len(groups[t]), t if t is not None else -1e9))
+        pts = groups[best]
     return sorted(pts)
 
 
@@ -1174,6 +1219,11 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
     tech = resolve_technology(profile, device_class)
     put("is_sic", tech["is_sic"], tech["provenance"])
     blk["_technology"] = tech
+
+    # The surge ratings and the junction limit. Chapter 8's inrush and fuse-coordination checks
+    # want them and the thermal check wants Tj_max, and nothing carried them onto a DIODE block —
+    # the same "extracted and then dropped" defect C218 fixed for the bridge.
+    _carry_meta(profile, blk, prov, ("I_FSM", "I2t", "Tj_max"))
 
     # 2. conduction. The peak current sets how far the V-I curve has to reach.
     i_max = 0.0
@@ -1429,6 +1479,7 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
         if note:
             notes.append({"key": "V_F_vs_IF", "severity": note[0], "message": note[1]})
 
+    _carry_meta(profile, blk, prov, ("I_FSM", "I2t", "Tj_max"))
     dig_hot = _digitised(profile, "V_F_vs_IF_hot")
     if dig_hot:
         put("V_F_vs_IF_hot", [list(dig_hot["x"]), list(dig_hot["y"])], "digitised")
@@ -1479,15 +1530,6 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
     # audiences: `meta_field` is what the block carries, `db_field` is the vendor catalogue's
     # column. `to_record_fields` returns either, so using it here wrote V_RRM as `vr` — a
     # catalogue name that is not a Bridge field, and Bridge(**params) refused it outright.
-    for key in ("I_FSM", "I2t"):
-        field = R.get(key).get("meta_field")
-        ent = _pick_entry(_entries_of(profile, key))
-        val = (ent or {}).get("typ")
-        if val is None:
-            val = (ent or {}).get("max")
-        if field and isinstance(val, (int, float)):
-            blk[field] = float(val)
-            prov[key] = "extracted"
 
     # 3c. the DERATING curve. Also not a loss parameter - the loss comes from the V-I curve either
     # way. This is what Section 7.3's gate reads: whether the part is ALLOWED to carry this current

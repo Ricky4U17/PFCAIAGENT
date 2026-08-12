@@ -625,7 +625,7 @@
       "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt", "sic_schottky", "si_diode", "bridge_rectifier"],
       "source": "datasheet", "required": true,
       "consumed_by": ["thermal", "report"],
-      "engine_fields": [],
+      "engine_fields": [], "meta_field": "_tj_max_C",
       "db_field": "tj_max",
       "report_label": "T<sub>j,max</sub>",
       "plausible": {"min": 80.0, "max": 250.0},

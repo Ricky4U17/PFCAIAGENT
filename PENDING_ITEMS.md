@@ -125,26 +125,29 @@ report currently points at a document the repo does not contain.
 
 ---
 
-### A11. No real diode datasheet has been through the extractor  ⭐ blocks M8 sign-off
-M8 built the whole datasheet-first path for the boost diode — technology resolution, Q_c scaling to
-the bus, Q_rr reconstruction, the GUI sub-tabs, the report sections — and every part of it is tested
-**against constructed profiles, not against a vendor PDF**. The MOSFET path was verified end to end
-on `IMZA65R033M2HXKSA1.pdf`; there is no equivalent diode file on disk.
+### A11. No real diode datasheet has been through the extractor  `CLOSED 2026-08-11 (C222)`
+Closed by the designer supplying both files: `vs-4c16ep07l-m3.pdf` (Vishay, 650 V Gen 4 SiC
+Schottky) and `SFAF1601G SERIES_H2105.pdf` (Taiwan Semiconductor, 16 A 50–600 V super-fast), both in
+`specs/Review/PFC Boost Diode`. No vendor-specific diode template was needed — the generic one
+covers both once the seven defects below were fixed.
 
-What that leaves unverified is specifically the **extraction layer**: whether a real SiC Schottky
-table spells its capacitive charge in a way the symbol map catches (`Qc`, `QC`, `Qc(tot)`,
-`Qtotal`), whether `V_R` and `I_F` survive as parsed conditions, and whether the V-I points land as
-several entries rather than one. Everything downstream of extraction is covered by
-`tests/test_diode_datasheet.py`.
+**Seven defects, one of which produced silently wrong loss numbers.** Full account in
+IMPLEMENTATION_LOG C222; the headline is that a SERIES datasheet bands the values that differ
+between its parts, and the part number resolved to the LAST variant while the banded values came
+from the FIRST — SFAF1608G reported 0.975 V against a real 1.700 V, 43 % low, straight into
+conduction loss. The designer's part number is now the variant; with none given every band is kept
+and `variant_required` asks, so nothing is silently chosen.
 
-The M4b precedent is the reason this is called out rather than assumed: the first Infineon template
-was written for the wrong vendor and silently fell back to generic, and a real file is what exposed
-it. No vendor-specific diode template has been added for exactly that reason — inventing one
-without a PDF to match it against would repeat the mistake.
+The others: `Tj_max` read the LOWER bound of "-55 to +175"; `I_FRM` was mapped onto `I_FSM`; `I2t`
+was lost to a private-use integral glyph; `C_j` was unread because this vendor prints it as a bare
+"C"; the hot forward curve mixed two temperatures into one non-function; and the surge ratings and
+junction limit were extracted and then dropped on their way to the block.
 
-- **Done when:** a SiC Schottky datasheet and a silicon fast-recovery datasheet have each been
-  uploaded through the Diode tab, the review screen shows Q_c / Q_rr with their conditions, and the
-  extracted values match the printed tables. Add a vendor template only if the generic one misses.
+Verified by `tests/test_diode_real_datasheets.py` (22 tests), every expectation read off the printed
+table rather than off the extractor's own output.
+
+**Still true, and worth keeping:** the M4b precedent — a real file is what exposes a template that
+silently falls back to generic. Any further vendor template should be added only against a PDF.
 
 ## B. Report & calculation  `CODE`
 

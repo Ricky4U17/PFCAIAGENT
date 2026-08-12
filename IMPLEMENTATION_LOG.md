@@ -8892,3 +8892,76 @@ renders 16 pp with 0 glyph boxes; registry audits 72 passed.
 Suite 503 passed / 2 skipped (was 491).
 
 Both C218 follow-ups are now closed.
+
+## C222 - the diode extractor meets real vendor PDFs (closes PENDING A11)
+
+Everything downstream of extraction was tested; the extraction layer itself had never read a diode
+datasheet. Two real files - a SiC Schottky (VS-4C16EP07L-M3, Vishay) and a silicon super-fast
+rectifier (SFAF1601G-1608G, Taiwan Semiconductor) - found seven defects. Every expected value in the
+new tests is read off the PRINTED TABLE, not off the extractor's own output.
+
+I REPORTED TWO DEFECTS THAT WERE NOT REAL. Reading the filtered review rows instead of the profile,
+I said the silicon part's t_rr and I_FSM had not extracted. Both had - 35 ns and 200 A, correctly.
+The actual silicon defect was narrower and worse.
+
+THE ONE THAT PRODUCED WRONG NUMBERS. A SERIES datasheet covers eight parts and bands the values that
+differ between them. The part number resolved to the LAST variant while the banded values came from
+the FIRST, so SFAF1608G reported a forward drop of 0.975 V against a real 1.700 V - 43 % low, and
+conduction loss scales directly with it. C_J the same way, 130 pF against 100 pF. Nothing flagged it:
+the profile was internally inconsistent and looked ordinary.
+
+    variant chosen        V_F        C_J
+    SFAF1601G-1604G       0.975 V    130 pF
+    SFAF1606G             1.300 V    100 pF
+    SFAF1608G             1.700 V    100 pF
+
+The designer's part number IS the variant - `upload()` already took one, so no second concept was
+needed. Uploaded without one, every band is KEPT and `variant_required` asks: three forward voltages
+under one key is something the review screen and the cross-check both report, where silently picking
+a band is not. A part number the document does not cover filters nothing, rather than dropping every
+banded row and leaving a part that appears to have no forward voltage.
+
+THE OTHER SIX:
+- `Tj_max` = -55 degC. "TJ(3), TStg" against "-55 to +175" was paired POSITIONALLY, one symbol per
+  number, so the maximum junction temperature became the range's LOWER bound - the limit the whole
+  thermal design is checked against, 230 degrees out.
+- I_FSM = 75 A. The template mapped IFRM (repetitive peak) onto I_FSM (non-repetitive surge). They
+  are different ratings and Chapter 8's inrush check compares against the surge one.
+- I2t absent. Its symbol is a symbol-font integral sign, which arrives as U+F0F2 (private use), and
+  the stray glyph made the token unmatchable.
+- C_j absent. This vendor prints it as a bare "C". Mapping that letter globally imported a 0.38 mm
+  LEAD THICKNESS from the package drawing as a junction capacitance, so it resolves by parameter
+  NAME instead - the mechanical table has no parameter-name column, which is what makes that safe.
+  A unit gate would have been the obvious guard and would falsely reject I2t and R_th_jc, whose
+  registry units ("1", "K_per_W") do not match what the unit parser emits.
+- The hot forward curve mixed 150 degC and 175 degC into one curve, x = [16, 16] - two points at one
+  current, which is not a function and cannot be interpolated. One temperature now, the vendor's
+  hottest.
+- The ratings were EXTRACTED AND THEN DROPPED, the same defect C218 fixed for the bridge and still
+  open for the diode: nothing carried them onto the block, and `Tj_max` had no `meta_field` at all,
+  so its declared `thermal` consumer could never have seen it. All three classes now carry
+  ifsm_A / i2t_A2s / tj_max_C through one shared `_carry_meta`.
+
+A NUMERICAL CONSEQUENCE BEYOND EXTRACTION. With both capacitance points present the junction grading
+coefficient is FITTED at m = 0.410 from the part's own data instead of falling back to m = 0, which
+moves C211's dissipated-charge factor from 0.500 to 0.629 on this part.
+
+I WALKED INTO THE C218 TRAP ONE COMMIT AFTER DOCUMENTING IT. `Tj_max`'s new `meta_field` was named
+`tj_max_C`, with no underscore — so `_clean_block` left it in params and Bridge(**params) refused it,
+breaking three bridge tests. C221's own commit message says the underscore convention exists because
+`_META_KEYS` is a second place that gets forgotten, and I then named a field that needed it without
+one. Renamed `_tj_max_C`; a test now constructs the dataclass from the block for exactly this.
+
+TWO PINNED COUNTS MOVED, both because a row that had been DROPPED now reads. The MOSFET gained
+`R_g_int` (3.1 ohm at 1 MHz — its symbol "RG,int" tokenises as two symbols against one value, so
+positional pairing gave up), and the vs-3c40cp12l SiC diode gained `I2t` (the private-use integral
+glyph). Both checked against the printed rows BEFORE the numbers were moved. My first diagnosis of
+that failure was wrong — I assumed the range fix had added `Tj_max`, which was already extracting;
+checking out the previous version and diffing the key sets gave the real answer in one command, and
+is what I should have done first.
+
+Verified: 22 new tests (tests/test_diode_real_datasheets.py) against both printed tables; tsc clean.
+Suite 525 passed / 2 skipped (was 503).
+
+PENDING A11 CLOSED. A1 (NTC datasheet pulse-energy column) stays open - it needs a workbook column
+the vendor file does not carry.

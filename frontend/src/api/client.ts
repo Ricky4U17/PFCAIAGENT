@@ -490,6 +490,12 @@ export interface DsUpload {
   tables_kept?: number; tables_rejected?: number
   stored?: { changed: boolean; sha256: string; note?: string }
   revision_diff?: { key: string; field: string; was: number | null; now: number | null }[]
+  /** A SERIES datasheet covers several parts and bands the values that differ between them.
+   *  `variant_required` means the document names more than one and none was chosen, so the banded
+   *  rows are all still present — visible rather than silently resolved to one band. */
+  variants?: string[]
+  variant?: string | null
+  variant_required?: boolean
 }
 export interface DsConfirm {
   ok: boolean; part_number: string

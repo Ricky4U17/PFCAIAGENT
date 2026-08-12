@@ -47,12 +47,17 @@
         "CT": "C_j", "Cj": "C_j", "CJ": "C_j", "Ct": "C_j",
         "Qrr(tot)": "Q_rr", "QRRtot": "Q_rr",
         "IF(AV)": "I_F_AV", "IO": "I_F_AV", "IFAV": "I_F_AV", "IFM": "I_F_AV",
-        "IFSM": "I_FSM", "IFRM": "I_FSM",
+        "IFSM": "I_FSM",
         "Ptot": "P_tot", "Tstg": "T_stg",
-        "I2t": "I2t",
+        "I2t": "I2t", "I2dt": "I2t", "i2dt": "I2t",
         "RthJC": "R_th_jc", "RthJ-C": "R_th_jc", "RthetaJC": "R_th_jc",
         "RthCS": "R_th_cs", "RthC-S": "R_th_cs",
         "TJ": "Tj_max", "TJmax": "Tj_max", "Tjmax": "Tj_max"
+      },
+      "name_map": {
+        "total capacitance": "C_j", "junction capacitance": "C_j",
+        "total capacitive charge": "Q_c", "reverse recovery time": "t_rr",
+        "i2t value": "I2t", "i2t rating": "I2t"
       },
       "column_synonyms": {
         "parameter": ["Parameter", "Characteristic", "Characteristics", "Description", "Item"],

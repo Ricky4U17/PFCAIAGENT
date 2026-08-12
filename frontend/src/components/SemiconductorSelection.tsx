@@ -428,7 +428,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         .then(r => setDsReq(s2 => ({ ...s2, [k]: r }))).catch(() => {}))
   }, [design])
 
-  const doUpload = async (kind: DsKind, file?: File) => {
+  const doUpload = async (kind: DsKind, file?: File, variant?: string) => {
     if (!file) return
     setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
     // A NEW UPLOAD RETIRES THE PREVIOUS PART, not just its review screen. `dbBlock` is what the
@@ -439,7 +439,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     setDbBlock(s2 => { const n = { ...s2 }; delete n[kind]; return n })
     setFigDone({}); setCurveFigs(s2 => ({ ...s2, [kind]: [] }))
     try {
-      const r = await datasheetUpload(kind, file)
+      const r = await datasheetUpload(kind, file, variant)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
       setDsPdf(s2 => ({ ...s2, [kind]: file }))       // the Curves tab reads the plots from it
       if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))
@@ -839,6 +839,32 @@ export const SemiconductorSelection: React.FC<Props> = ({
               {up.stored && !up.stored.changed &&
                 <span style={{ color: C.muted }}> · identical to the copy already on file</span>}
             </div>)}
+          {up && (up.variants?.length ?? 0) > 1 && (
+            <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: C.bg3,
+              border: `1px solid ${up.variant_required ? C.amber : C.green}` }}>
+              <div style={{ fontSize: 11.5, color: C.text, marginBottom: 6 }}>
+                {up.variant_required
+                  ? <>⚠ This datasheet covers <b>{up.variants!.length} parts</b>. Which one are you
+                      using?</>
+                  : <>✓ Read as <b>{up.variant}</b>.</>}
+              </div>
+              <div style={{ fontSize: 10, color: C.hint, marginBottom: 8, lineHeight: 1.6 }}>
+                A series document bands the values that differ between its parts — forward voltage
+                and capacitance here. Until one is chosen every band is kept, so the review list
+                shows the same parameter more than once rather than one being picked for you.
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={up.variant || ''} disabled={dsBusy[kind]}
+                  onChange={e => e.target.value &&
+                    doUpload(kind, dsPdf[kind], e.target.value)}
+                  style={{ ...inStyle, width: 190, padding: '3px 6px', fontSize: 11.5 }}>
+                  <option value="">— choose the part number —</option>
+                  {up.variants!.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                {dsBusy[kind] && <span style={{ fontSize: 10.5, color: C.hint }}>re-reading…</span>}
+              </div>
+            </div>)}
+
           {up && up.ok && (up.cross_check?.length ?? 0) > 0 && (
             <div style={{ marginTop: 8, fontSize: 10.5, color: C.amber }}>
               {up.cross_check!.map((c, i) => <div key={i}>⚠ {c.message}</div>)}

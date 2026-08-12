@@ -440,6 +440,51 @@ def find_parameter_tables(pdf_bytes: bytes) -> list[dict]:
 _SYMBOL_TOKEN = re.compile(r"[A-Za-zθ][A-Za-z0-9θ()/_.\-]*")
 
 
+# A part number in a SERIES datasheet: letters, then digits, optionally a suffix letter. The
+# space is optional because vendors set the column header as "SFAF 1601G" and the in-cell band as
+# "SFAF1601G".
+_VARIANT_TOKEN = re.compile(r"\b([A-Z]{2,6})\s?(\d{2,6}[A-Z]{0,3})\b")
+
+
+def variant_tokens(text: Any) -> list[str]:
+    """Part numbers named in a cell, normalised. Empty for ordinary text."""
+    out = []
+    for pre, num in _VARIANT_TOKEN.findall(norm_text(text).upper()):
+        v = f"{pre}{num}"
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def find_variants(pdf_bytes: bytes) -> list[str]:
+    """The part numbers a SERIES datasheet covers, or [] for a single-part document.
+
+    One document, several parts, and the parameters that differ between them are banded - either as
+    a column per variant, or as a list of variants in a cell against each value. Reading such a file
+    without knowing WHICH part is being used silently takes one band's numbers: the reference
+    silicon file gave a forward voltage of 0.975 V for a part whose actual figure is 1.700 V, a 43 %
+    understatement feeding straight into conduction loss.
+
+    Detected by grouping the part-number-shaped tokens by their letter prefix and keeping the
+    largest family with more than one member, so an isolated package code or standard number
+    ("TO-220AC", "JESD 201") cannot be mistaken for a variant list.
+    """
+    seen: dict[str, set] = {}
+    for t in find_parameter_tables(pdf_bytes):
+        if t.get("rejected"):
+            continue
+        for cellrow in [t.get("header") or []] + list(t.get("rows") or []):
+            for c in cellrow:
+                for v in variant_tokens(c):
+                    m = _VARIANT_TOKEN.match(v)
+                    if m:
+                        seen.setdefault(m.group(1), set()).add(v)
+    if not seen:
+        return []
+    best = max(seen.values(), key=len)
+    return sorted(best) if len(best) > 1 else []
+
+
 def split_packed_row(symbol_cell: str, value_cell: str) -> list[tuple[str, float]]:
     """Unpack a row that carries several parameters at once.
 
@@ -466,7 +511,7 @@ def parse_range(text: str) -> Optional[tuple[float, float]]:
     return None
 
 
-def parse_table(table: dict, symbol_map: dict[str, str]) -> list[dict]:
+def parse_table(table: dict, symbol_map: dict[str, str], name_map: Optional[dict] = None) -> list[dict]:
     """One parsed table -> canonical entries. Anything unmapped is returned as `unresolved` rather
     than dropped, so a reviewer can see what the parser gave up on."""
     roles = table.get("roles") or {}
@@ -504,10 +549,10 @@ def parse_table(table: dict, symbol_map: dict[str, str]) -> list[dict]:
                         if i_ is not None and i_ < len(lrow):
                             ls = lrow[i_]
                             sub[i_] = ls[k] if k < len(ls) else (ls[0] if len(ls) == 1 else "")
-                    entries.extend(_parse_row(sub, roles, symbol_map, cell))
+                    entries.extend(_parse_row(sub, roles, symbol_map, cell, name_map))
                 continue
         row = _inherit_continuation(row, roles, prev)
-        got = _parse_row(row, roles, symbol_map, cell)
+        got = _parse_row(row, roles, symbol_map, cell, name_map)
         if got:
             prev = row
         entries.extend(got)
@@ -557,7 +602,7 @@ def _inherit_continuation(row, roles, prev):
     return out
 
 
-def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
+def _parse_row(row, roles, symbol_map, cell, name_map=None) -> list[dict]:
     entries: list[dict] = []
     name_cell = cell(row, "parameter") or ""
     # A summary block ("Parameter | Value | Unit") has no symbol column: the symbol IS the
@@ -584,7 +629,22 @@ def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
         if parse_numbers(vcols.get(r, "")):
             primary = vcols[r]
             break
-    pairs = split_packed_row(sym_cell, primary)
+    # A RANGE IS ONE VALUE, however many symbols share the cell. "TJ(3), TStg" against
+    # "-55 to +175" was paired POSITIONALLY into TJ = -55 and TStg = +175, so the operating
+    # range's LOWER bound became the maximum junction temperature — the thermal limit the whole
+    # design is checked against, off by 230 degrees and in the unsafe direction for T_stg.
+    _syms = _SYMBOL_TOKEN.findall(norm_text(sym_cell))
+    _rng = parse_range(primary)
+    if _rng and _syms:
+        pairs = [(sym, _rng[1]) for sym in _syms]
+    elif len(_syms) > 1 and symbol_map.get(_symbol_lookup(sym_cell)):
+        # "TJ MAX" is ONE parameter whose symbol carries a qualifier word, not two parameters.
+        # It tokenises as two symbols against a single value, positional pairing gives up, and
+        # the row is dropped — which is how the silicon part lost its 150 degC junction limit.
+        _n = parse_numbers(primary)
+        pairs = [(norm_text(sym_cell), _n[0])] if _n else []
+    else:
+        pairs = split_packed_row(sym_cell, primary)
     if not pairs:
         if norm_text(sym_cell) or norm_text(name_cell):
             entries.append({"unresolved": True, "symbol": norm_text(sym_cell),
@@ -594,6 +654,13 @@ def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
     multi = len(pairs) > 1
     for sym, val in pairs:
         key = symbol_map.get(_symbol_lookup(sym))
+        if not key and name_map:
+            # BY NAME, only when the symbol did not resolve. A vendor may print the forward
+            # capacitance as a bare "C", which is also a package DIMENSION on the mechanical
+            # drawing — so matching that letter globally imported a 0.38 mm lead thickness as a
+            # junction capacitance. The dimensions table has no parameter-name column at all,
+            # which is what makes the name the safe discriminator here.
+            key = name_map.get(re.sub(r"\s+", " ", norm_text(name_cell).lower()).strip())
         _conds = parse_conditions(cond_text)
         _conds.update(_inline_cond)
         rec: dict[str, Any] = {
@@ -607,7 +674,9 @@ def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
         else:
             rec["unresolved"] = True
 
-        if multi:
+        if _rng is not None:
+            rec["min"], rec["max"] = _rng[0] * scale, _rng[1] * scale
+        elif multi:
             rec[_inline_field or "typ"] = val * scale
         else:
             for r in ("min", "typ", "max"):
@@ -635,6 +704,18 @@ def _parse_row(row, roles, symbol_map, cell) -> list[dict]:
                         rec["typ"] = nums[0] * scale
         if base_unit:
             rec["si_unit"] = base_unit
+        # WHICH VARIANTS THIS ROW IS FOR. A banded row names them in a cell of its own; an ordinary
+        # row names none and applies to the whole family. Recorded rather than resolved here: the
+        # extractor does not know which part the designer is holding.
+        _vars: list[str] = []
+        for i, c in enumerate(row):
+            if i in roles.values() and i != roles.get("conditions"):
+                continue
+            for v in variant_tokens(c):
+                if v not in _vars:
+                    _vars.append(v)
+        if _vars:
+            rec["variants"] = _vars
         entries.append(rec)
     return entries
 
@@ -676,6 +757,9 @@ def _symbol_lookup(sym: str) -> str:
     # is why the LVE5060E's forward voltage and thermal resistance did not extract even once its
     # tables parsed. A DIGIT-ONLY group is a footnote; "(AV)" in IF(AV) is part of the symbol.
     t = re.sub(r"\(\s*\d+\s*\)", "", t)
+    # PRIVATE-USE AREA. A symbol-font integral sign arrives as U+F0F2, not as U+222B, so the I2t
+    # row of the reference SiC datasheet read as "i2dt" and matched nothing.
+    t = "".join(ch for ch in t if not (0xE000 <= ord(ch) <= 0xF8FF))
     t = t.replace("θ", "th").replace("(", "").replace(")", "")
     return re.sub(r"[\s._\-/]", "", t)
 
@@ -713,7 +797,8 @@ def cross_check(entries: list[dict]) -> list[dict]:
 
 
 # ── the entry point ───────────────────────────────────────────────────────────────────────────
-def extract(pdf_bytes: bytes, device_class: str, template: Optional[dict] = None) -> dict:
+def extract(pdf_bytes: bytes, device_class: str, template: Optional[dict] = None,
+            variant: Optional[str] = None) -> dict:
     """Read a datasheet into a draft profile. Returns the profile plus everything a reviewer needs
     to judge it: the triage decision, what was rejected, what could not be mapped, and the
     cross-check result.
@@ -740,6 +825,8 @@ def extract(pdf_bytes: bytes, device_class: str, template: Optional[dict] = None
     tmpl = template or VT.match(pdf_bytes)
     profile["extraction"]["vendor_template"] = tmpl.get("template_id")
     symbol_map = {_symbol_lookup(k): v for k, v in (tmpl.get("symbol_map") or {}).items()}
+    name_map = {re.sub(r"\s+", " ", (k or "").lower()).strip(): v
+                for k, v in (tmpl.get("name_map") or {}).items()}
 
     tables = find_parameter_tables(pdf_bytes)
     rejected = [t for t in tables if t.get("rejected")]
@@ -747,12 +834,28 @@ def extract(pdf_bytes: bytes, device_class: str, template: Optional[dict] = None
 
     flat: list[dict] = []
     for t in good:
-        for e in parse_table(t, symbol_map):
+        for e in parse_table(t, symbol_map, name_map):
             e["source"] = {"page": t["page"], "bbox": t.get("bbox")}
             flat.append(e)
 
     resolved = [e for e in flat if e.get("key")]
     profile["unresolved"] = [e for e in flat if not e.get("key")]
+
+    # SERIES DATASHEETS. One document, several parts, and the values that differ between them are
+    # banded. Without a variant the banded rows are ALL kept — they are then visibly several
+    # entries for one key, which the review screen and the cross-check both report, rather than one
+    # silently-chosen band. With a variant, only its own band survives.
+    variants = find_variants(pdf_bytes)
+    # Only a variant this document actually covers filters it. A part number that is not one of
+    # them says nothing about the bands, and using it would drop every banded row.
+    chosen = variant if (variant and variant in variants) else None
+    if chosen:
+        resolved = [e for e in resolved
+                    if not e.get("variants") or chosen in e["variants"]]
+    profile["variants"] = variants
+    profile["variant"] = chosen
+    if chosen:
+        profile["part_number"] = chosen
 
     # group by canonical key -> one parameter with several condition-qualified entries
     grouped: dict[str, dict] = {}
@@ -760,13 +863,15 @@ def extract(pdf_bytes: bytes, device_class: str, template: Optional[dict] = None
         p = grouped.setdefault(e["key"], {"key": e["key"], "entries": []})
         entry = {k: v for k, v in e.items()
                  if k in ("min", "typ", "max", "values", "conditions", "condition_text",
-                          "symbol", "source", "si_unit")}
+                          "symbol", "source", "si_unit", "variants")}
         entry["provenance"] = "extracted"
         p["entries"].append(entry)
     profile["parameters"] = list(grouped.values())
 
     checks = cross_check(resolved)
     return {"profile": profile, "triage": tri, "tables": good, "rejected": rejected,
+            "variants": variants, "variant": profile["variant"],
+            "variant_required": bool(variants) and not variant,
             "cross_check": checks, "ok": bool(profile["parameters"]),
             "reason": "" if profile["parameters"] else
                       "no parameters could be mapped to canonical keys — the vendor template may "

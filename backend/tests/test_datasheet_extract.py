@@ -529,14 +529,21 @@ class TestLayoutHabitsThatProducedNothing:
         assert vf[125.0].get("max") is None
 
     def test_the_datasheets_that_already_worked_still_do(self, lve):
-        """Every fix above is additive. These counts are equalities, not floors."""
+        """Every fix above is additive. These counts are equalities, not floors.
+
+        Two rose at C222, both because a row that had been DROPPED now reads. The MOSFET gained
+        `R_g_int` (3.1 ohm at 1 MHz): its symbol "RG,int" tokenises as two symbols against one
+        value, so positional pairing gave up on it. The SiC diode gained `I2t`: its symbol is a
+        symbol-font integral sign arriving as U+F0F2, which made the token unmatchable. Both were
+        checked against the printed rows before these numbers were moved.
+        """
         spec = os.path.join(os.path.dirname(__file__), "..", "..", "specs")
         for path, cls, n in (
-                (os.path.join(spec, "Review", "IMZA65R033M2HXKSA1.pdf"), "sic_mosfet", 20),
+                (os.path.join(spec, "Review", "IMZA65R033M2HXKSA1.pdf"), "sic_mosfet", 21),
                 (os.path.join(spec, "Bridge Rectifier Configuration", "GBJ40L06.pdf"),
                  "bridge_rectifier", 9),
                 (os.path.join(spec, "Review", "PFC Boost Diode", "vs-3c40cp12l-m3.pdf"),
-                 "sic_schottky", 8)):
+                 "sic_schottky", 9)):
             if not os.path.exists(path):
                 continue
             with open(path, "rb") as f:
