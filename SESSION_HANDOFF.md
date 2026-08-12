@@ -47,6 +47,7 @@ entering the design must carry provenance.
 | C220 | per-temperature traces NAMED (order + table anchor); 1-based `page`; leader filter | sharing sweep no longer degenerate; 29.27 -> 25.71 W |
 | C221 | bridge **derating gate** computed (Table 7.3.3), PASS/FAIL/DATA MISSING | 30.0 A allowed vs 9.4 A drawn at 102 °C case |
 | C222 | **real diode datasheets through the extractor** — 7 defects, series-variant selection | SFAF1608G V_F 0.975 → 1.700 V; **A11 CLOSED** |
+| C223 | 6 designer findings on the semiconductor page (GUI only) | requirement ignored `n_parallel` — per-package 18.87 → 9.43 A |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -89,10 +90,16 @@ class it RESOLVED to rather than the one it arrived under.
     reads 1 of 14 plot regions; the rest refuse. Two stacked plots per row with shared label bands
     need a focused effort WITH ITS OWN FIXTURES — over-tuning here yields a confident wrong
     calibration, which is worse than reading nothing.
-  - **(c) THE MOSFET DATASHEET HAS NO CURVES TO MAP.** One figure caption in 17 pages, the package
-    outline. So the C208 gaps (E_oss as a V^1.5 fit, C_rss unmapped, g_fs absent) cannot be closed
-    from this part's datasheet at all — Infineon publishes those curves in a separate application
-    note. `_FIGURE_TARGETS` remains diode-only for that reason, not for want of machinery.
+  - **(c) CORRECTED at C223 — the MOSFET datasheet DOES have curves.** 14 plot regions across
+    pages 9–15; what it lacks is figure CAPTIONS (one caption in 17 pages, the package outline),
+    which is what the earlier note confused. Two things still block them, and they are separate:
+    **all 14 fail axis calibration** (gap (b), frameless + fragmented labels — `0 of 14` is the
+    honest count since C220 required ≥3 ticks, C216's "1 of 14" was a spurious 2-tick fit), and
+    **`_FIGURE_TARGETS` has no MOSFET entries at all** — only the five diode keys plus the bridge
+    derating curve, so even a cleanly-calibrated MOSFET plot yields zero proposals. Adding MOSFET
+    targets needs a MOSFET datasheet whose plots actually calibrate; inventing them against a file
+    that reads nothing would repeat the M4b mistake. The Curves tab now SAYS all of this instead of
+    showing an empty list.
 - ~~**M8-bridge**~~ — DONE at C217/C218. The bridge is selected the way the MOSFET and the diode
   are, and **nothing in Chapter 7 now comes from the parametric catalogue.** Its requirement is its
   own (blocks the LINE peak, carries the RECTIFIED MEAN against an average rating), sync-bottom

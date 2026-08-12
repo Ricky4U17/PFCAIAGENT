@@ -508,13 +508,18 @@ export interface DsConfirm {
 }
 export const datasheetRequirements = (design: Record<string, unknown>, kind = 'mosfet') =>
   post<DsRequirement>('/mode-b/semiconductor/datasheet/requirements', { design, kind })
-export const datasheetUpload = (kind: string, file: File, partNumber?: string): Promise<DsUpload> => {
+export const datasheetUpload = (kind: string, file: File, partNumber?: string,
+                                deviceClass?: string): Promise<DsUpload> => {
   const fd = new FormData(); fd.append('kind', kind); fd.append('file', file)
   if (partNumber) fd.append('part_number', partNumber)
+  // The class the part is EXTRACTED under: it selects the conduction-loss form and which
+  // parameters are required, so changing it re-reads the datasheet rather than relabelling it.
+  if (deviceClass) fd.append('device_class', deviceClass)
   return fetch(`${BASE}/mode-b/semiconductor/datasheet/upload`, { method: 'POST', body: fd })
     .then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`) } return r.json() })
 }
 export const datasheetConfirm = (b: { part_number: string; kind: string
+                                      device_class?: string
                                       edits?: Record<string, unknown>
                                       design?: Record<string, unknown> }) =>
   post<DsConfirm>('/mode-b/semiconductor/datasheet/confirm', b)

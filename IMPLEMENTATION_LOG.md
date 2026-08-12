@@ -8965,3 +8965,54 @@ Suite 525 passed / 2 skipped (was 503).
 
 PENDING A11 CLOSED. A1 (NTC datasheet pulse-energy column) stays open - it needs a workbook column
 the vendor file does not carry.
+
+## C223 - six designer findings on the semiconductor page (GUI only)
+
+A REAL BUG CAME OUT OF THE FIRST ONE. `datasheetRequirements` was called with the top-level design
+alone and never with `dsDesign[kind]`, so the bridge requirement always computed n_parallel = 1 and
+the PER-PACKAGE current it states was actually the total. Making two packages the default would have
+put 18.87 A on screen where the answer is 9.43 A. The default made a pre-existing disconnect visible
+rather than causing it; the requirement now sees the same design inputs the block is built from.
+
+1. BRIDGE DEFAULTS. Packages in parallel 1 -> 2, worst-package share blank -> 0.5. Checked that 0.5
+   is numerically identical to leaving it unset (29.468 W / 116.7 degC either way): it states the
+   ideal-sharing assumption instead of leaving it implied, and changes no result.
+
+   DEVICE CLASS is now a selector, and only where there is a real choice - diode (SiC Schottky /
+   Silicon) and MOSFET (SiC / Silicon). The bridge has none: a selector with one option is noise.
+   Changing it RE-READS the datasheet rather than relabelling it, because the class decides which
+   parameters are required and which conduction form the block is built with. The duplicate
+   read-only review row is gone. Where a datasheet states the technology outright, published
+   evidence still wins over the selection (settled at C210) - selecting Silicon for the reference
+   SiC part returns is_sic = True with "the datasheet publishes a capacitive charge Q_c and no
+   reverse-recovery charge", now shown as an amber warning beside the selector instead of silently.
+
+2. ACCEPT NO LONGER JUMPS TO RESULTS. `doConfirm` takes a `goToResults` flag, false when it runs as
+   part of accepting a curve, plus a new "Done - go to results" button. The re-confirm on each
+   Accept is KEPT: it is what rebuilds the block from the profile the curve just landed in. Seven
+   traces on one figure meant seven trips back to the Curves tab.
+
+3. "D COND" AND "DIODE" ARE THE SAME NUMBER, and that is correct - a recovery-free part has a
+   switching term of EXACTLY zero and the Q_c energy is booked to the MOSFET. A note now says so,
+   and only when it actually happens. The pre-existing footnote said "near zero" (it is exactly
+   zero) and used a bare section symbol against the settled convention; both corrected.
+
+4. R_g REMOVED from the MOSFET inputs. It was never a third gate resistor - the engine reads it only
+   as a fallback when the on and off paths are not given separately (`_rg` returns `rg_on or rg`),
+   so a field labelled plainly "R_g" beside R_g,on and R_g,off read like one. Same value in both if
+   the paths are the same. R_g,int shows READ-ONLY, "reported only, not added to the gate path":
+   C222 made it extract (3.1 ohm at 1 MHz) and it is the device's internal resistance, not part of
+   the external plus driver path those two describe.
+
+5. WHY A MOSFET DATASHEET SHOWS NO FIGURES. The empty state now states both reasons rather than
+   looking broken: the axes must READ (Infineon's frameless plots fail on all 14 regions), AND the
+   figure must be one this calculation consumes - there are no MOSFET curve targets at all, only the
+   five diode keys and the bridge derating curve. Also corrects a wrong note in SESSION_HANDOFF: the
+   MOSFET datasheet has 14 plot regions, what it lacks is figure CAPTIONS.
+
+6. TWO-CHANNEL TOTALS - already correct, no change. `pfc_loss_model.py:374` multiplies by Nch and
+   every P_* at 413-419 carries the same factor; verified numerically (nch=1 FET 97.48 W, nch=2
+   51.76 W, the halving expected when conduction splits across two channels).
+
+Verified: tsc clean; frontend builds; share-sweep and requirement figures checked against the engine.
+No backend file changed. Suite 525 passed / 2 skipped (unchanged).

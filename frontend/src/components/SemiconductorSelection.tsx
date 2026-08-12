@@ -157,19 +157,30 @@ function blockToForm(block: Record<string, any>, fields: Field[], base: Record<s
 // One row of the datasheet review screen. Shows the value WITH its conditions and its
 // destination, because a bare number is not reviewable — the reviewer has to be able to see what
 // it will be used for and under what conditions it was measured.
+// A REPORTED-ONLY parameter: read from the datasheet, shown so the designer can see what the
+// part carries, and not editable because nothing downstream consumes it. R_g,int is the case — it
+// is the device's INTERNAL gate resistance, it is not added to R_g,on / R_g,off (those are the
+// external plus driver path), and letting it be typed over would imply it changed a result.
+const READ_ONLY_KEYS = new Set(['R_g_int'])
+
 const ReviewRow: React.FC<{ r: DsReviewRow; edit?: string
                             onEdit: (k: string, v: string) => void }> = ({ r, onEdit, edit }) => {
   const bad = !r.supplied
+  const readOnly = READ_ONLY_KEYS.has(r.key)
   return (
     <div style={{ borderTop: `1px solid ${C.border}`, padding: '6px 0' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '150px 110px 1fr 130px', gap: 8, alignItems: 'center' }}>
         <div style={{ fontSize: 11.5, color: bad ? C.amber : C.text }}
           dangerouslySetInnerHTML={{ __html: r.label }} />
-        <input style={{ ...inStyle, padding: '2px 6px', fontSize: 11.5 }}
+        <input style={{ ...inStyle, padding: '2px 6px', fontSize: 11.5,
+            opacity: readOnly ? 0.65 : 1, cursor: readOnly ? 'not-allowed' : undefined }}
+          readOnly={readOnly} disabled={readOnly}
           placeholder={bad ? (r.source_kind === 'design' ? 'you supply' : 'not found') : ''}
           value={edit ?? (r.display ?? '')} onChange={e => onEdit(r.key, e.target.value)} />
         <div style={{ fontSize: 10, color: C.muted }}>
-          {Object.entries(r.conditions).length > 0
+          {readOnly
+            ? 'read from the datasheet · reported only, not added to the gate path'
+            : Object.entries(r.conditions).length > 0
             ? Object.entries(r.conditions).map(([k, v]) => `${k} = ${v}`).join(', ')
             : (r.source_kind === 'design' ? 'a design choice — no datasheet supplies it' : '—')}
           {r.entries > 1 && <span style={{ color: C.teal }}> · {r.entries} entries</span>}
@@ -396,6 +407,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const [figImg, setFigImg] = useState<Record<string, string>>({})
   const [curveBusy, setCurveBusy] = useState(false)
   const [figDone, setFigDone] = useState<Record<string, string>>({})
+  // whether the digitiser has actually been RUN for a kind — an empty list before it runs and
+  // an empty list after it runs mean different things, and the screen has to say which.
+  const [figLoaded, setFigLoaded] = useState<Partial<Record<DsKind, boolean>>>({})
   // Which stored parts the designer has actually vouched for. A part is PROVISIONAL until
   // then, so a datasheet uploaded by mistake never reaches the shared library.
   const [published, setPublished] = useState<Record<string, boolean>>({})
@@ -409,26 +423,42 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // than falling through to an engine default nobody chose. The diode needs far fewer of them:
   // it has no gate.
   const [dsDesign, setDsDesign] = useState<Record<DsKind, Record<string, string>>>({
-    mosfet: { V_GS_drive: '', R_g_on: '', R_g_off: '', R_g_common: '', R_th_cs: '0.3',
-              sw_method: 'analytic' },
+    // R_g_common is GONE. It was never a third resistor: the engine reads it only as a fallback
+    // when the on and off paths are not given separately (`_rg` returns `rg_on or rg`), so a field
+    // labelled plainly "R_g" alongside R_g,on and R_g,off read like a third gate resistor. If the
+    // two paths are the same, the same number goes in both.
+    mosfet: { V_GS_drive: '', R_g_on: '', R_g_off: '', R_th_cs: '0.3',
+              sw_method: 'analytic', device_class: 'sic_mosfet' },
     // dies/package: a dual common-cathode boost diode feeding both interleaved channels puts
     // BOTH legs' loss through one case-to-sink interface. The datasheet cannot say whether both
     // legs are actually loaded — only the designer knows which package is fitted.
-    diode:  { R_th_cs: '0.3', dies_per_package: '1' },
+    diode:  { R_th_cs: '0.3', dies_per_package: '1', device_class: 'sic_schottky' },
     // The bridge blocks the LINE peak and carries the rectified mean, so its configuration is the
     // current PATH: how many packages share it, how badly they share, and whether the bottom two
     // positions are diodes or bypass MOSFETs.
-    bridge: { R_th_cs: '0.5', n_parallel: '1', share_worst: '',
+    // Two packages sharing 50/50 is the arrangement this design actually uses, so it is the
+    // default rather than a single package. No device class here: a bridge rectifier is the only
+    // thing this tab can hold, so a selector with one option is noise.
+    bridge: { R_th_cs: '0.5', n_parallel: '2', share_worst: '0.5',
               bridge_topology: 'diode', bottom_mosfet_part: '' },
   })
 
+  // The requirement has to see the SAME design inputs the block is built from. It was called with
+  // the top-level design alone, so the bridge's `n_parallel` was always 1 no matter what the
+  // Parameters tab said — and the per-package current it states is derived from exactly that. The
+  // default of two packages made a pre-existing disconnect visible rather than causing it.
+  const dsDesignKey = JSON.stringify(dsDesign)
   useEffect(() => {
+    const numeric = (o: Record<string, string>) => Object.fromEntries(
+      Object.entries(o ?? {}).filter(([, v]) => v !== '')
+        .map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)]))
     ;(['mosfet', 'diode', 'bridge'] as DsKind[]).forEach(k =>
-      datasheetRequirements(design as unknown as Record<string, unknown>, k)
+      datasheetRequirements({ ...(design as unknown as Record<string, unknown>),
+                              ...numeric(dsDesign[k]) }, k)
         .then(r => setDsReq(s2 => ({ ...s2, [k]: r }))).catch(() => {}))
-  }, [design])
+  }, [design, dsDesignKey])
 
-  const doUpload = async (kind: DsKind, file?: File, variant?: string) => {
+  const doUpload = async (kind: DsKind, file?: File, variant?: string, deviceClass?: string) => {
     if (!file) return
     setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
     // A NEW UPLOAD RETIRES THE PREVIOUS PART, not just its review screen. `dbBlock` is what the
@@ -438,8 +468,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
     setDsConf(s2 => { const n = { ...s2 }; delete n[kind]; return n })
     setDbBlock(s2 => { const n = { ...s2 }; delete n[kind]; return n })
     setFigDone({}); setCurveFigs(s2 => ({ ...s2, [kind]: [] }))
+    setFigLoaded(s2 => ({ ...s2, [kind]: false }))
     try {
-      const r = await datasheetUpload(kind, file, variant)
+      const r = await datasheetUpload(kind, file, variant,
+                                      deviceClass ?? dsDesign[kind]?.device_class)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
       setDsPdf(s2 => ({ ...s2, [kind]: file }))       // the Curves tab reads the plots from it
       if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))
@@ -448,7 +480,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
 
-  const doConfirm = async (kind: DsKind) => {
+  // `goToResults` is false when this runs as part of accepting a CURVE. Every Accept re-confirms
+  // the part — that is what rebuilds the block from the profile the curve just landed in — but it
+  // was also switching tabs, so accepting seven traces meant seven trips back to the Curves tab.
+  const doConfirm = async (kind: DsKind, goToResults = true) => {
     const up = dsUp[kind]
     if (!up?.part_number) return
     setDsBusy(s2 => ({ ...s2, [kind]: true })); setErr(null)
@@ -457,6 +492,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
         Object.entries(o).filter(([, v]) => v !== '')
           .map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)]))
       const r = await datasheetConfirm({ part_number: up.part_number, kind,
+        device_class: dsDesign[kind]?.device_class,
         edits: numeric(dsEdits[kind] ?? {}),
         // The diode's V-I curve has to reach the design's peak current, and its Q_c has to be
         // moved to the design's bus voltage — so the whole design goes down, not just the
@@ -469,7 +505,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
       setDbBlock(s2 => ({ ...s2, [kind]: r.block }))
       setWhole(kind, blockToForm(r.block as Record<string, any>, FIELDS[kind],
                                  kind === 'mosfet' ? mosfet : kind === 'diode' ? diode : bridge))
-      if (r.validation.ok) setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
+      if (goToResults && r.validation.ok) setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
@@ -480,6 +516,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
     try {
       const r = await datasheetFigures(file, part || undefined)
       setCurveFigs(s2 => ({ ...s2, [kind]: r.proposals }))
+      setFigLoaded(s2 => ({ ...s2, [kind]: true }))
       for (const p of r.proposals) {
         const id = `${p.page}:${p.frame.join(',')}`
         if (figImg[id]) continue
@@ -501,8 +538,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
       await datasheetFigureConfirm({ part_number: part, key, curve: { x: c.x, y: c.y },
         conditions: tj ? { T_j: Number(tj) } : {} })
       setFigDone(m => ({ ...m, [`${p.key}:${ci}`]: key }))
-      // re-confirm so the engine block is rebuilt from the profile that now carries the curve
-      await doConfirm(kind)
+      // re-confirm so the engine block is rebuilt from the profile that now carries the curve —
+      // but STAY on this tab, so several curves can be accepted in one pass
+      await doConfirm(kind, false)
     } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
   }
 
@@ -775,11 +813,17 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
     const designFields: [string, string, string][] = isFet
       ? [['V_GS_drive', 'V_GS drive', 'V'], ['R_g_on', 'R_g,on', 'Ω'],
-         ['R_g_off', 'R_g,off', 'Ω'], ['R_g_common', 'R_g', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
+         ['R_g_off', 'R_g,off', 'Ω'], ['R_th_cs', 'R_θcs', '°C/W']]
       : kind === 'bridge'
       ? [['R_th_cs', 'R_θcs', '°C/W'], ['n_parallel', 'Packages in parallel', '1 or 2'],
          ['share_worst', 'Worst-package share', '0.5–1.0']]
       : [['R_th_cs', 'R_θcs', '°C/W'], ['dies_per_package', 'Dies / package', '1 or 2']]
+    // The class decides the conduction-loss form and the physics interlocks, so it is a CHOICE for
+    // the two kinds that have one and absent for the bridge, which can only ever be a rectifier.
+    const classOptions: [string, string][] | null =
+      isFet ? [['sic_mosfet', 'Silicon carbide (SiC)'], ['si_mosfet', 'Silicon']]
+      : kind === 'diode' ? [['sic_schottky', 'SiC Schottky'], ['si_diode', 'Silicon']]
+      : null
     return (
       <Card style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
@@ -882,6 +926,36 @@ export const SemiconductorSelection: React.FC<Props> = ({
               and it is stored as <i>corrected</i> with the extracted original kept beside it.
             </div>
 
+            {classOptions && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase',
+                  marginBottom: 4 }}>Device class</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={dsDesign[kind].device_class ?? classOptions[0][0]}
+                    disabled={dsBusy[kind]}
+                    onChange={e => {
+                      const dc = e.target.value
+                      setDsDesign(d => ({ ...d, [kind]: { ...d[kind], device_class: dc } }))
+                      // RE-READ, not relabel: the class decides which parameters are required and
+                      // which conduction form the block is built with, so the datasheet has to go
+                      // through extraction again under it.
+                      if (dsPdf[kind]) doUpload(kind, dsPdf[kind], dsUp[kind]?.variant || undefined, dc)
+                    }}
+                    style={{ ...inStyle, width: 210, padding: '3px 6px', fontSize: 11.5 }}>
+                    {classOptions.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+                  </select>
+                  {tech?.override && (
+                    <span style={{ fontSize: 10.5, color: C.amber }}>
+                      ⚠ the datasheet says otherwise — {String(tech.basis ?? '')}
+                    </span>)}
+                </div>
+                <div style={{ fontSize: 10, color: C.hint, marginTop: 5, lineHeight: 1.6 }}>
+                  It selects the conduction-loss form and the physics interlocks. Where the
+                  datasheet states the technology outright, published evidence wins over this
+                  choice and the override is reported above rather than made quietly.
+                </div>
+              </div>)}
+
             <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase', marginBottom: 4 }}>
               Your design decides these — no datasheet supplies them</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -907,7 +981,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 selector, the design row and this list). A review row exists to check a value
                 against the datasheet it came from, which a design decision never has. */}
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-              {rows.filter(r => r.source_kind !== 'design').map(r => (
+              {rows.filter(r => r.source_kind !== 'design' && r.key !== 'device_class').map(r => (
                 <ReviewRow key={r.key} r={r} edit={dsEdits[kind][r.key]}
                   onEdit={(k, v) => setDsEdits(o => ({ ...o,
                     [kind]: { ...o[kind], [k]: v } }))} />))}
@@ -1076,7 +1150,31 @@ export const SemiconductorSelection: React.FC<Props> = ({
               </div>)
           })}
 
-          {(curveFigs[kind] ?? []).length === 0 && !curveBusy && (
+          {(curveFigs[kind] ?? []).length > 0 && (
+            <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center',
+              flexWrap: 'wrap' }}>
+              <Btn variant="primary" disabled={curveBusy || dsBusy[kind]}
+                onClick={() => setDsTab(s2 => ({ ...s2, [kind]: 'results' }))}>
+                ✓ Done — go to results</Btn>
+              <span style={{ fontSize: 10.5, color: C.hint }}>
+                Accept as many curves as apply first; each one is stored as you go.
+              </span>
+            </div>)}
+
+          {(curveFigs[kind] ?? []).length === 0 && !curveBusy && figLoaded[kind] && (
+            <div style={{ fontSize: 10.5, color: C.hint, lineHeight: 1.6 }}>
+              <b>No figure from this datasheet can be used yet.</b> Two separate things have to hold
+              and the reason matters, so neither is glossed over:
+              <br />· its axes must READ — the tick labels have to fit a consistent linear or
+              logarithmic scale. A plot drawn without an axis frame, or with its labels split into
+              fragments, is skipped rather than guessed at.
+              <br />· the figure must be one this calculation CONSUMES. Curve targets exist today
+              for the diode (forward drop, capacitive charge and energy, junction capacitance,
+              reverse current) and for the bridge derating curve. <b>There are none for a MOSFET
+              yet</b>, so a MOSFET datasheet returns nothing here even when its plots read cleanly.
+            </div>)}
+
+          {(curveFigs[kind] ?? []).length === 0 && !curveBusy && !figLoaded[kind] && (
             <div style={{ fontSize: 10.5, color: C.hint, lineHeight: 1.6 }}>
               Nothing read yet. A figure is only offered when its tick labels fit a consistent
               linear or logarithmic scale — a plot whose axes cannot be read is skipped rather than
@@ -1424,11 +1522,22 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     ))}
                   </tbody>
                 </table>
+                {res.per_point.every(p => ((p as any).P_D_sw ?? 0) === 0) && (
+                  <div style={{ fontSize: 10.5, color: C.text, marginTop: 6, padding: '7px 10px',
+                    borderRadius: 6, background: C.bg3, border: `1px solid ${C.border}`,
+                    lineHeight: 1.6 }}>
+                    <b>"D cond" and "Diode" are the same number here, and that is correct.</b> This
+                    part has no minority-carrier recovery, so its switching term is EXACTLY zero and
+                    the total is the conduction loss alone — the Q<sub>c</sub> charging energy is
+                    booked to the MOSFET instead, in the "FET" column. The two columns separate only
+                    for a silicon diode, where the recovery charge is the diode's own loss.
+                  </div>)}
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 5 }}>
-                  D cond / D sw/RR = PFC boost-diode conduction vs switching loss (all channels). For a Si diode
-                  the switching term is its share of the Q<sub>rr</sub> reverse-recovery energy; for SiC Schottky
-                  there is no minority-carrier recovery — the Q<sub>c</sub> charging energy is booked to the MOSFET,
-                  so the diode's own term is near zero (see report §7.5).
+                  D cond / D sw/RR = PFC boost-diode conduction vs switching loss, TOTALLED over all
+                  channels. For a Si diode the switching term is its share of the Q<sub>rr</sub>
+                  reverse-recovery energy; for SiC Schottky there is no minority-carrier recovery —
+                  the Q<sub>c</sub> charging energy is booked to the MOSFET, so the diode's own term
+                  is zero (see report Section 7.5).
                 </div>
               </div>
             )}
