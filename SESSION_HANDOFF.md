@@ -1,13 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-12**, head = **`120d1ce` C223**, on `master`.
-
-> **C224 is COMPLETE but UNCOMMITTED** — MOSFET curve targets (see the row in the table below and
-> the full entry in `IMPLEMENTATION_LOG.md`). Suite 536 passed / 2 skipped, tsc clean, Ch7 builds
-> at 17 pp with zero unrenderable glyphs. Files touched: `semiconductor/curve_extract.py`,
-> `semiconductor/datasheet_flow.py`, `report_semiconductor.py`, `tests/test_curve_extract.py`,
-> `tests/test_datasheet_flow.py`, `frontend/src/components/SemiconductorSelection.tsx`,
-> `frontend/src/api/client.ts`, plus `PENDING_ITEMS.md` B19.
+**Start here after a restart.** Last updated **2026-08-12**, head = **`0921d90` C224**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -292,8 +285,7 @@ flow and fixed several real calculation defects found along the way.
 
 ## What to pick up next
 
-Nothing is half-finished. **Commit C224 first** — it is done and verified but still in the working
-tree. Then, suggested order:
+Nothing is half-finished. Suggested order:
 
 0. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: it is the only
    datasheet on file that cannot be read, and it fails safely today. Take it when a designer
