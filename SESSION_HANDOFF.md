@@ -1,6 +1,13 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-11**, head = **`120d1ce` C223**, on `master`.
+**Start here after a restart.** Last updated **2026-08-12**, head = **`120d1ce` C223**, on `master`.
+
+> **C224 is COMPLETE but UNCOMMITTED** — MOSFET curve targets (see the row in the table below and
+> the full entry in `IMPLEMENTATION_LOG.md`). Suite 536 passed / 2 skipped, tsc clean, Ch7 builds
+> at 17 pp with zero unrenderable glyphs. Files touched: `semiconductor/curve_extract.py`,
+> `semiconductor/datasheet_flow.py`, `report_semiconductor.py`, `tests/test_curve_extract.py`,
+> `tests/test_datasheet_flow.py`, `frontend/src/components/SemiconductorSelection.tsx`,
+> `frontend/src/api/client.ts`, plus `PENDING_ITEMS.md` B19.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -48,6 +55,7 @@ entering the design must carry provenance.
 | C221 | bridge **derating gate** computed (Table 7.3.3), PASS/FAIL/DATA MISSING | 30.0 A allowed vs 9.4 A drawn at 102 °C case |
 | C222 | **real diode datasheets through the extractor** — 7 defects, series-variant selection | SFAF1608G V_F 0.975 → 1.700 V; **A11 CLOSED** |
 | C223 | 6 designer findings on the semiconductor page (GUI only) | requirement ignored `n_parallel` — per-package 18.87 → 9.43 A |
+| C224 | **M7-MOSFET** — grid-based plot finding, decade/lost-minus axes, 4 targets, curves reach the engine | 0 → 17 of 26 calibrate; 4 targets all agree with the part's own table; P_FET 9.10 → 8.78 W |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -80,26 +88,23 @@ class it RESOLVED to rather than the one it arrived under.
 - ~~**M5**~~ — DONE at C213. Not deleted: the bridge and the bottom-FET conduction search
   still use it legitimately, so the ranking is bounded to what the catalogue measures.
 - ~~**M6**~~ — DONE at C212. The gate runs on upload and on confirm, advisory in both.
-- **M7 — DONE for the diode at C214/C215, coverage measured at C216.** Digitiser, proposals,
-  Curves sub-tab, and the confirmed curve reaching the engine. Coverage across the four datasheets
-  on file: **Vishay x2 and Diodes Inc read (9/10/11 figures); Toshiba and Infineon do not.**
-  STILL OPEN, and the two are NOT the same job:
-  - **(a) Toshiba needs a RASTER tracer.** Its curves are 1638x1289 bitmaps, no vector paths at
-    all. This is the "assisted pixel digitising" the plan originally specified, still unbuilt.
-  - **(b) Infineon needs frameless + fragmented-label support.** C216 added the fallback and it
-    reads 1 of 14 plot regions; the rest refuse. Two stacked plots per row with shared label bands
-    need a focused effort WITH ITS OWN FIXTURES — over-tuning here yields a confident wrong
-    calibration, which is worse than reading nothing.
-  - **(c) CORRECTED at C223 — the MOSFET datasheet DOES have curves.** 14 plot regions across
-    pages 9–15; what it lacks is figure CAPTIONS (one caption in 17 pages, the package outline),
-    which is what the earlier note confused. Two things still block them, and they are separate:
-    **all 14 fail axis calibration** (gap (b), frameless + fragmented labels — `0 of 14` is the
-    honest count since C220 required ≥3 ticks, C216's "1 of 14" was a spurious 2-tick fit), and
-    **`_FIGURE_TARGETS` has no MOSFET entries at all** — only the five diode keys plus the bridge
-    derating curve, so even a cleanly-calibrated MOSFET plot yields zero proposals. Adding MOSFET
-    targets needs a MOSFET datasheet whose plots actually calibrate; inventing them against a file
-    that reads nothing would repeat the M4b mistake. The Curves tab now SAYS all of this instead of
-    showing an empty list.
+- **M7 — DONE for the diode at C214/C215 and for the MOSFET at C224.** Digitiser, proposals,
+  Curves sub-tab, and the confirmed curve reaching the engine, for both device kinds.
+  - ~~**(b) Infineon frameless + fragmented labels**~~ and ~~**(c) no MOSFET targets**~~ — BOTH
+    CLOSED at C224. The blocker was never calibration quality: this vendor draws no rectangle and
+    every gridline is its own stroke, so nothing could FIND the plots. `find_plots_by_grid` recovers
+    the box from the geometry (see its docstring). 14 → 26 regions, 0 → 17 calibrated, and four
+    MOSFET targets that each agree with the part's own tabulated value.
+  - **(a) Toshiba still needs a RASTER tracer.** Its curves are 1638x1289 bitmaps, no vector paths
+    at all — a different capability, the "assisted pixel digitising" the plan specified. Unbuilt,
+    and the one remaining M7 gap. It reads nothing rather than reading something wrong, which is
+    the behaviour a test asserts.
+  - **The lesson C224 added:** two axis defects are INVISIBLE to the residual gate, and only the
+    cross-check against the datasheet's own table catches them. Decade labels read as integers
+    (100/101/102/103) are equally spaced, so they fit a linear axis with residual exactly zero —
+    that put a C_oss curve on a linear 100..104 axis instead of 1 pF..10 nF. And an exponent minus
+    drawn as a graphic leaves the text layer reading 10^5..10^0 for an axis running 10^-5..10^0.
+    **Never accept a curve on residual alone where the datasheet tabulates a point on those axes.**
 - ~~**M8-bridge**~~ — DONE at C217/C218. The bridge is selected the way the MOSFET and the diode
   are, and **nothing in Chapter 7 now comes from the parametric catalogue.** Its requirement is its
   own (blocks the LINE peak, carries the RECTIFIED MEAN against an average rating), sync-bottom
@@ -268,8 +273,11 @@ flow and fixed several real calculation defects found along the way.
   (`test_datasheet_flow.py`) → 378 at C210, 394 at C211 and 409 at C212 (`test_diode_datasheet.py`)
   → 442 at C214 (`test_curve_extract.py`), 455 at C217, 467 at C218 (`test_bridge_datasheet.py`)
   and 478 at C219 (`test_parts_library.py`), 491 at C220 (`test_figure_temperatures.py`),
-  503 at C221 (`test_derating_gate.py`), 525 at C222 (`test_diode_real_datasheets.py`).
-  The suite now takes ~25 min: the datasheet tests re-extract a 17-page PDF per test.
+  503 at C221 (`test_derating_gate.py`), 525 at C222 (`test_diode_real_datasheets.py`),
+  **536 at C224** (4 in `test_curve_extract.py`, 8 in `test_datasheet_flow.py`).
+  The suite now takes **~45 min**: the datasheet tests re-extract and re-digitise a 17-page PDF.
+  C224's own tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
+  do the same rather than uploading per test.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
@@ -284,8 +292,12 @@ flow and fixed several real calculation defects found along the way.
 
 ## What to pick up next
 
-Nothing is half-finished. Suggested order:
+Nothing is half-finished. **Commit C224 first** — it is done and verified but still in the working
+tree. Then, suggested order:
 
+0. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: it is the only
+   datasheet on file that cannot be read, and it fails safely today. Take it when a designer
+   actually needs a Toshiba part, not before.
 1. **`PENDING_ITEMS.md` B5** — delete the dead `_extra["esr_mohm"]` in `main.py`. Small, and it still
    carries the `or`-chain pattern that caused C171.
    *(Group 2 of the designer review — report shows the ranking default instead of the selected part —

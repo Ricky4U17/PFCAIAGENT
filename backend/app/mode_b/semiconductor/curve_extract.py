@@ -127,6 +127,8 @@ def find_plots(page, min_w: float = 80.0, min_h: float = 60.0) -> list[dict]:
         out.append({"rect": (r.x0, r.y0, r.x1, r.y1), "width": r.width, "height": r.height})
     # Only when no frame was drawn at all. Additive: a vendor that draws frames is untouched.
     if not out:
+        out.extend(find_plots_by_grid(page, min_w, min_h))
+    if not out:
         out.extend(find_plots_by_ticks(page, min_w, min_h))
     out.sort(key=lambda f: (round(f["rect"][1], 1), f["rect"][0]))
     return out
@@ -138,7 +140,7 @@ _SUP_RISE = 0.8
 _SUP_GAP = 7.0
 
 
-def reassembled_labels(page, clip=None) -> list[tuple[float, float, float]]:
+def reassembled_labels(page, clip=None, pairs_only: bool = False) -> list[tuple[float, float, float]]:
     """Numeric axis labels as (x_centre, y_centre, value), rebuilt from FRAGMENTED text runs.
 
     Some vendors position their axis labels rather than typesetting them, so one label arrives as
@@ -149,6 +151,11 @@ def reassembled_labels(page, clip=None) -> list[tuple[float, float, float]]:
     THIS IS A FALLBACK, NOT A REPLACEMENT. It runs only where the plain reading has already failed
     to fit — an earlier attempt made it the primary reader and broke 16 of 23 tests on the two
     vendors that were working, because reassembly changes what a correctly-read label means.
+
+    `pairs_only` returns ONLY the labels built from a base and a raised exponent. Those are not a
+    guess: "10" with a smaller, raised "3" beside it IS 1000, and no correct plain reading of that
+    typography exists. That distinction is what lets a caller trust them ahead of the plain reading
+    without disturbing the ordinary numbers this also rebuilds.
     """
     spans = []
     for b in page.get_text("dict", clip=clip)["blocks"]:
@@ -178,7 +185,8 @@ def reassembled_labels(page, clip=None) -> list[tuple[float, float, float]]:
                 joined = _as_number(sp["t"] + nx["t"])
                 if joined is not None:
                     used.add(j)
-                    out.append(((bb[0] + nb[2]) / 2.0, cy, joined))
+                    if not pairs_only:
+                        out.append(((bb[0] + nb[2]) / 2.0, cy, joined))
                 break
         if joined is not None:
             continue
@@ -200,7 +208,76 @@ def reassembled_labels(page, clip=None) -> list[tuple[float, float, float]]:
                 out.append(((bb[0] + eb[2]) / 2.0, cy, base ** ev if base else 0.0))
                 break
         else:
-            out.append(((bb[0] + bb[2]) / 2.0, cy, base))
+            if not pairs_only:
+                out.append(((bb[0] + bb[2]) / 2.0, cy, base))
+    return out
+
+
+def _runs(vals: list[float], gap: float) -> list[list[float]]:
+    """Split a sorted list where it jumps by more than `gap`."""
+    vals = sorted(vals)
+    out: list[list[float]] = []
+    cur = [vals[0]]
+    for v in vals[1:]:
+        if v - cur[-1] > gap:
+            out.append(cur); cur = [v]
+        else:
+            cur.append(v)
+    out.append(cur)
+    return out
+
+
+def find_plots_by_grid(page, min_w: float = 80.0, min_h: float = 60.0,
+                       tol: float = 2.0, min_lines: int = 5, gap: float = 40.0) -> list[dict]:
+    """Plot areas from the GRIDLINES, for a vendor that draws each one as its own stroke.
+
+    The reference MOSFET datasheet draws no rectangle anywhere on its diagram pages — not around
+    the plot, not around the page furniture — and every gridline is a separate line path. So the
+    rectangle search finds nothing and the gridline-GROUP search finds nothing either, because
+    there is no group: 920 separate segments, of which 405 are the curves themselves.
+
+    What survives that is the geometry. A plot's horizontal gridlines all share one x span, its
+    verticals all share one y span, and the two spans describe the same box. Grouping by span and
+    then SPLITTING EACH GROUP AT ITS GAPS is what separates stacked plots: the upper and lower
+    diagram in a column share an x span exactly, and without the split they merge into one box
+    covering both.
+    """
+    from collections import defaultdict
+    H: dict = defaultdict(list)
+    V: dict = defaultdict(list)
+    for a in page.get_drawings():
+        for it in a.get("items", []):
+            if it[0] != "l":
+                continue
+            p, q = it[1], it[2]
+            if abs(p.y - q.y) < 0.4 and abs(p.x - q.x) > 2:
+                H[(round(min(p.x, q.x) / tol) * tol, round(max(p.x, q.x) / tol) * tol)].append(p.y)
+            elif abs(p.x - q.x) < 0.4 and abs(p.y - q.y) > 2:
+                V[(round(min(p.y, q.y) / tol) * tol, round(max(p.y, q.y) / tol) * tol)].append(p.x)
+
+    hb, vb = [], []
+    for (x0, x1), ys in H.items():
+        for run in _runs(ys, gap):
+            if len(run) >= min_lines:
+                hb.append((x0, min(run), x1, max(run)))
+    for (y0, y1), xs in V.items():
+        for run in _runs(xs, gap):
+            if len(run) >= min_lines:
+                vb.append((min(run), y0, max(run), y1))
+
+    boxes = []
+    for h in hb:
+        for v in vb:
+            if all(abs(h[i] - v[i]) < 8 for i in range(4)):
+                r = (min(h[0], v[0]), min(h[1], v[1]), max(h[2], v[2]), max(h[3], v[3]))
+                if r[2] - r[0] >= min_w and r[3] - r[1] >= min_h:
+                    boxes.append(r)
+
+    out: list[dict] = []
+    for r in sorted(boxes, key=lambda r: -((r[2] - r[0]) * (r[3] - r[1]))):
+        if any(all(abs(r[i] - o["rect"][i]) < 8 for i in range(4)) for o in out):
+            continue
+        out.append({"rect": r, "width": r[2] - r[0], "height": r[3] - r[1]})
     return out
 
 
@@ -371,6 +448,32 @@ def _apply(cal: dict, pos: float) -> float:
     return 10.0 ** v if cal["scale"] == "log" else v
 
 
+def _recover_lost_minus(pts: list[tuple[float, float]], ascending: bool) -> list[tuple[float, float]]:
+    """Put back exponent minus signs that were drawn as GRAPHICS rather than set as text.
+
+    On the reference MOSFET datasheet the decade labels of the SOA and thermal-impedance plots are
+    typeset as "10" plus a raised digit, and the minus is a drawn stroke — so the text layer holds
+    10^5 10^4 10^3 10^2 10^1 10^0 for an axis that actually runs 10^-5 to 10^0. Nothing in the text
+    can recover it.
+
+    The GEOMETRY can. An axis increases left to right and bottom to top; there is no such thing as
+    one that runs backwards. So a run of pure powers of ten that DECREASES along its own axis is not
+    a strange axis, it is a lost sign, and negating the exponents is the only reading consistent
+    with the convention. Anything that is not a clean power-of-ten run is left exactly as read.
+    """
+    import math
+    if len(pts) < 3:
+        return pts
+    ordered = [v for _, v in sorted(pts, key=lambda p: p[0])]
+    if not all(v > 0 and abs(math.log10(v) - round(math.log10(v))) < 1e-9 for v in ordered):
+        return pts
+    wrong_way = (all(b < a for a, b in zip(ordered, ordered[1:])) if ascending
+                 else all(b > a for a, b in zip(ordered, ordered[1:])))
+    if not wrong_way:
+        return pts
+    return [(p, 10.0 ** (-round(math.log10(v)))) for p, v in pts]
+
+
 def calibrate(page, frame: tuple) -> dict:
     """Propose the pixel-to-data mapping for one plot, from the tick labels around it."""
     import fitz
@@ -389,6 +492,24 @@ def calibrate(page, frame: tuple) -> dict:
         # left of the frame, vertically inside it -> a y tick
         elif bb[2] <= x0 + 2 and x0 - _TICK_BAND - 20 <= bb[2] and y0 - 6 <= cy <= y1 + 6:
             left.append((cy, val))
+
+    # A DECADE LABEL IS NOT AMBIGUOUS. "10" with a raised "3" is 1000, and reading it as the
+    # integer 103 is simply wrong — but decades are EQUALLY SPACED, so 100/101/102/103 fits a
+    # perfect straight line with residual zero, and the residual gate can never catch it. That is
+    # how a C_oss curve came back on a linear 100..104 axis instead of 1 pF..10 nF. Where an axis
+    # carries superscript labels they ARE the reading; every other axis keeps the plain one, which
+    # is why this is narrower than making reassembly primary (that broke 16 of 23 tests once).
+    sup_b, sup_l = [], []
+    for cx, cy, val in reassembled_labels(page, clip, pairs_only=True):
+        if y1 - 2 <= cy <= y1 + _TICK_BAND and x0 - _TICK_SPAN_SLACK <= cx <= x1 + _TICK_SPAN_SLACK:
+            sup_b.append((cx, val))
+        elif cx <= x0 + 4 and x0 - _TICK_BAND - 24 <= cx and y0 - 8 <= cy <= y1 + 8:
+            sup_l.append((cy, val))
+    if len(sup_b) >= 3:
+        bottom = _recover_lost_minus(sup_b, ascending=True)
+    if len(sup_l) >= 3:
+        # screen y grows DOWNWARD, so a normal axis reads smaller as cy grows
+        left = _recover_lost_minus(sup_l, ascending=False)
 
     cal_x, cal_y = _fit_axis(bottom), _fit_axis(left)
     # FALLBACK, in that order. A label the plain reading got right must keep its meaning; only an

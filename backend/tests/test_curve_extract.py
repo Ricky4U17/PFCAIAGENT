@@ -349,22 +349,62 @@ class TestFragmentedAxisLabels:
         assert len(ok) == 9                                  # exactly as before the fallback
         assert _fig(figures, 1)["calibration"]["x"]["range"] == [0.5, 4.0]
 
-    def test_a_frameless_datasheet_reads_nothing_and_refuses_everything(self):
-        """CORRECTS C216, which reported "0 -> 1 of 14" for this datasheet.
+    def test_a_frameless_datasheet_now_reads_through_its_gridlines(self):
+        """SUPERSEDES the C216/C223 position that this file reads nothing.
 
-        That single figure was resting on a TWO-TICK fit, and two points fit a line with residual
-        zero whichever labels were picked up — so it was reported as calibrated without anything
-        having been checked, and was almost certainly wrong. Requiring three ticks removes it. The
-        honest result is that the C216 fallback recovers NO Infineon figure: its value was the
-        coverage measurement and the fall-back-never-replace structure, not a reading.
+        Both earlier readings were honest at the time: C216's "1 of 14" rested on a two-tick fit
+        and was withdrawn, and C223 recorded 0 of 14 once three ticks were required. What was
+        missing was not a better fit but a way to FIND the plots. This vendor draws no rectangle
+        anywhere on a diagram page and every gridline is its own stroke, so both the frame search
+        and the gridline-GROUP search see nothing. `find_plots_by_grid` recovers the box from the
+        geometry instead — see its docstring.
 
-        Fourteen plot regions are found and all fourteen refuse, each with a reason. That is the
-        behaviour worth asserting — a wrong calibration is worse than none."""
+        The refusals that remain are the honest ones: page 14-15 hold TABLES and a test-circuit
+        schematic, which are ruled lines that are not plots, and they still fail calibration with a
+        reason rather than being read as data."""
         figs = CX.digitise(_read(_MOSFET))
-        assert len(figs["figures"]) >= 10
-        assert not [f for f in figs["figures"] if f["calibration"]["ok"]]
+        ok = [f for f in figs["figures"] if f["calibration"]["ok"]]
+        assert len(ok) >= 15, f"only {len(ok)} of {len(figs['figures'])} calibrated"
         for f in figs["figures"]:
-            assert f["calibration"]["reason"]
+            if not f["calibration"]["ok"]:
+                assert f["calibration"]["reason"]
+
+    def test_a_decade_axis_is_not_read_as_the_integers_its_runs_spell(self):
+        """The failure this exists to stop is INVISIBLE to the residual gate.
+
+        A log axis labelled 10^0..10^4 arrives as the runs "10","0".."10","4". Read plainly that is
+        100, 101, 102, 103, 104 — which is EQUALLY SPACED, so it fits a linear axis with residual
+        exactly zero and passes every check. That is how the C_oss figure came back on a linear
+        100..104 axis instead of 1 pF..10 nF. Superscript pairs are therefore trusted ahead of the
+        plain reading, but ONLY where they exist."""
+        figs = CX.digitise(_read(_MOSFET))
+        cap = [f for f in figs["figures"]
+               if f["calibration"]["ok"] and "[pF]" in f["calibration"]["titles"]["y"]]
+        assert cap, "the capacitance figure was not read"
+        cal = cap[0]["calibration"]
+        assert cal["y"]["scale"] == "log"
+        assert cal["y"]["range"] == [1.0, 10000.0]
+
+    def test_an_exponent_minus_drawn_as_a_stroke_is_recovered(self):
+        """An axis that runs backwards is not a strange axis, it is a lost sign.
+
+        This vendor sets the minus of a negative exponent as a DRAWN stroke, so the text layer of
+        the thermal-impedance plot holds 10^5..10^0 for an axis that runs 10^-5..10^0. Nothing in
+        the text can recover it; the convention that axes increase left to right can."""
+        figs = CX.digitise(_read(_MOSFET))
+        zth = [f for f in figs["figures"]
+               if f["calibration"]["ok"] and f["calibration"]["titles"]["x"].startswith("tp [s]")]
+        assert zth, "the thermal-impedance figure was not read"
+        rng = zth[0]["calibration"]["x"]["range"]
+        assert rng[0] < 1e-3 and rng[1] <= 1.0, rng
+
+    def test_a_table_of_ruled_lines_is_not_offered_as_a_plot(self):
+        """The grid search keys on ruled lines, and a spec table is ruled lines. It must not become
+        a figure: those pages calibrate nothing, which is what keeps them out."""
+        figs = CX.digitise(_read(_MOSFET))
+        late = [f for f in figs["figures"] if f["page"] >= 14]
+        assert late, "expected the table pages to be found as candidate regions"
+        assert not [f for f in late if f["calibration"]["ok"]]
 
     def test_two_ticks_can_never_calibrate_an_axis(self):
         """The check that makes the residual mean something. Any two points fit a straight line

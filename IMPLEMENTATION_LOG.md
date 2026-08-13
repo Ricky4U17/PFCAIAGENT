@@ -9016,3 +9016,97 @@ rather than causing it; the requirement now sees the same design inputs the bloc
 
 Verified: tsc clean; frontend builds; share-sweep and requirement figures checked against the engine.
 No backend file changed. Suite 525 passed / 2 skipped (unchanged).
+
+## C224 - MOSFET curve targets: the plots read, and the curves reach the engine
+
+Closes gap (b) and gap (c) from the M7 list in SESSION_HANDOFF. C223 recorded that the reference
+MOSFET datasheet has 14 plot regions and that NONE of them calibrated, and that `_FIGURE_TARGETS`
+had no MOSFET entries at all - so even a cleanly-read MOSFET plot yielded nothing. Both are fixed,
+and a third problem that only became visible once the first two were: a confirmed MOSFET curve was
+not consumed by anything.
+
+WHY IT READ NOTHING, AND WHY THAT WAS NOT A CALIBRATION PROBLEM. This vendor draws no rectangle
+anywhere on a diagram page, and every gridline is a separate stroke - 920 segments on one page, of
+which 405 are the curves. So the frame search finds nothing and the gridline-GROUP search finds
+nothing either, because there is no group. `find_plots_by_grid` recovers the box from the geometry
+instead: a plot's horizontal gridlines share one x span, its verticals share one y span, and the two
+spans describe the same box. Grouping by span and then SPLITTING EACH GROUP AT ITS GAPS is what
+separates stacked plots - the upper and lower diagram in a column share an x span exactly, and
+without the split they merge into one box covering both. 14 regions -> 26 found, 0 -> 17 calibrated.
+
+TWO AXIS DEFECTS THAT THE RESIDUAL GATE CANNOT SEE, both found by the cross-check:
+- A DECADE LABEL IS NOT AMBIGUOUS, and reading "10" with a raised "3" as the integer 103 is simply
+  wrong - but decades are EQUALLY SPACED, so 100/101/102/103 fits a perfect straight line with
+  residual zero. That is how the C_oss curve came back on a linear 100..104 axis instead of
+  1 pF..10 nF. `reassembled_labels(pairs_only=True)` returns ONLY base+superscript pairs, and where
+  an axis carries them they ARE the reading. Every other axis keeps the plain one - deliberately
+  narrower than making reassembly primary, which broke 16 of 23 tests when it was tried at C216.
+- AN EXPONENT MINUS DRAWN AS A STROKE. The SOA and thermal-impedance decade labels set their minus
+  as a graphic, so the text layer holds 10^5..10^0 for an axis running 10^-5..10^0. Nothing in the
+  text can recover it; the convention that an axis increases left to right and bottom to top can.
+  A run of pure powers of ten that DECREASES along its own axis is a lost sign, not a strange axis.
+
+FOUR MOSFET TARGETS, EACH VERIFIED AGAINST THE PART'S OWN TABLE. The plot and the table are
+independent renderings of one measurement, so agreement is what says the frame, the axes and the
+scale were all read right:
+
+| key | table states | curve reads | apart |
+|---|---|---|---|
+| `E_oss_vs_VDS` | 8.7 uJ at 400 V | 8.745 uJ | 0.5 % |
+| `C_rss_vs_VDS` | 7 pF at 400 V | 6.998 pF | 0.03 % |
+| `R_DS_on_vs_ID` | 0.043 ohm at 27.9 A | 0.043 ohm | 0.0 % |
+| `R_DS_on_vs_Tj` | 1.0 at 25 degC (normalised) | 0.9997 | 0.0 % |
+
+THE THIRD PROBLEM: NONE OF IT REACHED THE ENGINE. With all four accepted, `E_oss_vs_VDS` and
+`R_DS_on_vs_Tj` still read `derived` - the 78-point and 42-point real curves were losing to
+two-point fits, because `_pick_entry` ranks by how many CONDITIONS an entry states and the
+digitised entry states none. `C_rss_vs_VDS` and `R_DS_on_vs_ID` were not in the block at all. This
+is the C215 step, which the diode had and the MOSFET did not.
+
+- `_scalar_entry` separates the two SHAPES one canonical key now holds. Once a figure can be
+  confirmed, `E_oss_vs_VDS` carries both a tabulated point and a CURVE whose `typ` is a pair of
+  lists, so every caller wanting the published number was one `float()` from a TypeError - or from
+  ranking the curve first and reading a list where a value belongs.
+- UNITS ARE NOT TAKEN FROM THE AXIS TITLE. The plots are in uJ and pF, the registry stores SI, so
+  the curve is converted through the registry's display unit and then CHECKED against the tabulated
+  point; only a curve that agrees is used. A scale slip is the one error every other check
+  survives - a curve read in nJ instead of uJ is smooth, monotonic, correctly shaped and wrong by
+  1000x, and the tabulated point is the only thing that can see it. Tolerance 12 %: wider than
+  reading error, and the smallest possible unit slip is 1000x, so nothing near the bound is
+  ambiguous. A curve that fails falls back to the derived fit and says why.
+- `R_DS_on_vs_ID` IS NORMALISED, NOT TAKEN IN OHMS. The engine multiplies by it (`r *= curve(Id)`)
+  and the plot is in ohms; landing it raw would have scaled on-resistance by ~0.04 instead of ~1.
+  It is normalised on the curve's own value at the current the table states, so `curve(I_D)` is
+  exactly 1.0 there and the table still supplies the level. Taking the SHAPE and not the level is
+  also what makes it safe that the plot carries five unlabelled gate-voltage traces.
+
+WHAT IT CHANGES. Per curve, at the worst-case point (reference design, 393 V bus):
+
+| curve | P_FET | delta |
+|---|---|---|
+| baseline (table + fits) | 9.1005 W | - |
+| `R_DS_on_vs_Tj` | 8.8014 W | -3.29 % |
+| `C_rss_vs_VDS` | 9.0899 W | -0.12 % |
+| `R_DS_on_vs_ID` | 9.0951 W | -0.06 % |
+| `E_oss_vs_VDS` | 9.0965 W | -0.04 % |
+| all four | 8.7816 W | -3.50 % |
+
+P_SEMI 58.21 -> 57.99 W, Tj_FET 69.33 -> 69.14 degC. The temperature curve dominates and the
+registry already said why: it is convex, so the straight line between two tabulated endpoints
+overshot in the middle. E_oss barely moves, which is the CORRECT result and a good sanity signal -
+C208 already anchored that fit on the real published point, so the curve only corrects the shape
+BETWEEN anchors. A large E_oss swing here would have meant a unit error.
+
+MULTI-TRACE FIGURES. C_iss / C_oss / C_rss share one plot, so its three traces are different
+QUANTITIES rather than one quantity at several conditions, and accepting the wrong one puts
+~1700 pF where 7 pF belongs. The cross-check already knew which trace matched the table and threw
+the answer away; `curve_index` is now shown against the trace in the Curves tab ("matches the
+table - reads 6.998 where it states 7.00"), and the others are marked as not the matched trace.
+
+GUI + REPORT. The Curves-tab empty state no longer says there are no MOSFET targets. Four report
+annotations state where a MOSFET quantity came off a plot and what it replaced, same rule as the
+diode's Q_c and C_j bases - labels kept to tokens of 7 characters or fewer for the wrap trap.
+
+Verified: Ch7 standalone builds, 17 pp, zero unrenderable glyphs, all four notes present (the
+LABELS are drawn rather than typeset, so they never appear in a text extract - "Qc AT BUS" does not
+either). Frontend tsc clean.

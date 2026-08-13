@@ -855,6 +855,18 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         ["Parameter", "Value", "Note"], prows,
         col_widths=[CW*0.36, CW*0.30, CW*0.34], ch=CH)
 
+    # Where a MOSFET quantity came off a PLOT rather than a table, say so and say what it replaced.
+    # Same rule as the diode's Q_c and C_j bases above: a digitised shape is neither a table value
+    # nor a fit, and the reader cannot tell which from the number alone. Labels are kept to tokens
+    # of 7 characters or fewer — the annotation cell breaks on spaces only, so a longer unbroken
+    # word splits mid-word.
+    for _key, _lbl in (("_eoss_basis", "Eoss CURVE"), ("_crss_basis", "Crss CURVE"),
+                       ("_rdson_tj_basis", "RDS(on) vs Tj"),
+                       ("_rdson_id_basis", "RDS(on) vs Id")):
+        _b = (mosfet or {}).get(_key) or {}
+        if _b.get("note"):
+            annotation(story, _lbl, _b["note"], CH)
+
     # #10 - model-source provenance. `to_block` already records WHICH parameters it had to
     # estimate (`_estimated`); that was never surfaced, so a reader could not tell a datasheet
     # scalar from an engine estimate. Same pattern as the material provenance table (Section 3.2.6).

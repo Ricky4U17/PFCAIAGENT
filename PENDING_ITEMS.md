@@ -514,6 +514,22 @@ or if the reverse-recovery placeholder in `Bridge.loss()` is ever made real.
   `bridge_rectifier` (both, or `audit_device_classes()` will flag it), or the decision to leave it
   out is recorded as final and the report says so where bridge loss is reported.
 
+### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
+Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
+Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
+all**, so there is nothing to trace. This is the "assisted pixel digitising" the bring-your-own-part
+plan specified — the agent proposes points, the designer confirms them against the plot — and it is
+a different capability from everything built so far, not a tuning problem.
+
+Today it reads nothing rather than reading something wrong, which is the correct failure and is
+asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
+
+- **Done when:** a raster figure yields a proposal whose cross-check against the part's own
+  tabulated point agrees, on the Toshiba file, with the same evidence gate the vector path uses.
+- **Do not** relax the vector path's calibration gates to make raster figures "sort of" read. C224
+  showed why: two axis defects there fit a straight line with residual exactly zero, so the
+  residual is not evidence — only the tabulated point is.
+
 ## C. GUI  `CODE`
 
 ### C1. Control Design page redesign

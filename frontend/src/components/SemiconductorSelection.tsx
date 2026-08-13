@@ -1128,6 +1128,20 @@ export const SemiconductorSelection: React.FC<Props> = ({
                           {c.n_points} pts · x {c.x_span[0].toPrecision(3)}…{c.x_span[1].toPrecision(3)}
                           {' '}· y {c.y_span[0].toPrecision(3)}…{c.y_span[1].toPrecision(3)}
                         </span>
+                        {/* Which trace the datasheet's OWN table lands on. On a plot whose traces
+                            are different quantities — C_iss / C_oss / C_rss together — this is the
+                            only thing distinguishing them, and accepting the wrong one puts
+                            ~1700 pF where 7 pF belongs. */}
+                        {cc.checked && cc.agrees && cc.curve_index === ci && (
+                          <span style={{ color: C.green, fontWeight: 600 }}>
+                            ✓ matches the table
+                            {cc.expected != null && cc.got != null &&
+                              ` — reads ${cc.got.toPrecision(3)} where it states ` +
+                              `${cc.expected.toPrecision(3)}`}
+                          </span>)}
+                        {cc.checked && cc.agrees && cc.curve_index !== ci && p.n_curves > 1 && (
+                          <span style={{ color: C.amber }}>
+                            not the trace the table matches</span>)}
                         {done
                           ? <span style={{ color: C.green }}>✓ accepted as {done}</span>
                           : (<>
@@ -1168,10 +1182,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
               <br />· its axes must READ — the tick labels have to fit a consistent linear or
               logarithmic scale. A plot drawn without an axis frame, or with its labels split into
               fragments, is skipped rather than guessed at.
-              <br />· the figure must be one this calculation CONSUMES. Curve targets exist today
-              for the diode (forward drop, capacitive charge and energy, junction capacitance,
-              reverse current) and for the bridge derating curve. <b>There are none for a MOSFET
-              yet</b>, so a MOSFET datasheet returns nothing here even when its plots read cleanly.
+              <br />· the figure must be one this calculation CONSUMES. Curve targets exist for the
+              diode (forward drop, capacitive charge and energy, junction capacitance, reverse
+              current), for the bridge derating curve, and for the MOSFET (E<sub>oss</sub>(V),
+              C<sub>rss</sub>(V), and R<sub>DS(on)</sub> against both junction temperature and
+              drain current). A figure outside that set is read but not offered, because nothing
+              would consume it.
             </div>)}
 
           {(curveFigs[kind] ?? []).length === 0 && !curveBusy && !figLoaded[kind] && (

@@ -554,7 +554,12 @@ export interface DsFigureProposal {
   per_temperature: boolean; swapped: boolean
   n_curves: number
   curves: DsCurve[]
+  /** `curve_index` is WHICH trace matched the tabulated point. On a figure whose traces are
+   *  different quantities rather than one quantity at several conditions — C_iss / C_oss / C_rss
+   *  share a plot — that index is the only thing on the page that says which trace is the one the
+   *  key names, so it is shown against the trace rather than left in the note. */
   cross_check: { checked: boolean; agrees: boolean; error_pct?: number
+                 curve_index?: number
                  expected?: number; got?: number; note: string }
   temperatures?: { T_j: number; label: string; anchor: number[] }[]
   assignment?: DsAssignment

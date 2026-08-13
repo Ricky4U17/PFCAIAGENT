@@ -567,3 +567,169 @@ class TestPlausibilityOnTheRealMosfet:
         prof = PS.load_profile(up["part_number"], kind="confirmed", root=store_root)
         blk = DF.profile_to_block(prof, "sic_mosfet", DESIGN_INPUTS)
         assert blk["rdson_25"] == pytest.approx(0.033)                        # but not used
+
+
+# ── M7 for the MOSFET (C224) ──────────────────────────────────────────────────────────────────
+# Extracting and digitising a 17-page PDF is the slowest thing in this suite, so the whole M7 flow
+# is run ONCE at module scope — upload, digitise, accept all four curves — and the tests below read
+# different keys off that one result. Per-test isolation buys nothing here: the four curves land on
+# four independent canonical keys, and accepting all four is also the realistic end state.
+@pytest.fixture(scope="module")
+def m7(pdf_bytes):
+    root = tempfile.mkdtemp(prefix="ds_m7_")
+    try:
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=root)
+        mpn = up["part_number"]
+        prof = PS.load_profile(mpn, kind="extracted", root=root)
+        props = {q["key"]: q for q in DF.figure_proposals(pdf_bytes, prof)["proposals"]}
+        for key in ("E_oss_vs_VDS", "C_rss_vs_VDS", "R_DS_on_vs_Tj", "R_DS_on_vs_ID"):
+            if key not in props:
+                continue
+            q = props[key]
+            ci = (q["cross_check"] or {}).get("curve_index", 0)   # the trace the table anchors
+            c = dict(q["curves"][ci])
+            c["caption"], c["page"] = q["caption"], q["page"]
+            DF.confirm_figure(mpn, key, c, root=root)
+        confirmed = PS.load_profile(mpn, kind="confirmed", root=root)
+        yield {"props": props, "profile": confirmed, "part_number": mpn, "root": root,
+               "block": DF.profile_to_block(confirmed, "sic_mosfet", DESIGN_INPUTS)}
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+class TestTheMosfetFiguresAreOffered:
+    """Until C224 `_FIGURE_TARGETS` held only the five diode keys and the bridge derating curve, so
+    a MOSFET datasheet yielded no proposals even where its plots read cleanly."""
+
+    def test_the_four_mosfet_targets_are_all_found(self, m7):
+        assert set(m7["props"]) >= {"E_oss_vs_VDS", "C_rss_vs_VDS",
+                                    "R_DS_on_vs_Tj", "R_DS_on_vs_ID"}
+
+    def test_each_one_is_checked_against_the_part_s_own_table(self, m7):
+        """The acceptance test for the whole reading. The plot and the table are independent
+        renderings of one measurement, so agreement is what says the frame, the axes and the scale
+        were all read right — and it is what catches a log axis read as linear."""
+        for key in ("E_oss_vs_VDS", "C_rss_vs_VDS", "R_DS_on_vs_Tj", "R_DS_on_vs_ID"):
+            cc = m7["props"][key]["cross_check"]
+            assert cc["checked"] is True, f"{key} was not checked"
+            assert cc["agrees"] is True, f"{key}: {cc.get('note')}"
+
+    def test_the_capacitance_figure_carries_three_traces_and_the_table_picks_one(self, m7):
+        """C_iss, C_oss and C_rss share one plot, so its traces are three DIFFERENT quantities
+        rather than one quantity at three conditions. Accepting the wrong one would put ~1700 pF
+        where 7 pF belongs. The datasheet's own tabulated C_rss identifies which is which."""
+        p = m7["props"]["C_rss_vs_VDS"]
+        assert p["n_curves"] == 3
+        ci = p["cross_check"]["curve_index"]
+        assert max(p["curves"][ci]["y"]) < min(max(c["y"]) for i, c in enumerate(p["curves"])
+                                               if i != ci)      # C_rss is the lowest of the three
+
+
+class TestAConfirmedMosfetCurveReachesTheEngine:
+    """Proposals no engine reads change no number. This is the C215 step for the MOSFET: before it,
+    all four were accepted and stored and the block still showed the two-point fits."""
+
+    def test_eoss_replaces_the_fitted_shape_and_lands_in_joules(self, m7):
+        """The published point was already the anchor (C208), so the curve corrects the SHAPE
+        between anchors rather than the level — and the unit is the thing worth asserting, because
+        a curve read in nJ instead of uJ is smooth, monotonic and wrong by 1000x."""
+        blk = m7["block"]
+        assert blk[M.PROVENANCE_KEY]["E_oss_vs_VDS"] == "digitised"
+        assert len(blk["eoss_at_v"][0]) > 20
+        assert blk["_eoss_basis"]["checked"] is True
+        assert blk["_eoss_basis"]["error_pct"] < 12.0
+        xs, ys = blk["eoss_at_v"]
+        at400 = max(y for x, y in zip(xs, ys) if x <= 400.0)
+        assert 5e-6 < at400 < 2e-5, f"E_oss(400 V) = {at400} is not in joules"
+
+    def test_crss_is_mapped_once_there_is_a_measured_shape(self, m7):
+        """It was deliberately unmapped while the datasheet gave ONE point, because crss_curve
+        wants C_rss(V) across the blocking range. A digitised curve is that shape."""
+        blk = m7["block"]
+        assert blk[M.PROVENANCE_KEY]["C_rss_vs_VDS"] == "digitised"
+        assert 1e-12 < min(blk["crss_curve"][1]) < 5e-11        # farads, not picofarads
+
+    def test_the_temperature_curve_beats_the_two_point_interpolation(self, m7):
+        """The registry says why in one line: the curve is convex, so a straight line between two
+        tabulated endpoints overshoots in the middle."""
+        blk = m7["block"]
+        assert blk[M.PROVENANCE_KEY]["R_DS_on_vs_Tj"] == "digitised"
+        xs, ys = blk["rdson_tj"]
+        assert len(xs) > 20
+        assert DF._curve_at({"x": xs, "y": ys}, 25.0) == pytest.approx(1.0, abs=0.1)
+
+    def test_rdson_vs_current_is_normalised_not_taken_in_ohms(self, m7):
+        """The engine MULTIPLIES by this curve (`r *= curve(Id)`) and the plot is in ohms. Landing
+        it raw would scale on-resistance by ~0.04 instead of by ~1."""
+        blk = m7["block"]
+        assert blk[M.PROVENANCE_KEY]["R_DS_on_vs_ID"] == "digitised"
+        xs, ys = blk["rdson_id_curve"]
+        assert 0.5 < min(ys) < 1.5 and 1.0 <= max(ys) < 4.0, (min(ys), max(ys))
+        # By INTERPOLATION, not by looking for a nearby sample: the curve is normalised at the
+        # current the table states, which need not be one of the digitised points.
+        at_ref = DF._curve_at({"x": xs, "y": ys}, blk["_rdson_id_basis"]["normalised_at_A"])
+        assert at_ref == pytest.approx(1.0, abs=1e-6)
+
+    def test_a_curve_that_contradicts_the_table_is_refused(self, m7, pdf_bytes, store_root):
+        """A unit slip is the one error every other check survives, so the tabulated point is the
+        gate. A curve scaled 1000x must be rejected and the fitted shape kept, not used."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        p = m7["props"]["E_oss_vs_VDS"]
+        bad = dict(p["curves"][(p["cross_check"] or {}).get("curve_index", 0)])
+        bad["y"] = [v * 1000.0 for v in bad["y"]]
+        DF.confirm_figure(up["part_number"], "E_oss_vs_VDS", bad, root=store_root)
+        blk = DF.profile_to_block(
+            PS.load_profile(up["part_number"], kind="confirmed", root=store_root),
+            "sic_mosfet", DESIGN_INPUTS)
+        assert blk[M.PROVENANCE_KEY]["E_oss_vs_VDS"] == "derived"      # fell back
+        assert blk["_eoss_basis"]["from_curve"] is False
+        assert blk["_eoss_basis"]["error_pct"] > 100.0
+
+
+class TestTheUnitBackstopWhenThereIsNoTabulatedPoint:
+    """With a tabulated point the unit is checked against it. WITHOUT one, the registry's declared
+    plausibility band is all that is left, and these tests pin down HOW WEAK that is — E_oss is
+    declared 1e-8 to 1e-2 J, so a 1000x slip from 8.7 uJ lands at 8.7 mJ and sails through.
+
+    That is the reason an unanchored curve is returned `checked: False` and reported as unverified
+    instead of being treated as confirmed. Asserting the limit rather than a comfortable-looking
+    pass is the point: someone will otherwise read the backstop as a unit check, which it is not.
+    Built from a hand-made profile so it costs no PDF work."""
+
+    @staticmethod
+    def _profile(curve_y):
+        """A minimal MOSFET profile carrying ONLY a digitised E_oss curve — no tabulated point."""
+        return {"part_number": "SYNTHETIC", "parameters": [
+            {"key": "device_class", "entries": [{"typ": "sic_mosfet", "conditions": {}}]},
+            {"key": "R_DS_on", "entries": [{"typ": 0.033, "conditions": {"V_GS": 18.0,
+                                                                         "T_j": 25.0}}]},
+            {"key": "E_oss_vs_VDS", "entries": [
+                {"typ": [[100.0, 200.0, 300.0, 400.0], curve_y], "provenance": "digitised",
+                 "conditions": {}, "n_points": 4}]},
+        ]}
+
+    def test_a_plausible_curve_is_used_and_marked_unchecked(self):
+        blk = DF.profile_to_block(self._profile([1.0, 3.0, 6.0, 8.7]),   # uJ -> 8.7e-6 J, sane
+                                  "sic_mosfet", DESIGN_INPUTS)
+        assert blk[M.PROVENANCE_KEY]["E_oss_vs_VDS"] == "digitised"
+        basis = blk["_eoss_basis"]
+        assert basis["from_curve"] is True and basis["checked"] is False
+        assert "tabulates no value" in basis["note"]
+
+    def test_a_grossly_wrong_curve_is_refused(self):
+        """8.7 J of output-capacitance energy is not a reading of anything."""
+        blk = DF.profile_to_block(self._profile([1e6, 3e6, 6e6, 8.7e6]),   # uJ -> 8.7 J
+                                  "sic_mosfet", DESIGN_INPUTS)
+        assert blk[M.PROVENANCE_KEY].get("E_oss_vs_VDS") != "digitised"
+        assert blk["_eoss_basis"]["from_curve"] is False
+        assert "outside the plausible" in blk["_eoss_basis"]["note"]
+
+    def test_the_band_does_NOT_catch_a_1000x_slip_and_says_so(self):
+        """The limit of the backstop, asserted so it is not mistaken for a unit check. 8.7 mJ is
+        1000x wrong and inside the declared band, so it is USED — and marked unverified, which is
+        the whole reason that flag exists."""
+        blk = DF.profile_to_block(self._profile([1e3, 3e3, 6e3, 8.7e3]),   # uJ -> 8.7 mJ
+                                  "sic_mosfet", DESIGN_INPUTS)
+        assert blk[M.PROVENANCE_KEY]["E_oss_vs_VDS"] == "digitised"        # not caught...
+        assert blk["_eoss_basis"]["checked"] is False                      # ...but never "checked"
+        assert "could not be checked" in blk["_eoss_basis"]["note"]

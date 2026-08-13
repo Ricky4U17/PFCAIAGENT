@@ -277,6 +277,16 @@ _FIGURE_TARGETS = [
     # differ by nearly an order of magnitude - the LVE5060E is rated 50 A against case and 6 A in
     # free air - so matching "temperature" loosely here would silently pick the wrong one.
     ("I_F_AV_vs_Tc",   ("case temperature",), ("rectified current",),    False,    False),
+
+    # ── MOSFET. These close the C208 gaps: E_oss had been a V^1.5 fit through one published point
+    # and C_rss was unmapped entirely, both because nothing read this vendor's plots. The matchers
+    # are terse because the titles are - "VDS [V]" against "Eoss [uJ]" - so each one is pinned to a
+    # token that appears on exactly one figure. "[pf]" rather than "capacitance": the capacitance
+    # plot's y title is the bare letter C, and matching "c [" would also take "Tj [°C]".
+    ("E_oss_vs_VDS",   ("vds",),              ("eoss",),                 False,    False),
+    ("C_rss_vs_VDS",   ("vds",),              ("[pf]",),                 False,    False),
+    ("R_DS_on_vs_Tj",  ("tj [",),             ("rds(on)",),              False,    False),
+    ("R_DS_on_vs_ID",  ("ids [", "id ["),     ("rds(on)",),              False,    False),
 ]
 
 
@@ -470,6 +480,30 @@ def _figure_cross_check(key: str, curves: list, profile: Optional[dict]) -> dict
             c = e.get("typ") or e.get("max")
             if vr and c and float(vr) > 1:
                 return CX.cross_check(curves, float(vr), float(c) * 1e12)   # pF
+    # MOSFET. Each of these is tabulated at ONE bus voltage, which is exactly the point the plot
+    # can be read at — the strongest evidence available that the frame, the axes and the scale were
+    # all read correctly, and it is what proved the log axes were being misread as linear.
+    _AT_VDS = {"E_oss_vs_VDS": ("E_oss_vs_VDS", 1e6),      # the plot is in uJ
+               "C_rss_vs_VDS": ("C_rss_vs_VDS", 1e12)}     # ...and this one in pF
+    if key in _AT_VDS:
+        pkey, scale = _AT_VDS[key]
+        e = _pick_entry(_entries_of(profile, pkey))
+        vds = ((e or {}).get("conditions") or {}).get("V_DS")
+        val = (e or {}).get("typ") or (e or {}).get("max")
+        if vds and val:
+            return CX.cross_check(curves, float(vds), float(val) * scale)
+    if key == "R_DS_on_vs_Tj":
+        e = _pick_entry(_entries_of(profile, "R_DS_on"))
+        r = (e or {}).get("typ") or (e or {}).get("max")
+        if r:
+            # the plot is NORMALISED to its 25 degC value, so the anchor is 1.0 there
+            return CX.cross_check(curves, 25.0, 1.0)
+    if key == "R_DS_on_vs_ID":
+        e = _pick_entry(_entries_of(profile, "R_DS_on"))
+        r = (e or {}).get("typ") or (e or {}).get("max")
+        i_d = ((e or {}).get("conditions") or {}).get("I_D")
+        if r and i_d:
+            return CX.cross_check(curves, float(i_d), float(r))
     return {"checked": False, "agrees": False,
             "note": "this datasheet tabulates no value on this figure's axes, so the digitised "
                     "curve cannot be checked against the part's own numbers"}
@@ -698,6 +732,29 @@ def _pick_entry(entries: list[dict]) -> Optional[dict]:
                                        1 if "typ" in e else 0))
 
 
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _scalar_entry(entries: list[dict]) -> Optional[dict]:
+    """`_pick_entry` restricted to entries whose value is a NUMBER.
+
+    Once a figure can be confirmed, one canonical key holds both a tabulated point and a digitised
+    CURVE, whose `typ` is a pair of lists. Every caller that wants the published number would then
+    be one `float()` away from a TypeError — or, worse, from ranking the curve first and silently
+    reading a list where a value belongs. The two shapes are separated here rather than at each of
+    the call sites, which is where one would eventually be forgotten.
+    """
+    return _pick_entry([e for e in entries
+                        if _is_number(e.get("typ")) or _is_number(e.get("max"))])
+
+
+# How far a digitised curve may sit from the value the same datasheet TABULATES on those axes
+# before it is refused. Wider than a reading error and far narrower than any unit slip: the
+# smallest one possible is 1000x, so nothing near this bound is ambiguous.
+_CURVE_ANCHOR_TOL_PCT = 12.0
+
+
 _DESTINATION = {
     "R_DS_on": "conduction loss", "R_DS_on_vs_Tj": "hot conduction loss",
     "C_iss": "switching transition times", "Q_gd": "Miller charge, switching energy",
@@ -822,12 +879,48 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
 
     # A REAL temperature curve from the datasheet's own two points, replacing the generic
     # "SiC rises 1.4x by 125 degC" assumption that has been standing in for it.
+    # ...and the PLOT beats both. The registry says why in one line: the curve is convex, so a
+    # straight line between two tabulated endpoints overshoots in the middle. Digitised, it is
+    # already normalised (the y axis is "RDS(on) [normalized]"), so there is no unit to convert.
+    dig_rtj = _digitised(profile, "R_DS_on_vs_Tj")
     hot = _hot_entry(profile, vgs)
     cold = e
-    if hot and cold and cold.get("typ"):
+    if dig_rtj and len(dig_rtj["x"]) >= 4:
+        put("R_DS_on_vs_Tj", [list(dig_rtj["x"]), list(dig_rtj["y"])], "digitised")
+        blk["_rdson_tj_basis"] = {
+            "from_curve": True, "n_points": len(dig_rtj["x"]),
+            "range_C": [min(dig_rtj["x"]), max(dig_rtj["x"])],
+            "note": (f"The on-resistance temperature factor is read across the datasheet's own "
+                     f"R_DS(on)(T_j) plot ({len(dig_rtj['x'])} points, "
+                     f"{min(dig_rtj['x']):.0f} to {max(dig_rtj['x']):.0f} degC). The curve is "
+                     f"convex, so the two-point interpolation this replaces overestimated the "
+                     f"factor between its endpoints.")}
+    elif hot and cold and cold.get("typ"):
         t_hot = (hot.get("conditions") or {}).get("T_j", 175.0)
         put("R_DS_on_vs_Tj", [[25.0, float(t_hot)],
                               [1.0, round(float(hot["typ"]) / float(cold["typ"]), 4)]], "derived")
+
+    # R_DS(on) vs DRAIN CURRENT. New: nothing populated it before, so the engine held on-resistance
+    # flat with current. THE ENGINE WANTS A MULTIPLIER (`r *= curve(Id)`) AND THE PLOT IS IN OHMS,
+    # so it is normalised here on the curve's own value at the current the table states — which
+    # makes curve(I_D) exactly 1.0 there and leaves the engine's own R_DS(on) the level. Taking the
+    # SHAPE and not the level is also what makes the reading safe when the plot carries several
+    # unlabelled gate-voltage traces: the level differs between them, the shape barely does.
+    dig_rid = _digitised(profile, "R_DS_on_vs_ID")
+    i_d_ref = float((e.get("conditions") or {}).get("I_D") or 0.0) if e else 0.0
+    if dig_rid and len(dig_rid["x"]) >= 4 and i_d_ref > 0:
+        r_ref = _curve_at(dig_rid, i_d_ref)
+        if r_ref and r_ref > 0:
+            put("R_DS_on_vs_ID", [list(dig_rid["x"]),
+                                  [round(v / r_ref, 6) for v in dig_rid["y"]]], "digitised")
+            blk["_rdson_id_basis"] = {
+                "from_curve": True, "n_points": len(dig_rid["x"]),
+                "normalised_at_A": i_d_ref, "reading_at_norm_ohm": round(r_ref, 6),
+                "range_A": [min(dig_rid["x"]), max(dig_rid["x"])],
+                "note": (f"R_DS(on) now rises with drain current instead of being held flat. The "
+                         f"shape is read off the datasheet's R_DS(on)(I_D) plot and normalised at "
+                         f"{i_d_ref:g} A, the current its parameter table states, so the plot "
+                         f"supplies the variation and the table still supplies the level.")}
 
     for key in ("C_iss", "Q_g", "Q_gd", "V_GS_th", "g_fs", "R_th_jc", "V_SD"):
         ent = _pick_entry(_entries_of(profile, key))
@@ -845,21 +938,95 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
         idss.sort()
         put("I_DSS_vs_Tj", [[t for t, _ in idss], [v for _, v in idss]])
 
-    # C_rss is deliberately NOT mapped. The datasheet publishes ONE point (7 pF at 400 V) and the
-    # engine's crss_curve expects C_rss(V), which swings by orders of magnitude across the blocking
-    # range. A two-point fit through a single value would be a shape nobody measured; without it
-    # the engine uses the Miller integral Q_gd*V/2, and Q_gd is now the real 6.2 nC.
+    # C_rss AND E_oss ARE PLOTTED IN THE PLOT'S OWN UNITS — "Eoss [uJ]", "C [pF]" — while the
+    # registry stores SI. The axis title is NOT taken as proof of the unit: it is converted through
+    # the registry's display unit and then CHECKED against the value the same datasheet tabulates,
+    # and only a curve that agrees is used. A scale slip is the one error that survives every other
+    # check here, because a curve read in nJ instead of uJ is smooth, monotonic, correctly shaped
+    # and wrong by 1000x. The tabulated point is the only thing that can see it.
+    def _si_curve(key: str, anchor_x: Optional[float], anchor_si: Optional[float]):
+        dig = _digitised(profile, key)
+        if not dig or len(dig["x"]) < 4:
+            return None, None                        # no curve confirmed: nothing to report
+        factor = R.to_si(key, 1.0)                    # display unit -> SI, from the registry
+        si = {"x": list(dig["x"]), "y": [v * factor for v in dig["y"]]}
+        got = _curve_at(si, anchor_x) if anchor_x is not None else None
+        if got is None or not anchor_si:
+            # NO ANCHOR TO CHECK AGAINST. The registry's plausibility band is the backstop, and it
+            # is a COARSE one — measured, not assumed: E_oss is declared 1e-8 to 1e-2 J, so a
+            # 1000x slip from 8.7 uJ lands at 8.7 mJ and passes. It catches a gross misread and
+            # nothing finer, which is exactly why a curve that clears it is still returned
+            # `checked: False` and reported as unverified rather than treated as confirmed.
+            # Refusing outright would be worse: the curve is still the measured shape.
+            band = (R.get(key).get("plausible") or {})
+            lo, hi = band.get("min"), band.get("max")
+            peak = max(si["y"]) if si["y"] else 0.0
+            why = ("this datasheet tabulates no value on these axes"
+                   if anchor_x is None or not anchor_si else
+                   f"the tabulated point at {anchor_x:g} lies outside the digitised range "
+                   f"{min(si['x']):.3g} to {max(si['x']):.3g}")
+            if lo is not None and hi is not None and not (lo <= peak <= hi):
+                return None, {"from_curve": False, "checked": True, "note": (
+                    f"The digitised curve peaks at {peak:.4g}, outside the plausible "
+                    f"{lo:.4g} to {hi:.4g} for this parameter, so it was NOT used. Because "
+                    f"{why}, that band was the only available check — and a reading that fails "
+                    f"it is a misread axis or a unit, not reading error.")}
+            return si, {"from_curve": True, "checked": False, "n_points": len(si["x"]),
+                        "note": (f"Read across {len(si['x'])} points of the datasheet's own plot. "
+                                 f"It could not be checked against a published number because "
+                                 f"{why}"
+                                 + (f"; it does sit inside the plausible {lo:.4g} to {hi:.4g} "
+                                    f"for this parameter." if lo is not None and hi is not None
+                                    else "."))}
+        err = abs(got - anchor_si) / abs(anchor_si) * 100.0
+        if err > _CURVE_ANCHOR_TOL_PCT:
+            return None, {"from_curve": False, "checked": True, "error_pct": round(err, 2),
+                          "note": (f"The digitised curve reads {got:.4g} at {anchor_x:g} where the "
+                                   f"table states {anchor_si:.4g} — {err:.0f} % apart, so it was "
+                                   f"NOT used. That size of disagreement is a misread axis or a "
+                                   f"unit, not reading error.")}
+        return si, {"from_curve": True, "checked": True, "n_points": len(si["x"]),
+                    "error_pct": round(err, 2), "anchor": [anchor_x, anchor_si],
+                    "note": (f"Read across {len(si['x'])} points of the datasheet's own plot and "
+                             f"checked against its table: {got:.4g} against {anchor_si:.4g} at "
+                             f"{anchor_x:g}, {err:.1f} % apart. The plot and the table are "
+                             f"independent renderings of one measurement, so that agreement is "
+                             f"what says the axes and the unit were read correctly.")}
 
-    # E_oss: phase 1 has the published point, not the curve. Anchoring a V^1.5 shape ON THE REAL
-    # VALUE is not the same as inventing one from die area — that estimate was 3.4x high on this
-    # part — but it is still a fitted shape, so it is stamped `derived` and M7 replaces it with the
-    # digitised curve.
-    ent = _pick_entry(_entries_of(profile, "E_oss_vs_VDS"))
-    if ent and (ent.get("typ") or ent.get("max")):
-        v_at = float((ent.get("conditions") or {}).get("V_DS") or 400.0)
-        e_at = float(ent.get("typ") or ent.get("max"))
+    def _tabulated_at_vds(key: str):
+        """(V_DS, value) the TABLE states for a key, both SI, or (None, None)."""
+        ent = _scalar_entry(_entries_of(profile, key))
+        if not ent:
+            return None, None
+        v = (ent.get("conditions") or {}).get("V_DS")
+        y = ent.get("typ") if _is_number(ent.get("typ")) else ent.get("max")
+        return (float(v) if v else None), (float(y) if y else None)
+
+    # C_rss was deliberately NOT mapped while the datasheet gave ONE point (7 pF at 400 V): the
+    # engine's crss_curve expects C_rss(V), which swings by orders of magnitude across the blocking
+    # range, and a two-point fit through a single value is a shape nobody measured. The DIGITISED
+    # curve answers that objection — it is the measured shape, over the whole range — so when one
+    # is confirmed the Miller integral is computed from it instead of from Q_gd*V/2.
+    crss, crss_basis = _si_curve("C_rss_vs_VDS", *_tabulated_at_vds("C_rss_vs_VDS"))
+    if crss:
+        put("C_rss_vs_VDS", [crss["x"], crss["y"]], "digitised")
+    if crss_basis:
+        blk["_crss_basis"] = crss_basis
+
+    # E_oss: with no curve, phase 1 has the published point only. Anchoring a V^1.5 shape ON THE
+    # REAL VALUE is not the same as inventing one from die area — that estimate was 3.4x high on
+    # this part — but it is still a fitted shape, so it is stamped `derived`. M7 replaces it with
+    # the digitised curve, which is what this branch finally does.
+    v_at, e_at = _tabulated_at_vds("E_oss_vs_VDS")
+    eoss, eoss_basis = _si_curve("E_oss_vs_VDS", v_at, e_at)
+    if eoss:
+        put("E_oss_vs_VDS", [eoss["x"], eoss["y"]], "digitised")
+    elif e_at:
+        v_at = v_at or 400.0                          # the condition vendors omit most often
         put("E_oss_vs_VDS", [[v_at * 0.25, v_at],
                              [round(e_at * 0.25 ** 1.5, 12), e_at]], "derived")
+    if eoss_basis:
+        blk["_eoss_basis"] = eoss_basis
 
     # V_plateau is DERIVED, not published. With g_fs known it is per-current inside the engine;
     # without it, V_GS(th) + 2 V is the standing approximation. Deriving it here rather than letting
