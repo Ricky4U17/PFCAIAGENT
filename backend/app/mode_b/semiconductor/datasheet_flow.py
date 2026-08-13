@@ -28,6 +28,7 @@ missing one as an engine default.
 from __future__ import annotations
 
 import math
+import os
 from typing import Any, Optional
 
 from app.mode_b.semiconductor import datasheet_extract as DX
@@ -287,6 +288,18 @@ _FIGURE_TARGETS = [
     ("C_rss_vs_VDS",   ("vds",),              ("[pf]",),                 False,    False),
     ("R_DS_on_vs_Tj",  ("tj [",),             ("rds(on)",),              False,    False),
     ("R_DS_on_vs_ID",  ("ids [", "id ["),     ("rds(on)",),              False,    False),
+
+    # ── SWITCHING ENERGY. FOUR TARGETS ACROSS TWO FIGURES: each plot carries E_on, E_off and
+    # their sum as three unlabelled traces, so one figure has to yield TWO keys and each key has
+    # to find its own trace. Both are settled by the datasheet's own table - E_on = 35 uJ and
+    # E_off = 22 uJ at the test point - which the cross-check matches trace by trace.
+    # The y matcher is the bare "e [" because these titles are just "E [uJ]"; it is checked to hit
+    # nothing else on this datasheet ("Eoss [uJ]" and "EAS [mJ]" both read "s [" before the
+    # bracket, and no other axis title contains an 'e' followed by a space and a bracket).
+    ("E_on_vs_ID",     ("id [",),             ("e [",),                  False,    False),
+    ("E_off_vs_ID",    ("id [",),             ("e [",),                  False,    False),
+    ("E_on_vs_Rg",     ("rg",),               ("e [",),                  False,    False),
+    ("E_off_vs_Rg",    ("rg",),               ("e [",),                  False,    False),
 ]
 
 
@@ -441,7 +454,11 @@ def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
             # the cross-check runs on the FIGURE's own orientation, which is how the table states it
             p["cross_check"] = _figure_cross_check(key, fig["curves"], profile)
             out.append(p)
-            break
+            # NO `break`. One figure can carry SEVERAL canonical quantities — the switching-energy
+            # plot holds E_on and E_off as separate traces — and stopping at the first match made
+            # the second one unreachable. Every target whose axes match is offered, and each finds
+            # its own trace through its own cross-check; the matchers are mutually exclusive on
+            # everything else, so no other figure gains a second proposal from this.
     return {"ok": True, "proposals": out, "figures_seen": len(res["figures"])}
 
 
@@ -504,6 +521,19 @@ def _figure_cross_check(key: str, curves: list, profile: Optional[dict]) -> dict
         i_d = ((e or {}).get("conditions") or {}).get("I_D")
         if r and i_d:
             return CX.cross_check(curves, float(i_d), float(r))
+    # SWITCHING ENERGY. This is the cross-check doing its second job: not only "was the figure read
+    # right" but "WHICH of the three traces is this key". E_on and E_off come off the same plot,
+    # and the datasheet states both at one test point, so each key anchors on its own number and
+    # `curve_index` names the trace. The sum trace matches neither and is never selected.
+    _ESW = {"E_on_vs_ID": ("E_on", "I_D"), "E_off_vs_ID": ("E_off", "I_D"),
+            "E_on_vs_Rg": ("E_on", "R_g"), "E_off_vs_Rg": ("E_off", "R_g")}
+    if key in _ESW:
+        pkey, xcond = _ESW[key]
+        e = _pick_entry(_entries_of(profile, pkey))
+        val = (e or {}).get("typ") or (e or {}).get("max")
+        x_at = ((e or {}).get("conditions") or {}).get(xcond)
+        if val and x_at:
+            return CX.cross_check(curves, float(x_at), float(val) * 1e6)   # the plot is in uJ
     return {"checked": False, "agrees": False,
             "note": "this datasheet tabulates no value on this figure's axes, so the digitised "
                     "curve cannot be checked against the part's own numbers"}
@@ -524,10 +554,31 @@ def confirm_figure(part_number: str, key: str, curve: dict, conditions: Optional
         raise PS.PartsStoreError(f"no profile on file for {part_number!r}; upload the datasheet first")
     profile = dict(profile)
 
+    # RENDER THE FIGURE THE DESIGNER APPROVED, ONCE, HERE. The report has to be able to show the
+    # plot a curve came off — a digitised shape that a reviewer cannot see the source of is just
+    # another unexplained number. Doing it at confirm time rather than at report time fixes the
+    # image to what was actually on screen when it was accepted, and means the report needs no
+    # access to the datasheet or the frame geometry.
+    img_name = None
+    frame, page_no = curve.get("frame"), curve.get("page")
+    if frame and page_no:
+        try:
+            import fitz
+            from app.mode_b.semiconductor import curve_extract as CX
+            pdf_path = os.path.join(PS.part_dir(part_number, root), "datasheet.pdf")
+            with fitz.open(pdf_path) as doc:
+                png = CX.render(doc[int(page_no) - 1], tuple(frame))      # `page` is 1-based
+            img_name = f"figure_{key}.png"
+            with open(os.path.join(PS.part_dir(part_number, root, create=True), img_name), "wb") as f:
+                f.write(png)
+        except Exception:
+            img_name = None            # a missing picture must never block a confirmed curve
+
     entry = {"typ": [list(curve["x"]), list(curve["y"])],
              "provenance": "digitised",
              "conditions": dict(conditions or {}),
-             "source": {"figure": curve.get("caption"), "page": curve.get("page")},
+             "source": {"figure": curve.get("caption"), "page": page_no,
+                        "frame": list(frame) if frame else None, "image": img_name},
              "n_points": len(curve["x"])}
     for p in profile.setdefault("parameters", []):
         if p["key"] == key:
@@ -826,7 +877,8 @@ def confirm(part_number: str, edits: dict, device_class: str, reviewed_by: str =
 
 
 # ── profile -> engine block ───────────────────────────────────────────────────────────────────
-def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
+def profile_to_block(profile: dict, device_class: str, design: dict,
+                     root: Optional[str] = None) -> dict:
     """Turn a confirmed profile into an engine block, routed by the class's engine dataclass.
 
     The route comes from the REGISTRY (`engine_dataclass`), not from a string test on the class
@@ -844,10 +896,18 @@ def profile_to_block(profile: dict, device_class: str, design: dict) -> dict:
             f"device class {device_class!r} has engine_dataclass {engine!r}, which has no block "
             f"builder. Add one rather than letting it default: the builders read different "
             f"parameters, so the wrong one produces a block that is confidently empty.")
-    return builder(profile, device_class, design, cls)
+    blk = builder(profile, device_class, design, cls, root)
+    # The datasheet plots behind every digitised curve, so Chapter 7 can SHOW its evidence rather
+    # than assert it — for all three device kinds, not just the MOSFET. Underscore-prefixed: this
+    # is metadata riding on the block, not an engine field, and `Mosfet(**block)` refuses anything
+    # else (a trap this codebase has hit twice).
+    blk["_figure_images"] = _figure_images(profile, part_number=profile.get("part_number"),
+                                           root=root)
+    return blk
 
 
-def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict) -> dict:
+def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict,
+                  root: Optional[str] = None) -> dict:
     """`select()` is what earns its keep here: the on-resistance handed to the engine is the entry
     at the design's OWN gate-drive voltage, not whichever entry parsed first. Ask for a condition
     the datasheet does not state and it raises rather than substituting a neighbour.
@@ -1044,18 +1104,44 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict) -> 
         if val not in (None, ""):
             put(key, val, "manual")
 
-    blk[M.PROVENANCE_KEY] = prov
     blk["_conduction_form"] = cls["conduction_loss_form"]
 
-    # M4b: anchor the switching model on the published energies. Done LAST, because it needs the
-    # rest of the block (E_oss, Q_gd, C_iss) already in place to evaluate the analytic baseline.
+    # THE MEASURED SWITCHING-ENERGY CURVES BEAT THE ANALYTIC SHAPE. Run after the design inputs
+    # because the gate-resistance correction needs the designer's own R_g,on and R_g,off. An
+    # explicit `sw_method` from the designer still wins — the curves are then computed, reported
+    # and left unused, so choosing the analytic model is a decision on the record rather than a
+    # silently different answer.
+    esw = _switching_curves(profile, blk, design)
+    blk["_esw_basis"] = esw
+    if esw.get("ok"):
+        put("E_on_vs_ID", esw["eon_curve"], "digitised")
+        put("E_off_vs_ID", esw["eoff_curve"], "digitised")
+        put("V_test_sw", esw["v_test"], "extracted")
+        if not design.get("sw_method"):
+            put("sw_method", "esw", "derived")
+
+    blk[M.PROVENANCE_KEY] = prov
+
+    # M4b: anchor the analytic switching model on the published energies. Kept even when the
+    # measured curves are in use: k_on and k_off landing together is an independent check that the
+    # de-bundling is the right size, and it is the fallback whenever no curve is confirmed.
     anchor = switching_anchor(profile, blk, design)
     blk["_switching_anchor"] = anchor
-    if anchor.get("ok"):
+    # THE ANCHOR FACTORS CALIBRATE THE ANALYTIC MODEL, AND NOTHING ELSE. `e_switch` applies k_esw
+    # and k_turnoff in BOTH branches, so writing them while the measured curves are in use scaled
+    # a digitised plot by 2.71 and put P_FET 41 % high — the curve IS the measurement, there is
+    # nothing left to calibrate. On that path the two revert to their dataclass meaning, which is
+    # a tolerance knob the designer sets for worst-case sign-off, not a fitted correction.
+    if anchor.get("ok") and blk.get("sw_method") != "esw":
         blk["k_esw"] = anchor["k_esw"]
         blk["k_turnoff"] = anchor["k_turnoff"]
         prov["k_esw"] = "derived"
         prov["k_turnoff"] = "derived"
+    elif anchor.get("ok"):
+        anchor["applied"] = False
+        anchor["not_applied_reason"] = (
+            "reported as a cross-check only: the measured E(I_D) curves are in use, and these "
+            "factors exist to calibrate the analytic model against them")
 
     blk["_checks"] = _mosfet_checks(profile, design, blk)
     return blk
@@ -1359,7 +1445,8 @@ def _vf_curve_from(pts: list[tuple], rd: Optional[float], i_max: float):
     return None, None, None
 
 
-def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> dict:
+def _diode_block(profile: dict, device_class: str, design: dict, cls: dict,
+                 root: Optional[str] = None) -> dict:
     """Turn a confirmed diode profile into a `Diode` engine block.
 
     Both technologies are built here and neither is privileged: the technology is resolved from the
@@ -1581,7 +1668,8 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict) -> d
     return blk
 
 
-def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict) -> dict:
+def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict,
+                  root: Optional[str] = None) -> dict:
     """Turn a confirmed bridge profile into a `Bridge` engine block.
 
     The bridge's conduction model needs no new physics: the engine already integrates the
@@ -1969,6 +2057,170 @@ def _diode_checks(profile: dict, design: dict, blk: dict, tech: dict) -> list[di
     return out
 
 
+def _figure_images(profile: dict, part_number: Optional[str] = None,
+                   root: Optional[str] = None) -> list[dict]:
+    """The stored plot image behind each digitised curve: [{key, path, figure, page}, ...].
+
+    Only entries whose picture is actually on disk are returned, so a report built from an older
+    profile — confirmed before the image was captured — simply shows no figure panel rather than
+    a broken one.
+    """
+    mpn = part_number or profile.get("part_number")
+    if not mpn:
+        return []
+    try:
+        d = PS.part_dir(mpn, root)
+    except Exception:
+        return []
+    out = []
+    for p in profile.get("parameters", []):
+        for e in p.get("entries", []):
+            src = e.get("source") or {}
+            if e.get("provenance") != "digitised" or not src.get("image"):
+                continue
+            path = os.path.join(d, src["image"])
+            if os.path.exists(path):
+                out.append({"key": p["key"], "path": path,
+                            "figure": src.get("figure") or "", "page": src.get("page"),
+                            # the SOURCE plot, so a report can group the several quantities that
+                            # come off one figure instead of printing it once per quantity
+                            "frame": src.get("frame")})
+    return out
+
+
+def _switching_curves(profile: dict, blk: dict, design: dict) -> dict:
+    """The datasheet's MEASURED E_on/E_off vs I_D, turned into the engine's `esw` curves.
+
+    This replaces an analytic overlap SHAPE anchored at one point with the shape the vendor
+    measured, which is the reviewer-grade method. Two things have to be right for it to be an
+    improvement rather than a regression, and both are the reason this is not a two-line change.
+
+    1. CONVENTION B APPLIES TO THE CURVE, NOT JUST THE ANCHOR. A published E_on bundles the
+       device's own overlap, the discharge of its C_oss, and the charge of the fixture's
+       freewheeling element. This engine books the last two separately as `P_oss_fet` and
+       `P_rr_to_fet`, so dropping the raw curve into `eon_curve` would count them TWICE — the
+       exact error the external review warned about ("avoid raw E_on + separate P_Eoss + separate
+       diode Q_c"). The bundled parts are set by the test VOLTAGE, not the current, so they come
+       off as a constant:
+
+           E_on,overlap(I) = E_on,published(I) - E_oss(V_test) - Q_fw*V_test
+
+       That the remainder tends to ~0 as I_D -> 0 is a real check on the subtraction, not a
+       coincidence: overlap energy is proportional to current, so it MUST vanish there.
+       E_off needs no de-bundling — no C_oss discharge and no recovery charge flow through it.
+
+    2. THE PUBLISHED ENERGIES ARE VALID ONLY AT THE FIXTURE'S GATE RESISTOR. The engine's `esw`
+       path applies no gate-resistance correction at all, so a design whose gate path differs
+       from the test would silently inherit the fixture's. The datasheet's own E vs R_g,ext plot
+       supplies the ratio, and the two paths are corrected INDEPENDENTLY — turn-on resistance
+       sets E_on, turn-off sets E_off, and using one figure for both hides design intent.
+    """
+    import numpy as np
+
+    on_e = _pick_entry(_entries_of(profile, "E_on"))
+    off_e = _pick_entry(_entries_of(profile, "E_off"))
+    dig_on, dig_off = _digitised(profile, "E_on_vs_ID"), _digitised(profile, "E_off_vs_ID")
+    if not (dig_on and dig_off):
+        return {"ok": False, "reason": "no digitised E_on/E_off vs I_D curve has been confirmed"}
+    if not (on_e and off_e):
+        return {"ok": False, "reason": (
+            "the datasheet publishes no E_on/E_off test point, so the digitised curves cannot be "
+            "checked or de-bundled")}
+
+    cond = dict(on_e.get("conditions") or {})
+    v_test = float(cond.get("V_DS") or 400.0)
+    i_test = float(cond.get("I_D") or 0.0)
+    rg_test = float(cond.get("R_g") or 0.0)
+    e_on_ds = float(on_e.get("typ") or on_e.get("max") or 0.0)
+    e_off_ds = float(off_e.get("typ") or off_e.get("max") or 0.0)
+    if not (i_test and e_on_ds and e_off_ds):
+        return {"ok": False, "reason": "the published switching energies carry no usable test point"}
+
+    f_on = R.to_si("E_on_vs_ID", 1.0)                       # uJ -> J, from the registry
+    si_on = {"x": list(dig_on["x"]), "y": [v * f_on for v in dig_on["y"]]}
+    si_off = {"x": list(dig_off["x"]), "y": [v * f_on for v in dig_off["y"]]}
+    got_on, got_off = _curve_at(si_on, i_test), _curve_at(si_off, i_test)
+    if got_on is None or got_off is None:
+        return {"ok": False, "reason": (
+            f"the digitised curves do not cover the {i_test:g} A test point, so they cannot be "
+            f"checked against the published energies")}
+    err_on = abs(got_on - e_on_ds) / e_on_ds * 100.0
+    err_off = abs(got_off - e_off_ds) / e_off_ds * 100.0
+    if max(err_on, err_off) > _CURVE_ANCHOR_TOL_PCT:
+        return {"ok": False, "reason": (
+            f"the digitised curves disagree with the published energies at {i_test:g} A "
+            f"(E_on {err_on:.0f} %, E_off {err_off:.0f} %), so the wrong traces were taken or an "
+            f"axis was misread")}
+
+    # ── 1. de-bundle turn-on ──────────────────────────────────────────────────────────────────
+    eoss_at_v = blk.get("eoss_at_v")
+    e_oss_test = (_curve_at({"x": list(eoss_at_v[0]), "y": list(eoss_at_v[1])}, v_test)
+                  if eoss_at_v else None)
+    fw = (profile.get("measurement") or {}).get("freewheel_charge_C")
+    q_lo, q_hi = QFW_RANGE_C
+    q_fw = fw if fw is not None else 0.5 * (q_lo + q_hi)
+    subtract = (e_oss_test or 0.0) + q_fw * v_test
+    overlap = [y - subtract for y in si_on["y"]]
+    clamped = sum(1 for y in overlap if y <= 0.0)
+    eon_curve = [si_on["x"], [max(y, 0.0) for y in overlap]]
+    residual_at_zero = min(overlap)
+
+    # ── 2. gate-resistance correction, the two paths independently ────────────────────────────
+    def _k_rg(key: str, rg_design: Optional[float]):
+        dig = _digitised(profile, key)
+        if not (dig and rg_test and rg_design):
+            return 1.0, None
+        at_d, at_t = _curve_at(dig, float(rg_design)), _curve_at(dig, rg_test)
+        if not (at_d and at_t and at_t > 0):
+            return 1.0, (f"the design's {rg_design:g} ohm lies outside the plotted gate-resistance "
+                         f"range, so no correction could be read")
+        return at_d / at_t, None
+
+    rg_on = design.get("R_g_on") or blk.get("rg_on") or blk.get("rg")
+    rg_off = design.get("R_g_off") or blk.get("rg_off") or blk.get("rg")
+    k_on, why_on = _k_rg("E_on_vs_Rg", rg_on)
+    k_off, why_off = _k_rg("E_off_vs_Rg", rg_off)
+    eon_curve[1] = [y * k_on for y in eon_curve[1]]
+    eoff_curve = [si_off["x"], [y * k_off for y in si_off["y"]]]
+
+    notes = [w for w in (why_on, why_off) if w]
+    if not _digitised(profile, "E_on_vs_Rg") and rg_on and rg_test and \
+            abs(float(rg_on) - rg_test) > 0.05:
+        notes.append(
+            f"The design's turn-on gate resistance ({float(rg_on):g} ohm) differs from the "
+            f"{rg_test:g} ohm the switching energies were measured at, and no E vs R_g curve has "
+            f"been confirmed, so NO correction was applied. Confirm that figure to correct it.")
+    if clamped:
+        notes.append(
+            f"{clamped} of {len(overlap)} digitised points sit at or below the de-bundled floor "
+            f"and were clamped to zero. Near zero current the published turn-on energy is almost "
+            f"entirely C_oss and fixture charge, so a small residual there is expected.")
+
+    return {
+        "ok": True, "from_curve": True,
+        "n_points": len(eon_curve[0]),
+        "v_test": v_test, "i_test": i_test, "rg_test": rg_test,
+        "error_pct": {"E_on": round(err_on, 2), "E_off": round(err_off, 2)},
+        "eoss_test_J": e_oss_test, "q_fw_C": q_fw, "q_fw_stated": fw is not None,
+        "debundled_J": subtract,
+        "residual_at_min_current_J": residual_at_zero,
+        "k_rg_on": round(k_on, 4), "k_rg_off": round(k_off, 4),
+        "rg_on": rg_on, "rg_off": rg_off,
+        "eon_curve": eon_curve, "eoff_curve": eoff_curve,
+        "notes": notes,
+        "note": (
+            f"Turn-on and turn-off energy are read across the datasheet's own E(I_D) plots "
+            f"({len(eon_curve[0])} points), checked against its table at {i_test:g} A "
+            f"(E_on {err_on:.1f} %, E_off {err_off:.1f} %). Turn-on is de-bundled by "
+            f"{subtract*1e6:.1f} uJ — E_oss({v_test:.0f} V) = {(e_oss_test or 0)*1e6:.1f} uJ plus "
+            f"{q_fw*1e9:.0f} nC of fixture freewheeling charge — because this report books those "
+            f"two separately; the remainder falls to {residual_at_zero*1e6:.1f} uJ at the lowest "
+            f"plotted current, which is the check that the subtraction is the right size. "
+            f"Gate-resistance correction K_Rg,on = {k_on:.3f} and K_Rg,off = {k_off:.3f} against "
+            f"the {rg_test:g} ohm test fixture."),
+    }
+
+
 # ── switching-energy anchoring, convention B (M4b) ────────────────────────────────────────────
 # Plausible freewheeling-device charge in a double-pulse fixture, when the datasheet does not say
 # which device it used. The low end is a bare capacitive Schottky, the high end a larger one; the
@@ -2019,6 +2271,14 @@ def switching_anchor(profile: dict, block: dict, design: dict) -> dict:
     fields = Mosfet.__dataclass_fields__
     base = {k: v for k, v in block.items() if k in fields}
     base.update({"k_esw": 1.0, "k_turnoff": 1.0, "ls_loop": 0.0})
+    # FORCE THE ANALYTIC PATH. Once a measured E(I_D) curve is confirmed the block carries
+    # `sw_method='esw'` and the curves themselves, and `e_switch` would then return the CURVE —
+    # making this compare the digitised plot against itself and report ~0.36 for a factor whose
+    # whole meaning is "how far off is the analytic model". The value of this anchor is that it
+    # shares no input with the plot, so the baseline is always evaluated analytically.
+    base["sw_method"] = "analytic"
+    for _c in ("eon_curve", "eoff_curve", "eon_curve_hot", "eoff_curve_hot"):
+        base.pop(_c, None)
     if rg_test:
         base.update({"rg": rg_test, "rg_on": rg_test, "rg_off": rg_test})
     vgs_test = cond.get("V_GS_high") or cond.get("V_GS_swing")

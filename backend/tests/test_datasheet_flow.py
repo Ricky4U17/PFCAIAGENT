@@ -582,7 +582,8 @@ def m7(pdf_bytes):
         mpn = up["part_number"]
         prof = PS.load_profile(mpn, kind="extracted", root=root)
         props = {q["key"]: q for q in DF.figure_proposals(pdf_bytes, prof)["proposals"]}
-        for key in ("E_oss_vs_VDS", "C_rss_vs_VDS", "R_DS_on_vs_Tj", "R_DS_on_vs_ID"):
+        for key in ("E_oss_vs_VDS", "C_rss_vs_VDS", "R_DS_on_vs_Tj", "R_DS_on_vs_ID",
+                    "E_on_vs_ID", "E_off_vs_ID", "E_on_vs_Rg", "E_off_vs_Rg"):
             if key not in props:
                 continue
             q = props[key]
@@ -591,8 +592,14 @@ def m7(pdf_bytes):
             c["caption"], c["page"] = q["caption"], q["page"]
             DF.confirm_figure(mpn, key, c, root=root)
         confirmed = PS.load_profile(mpn, kind="confirmed", root=root)
+        # NO `sw_method` here, deliberately. DESIGN_INPUTS pins it to "analytic" for the older
+        # tests, and passing that would tell the block to ignore the very curves this fixture
+        # exists to confirm — the evidence is supposed to choose the method when the designer has
+        # not. The designer-override path is tested separately, where it is the actual subject.
+        d = {k: v for k, v in DESIGN_INPUTS.items() if k != "sw_method"}
         yield {"props": props, "profile": confirmed, "part_number": mpn, "root": root,
-               "block": DF.profile_to_block(confirmed, "sic_mosfet", DESIGN_INPUTS)}
+               "design": d,
+               "block": DF.profile_to_block(confirmed, "sic_mosfet", d, root=root)}
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -733,3 +740,177 @@ class TestTheUnitBackstopWhenThereIsNoTabulatedPoint:
         assert blk[M.PROVENANCE_KEY]["E_oss_vs_VDS"] == "digitised"        # not caught...
         assert blk["_eoss_basis"]["checked"] is False                      # ...but never "checked"
         assert "could not be checked" in blk["_eoss_basis"]["note"]
+
+
+# ── the MEASURED switching-energy curves (C225, from the external MOSFET review) ───────────────
+class TestSwitchingEnergyComesOffTheMeasuredCurves:
+    """The external review's main MOSFET recommendation: stop inferring the SHAPE of E_on/E_off
+    from an analytic gate model anchored at one point, and read the vendor's own E(I_D) plots.
+
+    The trap it also warned about is the reason this is not a two-line change — a published E_on
+    bundles C_oss discharge and fixture freewheeling charge, both of which this chapter already
+    books separately, so the raw curve would double-count them."""
+
+    def test_both_energies_are_offered_from_the_one_figure(self, m7):
+        """E_on and E_off share a plot, so `figure_proposals` must not stop at the first match."""
+        for key in ("E_on_vs_ID", "E_off_vs_ID", "E_on_vs_Rg", "E_off_vs_Rg"):
+            assert key in m7["props"], f"{key} was not offered"
+        a, b = m7["props"]["E_on_vs_ID"], m7["props"]["E_off_vs_ID"]
+        assert a["frame"] == b["frame"] and a["page"] == b["page"]   # the SAME figure
+
+    def test_each_key_finds_its_own_trace(self, m7):
+        """Three unlabelled traces: E_on, E_off and their sum. The datasheet states E_on = 35 uJ
+        and E_off = 22 uJ at one test point, and that is what tells them apart."""
+        on, off = m7["props"]["E_on_vs_ID"], m7["props"]["E_off_vs_ID"]
+        assert on["cross_check"]["agrees"] and off["cross_check"]["agrees"]
+        assert on["cross_check"]["curve_index"] != off["cross_check"]["curve_index"]
+        assert on["cross_check"]["got"] > off["cross_check"]["got"]     # E_on > E_off
+
+    def test_the_curves_reach_the_engine_in_joules(self, m7):
+        blk = m7["block"]
+        assert blk["sw_method"] == "esw"
+        assert blk[M.PROVENANCE_KEY]["E_on_vs_ID"] == "digitised"
+        assert blk[M.PROVENANCE_KEY]["E_off_vs_ID"] == "digitised"
+        assert len(blk["eon_curve"][0]) > 20 and len(blk["eoff_curve"][0]) > 20
+        assert blk["vref_sw"] == pytest.approx(400.0)
+        # microjoules, in joules: 1e-6..1e-4. A curve left in uJ would read 10..100.
+        assert 1e-7 < max(blk["eoff_curve"][1]) < 1e-3
+
+    def test_turn_on_is_de_bundled_and_the_residual_proves_the_size(self, m7):
+        """THE physical check. Overlap energy is proportional to current, so after removing the
+        parts that are set by VOLTAGE (C_oss and the fixture's freewheeling charge) what is left
+        must fall to about zero at the lowest plotted current. If the subtraction were the wrong
+        size this would come out strongly negative or still large."""
+        e = m7["block"]["_esw_basis"]
+        assert e["ok"], e.get("reason")
+        assert e["debundled_J"] > 0
+        resid = e["residual_at_min_current_J"]
+        assert -1e-6 < resid < 3e-6, f"residual {resid*1e6:.2f} uJ is not near zero"
+        # and the de-bundled turn-on curve must sit BELOW the published one at the test point
+        blk = m7["block"]
+        at = DF._curve_at({"x": blk["eon_curve"][0], "y": blk["eon_curve"][1]}, e["i_test"])
+        assert at < 35e-6, "de-bundled turn-on must be below the published 35 uJ"
+        assert at == pytest.approx(35e-6 - e["debundled_J"], rel=0.05)
+
+    def test_turn_off_is_not_de_bundled(self, m7):
+        """No C_oss discharge and no recovery charge flow through the device at turn-off, so E_off
+        is used as published. At the test current it must still read the tabulated 22 uJ."""
+        blk = m7["block"]
+        at = DF._curve_at({"x": blk["eoff_curve"][0], "y": blk["eoff_curve"][1]},
+                          blk["_esw_basis"]["i_test"])
+        assert at == pytest.approx(22e-6, rel=0.05)
+
+    def test_the_analytic_anchor_stays_independent(self, m7):
+        """Regression guard. The anchor's whole value is that it shares no input with the plot;
+        once the block carries `sw_method='esw'` it would otherwise compare the curve with itself
+        and report a nonsense factor (0.36 was the observed value before this was fixed)."""
+        a = m7["block"]["_switching_anchor"]
+        assert a["ok"], a.get("reason")
+        assert 0.5 <= a["k_on"] <= 5.0
+
+
+class TestGateResistanceIsCorrectedPerPath:
+    """The published energies are valid only at the fixture's gate resistor, and the `esw` path
+    applies no correction of its own. Turn-on and turn-off are corrected SEPARATELY because the
+    two gate paths are independent — using one figure for both hides an asymmetric gate drive."""
+
+    @staticmethod
+    def _blk(pdf_bytes, root, rg_on, rg_off):
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=root)
+        mpn = up["part_number"]
+        prof0 = PS.load_profile(mpn, kind="extracted", root=root)
+        props = {q["key"]: q for q in DF.figure_proposals(pdf_bytes, prof0)["proposals"]}
+        for key in ("E_oss_vs_VDS", "E_on_vs_ID", "E_off_vs_ID", "E_on_vs_Rg", "E_off_vs_Rg"):
+            q = props[key]
+            ci = (q["cross_check"] or {}).get("curve_index", 0)
+            c = dict(q["curves"][ci]); c["caption"], c["page"] = q["caption"], q["page"]
+            DF.confirm_figure(mpn, key, c, root=root)
+        d = dict(DESIGN_INPUTS); d["R_g_on"], d["R_g_off"] = rg_on, rg_off
+        return DF.profile_to_block(PS.load_profile(mpn, kind="confirmed", root=root),
+                                   "sic_mosfet", d)
+
+    def test_the_fixture_resistor_is_a_no_op(self, pdf_bytes, store_root):
+        """1.8 ohm IS the test condition, so the correction must be exactly 1.0 — not 'about' 1.0.
+        Anything else means the ratio is being read off the wrong place on the curve."""
+        e = self._blk(pdf_bytes, store_root, 1.8, 1.8)["_esw_basis"]
+        assert e["k_rg_on"] == pytest.approx(1.0, abs=1e-3)
+        assert e["k_rg_off"] == pytest.approx(1.0, abs=1e-3)
+
+    def test_an_asymmetric_gate_path_gives_two_different_factors(self, pdf_bytes, store_root):
+        e = self._blk(pdf_bytes, store_root, 4.7, 10.0)["_esw_basis"]
+        assert e["k_rg_on"] > 1.2 and e["k_rg_off"] > 1.2      # both slower than the fixture
+        assert e["k_rg_off"] > e["k_rg_on"]                    # 10 ohm costs more than 4.7 ohm
+        assert abs(e["k_rg_off"] - e["k_rg_on"]) > 0.5         # and they are NOT the same number
+
+
+class TestTheDesignerCanStillChooseTheAnalyticModel:
+    def test_an_explicit_sw_method_wins_over_the_curves(self, pdf_bytes, store_root):
+        """Evidence wins by DEFAULT, not unconditionally. Choosing the analytic model stays a
+        decision on the record: the curves are still read, checked and reported, just not used."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        mpn = up["part_number"]
+        prof0 = PS.load_profile(mpn, kind="extracted", root=store_root)
+        props = {q["key"]: q for q in DF.figure_proposals(pdf_bytes, prof0)["proposals"]}
+        for key in ("E_oss_vs_VDS", "E_on_vs_ID", "E_off_vs_ID"):
+            q = props[key]
+            ci = (q["cross_check"] or {}).get("curve_index", 0)
+            c = dict(q["curves"][ci]); c["caption"], c["page"] = q["caption"], q["page"]
+            DF.confirm_figure(mpn, key, c, root=store_root)
+        d = dict(DESIGN_INPUTS); d["sw_method"] = "analytic"
+        blk = DF.profile_to_block(PS.load_profile(mpn, kind="confirmed", root=store_root),
+                                  "sic_mosfet", d)
+        assert blk["sw_method"] == "analytic"          # the designer's choice stands...
+        assert blk["_esw_basis"]["ok"] is True         # ...and the curves are still reported
+
+
+class TestTheAnchorFactorsNeverScaleAMeasuredCurve:
+    """REGRESSION GUARD for a bug that was masked by a second one.
+
+    `Mosfet.e_switch` applies `k_esw` and `k_turnoff` in BOTH its branches. Those factors exist to
+    calibrate the ANALYTIC model against the published energies (k_esw came out at 2.71 on this
+    part), so writing them while the measured E(I_D) curves are in use multiplies a digitised plot
+    by 2.71 — P_FET read 41 % high. It only looked correct at first because the anchor was itself
+    broken and failing its own band check, so nothing was written. Fixing the anchor exposed it.
+
+    The curve IS the measurement; there is nothing left to calibrate on that path.
+    """
+
+    def test_no_anchor_factor_is_written_when_the_curves_are_in_use(self, m7):
+        blk = m7["block"]
+        assert blk["sw_method"] == "esw"
+        assert blk.get("k_esw", 1.0) == 1.0
+        assert blk.get("k_turnoff", 1.0) == 1.0
+        anchor = blk["_switching_anchor"]
+        assert anchor["ok"] is True                    # still computed...
+        assert anchor.get("applied") is False          # ...and explicitly not applied
+        assert anchor.get("not_applied_reason")
+
+    def test_the_factors_are_still_applied_to_the_analytic_model(self, pdf_bytes, store_root):
+        """The other half: switching the designer back to the analytic model must restore them,
+        or the anchor stops doing the job it was built for (C209)."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        d = dict(DESIGN_INPUTS); d["sw_method"] = "analytic"
+        blk = DF.profile_to_block(PS.load_profile(up["part_number"], kind="extracted",
+                                                  root=store_root), "sic_mosfet", d)
+        assert blk["_switching_anchor"]["ok"] is True
+        assert blk["k_esw"] != 1.0
+        assert blk[M.PROVENANCE_KEY]["k_esw"] == "derived"
+
+    def test_switching_energy_is_exactly_the_curve_arithmetic(self, m7):
+        """Hand-check, so the number is not merely self-consistent: at the datasheet's own test
+        current the engine must return (E_on,debundled + E_off) scaled by V_OUT/V_test, with no
+        other factor sneaking in."""
+        import numpy as np
+        from app.mode_b.semiconductor.pfc_loss_model import Mosfet, curve
+        blk = m7["block"]
+        e = blk["_esw_basis"]
+        fields = {k: v for k, v in blk.items() if k in Mosfet.__dataclass_fields__}
+        m = Mosfet(**fields)
+        i = np.array([e["i_test"]])
+        vo = 394.0
+        eon = curve(i, *blk["eon_curve"])[0]
+        eoff = curve(i, *blk["eoff_curve"])[0]
+        got = m.e_switch(i, i, vo, 110.0)[0]
+        assert got == pytest.approx((eon + eoff) * (vo / blk["vref_sw"]), rel=1e-9)
+        # and the de-bundling really did come off the turn-on side
+        assert eon == pytest.approx(35e-6 - e["debundled_J"], abs=1.5e-6)

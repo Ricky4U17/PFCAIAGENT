@@ -9110,3 +9110,99 @@ diode's Q_c and C_j bases - labels kept to tokens of 7 characters or fewer for t
 Verified: Ch7 standalone builds, 17 pp, zero unrenderable glyphs, all four notes present (the
 LABELS are drawn rather than typeset, so they never appear in a text extract - "Qc AT BUS" does not
 either). Frontend tsc clean.
+
+## C225 - the external MOSFET/diode/bridge review: measured switching energy, and the labels
+
+Three review documents (specs/Review/{PFC Mosfet, PFC Boost Diode, Bridge Rectifier Update}) were
+compared against the code as it stands, NOT against the report they were written on. Most of what
+they raise is already done or already better - the bridge sharing sweep (C218/C220), the digitised
+Fig. 4 (C217), the derating gate (C221), the diode V_F curve (C215/C222), no-double-count of Q_c,
+I_FSM used for surge only. Two things were real, and one of them found a live bug.
+
+### Item 1 - switching energy off the MEASURED curves
+
+The review's main MOSFET point: the SHAPE of E_on/E_off was analytic, anchored at one datasheet
+point. It should be the vendor's own E(I_D) curves. Everything for that already existed except the
+last link - the registry already declared `E_on_vs_ID`/`E_off_vs_ID` -> `eon_curve`/`eoff_curve`,
+and the engine already consumed them through `sw_method='esw'`. Nothing populated them.
+
+Both plots read cleanly and, better, the three unlabelled traces on each SELF-IDENTIFY against the
+part's own table (E_on 35 uJ, E_off 22 uJ at 27.9 A, R_g 1.8 ohm):
+
+| figure | E_on trace | E_off trace | sum trace |
+|---|---|---|---|
+| E vs I_D at 27.9 A | 34.90 uJ (0.28 %) | 21.82 uJ (0.82 %) | 56.76 uJ |
+| E vs R_g at 1.8 ohm | 34.90 uJ (0.30 %) | 21.85 uJ (0.66 %) | 56.82 uJ |
+
+Four targets added. `figure_proposals` lost its `break`: one figure now yields SEVERAL keys, and
+each finds its own trace through its own cross-check anchor. The matchers were checked to be
+mutually exclusive on every other axis title in the file ("Eoss [uJ]" and "EAS [mJ]" both read
+"s [" before the bracket, so the bare "e [" hits only these two plots).
+
+CONVENTION B APPLIES TO THE CURVE, NOT JUST THE ANCHOR. A published E_on bundles the device
+overlap, its own E_oss and the fixture's freewheeling charge; this chapter books the last two
+separately, so the raw curve would double-count them - the exact error the review itself warns
+about. The bundled parts are voltage-set, not current-set, so they come off as a constant
+22.34 uJ (E_oss 8.74 + 34 nC x 400 V). **The check that the subtraction is the right SIZE is
+physical: the remainder falls to +0.82 uJ at the lowest plotted current, and overlap energy is
+proportional to current, so it must vanish there.** E_off is not de-bundled.
+
+GATE RESISTANCE, PER PATH. The `esw` path applies no correction at all, so a design whose gate
+path differs from the fixture would silently inherit 1.8 ohm. K_Rg,on and K_Rg,off are read off the
+E vs R_g curve and applied INDEPENDENTLY. Exactly 1.000/1.000 at the fixture value (a real no-op,
+not an approximate one); 1.499/1.749 at 4.7 ohm; 2.412/3.014 at 10 ohm - turn-off is the more
+R_g-sensitive path, which is why one figure for both would be wrong.
+
+**A LIVE BUG, FOUND BY CHASING A NUMBER THAT MOVED.** `e_switch` applies `k_esw` and `k_turnoff`
+in BOTH branches. Those factors calibrate the ANALYTIC model (k_esw = 2.71 here), so once the
+measured curves were in use they multiplied a digitised plot by 2.71 - P_FET 41 % high. It was
+masked because the anchor was ALSO broken: `switching_anchor` built its "analytic baseline" from a
+block that now carried `sw_method='esw'`, so it compared the curve with itself, returned k_on =
+0.36, failed its own band check and wrote nothing. Fixing the anchor's independence exposed the
+scaling. Both are fixed: the baseline is always evaluated analytically, and the factors are
+written only when the analytic model is the one running.
+
+Result at the reference design, hand-verified against the curve arithmetic
+(e_switch == (E_on,debundled + E_off) x V_OUT/V_test exactly, k factors at 1.0):
+
+| | analytic (C224) | measured (C225) |
+|---|---|---|
+| P_FET_max | 8.7816 W | 9.3140 W (+6.06 %) |
+| P_SEMI_max | 57.9864 W | 58.4097 W (+0.73 %) |
+| Tj_FET_max | 69.13 degC | 69.50 degC |
+
+Two independent methods - one built from C_iss/Q_gd/R_g, one from a digitised plot, sharing no
+input - agreeing to 6 % is worth more than either alone, and the analytic anchor is now REPORTED
+as that cross-check rather than applied.
+
+### Item 2 - what the reviewer could not check
+
+Labels first, because two of them named mechanisms the part does not have:
+- Table 7.4's column was literally **"RR"** for a SiC Schottky with no reverse recovery. It is now
+  "Diode Q_c -> FET", and it follows the RESOLVED technology - for a silicon part it really is
+  Q_rr, so renaming it unconditionally would have traded one wrong label for another.
+- Table 7.5 gained a **Blocking (leak)** column. `P_D_leak` was computed all along and never
+  shown, so conduction + switching did not equal the total and the remainder was unexplained. The
+  three columns now sum exactly.
+- The bridge table printed **"P_bridge (bottom) = 0.00 W"** for a diode bridge, where "bottom"
+  means a sync FET that does not exist. That is what led the reviewer to conclude the model was
+  single-path. The split is shown only for `sync_bottom`; package sharing is Table 7.3.2, which
+  has been there since C220.
+- Section 7.4.1 now writes out what i^2 IS. The engine computes `i_ch^2 + di^2/12`, which is
+  identical to (I_v^2 + I_v.I_p + I_p^2)/3 - the review's own equation - but the report showed only
+  `sqrt(avg[i^2 d])`, which reads as though it might be the square of the AVERAGE current.
+  No calculation change; the ambiguity was real.
+
+DATASHEET FIGURES IN THE REPORT. Every digitised curve now carries the plot it was read off.
+`confirm_figure` renders it once, at confirm time, so the image is what the designer approved and
+the report needs no access to the PDF or the frame geometry. New Sections 7.3.4 / 7.4.6 / 7.5.6,
+grouped by SOURCE plot so a figure carrying two quantities prints once. This also fixed a
+provenance hole: the GUI was sending only {x, y}, so every curve confirmed through the real UI had
+a blank source - caption, page and frame now travel with it.
+
+GUI/REPORT PARITY. The screen had the same bad labels ("Recovery" for a SiC Q_c term, "D sw/RR",
+"Bottom"), so all three tables were brought to the same wording as Chapter 7.
+
+Verified: Table 7.4 as PRINTED matches the engine's own per_point rows at all 9 line voltages
+(max delta 0.0043 W = 2-dp display rounding); diode columns sum to the total exactly; consistency
+gate passes; Ch7 builds at 20 pp with 29 embedded images and zero unrenderable glyphs; tsc clean.

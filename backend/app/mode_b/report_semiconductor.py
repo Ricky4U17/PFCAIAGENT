@@ -38,6 +38,84 @@ def _f(x, n=2):
     return f"{float(x):.{n}f}"
 
 
+# Which figure backs which quantity, and what a reviewer should look for in it. Keyed by the
+# canonical parameter, so a datasheet that publishes a plot we do not consume never appears and a
+# curve we DO consume is never shown without saying what it is for.
+_FIGURE_PURPOSE = {
+    "V_F_vs_IF":     ("Forward voltage V<sub>F</sub>(I<sub>F</sub>)",
+                      "conduction loss is integrated along this curve, not taken at one drop"),
+    "V_F_vs_IF_hot": ("Forward voltage at the hot junction",
+                      "the second temperature the per-point V<sub>F</sub> interpolates towards"),
+    "Q_c_vs_VR":     ("Capacitive charge Q<sub>c</sub>(V<sub>R</sub>)",
+                      "read at the bus voltage; booked to the MOSFET in Section 7.4.4"),
+    "E_c_vs_VR":     ("Capacitive energy E<sub>c</sub>(V<sub>R</sub>)",
+                      "the same commutation energy expressed directly as energy"),
+    "C_j_vs_VR":     ("Junction capacitance C<sub>j</sub>(V<sub>R</sub>)",
+                      "fits the grading coefficient across the whole plotted range"),
+    "I_rev_vs_VR":   ("Reverse current I<sub>R</sub>(V<sub>R</sub>)", "blocking (leakage) loss"),
+    "I_F_AV_vs_Tc":  ("Rectified current vs case temperature",
+                      "the derating gate of Table 7.3.3 — against CASE, not free air"),
+    "E_oss_vs_VDS":  ("Output-capacitance energy E<sub>oss</sub>(V<sub>DS</sub>)",
+                      "evaluated at the actual bus, not at the datasheet's 400 V"),
+    "C_rss_vs_VDS":  ("Reverse-transfer capacitance C<sub>rss</sub>(V<sub>DS</sub>)",
+                      "the Miller integral is taken from this curve instead of Q<sub>gd</sub>V/2"),
+    "R_DS_on_vs_Tj": ("On-resistance vs junction temperature",
+                      "why a 25&#176;C R<sub>DS(on)</sub> cannot be used; the curve is convex"),
+    "R_DS_on_vs_ID": ("On-resistance vs drain current",
+                      "normalised, so R<sub>DS(on)</sub> rises with current instead of being flat"),
+    "E_on_vs_ID":    ("Turn-on energy vs drain current",
+                      "E<sub>on</sub> is read at the inductor VALLEY current at each line angle"),
+    "E_off_vs_ID":   ("Turn-off energy vs drain current",
+                      "E<sub>off</sub> is read at the PEAK current at each line angle"),
+    "E_on_vs_Rg":    ("Turn-on energy vs gate resistance",
+                      "supplies K<sub>Rg,on</sub>; the published energies hold only at the "
+                      "fixture's resistor"),
+    "E_off_vs_Rg":   ("Turn-off energy vs gate resistance",
+                      "supplies K<sub>Rg,off</sub>, corrected independently of turn-on"),
+}
+
+
+def _datasheet_figures(story, block, sect, title, ch):
+    """Embed the datasheet plots every digitised curve in this block was read off.
+
+    The external review asked for these on all three components, and the reason is the strongest
+    argument in it: a digitised curve is the one input a reviewer cannot check against anything —
+    a table value can be looked up, a formula can be re-derived, but a shape read off a picture is
+    only as good as the picture it came from. Showing it turns the curve from an assertion into
+    evidence.
+    """
+    figs = [f for f in ((block or {}).get("_figure_images") or []) if f.get("path")]
+    if not figs:
+        return
+    sub_h(story, sect, title, ch)
+    _W(story,
+       "Every curve below was read off the plot shown beside it and confirmed against the "
+       "datasheet's own tabulated value on the same axes. Where the two disagreed the reading was "
+       "refused, so a figure appearing here has been checked, not merely extracted.")
+    # ONE PLOT CAN CARRY SEVERAL QUANTITIES — E_on and E_off are two traces of one figure — so the
+    # panel groups by image and lists what was taken from each. Printing the same plot twice in
+    # succession reads as a duplication error rather than as two separate readings.
+    # Grouped by the SOURCE PLOT (page + frame), not by the stored filename: each key writes its
+    # own PNG, so two quantities off one figure have different paths but identical pictures.
+    seen: dict = {}
+    for f in figs:
+        seen.setdefault((f.get("page"), tuple(f.get("frame") or ()) or f["path"]), []).append(f)
+    for _src_key, group in seen.items():
+        path = group[0]["path"]
+        try:
+            story.append(_img_path(path, width=CW * 0.52))
+        except Exception:
+            continue
+        g0 = group[0]
+        src = (f"{g0['figure']}, page {g0['page']}" if g0.get("figure")
+               else (f"page {g0['page']}" if g0.get("page") else "this datasheet"))
+        lines = []
+        for f in group:
+            what, why = _FIGURE_PURPOSE.get(f["key"], (f["key"], "used by this calculation"))
+            lines.append(f"<b>{what}</b> &#8212; {why}")
+        _W(story, f"Read from {src}. " + "; ".join(lines) + ".")
+
+
 _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "semiconductor", "assets")
 
 def _config_schematic(topology, n_parallel):
@@ -358,8 +436,22 @@ def _mosfet_section(story, traces, mosfet=None):
        "during the on-time d). R<sub>ds(on)</sub> has a strong positive temperature coefficient "
        "(&#8776; +0.4&#8211;0.5 %/&#176;C for SiC), so we evaluate it at the converged hot junction "
        "temperature — a 25&#176;C value would under-state the loss by 20&#8211;40 %.")
+    # WHAT i^2 IS, WRITTEN OUT. The compact form was read by an external reviewer as possibly the
+    # square of the AVERAGE channel current, which would drop the ripple contribution entirely.
+    # The engine evaluates the switching-cycle triangular mean square, and these are identical:
+    # [(i-di/2)^2 + (i-di/2)(i+di/2) + (i+di/2)^2]/3 = i^2 + di^2/12.
     eq_box(story, [r"I_{FET,rms}=\sqrt{\overline{\,i^2\,d\,}},\qquad R_{ds(on)}(T_j)=R_{ds,25}\,k(T_j)",
+                   r"i^2(\theta)=\frac{I_{valley}^2+I_{valley}I_{peak}+I_{peak}^2}{3}"
+                   r"=I_{ch}^2(\theta)+\frac{\Delta I_L^2(\theta)}{12}",
                    r"P_{cond}=N_{ch}\,R_{ds(on)}(T_j)\,I_{FET,rms}^2"], number="7.4.1", ch=CH)
+    _W(story,
+       "The middle line is the point a reviewer should check: <b>i&#178; is the switching-cycle "
+       "<i>triangular</i> mean square</b>, not the square of the average channel current. The two "
+       "forms shown are algebraically identical &#8212; the engine evaluates the right-hand one "
+       "&#8212; and using the average instead would discard the ripple term "
+       "&#916;I<sub>L</sub>&#178;/12, which is not negligible at low line. The duty factor d gates "
+       "it to the MOSFET on-time; in DCM the same integral is taken over the actual conduction "
+       "sub-interval instead.")
     _worked(story, "7.4.1", "Conduction Loss — Worked Derivation", [
         ("R<sub>ds(on)</sub>(T<sub>j</sub>) = R<sub>ds,25</sub>&#183;k(T<sub>j</sub>)",
          lambda tr: f"{_f(tr['rds_25']*1e3,1)}m&#215;{_f(tr['rds_tj_factor'],3)} (T<sub>j</sub>={_f(tr['Tj_fet'],0)}{_DEG}C) = {_f(tr['rds_tj']*1e3,1)} m{_OHM}"),
@@ -369,17 +461,41 @@ def _mosfet_section(story, traces, mosfet=None):
     ], traces)
 
     sub_h(story, "7.4.2", "Switching loss (turn-on + turn-off)", CH)
-    _W(story,
-       "<b>Model.</b> At hard switching the drain voltage and current overlap during the transition, "
-       "dissipating a crossover energy each cycle. Rather than a single datasheet E<sub>sw</sub> figure "
-       "(quoted at one R<sub>g</sub>/V<sub>DS</sub>/I that rarely matches the design), we compute "
-       "E<sub>on</sub> and E<sub>off</sub> <i>analytically</i> from the actual gate drive: the "
-       "current rise/fall times from C<sub>iss</sub>&#183;R<sub>g</sub>&#183;ln(&#183;) and the "
-       "Miller-plateau charge J = Q<sub>gd</sub>&#183;V<sub>OUT</sub>/2 (or the C<sub>rss</sub>(V) "
-       "integral). This makes E<sub>sw</sub> scale correctly with this design's R<sub>g</sub>, V<sub>g</sub>, "
-       "operating current and T<sub>j</sub>. The loss is f<sub>sw</sub> times the cycle-averaged energy.")
-    eq_box(story, [r"E_{sw}(i,V_{OUT},T_j)=E_{on}+E_{off},\qquad "
-                   r"P_{sw}=N_{ch}\,f_{sw}\,\overline{E_{sw}}"], number="7.4.2", ch=CH)
+    # WHICH MODEL IS ACTUALLY RUNNING DECIDES WHAT THIS SECTION SAYS. When a measured E(I_D) curve
+    # has been confirmed the engine switches to it, and a section still describing the analytic
+    # crossover model would be documenting a calculation that did not happen.
+    _esw = (mosfet or {}).get("_esw_basis") or {}
+    _use_curves = (mosfet or {}).get("sw_method") == "esw" and _esw.get("ok")
+    if _use_curves:
+        _W(story,
+           "<b>Model.</b> Turn-on and turn-off energy are taken from the <b>datasheet's own "
+           "measured E(I<sub>D</sub>) curves</b>, not from an analytic crossover model. Each is "
+           "evaluated at the current that actually flows at that instant &#8212; E<sub>on</sub> at "
+           "the inductor <i>valley</i> current, since the channel takes over there, and "
+           "E<sub>off</sub> at the <i>peak</i> &#8212; at every angle of the line cycle, so the "
+           "energy tracks the current the same way the vendor measured it. Two corrections are "
+           "applied and both are shown below: the published turn-on energy is <b>de-bundled</b> "
+           "(Table 7.4.2b) because this chapter books E<sub>oss</sub> and the diode charge "
+           "separately in Sections 7.4.3 and 7.4.4, and the energies are <b>corrected for this "
+           "design's gate resistors</b>, which are not the ones the datasheet was measured at.")
+        # mathtext has no \big[ ; plain brackets render and \left[..\right] is the only other form
+        eq_box(story, [r"E_{on}(\theta)=[\,E_{on,ds}(i_{valley})-E_{oss}(V_{test})-Q_{fw}V_{test}\,]"
+                       r"\,K_{Rg,on}\,\frac{V_{OUT}}{V_{test}}",
+                       r"E_{off}(\theta)=E_{off,ds}(i_{peak})\,K_{Rg,off}\,\frac{V_{OUT}}{V_{test}},"
+                       r"\qquad P_{sw}=N_{ch}\,f_{sw}\,\overline{E_{on}+E_{off}}"],
+               number="7.4.2", ch=CH)
+    else:
+        _W(story,
+           "<b>Model.</b> At hard switching the drain voltage and current overlap during the transition, "
+           "dissipating a crossover energy each cycle. Rather than a single datasheet E<sub>sw</sub> figure "
+           "(quoted at one R<sub>g</sub>/V<sub>DS</sub>/I that rarely matches the design), we compute "
+           "E<sub>on</sub> and E<sub>off</sub> <i>analytically</i> from the actual gate drive: the "
+           "current rise/fall times from C<sub>iss</sub>&#183;R<sub>g</sub>&#183;ln(&#183;) and the "
+           "Miller-plateau charge J = Q<sub>gd</sub>&#183;V<sub>OUT</sub>/2 (or the C<sub>rss</sub>(V) "
+           "integral). This makes E<sub>sw</sub> scale correctly with this design's R<sub>g</sub>, V<sub>g</sub>, "
+           "operating current and T<sub>j</sub>. The loss is f<sub>sw</sub> times the cycle-averaged energy.")
+        eq_box(story, [r"E_{sw}(i,V_{OUT},T_j)=E_{on}+E_{off},\qquad "
+                       r"P_{sw}=N_{ch}\,f_{sw}\,\overline{E_{sw}}"], number="7.4.2", ch=CH)
     _worked(story, "7.4.2", "Switching Loss — Worked Derivation", [
         ("i<sub>on</sub> / i<sub>off</sub> (peak of line)",
          lambda tr: f"{_f(tr['i_on_pk'],2)} / {_f(tr['i_off_pk'],2)} A"),
@@ -389,6 +505,47 @@ def _mosfet_section(story, traces, mosfet=None):
          lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['Esw_avg'])} = <b>{_f(tr['P_sw_fet_tot'])} W</b>"),
     ], traces)
 
+    if _use_curves:
+        _eo = _esw.get("eoss_test_J") or 0.0
+        data_table(story, "7.4.2b", "Measured Switching Energy — Extraction and Corrections",
+            "Every number the switching model uses, and what it was checked against. The plot and "
+            "the parameter table are independent renderings of one measurement, so their agreement "
+            "at the test point is what says the curve was read correctly.",
+            ["Quantity", "Value", "Basis"],
+            [["E<sub>on</sub> read at test point",
+              f"{_esw['error_pct']['E_on']:.2f} % from table",
+              f"digitised E(I<sub>D</sub>) curve at {_esw['i_test']:.1f} A"],
+             ["E<sub>off</sub> read at test point",
+              f"{_esw['error_pct']['E_off']:.2f} % from table",
+              f"digitised E(I<sub>D</sub>) curve at {_esw['i_test']:.1f} A"],
+             ["&#8722; E<sub>oss</sub>(V<sub>test</sub>)", f"{_eo*1e6:.2f} {_MU}J",
+              f"counted separately in Section 7.4.3"],
+             ["&#8722; fixture charge Q<sub>fw</sub>&#183;V<sub>test</sub>",
+              f"{_esw['q_fw_C']*_esw['v_test']*1e6:.2f} {_MU}J",
+              (f"{_esw['q_fw_C']*1e9:.0f} nC "
+               + ("stated by the datasheet" if _esw.get("q_fw_stated") else "assumed midpoint")
+               + "; counted in Section 7.4.4")],
+             ["De-bundled turn-on total", f"&#8722;{_esw['debundled_J']*1e6:.2f} {_MU}J",
+              "removed before the curve is used, so no term is counted twice"],
+             ["Residual at lowest plotted current",
+              f"{_esw['residual_at_min_current_J']*1e6:+.2f} {_MU}J",
+              "<b>the check</b>: overlap energy is proportional to current, so it must fall to "
+              "about zero here"],
+             ["K<sub>Rg,on</sub>", f"{_esw['k_rg_on']:.3f}",
+              f"R<sub>g,on</sub> {float(_esw['rg_on'] or 0):g} {_OHM} vs "
+              f"{_esw['rg_test']:g} {_OHM} test, from the E vs R<sub>g</sub> curve"],
+             ["K<sub>Rg,off</sub>", f"{_esw['k_rg_off']:.3f}",
+              f"R<sub>g,off</sub> {float(_esw['rg_off'] or 0):g} {_OHM} vs "
+              f"{_esw['rg_test']:g} {_OHM} test, corrected independently of turn-on"]],
+            col_widths=[CW*0.34, CW*0.22, CW*0.44], ch=CH)
+        annotation(story, "GATE PATH",
+            "The published switching energies are valid only at the gate resistor the datasheet "
+            "measured them with. The turn-on path sets dv/dt and E<sub>on</sub>; the turn-off path "
+            "sets E<sub>off</sub>. They are therefore corrected <b>separately</b> &#8212; using one "
+            "figure for both would hide the design intent of an asymmetric gate drive.", CH)
+        for _n in (_esw.get("notes") or []):
+            annotation(story, "Esw NOTE", _n, CH)
+
     # M4b. When the switching model is anchored on published energies, the report MUST show the
     # de-bundling arithmetic: the whole basis for keeping a separate E_oss term alongside a
     # datasheet E_on is that the bundled parts were subtracted first. A reader has to be able to
@@ -397,8 +554,14 @@ def _mosfet_section(story, traces, mosfet=None):
     if _anch.get("ok"):
         _b = _anch["basis"]
         annotation(story, "ANCHOR",
-            f"The switching model is <b>anchored on the datasheet's published energies</b> rather "
-            f"than run open-loop. {_anch['statement']}<br/><br/>"
+            (f"The analytic crossover model is retained as an <b>independent cross-check</b> on the "
+             f"measured curves above, not as the reported calculation. It is built from the gate "
+             f"drive &#8212; C<sub>iss</sub>, Q<sub>gd</sub>, R<sub>g</sub> &#8212; and so shares no "
+             f"input with a digitised plot; the two agreeing is evidence neither could give alone. "
+             if _use_curves else
+             f"The switching model is <b>anchored on the datasheet's published energies</b> rather "
+             f"than run open-loop. ")
+            + f"{_anch['statement']}<br/><br/>"
             f"<b>Why the subtraction.</b> A published E<sub>on</sub> is measured in a double-pulse "
             f"fixture and bundles three things: the device's own voltage-current overlap, the "
             f"discharge of its own C<sub>oss</sub>, and the charge of the freewheeling element. "
@@ -979,12 +1142,28 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             "assumption. A lower hot R<sub>DS(on)</sub> restores full FET conduction and that "
             "share falls to zero.", CH)
     _has_bd = any(r.get("P_BRIDGE_bottom_bd", 0) > 0.01 for r in rows)
-    data_table(story, "7.3", "Bridge Loss vs Line Voltage",
-        "Conducting-pair loss at each operating point" + (" (top diodes + bottom MOSFETs)." if is_sync else "."),
-        ["V_AC", "I_in,rms", "P_bridge (top)", "P_bridge (bottom)", "P_bridge total"],
-        [[f"{r['Vac']:.0f} V", f"{_f(r['Iin_rms'],1)} A", f"{_f(r['P_BRIDGE_top'])} W",
-          f"{_f(r['P_BRIDGE_bottom'])} W", f"{_f(r['P_BRIDGE_total'])} W"] for r in rows],
-        col_widths=[CW*0.14, CW*0.18, CW*0.22, CW*0.24, CW*0.22], ch=CH)
+    # "TOP" AND "BOTTOM" ONLY MEAN ANYTHING IN A SYNC-BOTTOM BRIDGE, where the top half is diodes
+    # and the bottom half is bypass MOSFETs. In a plain diode bridge there is no bottom device, so
+    # the column printed 0.00 W at every line and an external reviewer read that as "all the loss
+    # is in one package" — i.e. as a single-path model. The split is a topology artefact, not a
+    # result, so it is shown only where it is one. Package-to-package sharing is Table 7.3.2.
+    if is_sync:
+        _hdr = ["V_AC", "I_in,rms", "P_bridge (top)", "P_bridge (bottom)", "P_bridge total"]
+        _rws = [[f"{r['Vac']:.0f} V", f"{_f(r['Iin_rms'],1)} A", f"{_f(r['P_BRIDGE_top'])} W",
+                 f"{_f(r['P_BRIDGE_bottom'])} W", f"{_f(r['P_BRIDGE_total'])} W"] for r in rows]
+        _cw = [CW*0.14, CW*0.18, CW*0.22, CW*0.24, CW*0.22]
+        _cap = "Conducting-pair loss at each operating point (top diodes + bottom MOSFETs)."
+    else:
+        _hdr = ["V_AC", "I_in,rms", "P_bridge total"]
+        _rws = [[f"{r['Vac']:.0f} V", f"{_f(r['Iin_rms'],1)} A", f"{_f(r['P_BRIDGE_total'])} W"]
+                for r in rows]
+        _cw = [CW*0.28, CW*0.34, CW*0.38]
+        _cap = ("Conducting-pair loss at each operating point. Two diodes conduct in series at "
+                "every line angle, and where packages are paralleled each carries its share of "
+                "the rectified current with its forward voltage evaluated at that shared current "
+                "&#8212; the sensitivity of the result to how evenly they share is Table 7.3.2.")
+    data_table(story, "7.3", "Bridge Loss vs Line Voltage", _cap, _hdr, _rws,
+               col_widths=_cw, ch=CH)
     if _has_bd:
         annotation(story, "NOTE",
             "The total includes a bottom-diode crest share (the bypass-FET ohmic drop exceeds the "
@@ -1050,6 +1229,9 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             ["Rating", "Value", "Check"], _srows,
             col_widths=[CW*0.30, CW*0.22, CW*0.48], ch=CH)
 
+    _datasheet_figures(story, bridge, "7.3.4",
+                       "Datasheet evidence for the bridge loss model", CH)
+
     # ── 7.4 MOSFET ───────────────────────────────────────────────────────────
     sub_h(story, "7.4", "Boost MOSFET Loss", CH)
     annotation(story, "THEORY",
@@ -1058,25 +1240,54 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "gate-drive + leakage. Each is modelled below in its own sub-section: the equation we use, why "
         "that model is appropriate, and the worked numbers at the 90 V and 180 V corners.", CH)
     _mosfet_section(story, traces, mosfet)
+    # THE COLUMN WAS CALLED "RR" FOR A PART WITH NO REVERSE RECOVERY. For a SiC Schottky the
+    # energy dumped into the channel at turn-on is the diode's junction CHARGE Q_c, not recovery
+    # charge, and the external review flagged the label as actively misleading. The header now
+    # follows the technology that was actually resolved, because for a silicon diode it really is
+    # Q_rr and renaming it unconditionally would trade one wrong label for another.
+    # `is_sic` is resolved per section; the loss engine records what the diode block RESOLVED to
+    # (which is not always the sub-tab it was uploaded under — settled at C210).
+    is_sic = bool(traces[0][1].get("is_sic", True)) if traces else True
+    _rr_hdr = "Diode Q<sub>c</sub>&#8594;FET" if is_sic else "Diode Q<sub>rr</sub>&#8594;FET"
     data_table(story, "7.4", "MOSFET Loss Breakdown vs Line Voltage",
-        "Per-mechanism MOSFET loss (all channels), at every input voltage.",
-        ["V_AC", "Cond", "Switch", "Coss", "RR", "Gate+leak", "FET total"],
+        "Per-mechanism MOSFET loss (all channels), at every input voltage. The "
+        + ("Q<sub>c</sub>" if is_sic else "Q<sub>rr</sub>") +
+        " column is the boost diode's charge dissipated in the MOSFET channel at turn-on: it is a "
+        "MOSFET loss, and it is deliberately NOT repeated in the diode total of Table 7.5.",
+        ["V_AC", "Cond", "Switch", "Coss", _rr_hdr, "Gate+leak", "FET total"],
         [[f"{r['Vac']:.0f} V", _f(r['P_FET_cond']), _f(r['P_FET_sw']), _f(r['P_FET_coss']),
           _f(r['P_FET_rr']), _f(r['P_gate_driver'] + r['P_FET_leak']),
           f"{_f(r['P_FET_total'] + r['P_gate_driver'])} W"] for r in rows],
-        col_widths=[CW*0.13, CW*0.13, CW*0.14, CW*0.13, CW*0.12, CW*0.17, CW*0.18], ch=CH)
+        col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.18, CW*0.16, CW*0.18], ch=CH)
+
+    _datasheet_figures(story, mosfet, "7.4.6",
+                       "Datasheet evidence for the MOSFET loss model", CH)
 
     # ── 7.5 Boost diode ──────────────────────────────────────────────────────
     sub_h(story, "7.5", "Boost Diode Loss", CH)
     _diode_section(story, traces, diode)
+    # LEAKAGE WAS COMPUTED AND NEVER SHOWN, so Conduction + Switching did not add up to the total
+    # and a reader could only guess at the remainder. It is its own column now. The switching
+    # column is named for the mechanism it actually contains — recovery — because for a SiC part
+    # it is exactly zero and a bare "Switching" reads like an omission rather than a result.
+    _sw_hdr = "Recovery Q<sub>rr</sub>" if not is_sic else "Recovery (Q<sub>rr</sub>)"
     data_table(story, "7.5", "Diode Loss vs Line Voltage",
-        "Conduction + switching loss of the boost diode(s), at every input voltage.",
-        ["V_AC", "Conduction", "Switching", "Diode total"],
-        [[f"{r['Vac']:.0f} V", f"{_f(r['P_D_cond'])} W", f"{_f(r['P_D_sw'])} W", f"{_f(r['P_DIODE_total'])} W"]
+        "Conduction, recovery and blocking loss of the boost diode(s), at every input voltage. "
+        + ("This is a SiC Schottky: it has no minority-carrier recovery, so the recovery column is "
+           "exactly zero, and its junction charge Q<sub>c</sub> is booked to the MOSFET in "
+           "Table 7.4 rather than counted again here. "
+           if is_sic else "") +
+        "The three columns sum to the total, so nothing is hidden in the remainder.",
+        ["V_AC", "Conduction", _sw_hdr, "Blocking (leak)", "Diode total"],
+        [[f"{r['Vac']:.0f} V", f"{_f(r['P_D_cond'])} W", f"{_f(r['P_D_sw'])} W",
+          f"{_f(r.get('P_D_leak', 0.0), 3)} W", f"{_f(r['P_DIODE_total'])} W"]
          for r in rows],
-        col_widths=[CW*0.18, CW*0.27, CW*0.27, CW*0.28], ch=CH)
+        col_widths=[CW*0.13, CW*0.21, CW*0.23, CW*0.22, CW*0.21], ch=CH)
 
     # ── 7.6 Thermal ──────────────────────────────────────────────────────────
+    _datasheet_figures(story, diode, "7.5.6",
+                       "Datasheet evidence for the boost-diode loss model", CH)
+
     sub_h(story, "7.6", "Thermal Network and Junction Temperatures", CH)
     _thermal_section(story, traces, thermal)
     data_table(story, "7.6", "Junction Temperatures vs Line Voltage",

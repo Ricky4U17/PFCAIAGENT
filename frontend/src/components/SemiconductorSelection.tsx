@@ -535,7 +535,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
     setCurveBusy(true); setErr(null)
     try {
       const c = p.curves[ci]
-      await datasheetFigureConfirm({ part_number: part, key, curve: { x: c.x, y: c.y },
+      // caption/page/frame travel WITH the curve: the backend cites them as the curve's source and
+      // renders the plot image from the frame, so the report can show the figure the curve came
+      // off. Sending only {x,y} left every confirmed curve with a blank source.
+      await datasheetFigureConfirm({ part_number: part, key,
+        curve: { x: c.x, y: c.y, caption: p.caption, page: p.page, frame: p.frame },
         conditions: tj ? { T_j: Number(tj) } : {} })
       setFigDone(m => ({ ...m, [`${p.key}:${ci}`]: key }))
       // re-confirm so the engine block is rebuilt from the profile that now carries the curve —
@@ -784,6 +788,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const isFet = kind === 'mosfet'
     const blk = (conf?.block ?? {}) as Record<string, any>
     const tech = blk._technology as Record<string, any> | undefined
+    // What the DIODE resolved to, which is what decides whether the charge dumped into the MOSFET
+    // is Q_c or Q_rr. Defaults to SiC, matching the loss engine's own default.
+    const dSiC = (tech?.is_sic ?? true) as boolean
     const checks = (blk._checks ?? []) as { key: string; severity: string; message: string }[]
     // Design-sourced fields, per kind. The diode has no gate, so asking for R_g would be noise.
     // The C202 gate, run over what was just extracted or confirmed (M6). ADVISORY — it is shown
@@ -1211,13 +1218,20 @@ export const SemiconductorSelection: React.FC<Props> = ({
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                {/* HEADERS FOLLOW THE RESOLVED TECHNOLOGY, and match Chapter 7's tables word for
+                    word. A SiC Schottky has no reverse recovery: what lands in the MOSFET at
+                    turn-on is the diode's junction CHARGE Q_c, and calling that column "Recovery"
+                    described a mechanism the part does not have. The screen and the report must
+                    also not name the same number two different things. */}
                 <thead><tr>{(isFet
-                  ? ['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss', 'Recovery', 'Leakage',
-                     'TOTAL', 'T_j']
+                  ? ['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss',
+                     dSiC ? 'Diode Q_c → FET' : 'Diode Q_rr → FET', 'Leakage', 'TOTAL', 'T_j']
                   : kind === 'bridge'
-                  ? ['V_ac', 'P_out', 'Top (diodes)', 'Bottom', 'TOTAL', 'T_j']
-                  : ['V_ac', 'P_out', 'Conduction', 'Switching / RR', 'Leakage', 'TOTAL', 'T_j',
-                     'into MOSFET']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                  ? ['V_ac', 'P_out', 'Top (diodes)', 'Bottom (sync FET)', 'TOTAL', 'T_j']
+                  : ['V_ac', 'P_out', 'Conduction', dSiC ? 'Recovery (Q_rr = 0)' : 'Recovery Q_rr',
+                     'Blocking (leak)', 'TOTAL', 'T_j',
+                     dSiC ? 'Q_c → MOSFET' : 'Q_rr → MOSFET']).map(h =>
+                       <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {perPoint.map((p, i) => {
                     const key = isFet ? 'Tj_FET' : kind === 'bridge' ? 'Tj_BRIDGE_top' : 'Tj_DIODE'
@@ -1516,7 +1530,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
             {res.validation.ok && (
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'D cond', 'D sw/RR', 'Diode', 'Bridge', 'SEMI', 'Tj FET', 'Tj D', 'Tj Br']
+                  {/* "D sw/RR" named a mechanism a SiC Schottky does not have. Same wording as
+                      Chapter 7 Table 7.5 and as the datasheet-flow table above. */}
+                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'D cond',
+                               diode.is_sic ? 'D recovery (0)' : 'D recovery',
+                               'Diode', 'Bridge', 'SEMI', 'Tj FET', 'Tj D', 'Tj Br']
                     .map((h, i) => <th key={h} style={{ ...th, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
                   <tbody>
                     {res.per_point.map((r, i) => (
@@ -1549,8 +1567,8 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     for a silicon diode, where the recovery charge is the diode's own loss.
                   </div>)}
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 5 }}>
-                  D cond / D sw/RR = PFC boost-diode conduction vs switching loss, TOTALLED over all
-                  channels. For a Si diode the switching term is its share of the Q<sub>rr</sub>
+                  D cond / D recovery = PFC boost-diode conduction vs recovery loss, TOTALLED over
+                  all channels. For a Si diode the recovery term is its share of the Q<sub>rr</sub>
                   reverse-recovery energy; for SiC Schottky there is no minority-carrier recovery —
                   the Q<sub>c</sub> charging energy is booked to the MOSFET, so the diode's own term
                   is zero (see report Section 7.5).

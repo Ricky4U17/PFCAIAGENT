@@ -487,6 +487,26 @@
       "description": "Turn-off energy versus drain current."
     },
     {
+      "key": "E_on_vs_Rg",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": [],
+      "report_label": "E<sub>on</sub>(R<sub>g,ext</sub>)",
+      "description": "Turn-on energy versus external gate resistance. Not an engine field: the published switching energies are valid only at the fixture's own gate resistor, so this curve is consumed as the RATIO K_Rg,on = E_on(R_g,design)/E_on(R_g,test), which scales the turn-on energy curve. The turn-on path sets dv/dt and E_on and is independent of the turn-off path."
+    },
+    {
+      "key": "E_off_vs_Rg",
+      "si_unit": "J", "display_unit": "uJ",
+      "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],
+      "source": "datasheet", "required": false, "is_curve": true,
+      "consumed_by": ["loss_engine"],
+      "engine_fields": [],
+      "report_label": "E<sub>off</sub>(R<sub>g,ext</sub>)",
+      "description": "Turn-off energy versus external gate resistance, consumed as K_Rg,off = E_off(R_g,design)/E_off(R_g,test). Kept separate from the turn-on ratio because the two gate paths are independent."
+    },
+    {
       "key": "E_on_vs_ID_hot",
       "si_unit": "J", "display_unit": "uJ",
       "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt", "igbt"],

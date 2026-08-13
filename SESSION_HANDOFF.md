@@ -1,6 +1,10 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-12**, head = **`0921d90` C224**, on `master`.
+**Start here after a restart.** Last updated **2026-08-12**, head = **`fca4051` C224**, on `master`.
+
+> **C225 is COMPLETE but UNCOMMITTED** — the external MOSFET/diode/bridge review.
+> Measured switching-energy curves (item 1) + labels/leakage/figures (item 2). See the
+> `IMPLEMENTATION_LOG.md` entry; it found a live k_esw double-scaling bug.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -49,6 +53,7 @@ entering the design must carry provenance.
 | C222 | **real diode datasheets through the extractor** — 7 defects, series-variant selection | SFAF1608G V_F 0.975 → 1.700 V; **A11 CLOSED** |
 | C223 | 6 designer findings on the semiconductor page (GUI only) | requirement ignored `n_parallel` — per-package 18.87 → 9.43 A |
 | C224 | **M7-MOSFET** — grid-based plot finding, decade/lost-minus axes, 4 targets, curves reach the engine | 0 → 17 of 26 calibrate; 4 targets all agree with the part's own table; P_FET 9.10 → 8.78 W |
+| C225 | external review: **measured E_on/E_off curves** + de-bundled + per-path K_Rg; labels, leakage column, datasheet figures in the report | traces self-identify to ≤0.8 %; **found k_esw scaling a measured curve by 2.71** (P_FET 41 % high) |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are

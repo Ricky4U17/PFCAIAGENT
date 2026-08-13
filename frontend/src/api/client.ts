@@ -579,8 +579,12 @@ export const datasheetFigureImage = (file: File, page: number, frame: number[]) 
   return fetch(`${BASE}/mode-b/semiconductor/datasheet/figure-image`, { method: 'POST', body: fd })
     .then(async r => { if (!r.ok) throw new Error(`${r.status}`); return r.blob() })
 }
+/** `caption`/`page`/`frame` are the curve's SOURCE, not decoration: the backend cites them and
+ *  renders the plot image from the frame so Chapter 7 can show the figure the curve was read off. */
 export const datasheetFigureConfirm = (b: { part_number: string; key: string
-                                            curve: { x: number[]; y: number[] }
+                                            curve: { x: number[]; y: number[]
+                                                     caption?: string; page?: number
+                                                     frame?: number[] }
                                             conditions?: Record<string, unknown> }) =>
   post<{ ok: boolean; key: string; n_points: number }>(
     '/mode-b/semiconductor/datasheet/figure-confirm', b)
