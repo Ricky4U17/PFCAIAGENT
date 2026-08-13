@@ -1,10 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-12**, head = **`fca4051` C224**, on `master`.
-
-> **C225 is COMPLETE but UNCOMMITTED** — the external MOSFET/diode/bridge review.
-> Measured switching-energy curves (item 1) + labels/leakage/figures (item 2). See the
-> `IMPLEMENTATION_LOG.md` entry; it found a live k_esw double-scaling bug.
+**Start here after a restart.** Last updated **2026-08-13**, head = **`6b1193d` C225**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -272,10 +268,15 @@ flow and fixed several real calculation defects found along the way.
   → 442 at C214 (`test_curve_extract.py`), 455 at C217, 467 at C218 (`test_bridge_datasheet.py`)
   and 478 at C219 (`test_parts_library.py`), 491 at C220 (`test_figure_temperatures.py`),
   503 at C221 (`test_derating_gate.py`), 525 at C222 (`test_diode_real_datasheets.py`),
-  **536 at C224** (4 in `test_curve_extract.py`, 8 in `test_datasheet_flow.py`).
-  The suite now takes **~45 min**: the datasheet tests re-extract and re-digitise a 17-page PDF.
-  C224's own tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
+  **536 at C224** (4 in `test_curve_extract.py`, 8 in `test_datasheet_flow.py`),
+  **551 at C225** (15 more in `test_datasheet_flow.py`).
+  The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
+  C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
+  **The suite time needs re-measuring on a quiet machine.** It was ~45 min at C224; the C225 run
+  reported 3 h 50 m, but heavy probe scripts were running concurrently, so that figure is not a
+  clean measurement of the tests themselves. Do not treat either number as the baseline until it
+  has been timed with nothing else running.
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
