@@ -273,10 +273,15 @@ flow and fixed several real calculation defects found along the way.
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
-  **The suite time needs re-measuring on a quiet machine.** It was ~45 min at C224; the C225 run
-  reported 3 h 50 m, but heavy probe scripts were running concurrently, so that figure is not a
-  clean measurement of the tests themselves. Do not treat either number as the baseline until it
-  has been timed with nothing else running.
+  **The suite takes ~51 min** (3078 s, measured 2026-08-13 with no other process running; ~45 min
+  at C224 for 15 fewer tests). `DF.upload` re-extracts the PDF at ~40 s and is what every slow test
+  is paying for; the slowest single test is ~51 s.
+  **Two earlier readings were WRONG and are recorded here so they are not trusted again**: 3 h 50 m
+  (heavy probe scripts running concurrently) and 1 h 25 m (a single test showed 1902 s — 32 min for
+  work that takes 43 s standalone). The 1902 s did NOT reproduce: the same test at the same position
+  with no plugins to reorder it came back under 42 s on a repeat run, and the totals agree
+  (85 min − 32 min ≈ 51 min). Code, memory, ordering and Defender were each eliminated by
+  measurement, so it was external. **When a suite time looks wrong, re-run before believing it.**
 - Frontend `tsc`: clean.
 - Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
   Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
