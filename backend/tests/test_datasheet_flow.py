@@ -914,3 +914,82 @@ class TestTheAnchorFactorsNeverScaleAMeasuredCurve:
         assert got == pytest.approx((eon + eoff) * (vo / blk["vref_sw"]), rel=1e-9)
         # and the de-bundling really did come off the turn-on side
         assert eon == pytest.approx(35e-6 - e["debundled_J"], abs=1.5e-6)
+
+
+class TestConfirmDoesNotDestroyAcceptedCurves:
+    """REGRESSION GUARD for the defect that made every curve feature dead in the real GUI.
+
+    `confirm()` rebuilds from the EXTRACTED profile by design — that is what lets the library say
+    "the machine read X, you confirmed Y". But it wrote that over the confirmed profile, and the
+    only thing living there that the extraction does not contain is a digitised curve.
+
+    The Curves tab re-confirms after every Accept (deliberately, so the engine block rebuilds), so
+    in the running application each curve was written by `confirm_figure` and deleted by the
+    `confirm` that followed it milliseconds later. C215, C224 and C225 all shipped curve features
+    that never once reached the engine through the screen.
+
+    EVERY EXISTING TEST MISSED IT by calling `profile_to_block` directly and never running the two
+    calls in the order the GUI does. These tests run them in that order.
+    """
+
+    @staticmethod
+    def _n_digitised(mpn, root):
+        p = PS.load_profile(mpn, kind="confirmed", root=root) or {}
+        return sum(1 for prm in p.get("parameters", [])
+                   for e in prm.get("entries", []) if e.get("provenance") == "digitised")
+
+    def _accept_one(self, pdf_bytes, root, key="E_on_vs_ID"):
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=root)
+        mpn = up["part_number"]
+        prof0 = PS.load_profile(mpn, kind="extracted", root=root)
+        p = next(q for q in DF.figure_proposals(pdf_bytes, prof0)["proposals"] if q["key"] == key)
+        ci = (p["cross_check"] or {}).get("curve_index", 0)
+        c = dict(p["curves"][ci])
+        c["caption"], c["page"], c["frame"] = p["caption"], p["page"], p["frame"]
+        DF.confirm_figure(mpn, key, c, root=root)
+        return mpn
+
+    def test_a_curve_survives_the_confirm_that_follows_it(self, pdf_bytes, store_root):
+        mpn = self._accept_one(pdf_bytes, store_root)
+        assert self._n_digitised(mpn, store_root) == 1
+        DF.confirm(mpn, {}, "sic_mosfet", root=store_root)
+        assert self._n_digitised(mpn, store_root) == 1, "confirm() destroyed the accepted curve"
+
+    def test_it_survives_an_edit_too(self, pdf_bytes, store_root):
+        """The edit path is the one that rebuilds from the extraction, so it is the one that used
+        to drop the curve. Both must end up in the profile: the correction AND the evidence."""
+        mpn = self._accept_one(pdf_bytes, store_root)
+        DF.confirm(mpn, {"R_th_jc": 0.80}, "sic_mosfet", root=store_root)
+        prof = PS.load_profile(mpn, kind="confirmed", root=store_root)
+        assert self._n_digitised(mpn, store_root) == 1
+        rth = next(p for p in prof["parameters"] if p["key"] == "R_th_jc")
+        assert any(e.get("provenance") == "corrected" for e in rth["entries"])
+
+    def test_re_confirming_repeatedly_does_not_duplicate_it(self, pdf_bytes, store_root):
+        """The GUI confirms after every Accept, so this runs many times in one session."""
+        mpn = self._accept_one(pdf_bytes, store_root)
+        for _ in range(3):
+            DF.confirm(mpn, {}, "sic_mosfet", root=store_root)
+        assert self._n_digitised(mpn, store_root) == 1
+
+    def test_the_engine_block_still_uses_the_curve_after_confirming(self, pdf_bytes, store_root):
+        """The end of the chain, and the thing the designer actually sees: accept a curve, confirm,
+        and the switching model must be the measured one."""
+        up_keys = ("E_oss_vs_VDS", "E_on_vs_ID", "E_off_vs_ID")
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        mpn = up["part_number"]
+        prof0 = PS.load_profile(mpn, kind="extracted", root=store_root)
+        props = {q["key"]: q for q in DF.figure_proposals(pdf_bytes, prof0)["proposals"]}
+        for key in up_keys:
+            q = props[key]
+            ci = (q["cross_check"] or {}).get("curve_index", 0)
+            c = dict(q["curves"][ci])
+            c["caption"], c["page"], c["frame"] = q["caption"], q["page"], q["frame"]
+            DF.confirm_figure(mpn, key, c, root=store_root)
+            DF.confirm(mpn, {}, "sic_mosfet", root=store_root)      # exactly what the tab does
+        d = {k: v for k, v in DESIGN_INPUTS.items() if k != "sw_method"}
+        blk = DF.profile_to_block(PS.load_profile(mpn, kind="confirmed", root=store_root),
+                                  "sic_mosfet", d, root=store_root)
+        assert blk["sw_method"] == "esw"
+        assert blk["_esw_basis"]["ok"] is True
+        assert len(blk["_figure_images"]) == len(up_keys)

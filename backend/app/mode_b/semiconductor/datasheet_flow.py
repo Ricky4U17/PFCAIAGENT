@@ -27,6 +27,7 @@ missing one as an engine default.
 """
 from __future__ import annotations
 
+import copy
 import math
 import os
 from typing import Any, Optional
@@ -848,7 +849,38 @@ def confirm(part_number: str, edits: dict, device_class: str, reviewed_by: str =
     if profile is None:
         raise PS.PartsStoreError(f"no extraction on file for {part_number!r}; upload the datasheet first")
 
-    profile = dict(profile)
+    profile = copy.deepcopy(profile)
+
+    # CARRY THE DIGITISED CURVES ACROSS. Edits are applied to the EXTRACTION on purpose — that is
+    # what lets the library answer "the machine read X, you confirmed Y" — but rebuilding from the
+    # extraction alone silently discarded everything added to the confirmed profile AFTER upload,
+    # and the only thing in that category is a digitised curve.
+    #
+    # THE EFFECT WAS THAT NO ACCEPTED CURVE EVER REACHED THE ENGINE THROUGH THE GUI. The Curves tab
+    # re-confirms after every Accept (deliberately, so the block rebuilds), so each curve was
+    # written by `confirm_figure` and deleted by the `confirm` that followed it a moment later.
+    # Every test missed it by calling `profile_to_block` directly and never running the two in the
+    # order the screen does.
+    #
+    # A curve is EVIDENCE, not a designer edit: it belongs to the part, is stamped `digitised`, and
+    # nothing in the confirmation screen can produce or revise one. So it is carried forward rather
+    # than re-derived, and re-confirming is idempotent.
+    prev = PS.load_profile(part_number, kind="confirmed", root=root)
+    if prev:
+        by_key = {p["key"]: p for p in profile.setdefault("parameters", [])}
+        for p in prev.get("parameters", []):
+            kept = [e for e in p.get("entries", []) if e.get("provenance") == "digitised"]
+            if not kept:
+                continue
+            tgt = by_key.get(p["key"])
+            if tgt is None:
+                tgt = {"key": p["key"], "entries": []}
+                profile["parameters"].append(tgt)
+                by_key[p["key"]] = tgt
+            tgt.setdefault("entries", [])
+            tgt["entries"] = [e for e in tgt["entries"] if e.get("provenance") != "digitised"]
+            tgt["entries"].extend(copy.deepcopy(kept))
+
     for key, new_val in (edits or {}).items():
         R.get(key)                                   # unknown canonical key raises
         found = False
