@@ -273,7 +273,7 @@ flow and fixed several real calculation defects found along the way.
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
-  **The suite takes ~8.5 min** (503 s / 551 tests, measured 2026-08-13 on a quiet machine). It was
+  **The suite takes ~8 min** (472 s / 567 tests, measured 2026-08-13 on a quiet machine). It was
   51 min until `tests/conftest.py` began memoising the two pure expensive reads — `extract` (~40 s,
   called ~34 times on the same few PDFs) and `digitise` — session-wide, keyed on the SHA-256 of the
   PDF bytes. **Every cache hit returns a DEEP COPY and that is load-bearing**: `upload` writes
@@ -330,6 +330,14 @@ Nothing is half-finished. Suggested order:
 ---
 
 ## Traps that have bitten more than once
+
+- **A FEATURE CAN PASS EVERY TEST AND STILL BE DEAD IN THE GUI.** C215, C224 and C225 each shipped
+  curve work that never reached the engine through the screen: `confirm()` deleted every accepted
+  curve, and no test ran `confirm_figure` and `confirm` in the order the Curves tab calls them.
+  The engine was right and each endpoint was right — the SEQUENCE was broken, and nothing tested a
+  sequence. `tests/test_api_flows.py` now drives the real endpoints in GUI order; **add to it when
+  you add a screen flow**, because a unit test on the engine cannot see this class of defect.
+
 
 - **The verify harness does not cover Chapter 7.** `verify_combined_report.py` passes no `semiconductor`
   block, so Ch7 is absent from its 184-page report — that is why the C171 capacitor-loss error survived.
