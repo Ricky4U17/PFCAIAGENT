@@ -273,9 +273,13 @@ flow and fixed several real calculation defects found along the way.
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
-  **The suite takes ~51 min** (3078 s, measured 2026-08-13 with no other process running; ~45 min
-  at C224 for 15 fewer tests). `DF.upload` re-extracts the PDF at ~40 s and is what every slow test
-  is paying for; the slowest single test is ~51 s.
+  **The suite takes ~8.5 min** (503 s / 551 tests, measured 2026-08-13 on a quiet machine). It was
+  51 min until `tests/conftest.py` began memoising the two pure expensive reads — `extract` (~40 s,
+  called ~34 times on the same few PDFs) and `digitise` — session-wide, keyed on the SHA-256 of the
+  PDF bytes. **Every cache hit returns a DEEP COPY and that is load-bearing**: `upload` writes
+  `part_number` into the profile it is handed and `figure_proposals` writes `T_j` onto curve dicts,
+  so sharing the cached object would leak one test's mutations into the next test's "fresh"
+  extract. The slowest tests are now the report builders (~100 s), not the datasheet reads.
   **Two earlier readings were WRONG and are recorded here so they are not trusted again**: 3 h 50 m
   (heavy probe scripts running concurrently) and 1 h 25 m (a single test showed 1902 s — 32 min for
   work that takes 43 s standalone). The 1902 s did NOT reproduce: the same test at the same position
