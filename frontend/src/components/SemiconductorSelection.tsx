@@ -1561,7 +1561,14 @@ export const SemiconductorSelection: React.FC<Props> = ({
                         <td style={cell}>{r.Po.toFixed(0)}</td>
                         <td style={cell}>{r['eta_in_%'].toFixed(1)}</td>
                         <td style={cell}>{r.PF_in.toFixed(4)}</td>
-                        <td style={cell}>{r.P_FET_total.toFixed(2)}</td>
+                        {/* GATE DRIVE IS PART OF THE FET BUCKET, exactly as Chapter 7 Table 7.4
+                            has it. `P_SEMI_total` already includes it while `P_FET_total` does
+                            not, so showing the latter raw left FET + Diode + Bridge short of SEMI
+                            by P_gate_driver on every row. Harmless while seven loss columns sat
+                            here; the moment the row became four adjacent totals it reads as an
+                            arithmetic error. */}
+                        <td style={cell}>
+                          {(r.P_FET_total + ((r as any).P_gate_driver ?? 0)).toFixed(2)}</td>
                         <td style={cell}>{r.P_DIODE_total.toFixed(2)}</td>
                         <td style={cell}>{r.P_BRIDGE_total.toFixed(2)}</td>
                         <td style={{ ...cell, fontWeight: 700 }}>{r.P_SEMI_total.toFixed(2)}</td>

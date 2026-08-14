@@ -225,6 +225,18 @@ class TestTheWholeMosfetFlow:
             total = row["P_D_cond"] + row["P_D_sw"] + row.get("P_D_leak", 0.0)
             assert total == pytest.approx(row["P_DIODE_total"], rel=1e-9)
 
+        # AND THE THREE COMPONENT TOTALS MUST SUM TO THE SYSTEM TOTAL. The Results tab shows
+        # exactly these four numbers side by side, so any term living outside the three is read as
+        # an arithmetic error by whoever adds them up. `P_SEMI_total` counts gate drive while
+        # `P_FET_total` does not, so the FET column carries it — the same grouping Chapter 7
+        # Table 7.4 uses. This assertion is what keeps the screen and the report on one convention.
+        for row in res["per_point"]:
+            fet = row["P_FET_total"] + row.get("P_gate_driver", 0.0)
+            parts = fet + row["P_DIODE_total"] + row["P_BRIDGE_total"]
+            assert parts == pytest.approx(row["P_SEMI_total"], rel=1e-9), (
+                f"{row['Vac']:.0f} Vac: FET+Diode+Bridge {parts:.4f} != SEMI "
+                f"{row['P_SEMI_total']:.4f}")
+
     def test_an_unreadable_pdf_is_refused_with_a_reason(self, api):
         """A refusal and an empty extraction look identical to the screen unless it says which."""
         import fitz
