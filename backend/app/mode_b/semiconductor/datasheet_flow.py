@@ -735,7 +735,14 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
         if not p.get("required") and p["key"] not in by_key:
             continue
         entries = by_key.get(p["key"], [])
-        best = _pick_entry(entries)
+        # A CONFIRMED CURVE IS A REVIEWABLE VALUE, and the screen has to be able to say so. One
+        # canonical key can hold both a tabulated point and a digitised curve, and two things go
+        # wrong if they are not separated here: a key whose ONLY entry is a curve reported its
+        # `value` as a raw pair of lists, and a scalar row could have its number displaced by the
+        # curve whenever the curve happened to carry more stated conditions.
+        dig = next((e for e in entries if e.get("provenance") == "digitised"
+                    and isinstance(e.get("typ"), (list, tuple)) and len(e["typ"]) == 2), None)
+        best = _scalar_entry(entries)
         val = None
         if best:
             val = best.get("typ", best.get("max", best.get("min")))
@@ -743,6 +750,11 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
         if isinstance(val, (int, float)) and p["si_unit"] not in ("text", "1"):
             n, unit = R.to_display(p["key"], float(val))
             display = f"{n:g} {unit}".strip()
+        n_pts = 0
+        if dig:
+            n_pts = dig.get("n_points") or len(dig["typ"][0])
+            if display is None:
+                display = f"curve, {n_pts} points"
 
         rows.append({
             "key": p["key"],
@@ -759,11 +771,20 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
                  "provenance": e.get("provenance", "extracted")}
                 for e in entries
             ] if len(entries) > 1 else [],
-            "supplied": val is not None,
+            # A key backed ONLY by an accepted curve is supplied — it is the strongest evidence
+            # this flow can produce, and marking it "missing" would send a designer looking for a
+            # table value the datasheet does not print.
+            "supplied": val is not None or dig is not None,
             "source_kind": p["source"],
-            "provenance": (best or {}).get("provenance", "default" if val is None else "extracted"),
+            "provenance": (best or {}).get(
+                "provenance", "digitised" if dig else ("default" if val is None else "extracted")),
             "required": bool(p.get("required")),
             "is_curve": bool(p.get("is_curve")),
+            # What the designer accepted off a plot, so the review step can show the WHOLE basis
+            # of the calculation rather than only its scalars.
+            "has_curve": dig is not None,
+            "curve_points": n_pts,
+            "curve_source": (dig or {}).get("source") or {},
             "destination": _destination(p),
             "description": p.get("description", ""),
         })

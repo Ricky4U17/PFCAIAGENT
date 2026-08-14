@@ -474,7 +474,7 @@ export const SemiconductorSelection: React.FC<Props> = ({
                                       deviceClass ?? dsDesign[kind]?.device_class)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
       setDsPdf(s2 => ({ ...s2, [kind]: file }))       // the Curves tab reads the plots from it
-      if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))
+      if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'curves' }))
       else setErr(r.reason || 'the datasheet could not be read')
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
@@ -505,7 +505,17 @@ export const SemiconductorSelection: React.FC<Props> = ({
       setDbBlock(s2 => ({ ...s2, [kind]: r.block }))
       setWhole(kind, blockToForm(r.block as Record<string, any>, FIELDS[kind],
                                  kind === 'mosfet' ? mosfet : kind === 'diode' ? diode : bridge))
-      if (goToResults && r.validation.ok) setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
+      if (goToResults && r.validation.ok) {
+        setDsTab(s2 => ({ ...s2, [kind]: 'results' }))
+        // CONFIRMING IS THE TRIGGER — no separate "Calculate losses" click. But the three devices
+        // SHARE ONE HEATSINK, so the engine solves them together and refuses a partial set: there
+        // is no such thing as a bridge loss computed on its own, because its junction temperature
+        // depends on what the other two are dissipating. So the run happens once the last
+        // component is confirmed; before that the Results tab says what it is still waiting for.
+        const ready = (['bridge', 'mosfet', 'diode'] as DsKind[])
+          .every(k => k === kind ? true : !!dsConf[k]?.block)
+        if (ready) await calc(false)      // fill THIS component's Results tab, do not navigate away
+      }
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
@@ -542,9 +552,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
         curve: { x: c.x, y: c.y, caption: p.caption, page: p.page, frame: p.frame },
         conditions: tj ? { T_j: Number(tj) } : {} })
       setFigDone(m => ({ ...m, [`${p.key}:${ci}`]: key }))
-      // re-confirm so the engine block is rebuilt from the profile that now carries the curve —
-      // but STAY on this tab, so several curves can be accepted in one pass
-      await doConfirm(kind, false)
+      // NO re-confirm here any more. It existed to rebuild the engine block from the profile the
+      // curve had just landed in, back when Curves came AFTER Parameters. Now that Parameters is
+      // the step that follows, confirming here would mark values approved before the designer had
+      // looked at them — and it is about to happen anyway, once, with the whole basis in view.
+      // The curve is already persisted by the call above; nothing is lost by waiting.
     } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
   }
 
@@ -631,12 +643,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
     approved_design: approvedInductorDesign as Record<string, unknown>,
   })
 
-  const calc = async () => {
+  const calc = async (navigate = true) => {
     setBusy(true); setErr(null); setFigs(null)
     try {
       const b = body()
       const r = await semiconductorCalculate(b)
-      setRes(r); setSub('results')
+      setRes(r); if (navigate) setSub('results')
       if (r.validation.ok) {
         setFigBusy(true)
         semiconductorFigures({ ...b, selected_vac: design.vin_min }).then(f => setFigs(f.figures))
@@ -837,8 +849,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
           {isFet ? 'Boost MOSFET' : kind === 'bridge' ? 'Bridge rectifier' : 'Boost diode'} — from its datasheet</div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
-          {([['upload', '1 · Upload datasheet'], ['parameters', '2 · Parameters'],
-             ['curves', '3 · Curves'], ['results', '4 · Results']] as
+          {/* ORDER: upload -> curves -> parameters -> results. The curves are read off the
+              datasheet the agent just parsed, so they are part of what the designer is being
+              asked to approve — reviewing the scalars BEFORE the plots meant confirming a
+              calculation whose largest inputs had not been seen yet. Parameters now comes last
+              before the result, and shows the accepted curves alongside the scalars.
+              (The JSX blocks below are rendered by `tab === ...`, so their source order is not
+              the tab order; each is labelled with its step number.) */}
+          {([['upload', '1 · Upload datasheet'], ['curves', '2 · Curves'],
+             ['parameters', '3 · Parameters'], ['results', '4 · Results']] as
              ['upload' | 'parameters' | 'curves' | 'results', string][])
             .map(([m, lbl]) => (
               <button key={m} onClick={() => setDsTab(s2 => ({ ...s2, [kind]: m }))} style={{
@@ -994,9 +1013,43 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     [kind]: { ...o[kind], [k]: v } }))} />))}
             </div>
 
+            {/* THE CURVES ARE PART OF WHAT IS BEING CONFIRMED. This step is the last thing before
+                the losses are computed, so it has to show the WHOLE basis — and the curves are the
+                largest inputs in it, not a footnote. Listed separately from the scalar rows
+                because there is nothing to edit: a curve is accepted against its plot on the
+                previous step, or it is not there at all. */}
+            {(() => {
+              const curved = rows.filter(r => r.has_curve)
+              return (
+                <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 8,
+                  border: `1px solid ${curved.length ? C.green : C.border}`, background: C.bg3 }}>
+                  <div style={{ fontSize: 10.5, color: C.hint, textTransform: 'uppercase' }}>
+                    Curves accepted from the datasheet plots</div>
+                  {curved.length === 0
+                    ? <div style={{ fontSize: 10.5, color: C.muted, marginTop: 5, lineHeight: 1.6 }}>
+                        None yet. Every quantity below is a table value or a fitted shape. Step 2
+                        offers the plots this calculation can read — accepting them replaces the
+                        fits with the vendor's own measured curves.
+                      </div>
+                    : <div style={{ marginTop: 5 }}>
+                        {curved.map(r => (
+                          <div key={r.key} style={{ fontSize: 10.5, color: C.text,
+                            lineHeight: 1.7 }}>
+                            <span style={{ color: C.green }}>✓</span>{' '}
+                            <b dangerouslySetInnerHTML={{ __html: r.label }} />{' '}
+                            <span style={{ color: C.muted }}>
+                              — {r.curve_points} points
+                              {r.curve_source?.page ? `, page ${r.curve_source.page}` : ''}
+                              {' · '}{r.destination}
+                            </span>
+                          </div>))}
+                      </div>}
+                </div>)
+            })()}
+
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
               <Btn variant="primary" disabled={busy} onClick={() => doConfirm(kind)}>
-                {busy ? '⏳ confirming…' : '✓ Confirm these values'}</Btn>
+                {busy ? '⏳ confirming…' : '✓ Confirm these values & calculate'}</Btn>
               {conf && (conf.validation.ok
                 ? <span style={{ fontSize: 11, color: C.green }}>
                     ✓ every engine input has a source — nothing fell back to a default</span>
@@ -1175,10 +1228,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
             <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center',
               flexWrap: 'wrap' }}>
               <Btn variant="primary" disabled={curveBusy || dsBusy[kind]}
-                onClick={() => setDsTab(s2 => ({ ...s2, [kind]: 'results' }))}>
-                ✓ Done — go to results</Btn>
+                onClick={() => setDsTab(s2 => ({ ...s2, [kind]: 'parameters' }))}>
+                ✓ Done — review the parameters</Btn>
               <span style={{ fontSize: 10.5, color: C.hint }}>
-                Accept as many curves as apply first; each one is stored as you go.
+                Accept as many curves as apply first; each one is stored as you go. They appear
+                with the scalars on the next step, so you approve the whole basis at once.
               </span>
             </div>)}
 
@@ -1207,8 +1261,23 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
         {/* ── 4 · results ───────────────────────────────────────────────────── */}
         {tab === 'results' && (perPoint.length === 0
-          ? <div style={{ fontSize: 11.5, color: C.hint }}>
-              Confirm the parameters, then run Calculate below to fill this table.</div>
+          ? <div style={{ fontSize: 11.5, color: C.hint, lineHeight: 1.7 }}>
+              {(() => {
+                // Name what is missing. "Run Calculate" was unhelpful once confirming became the
+                // trigger: the reason this table is empty is almost always another component, not
+                // a button the designer failed to press.
+                const waiting = (['bridge', 'mosfet', 'diode'] as DsKind[])
+                  .filter(k => k !== kind && !dsConf[k]?.block)
+                  .map(k => k === 'mosfet' ? 'MOSFET' : k === 'diode' ? 'boost diode' : 'bridge')
+                if (!dsConf[kind]?.block)
+                  return 'Accept the curves that apply, then confirm the parameters — the losses '
+                       + 'are calculated as soon as you do.'
+                return waiting.length === 0
+                  ? 'Confirm the parameters to calculate.'
+                  : `This part is confirmed. The three devices share one heatsink, so their `
+                    + `losses and junction temperatures are solved together — waiting on the `
+                    + `${waiting.join(' and the ')}.`
+              })()}</div>
           : (<>
             <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 8, lineHeight: 1.7 }}>
               {isFet ? 'MOSFET' : 'Boost-diode'} loss by mechanism at every input voltage, for all
@@ -1614,7 +1683,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
           <Btn variant="success" disabled={rptBusy || !res?.validation.ok} onClick={downloadReport}>
             {rptBusy ? '⏳ Generating…' : '📥 Download full report (Ch 1–7)'}
           </Btn>
-          <Btn variant="primary" disabled={busy} onClick={calc}>
+          {/* `() => calc()`, never bare: React passes the click event as the first argument, which
+              since calc gained a `navigate` flag would have been read as that flag. This is the
+              C174 trap, and `Btn.onClick` is typed precisely so the compiler catches it. */}
+          <Btn variant="primary" disabled={busy} onClick={() => calc()}>
             {busy ? '⏳ Calculating…' : '⚙ Calculate losses (all 9 line voltages)'}
           </Btn>
           {onNext && <Btn variant="success" onClick={() => {

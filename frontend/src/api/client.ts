@@ -472,6 +472,12 @@ export interface DsReviewRow {
                  conditions: Record<string, number>; provenance: string }[]
   supplied: boolean; source_kind: string; provenance: string
   required: boolean; is_curve: boolean; destination: string; description: string
+  /** A curve the designer ACCEPTED off a plot, so the review step can show the whole basis of the
+   *  calculation and not only its scalars. `is_curve` says the parameter is curve-SHAPED;
+   *  `has_curve` says one has actually been confirmed for this part. */
+  has_curve?: boolean
+  curve_points?: number
+  curve_source?: { figure?: string; page?: number; image?: string }
 }
 /** The C202 plausibility gate, run over an extracted or confirmed profile (M6). ADVISORY:
  *  `ok: true` means nothing looked wrong, not that the extraction is right. It never blocks. */
