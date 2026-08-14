@@ -79,7 +79,14 @@ class Mosfet:
         if self.rdson_id_curve is not None and Id is not None: r *= curve(Id,*self.rdson_id_curve)
         return r
     def eoss(self, Vo): return curve(Vo,*self.eoss_at_v)*self.k_coss
-    def _rg(self, on): return (self.rg_on or self.rg) if on else (self.rg_off or self.rg)
+    # `is not None`, NOT truthiness: 0 ohm is a legitimate entry (direct drive, no external
+    # resistor) and `rg_on or self.rg` silently replaced it with the fallback. Switching energy
+    # scales roughly linearly with gate resistance, so that substitution is a large, invisible
+    # error — and it got harder to notice once R_g_common left the confirmation screen, because
+    # the value being substituted is now a dataclass default nobody can see.
+    def _rg(self, on):
+        r = self.rg_on if on else self.rg_off
+        return self.rg if r is None else r
     def _vpl(self, i): return self.vpl if self.gfs is None else (self.vth+np.asarray(i)/self.gfs)
     def _Jvcrss(self, Vo):
         if self.crss_curve is None: return self.qgd*Vo/2.0

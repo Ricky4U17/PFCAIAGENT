@@ -32,7 +32,7 @@ DESIGN = {"vin_min": 90, "vin_max": 264, "vout": 393, "fline": 60, "fsw": 70000,
 # An ASYMMETRIC gate path on purpose: it makes the two K_Rg corrections distinguishable, so a
 # single shared factor cannot pass these tests. `sw_method` is deliberately ABSENT — the whole
 # point is that confirming the curves is what resolves it, and supplying it here would hide that.
-GATE = {"V_GS_drive": 18.0, "R_g_on": 4.7, "R_g_off": 10.0, "R_g_common": 1.8, "R_th_cs": 0.3}
+GATE = {"V_GS_drive": 18.0, "R_g_on": 4.7, "R_g_off": 10.0, "R_th_cs": 0.3}
 
 
 @pytest.fixture(scope="module")

@@ -402,7 +402,7 @@
       "engine_fields": ["rg_on"],
       "report_label": "R<sub>g,on</sub>",
       "plausible": {"min": 0.0, "max": 100.0},
-      "description": "Turn-ON gate resistance, external plus driver source. A DESIGN choice. Couples only to E_on. Falls back to R_g_common when unset."
+      "description": "Turn-ON gate resistance, external plus driver source. A DESIGN choice. Couples only to E_on, never to E_off."
     },
     {
       "key": "R_g_off",
@@ -419,12 +419,12 @@
       "key": "R_g_common",
       "si_unit": "ohm", "display_unit": "ohm",
       "device_classes": ["si_mosfet", "sic_mosfet", "gan_hemt"],
-      "source": "design", "required": true,
-      "consumed_by": ["loss_engine", "report"],
+      "source": "design", "required": false,
+      "consumed_by": ["loss_engine"],
       "engine_fields": ["rg"],
-      "report_label": "R<sub>g</sub>",
+      "report_label": "R<sub>g</sub> (fallback)",
       "plausible": {"min": 0.0, "max": 100.0},
-      "description": "Gate resistance used when the on and off paths are not stated separately. Switching energy scales roughly linearly with it, so a placeholder here is a ~2x lever."
+      "description": "INTERNAL FALLBACK, not a design input and not asked for. The engine reads `rg` only for a switching edge whose own resistance was not given, and R_g_on and R_g_off are both required, so it can never be the operative value in this flow - swept 1.8 to 9999 ohm with both paths supplied it moves the loss by exactly nothing. It is declared solely so `rg` is not an unclaimed engine field, which is the disconnect the C203 audit exists to catch; it was `required` until C226, which made the confirmation screen warn about a default that can never be reached."
     },
     {
       "key": "R_g_int",

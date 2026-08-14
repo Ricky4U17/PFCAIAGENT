@@ -1152,7 +1152,12 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict,
     blk["tech"] = "sic" if "sic" in device_class else "si"
     prov["device_class"] = "extracted"
 
-    for key in ("V_GS_drive", "R_g_on", "R_g_off", "R_g_common", "R_th_cs", "sw_method"):
+    # R_g_common is GONE. It was never a third gate resistor: the engine reads `rg` only as a
+    # fallback for a path that was not given separately, and both paths are REQUIRED here — so it
+    # could never be the operative value, while being marked required made the confirmation screen
+    # warn about a default that can never be reached. Proved before removing: sweeping it 1.8 ->
+    # 9999 ohm with both paths supplied moves the loss by exactly nothing.
+    for key in ("V_GS_drive", "R_g_on", "R_g_off", "R_th_cs", "sw_method"):
         val = design.get(key)
         if val not in (None, ""):
             put(key, val, "manual")
@@ -1170,8 +1175,16 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict,
         put("E_on_vs_ID", esw["eon_curve"], "digitised")
         put("E_off_vs_ID", esw["eoff_curve"], "digitised")
         put("V_test_sw", esw["v_test"], "extracted")
-        if not design.get("sw_method"):
-            put("sw_method", "esw", "derived")
+
+    # SW_METHOD IS ALWAYS STATED, never left to a default. Two reasons. It is the choice between a
+    # measured switching model and an analytic one, so "whatever the dataclass happens to default
+    # to" is not an acceptable basis for it; and while it was merely absent, `validate_block`
+    # reported it as an engine default on every confirmation, which is noise in the one list that
+    # is supposed to mean "a number you did not choose is affecting your result".
+    # The designer's explicit choice still wins — it is applied by the loop above and only the
+    # untouched case is resolved here, from whether the curves are actually there.
+    if not design.get("sw_method"):
+        put("sw_method", "esw" if esw.get("ok") else "analytic", "derived")
 
     blk[M.PROVENANCE_KEY] = prov
 

@@ -25,7 +25,7 @@ DESIGN = {"vin_min": 90, "vin_max": 264, "vout": 393, "fline": 60, "fsw": 65000,
           "eta": 0.95, "r_input": 0.2, "pf": 0.99}
 
 # The design decisions no datasheet can supply.
-DESIGN_INPUTS = {"V_GS_drive": 18.0, "R_g_on": 1.8, "R_g_off": 1.8, "R_g_common": 1.8,
+DESIGN_INPUTS = {"V_GS_drive": 18.0, "R_g_on": 1.8, "R_g_off": 1.8,
                  "R_th_cs": 0.3, "sw_method": "analytic"}
 
 

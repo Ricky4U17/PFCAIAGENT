@@ -423,12 +423,17 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // than falling through to an engine default nobody chose. The diode needs far fewer of them:
   // it has no gate.
   const [dsDesign, setDsDesign] = useState<Record<DsKind, Record<string, string>>>({
-    // R_g_common is GONE. It was never a third resistor: the engine reads it only as a fallback
-    // when the on and off paths are not given separately (`_rg` returns `rg_on or rg`), so a field
-    // labelled plainly "R_g" alongside R_g,on and R_g,off read like a third gate resistor. If the
-    // two paths are the same, the same number goes in both.
+    // R_g_common is GONE, from the registry too: it was never a third resistor, only a fallback
+    // for a path not given separately, and both paths are required here. If the two paths are the
+    // same, the same number goes in both.
+    // `sw_method` IS ALSO GONE, and that one was doing real damage. Sent as a hidden 'analytic'
+    // on every confirm, it counted as the designer explicitly choosing the analytic model — so a
+    // datasheet's measured E_on/E_off curves were read, accepted, stored, shown in the report's
+    // evidence panel, and then not used for the calculation. Leaving it unset lets the evidence
+    // decide: `profile_to_block` resolves it to 'esw' when the curves are there and 'analytic'
+    // when they are not, and states it either way rather than defaulting.
     mosfet: { V_GS_drive: '', R_g_on: '', R_g_off: '', R_th_cs: '0.3',
-              sw_method: 'analytic', device_class: 'sic_mosfet' },
+              device_class: 'sic_mosfet' },
     // dies/package: a dual common-cathode boost diode feeding both interleaved channels puts
     // BOTH legs' loss through one case-to-sink interface. The datasheet cannot say whether both
     // legs are actually loaded — only the designer knows which package is fitted.
@@ -1292,9 +1297,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     turn-on is the diode's junction CHARGE Q_c, and calling that column "Recovery"
                     described a mechanism the part does not have. The screen and the report must
                     also not name the same number two different things. */}
+                {/* GATE DRIVE IS PART OF THE FET BUCKET. `P_FET_total` is the sum of the five
+                    device mechanisms and does NOT include it, while the summary table and
+                    Chapter 7 Table 7.4 both do — so this table read low by exactly the gate loss
+                    and disagreed with the summary on the same part. Shown as its own column, and
+                    added into TOTAL, so the row sums and the two screens agree. */}
                 <thead><tr>{(isFet
                   ? ['V_ac', 'P_out', 'Conduction', 'Switching', 'E_oss',
-                     dSiC ? 'Diode Q_c → FET' : 'Diode Q_rr → FET', 'Leakage', 'TOTAL', 'T_j']
+                     dSiC ? 'Diode Q_c → FET' : 'Diode Q_rr → FET', 'Gate', 'Leakage',
+                     'TOTAL', 'T_j']
                   : kind === 'bridge'
                   ? ['V_ac', 'P_out', 'Top (diodes)', 'Bottom (sync FET)', 'TOTAL', 'T_j']
                   : ['V_ac', 'P_out', 'Conduction', dSiC ? 'Recovery (Q_rr = 0)' : 'Recovery Q_rr',
@@ -1319,9 +1330,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
                           <td style={dsCell}>{(p.P_FET_sw ?? 0).toFixed(2)}</td>
                           <td style={dsCell}>{(p.P_FET_coss ?? 0).toFixed(2)}</td>
                           <td style={dsCell}>{(p.P_FET_rr ?? 0).toFixed(2)}</td>
+                          <td style={dsCell}>{(p.P_gate_driver ?? 0).toFixed(3)}</td>
                           <td style={dsCell}>{(p.P_FET_leak ?? 0).toFixed(2)}</td>
                           <td style={{ ...dsCell, fontWeight: 700, color: C.teal }}>
-                            {(p.P_FET_total ?? 0).toFixed(2)} W</td>
+                            {((p.P_FET_total ?? 0) + (p.P_gate_driver ?? 0)).toFixed(2)} W</td>
                         </>) : (<>
                           {/* the engine's own key names — P_DIODE_cond/_sw do not exist and
                               would have rendered a silent column of zeros beside a correct total */}

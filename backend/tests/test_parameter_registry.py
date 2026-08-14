@@ -102,7 +102,7 @@ class TestRegistryIsWellFormed:
     def test_design_sourced_parameters_are_marked_as_such(self):
         """No datasheet upload can supply a gate resistor or a mounting interface. Marking them
         'design' is what stops them becoming silent defaults again."""
-        for key in ("V_GS_drive", "R_g_on", "R_g_off", "R_g_common", "R_th_cs", "L_loop"):
+        for key in ("V_GS_drive", "R_g_on", "R_g_off", "R_th_cs", "L_loop"):
             assert R.get(key)["source"] == "design", key
 
     def test_plausible_ranges_are_ordered_and_contain_real_values(self):
@@ -144,7 +144,7 @@ class TestNoDisconnects:
 
     def test_expanded_fields_are_accepted_by_the_engine(self):
         """Naming agreement is worthless if the engine will not take the kwargs."""
-        m = Mosfet(**R.expand_to_engine_fields({"V_GS_drive": 18.0, "R_g_common": 1.8}))
+        m = Mosfet(**R.expand_to_engine_fields({"V_GS_drive": 18.0, "R_g_on": 1.8}))
         assert m.vg == 18.0 and m.vg_drive == 18.0 and m.rg == 1.8
 
     def test_audit_block_catches_a_partial_alias_write(self):
