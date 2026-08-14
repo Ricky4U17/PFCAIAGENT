@@ -1271,6 +1271,20 @@ export const SemiconductorSelection: React.FC<Props> = ({
                 </tbody>
               </table>
             </div>
+            {/* MOVED HERE from the summary Results tab along with the columns it explains. A zero
+                that is CORRECT looks identical to a zero that is broken, so it is worth saying
+                which — and it belongs beside the Recovery column, which now lives only here. */}
+            {!isFet && kind === 'diode' && perPoint.every(p => (p.P_D_sw ?? 0) === 0) && (
+              <div style={{ fontSize: 10.5, color: C.text, marginTop: 8, padding: '7px 10px',
+                borderRadius: 6, background: C.bg3, border: `1px solid ${C.border}`,
+                lineHeight: 1.6 }}>
+                <b>The recovery column is exactly zero, and that is correct.</b> This part has no
+                minority-carrier recovery, so conduction and blocking are its whole loss. Its
+                junction charge Q<sub>c</sub> is real, but it is dissipated in the MOSFET channel at
+                turn-on rather than in the diode — that is the <i>Q<sub>c</sub> &#8594; MOSFET</i>
+                column on the right, and it is counted once, in the MOSFET total. The recovery
+                column separates from conduction only for a silicon diode.
+              </div>)}
             {dsUp[kind]?.part_number && (
               <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
                 border: `1px solid ${published[dsUp[kind]!.part_number!] ? C.green : C.border}`,
@@ -1530,11 +1544,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
             {res.validation.ok && (
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  {/* "D sw/RR" named a mechanism a SiC Schottky does not have. Same wording as
-                      Chapter 7 Table 7.5 and as the datasheet-flow table above. */}
-                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'D cond',
-                               diode.is_sic ? 'D recovery (0)' : 'D recovery',
-                               'Diode', 'Bridge', 'SEMI', 'Tj FET', 'Tj D', 'Tj Br']
+                  {/* ONE NUMBER PER COMPONENT. The diode used to be the only part whose internals
+                      leaked into this summary — the MOSFET has five mechanisms here and shows
+                      none, the bridge has top/bottom and shows neither — so "D cond" and
+                      "D recovery" were an exception to a rule the table already had. The
+                      per-mechanism breakdown lives in each component's own Results sub-tab, which
+                      reads the same `res.per_point`, and in Chapter 7 Tables 7.4/7.5.
+                      The T_j columns STAY: they are a limit check, not a loss breakdown. */}
+                  <thead><tr>{['V_AC', 'P_out', 'η%', 'PF', 'FET', 'Diode', 'Bridge', 'SEMI',
+                               'Tj FET', 'Tj D', 'Tj Br']
                     .map((h, i) => <th key={h} style={{ ...th, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
                   <tbody>
                     {res.per_point.map((r, i) => (
@@ -1544,8 +1562,6 @@ export const SemiconductorSelection: React.FC<Props> = ({
                         <td style={cell}>{r['eta_in_%'].toFixed(1)}</td>
                         <td style={cell}>{r.PF_in.toFixed(4)}</td>
                         <td style={cell}>{r.P_FET_total.toFixed(2)}</td>
-                        <td style={cell}>{((r as any).P_D_cond ?? 0).toFixed(2)}</td>
-                        <td style={cell}>{((r as any).P_D_sw ?? 0).toFixed(2)}</td>
                         <td style={cell}>{r.P_DIODE_total.toFixed(2)}</td>
                         <td style={cell}>{r.P_BRIDGE_total.toFixed(2)}</td>
                         <td style={{ ...cell, fontWeight: 700 }}>{r.P_SEMI_total.toFixed(2)}</td>
@@ -1556,22 +1572,11 @@ export const SemiconductorSelection: React.FC<Props> = ({
                     ))}
                   </tbody>
                 </table>
-                {res.per_point.every(p => ((p as any).P_D_sw ?? 0) === 0) && (
-                  <div style={{ fontSize: 10.5, color: C.text, marginTop: 6, padding: '7px 10px',
-                    borderRadius: 6, background: C.bg3, border: `1px solid ${C.border}`,
-                    lineHeight: 1.6 }}>
-                    <b>"D cond" and "Diode" are the same number here, and that is correct.</b> This
-                    part has no minority-carrier recovery, so its switching term is EXACTLY zero and
-                    the total is the conduction loss alone — the Q<sub>c</sub> charging energy is
-                    booked to the MOSFET instead, in the "FET" column. The two columns separate only
-                    for a silicon diode, where the recovery charge is the diode's own loss.
-                  </div>)}
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 5 }}>
-                  D cond / D recovery = PFC boost-diode conduction vs recovery loss, TOTALLED over
-                  all channels. For a Si diode the recovery term is its share of the Q<sub>rr</sub>
-                  reverse-recovery energy; for SiC Schottky there is no minority-carrier recovery —
-                  the Q<sub>c</sub> charging energy is booked to the MOSFET, so the diode's own term
-                  is zero (see report Section 7.5).
+                  One number per component, TOTALLED over all {design.nch} channels. For the
+                  per-mechanism breakdown — conduction, switching, E<sub>oss</sub>, recovery,
+                  blocking — open that component's own <b>Results</b> tab, or Chapter 7
+                  Tables 7.4 and 7.5 in the report.
                 </div>
               </div>
             )}
