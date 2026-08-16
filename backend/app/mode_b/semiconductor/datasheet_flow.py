@@ -756,6 +756,27 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
             if display is None:
                 display = f"curve, {n_pts} points"
 
+        # DO NOT ASK FOR SOMETHING ALREADY DECIDED BY EVIDENCE. No datasheet prints an `is_sic`
+        # row, so this always came back unsupplied and the screen demanded "which recovery model
+        # applies" — while the very same screen displayed "Calculated as SiC Schottky" from
+        # `resolve_technology`, which had read it off the published charges. Two panels
+        # contradicting each other about the same fact.
+        # It is still ASKED when the evidence genuinely does not decide: a datasheet publishing
+        # both Q_c and a recovery charge, or neither, leaves it a designer's call, and that case
+        # comes back `ambiguous` and stays unsupplied.
+        prov_override = None
+        extra_note = ""
+        if p["key"] == "is_sic" and val is None:
+            t = resolve_technology(profile, device_class)
+            val = t["is_sic"]
+            display = "SiC Schottky" if val else "Silicon"
+            prov_override = t["provenance"]
+            # NOT `.capitalize()`: it lower-cases everything after the first letter, which turned
+            # the symbols in the basis into "q_c" and "i_rrm".
+            extra_note = " " + t["basis"][:1].upper() + t["basis"][1:] + "."
+            if t["ambiguous"]:
+                val, display, prov_override = None, None, None    # genuinely the designer's call
+
         rows.append({
             "key": p["key"],
             "label": p.get("report_label", p["key"]),
@@ -776,7 +797,7 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
             # table value the datasheet does not print.
             "supplied": val is not None or dig is not None,
             "source_kind": p["source"],
-            "provenance": (best or {}).get(
+            "provenance": prov_override or (best or {}).get(
                 "provenance", "digitised" if dig else ("default" if val is None else "extracted")),
             "required": bool(p.get("required")),
             "is_curve": bool(p.get("is_curve")),
@@ -786,7 +807,7 @@ def review_rows(profile: dict, device_class: str) -> list[dict]:
             "curve_points": n_pts,
             "curve_source": (dig or {}).get("source") or {},
             "destination": _destination(p),
-            "description": p.get("description", ""),
+            "description": p.get("description", "") + extra_note,
         })
 
     # Problems first: unsupplied, then required, then design-sourced. A reviewer should meet the

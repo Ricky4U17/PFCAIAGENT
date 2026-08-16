@@ -967,7 +967,23 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     import numpy as _np
     _sp, _mos, _dio, _br, _th = _eng.design_from_dict(cfg)
     _vo = float(design["vout"])
-    def _vf(c): return ", ".join(f"{y:.2f} V&#64;{x:.0f} A".replace("&#64;", "@") for x, y in zip(c[0], c[1]))
+    # A DIGITISED CURVE CANNOT BE PRINTED POINT BY POINT. This listed every point, which was fine
+    # while a vf_curve was the engine's 3-4 point default (about 50 characters) and fatal once a
+    # confirmed curve reached the block: 244 points is ~3170 characters, ~33 wrapped lines, and
+    # ReportLab measured the row at 1724 pt against a 728 pt frame and refused the whole document
+    # with "Flowable too large". The report generated nothing at all.
+    # Short curves still print in full — that is the useful reading. Long ones are summarised by
+    # their extent, which is what a parameter table is for; the curve itself is shown as the
+    # datasheet figure it was read off, in the evidence panel of its own section.
+    def _vf(c, n_full: int = 5):
+        xs, ys = list(c[0]), list(c[1])
+        if not xs:
+            return "&#8212;"
+        if len(xs) <= n_full:
+            return ", ".join(f"{y:.2f} V&#64;{x:.0f} A".replace("&#64;", "@")
+                             for x, y in zip(xs, ys))
+        return (f"{len(xs)} points: {min(ys):.2f}&#8211;{max(ys):.2f} V "
+                f"over {min(xs):.3g}&#8211;{max(xs):.3g} A")
     _eoss = float(_np.interp(_vo, _mos.eoss_at_v[0], _mos.eoss_at_v[1]))
     # The hot factor must be read AT the temperature the label names. This interpolated at a
     # hardcoded 125 degC while printing the curve's last temperature — invisible while every curve
