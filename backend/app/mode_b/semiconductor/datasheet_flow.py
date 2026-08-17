@@ -838,9 +838,17 @@ def _scalar_entry(entries: list[dict]) -> Optional[dict]:
     be one `float()` away from a TypeError — or, worse, from ranking the curve first and silently
     reading a list where a value belongs. The two shapes are separated here rather than at each of
     the call sites, which is where one would eventually be forgotten.
+
+    MIN COUNTS. This tested `typ` and `max` only, which quietly dropped every parameter a vendor
+    quotes as a LOWER bound — and a breakdown voltage is exactly that. V_DSS was extracted
+    correctly (650 V at V_GS = 0, I_D = 0.57 mA, from the static-characteristics table) and then
+    discarded here, so the review screen reported it unsupplied and asked the designer to type in
+    a number the datasheet had already given. Introduced at C227; the three keys the caller reads
+    are min, typ and max, and all three are values.
     """
     return _pick_entry([e for e in entries
-                        if _is_number(e.get("typ")) or _is_number(e.get("max"))])
+                        if _is_number(e.get("typ")) or _is_number(e.get("max"))
+                        or _is_number(e.get("min"))])
 
 
 # How far a digitised curve may sit from the value the same datasheet TABULATES on those axes

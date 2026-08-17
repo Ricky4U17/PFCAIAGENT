@@ -9206,3 +9206,49 @@ GUI/REPORT PARITY. The screen had the same bad labels ("Recovery" for a SiC Q_c 
 Verified: Table 7.4 as PRINTED matches the engine's own per_point rows at all 9 line voltages
 (max delta 0.0043 W = 2-dp display rounding); diode columns sum to the total exactly; consistency
 gate passes; Ch7 builds at 20 pp with 29 embedded images and zero unrenderable glyphs; tsc clean.
+
+## C228 - a minimum is a value: V_DSS was extracted and then dropped three layers later
+
+The designer asked why the MOSFET screen wanted V_DSS typed in when it is printed on the
+datasheet. It was not an extraction failure. V_DSS extracts correctly - 650 V, from the
+static-characteristics table, with its bias conditions (V_GS = 0, I_D = 0.57 mA) - and was then
+discarded on the way to the review row.
+
+`_scalar_entry`, added at C227 to stop a digitised CURVE being read where a scalar belongs, tested
+`typ` and `max` only. Every parameter a vendor quotes as a LOWER bound therefore vanished, and a
+breakdown voltage is exactly that. One line: min is a value too.
+
+Four regression tests, including that a curve is still NOT a scalar - the property the helper
+exists for and which must not be lost while widening it - and an end-to-end check that 650 V
+reaches the review row from the real file.
+
+### HOW THE DIAGNOSIS WENT WRONG, WHICH IS THE PART WORTH KEEPING
+
+Three successive theories, each confidently wrong, each costing a round of investigation:
+
+1. "The subscripts are dropped and need reassembly." FALSE. The raw text layer does show
+   "V" + detached "DSS", but the TABLE parser already reassembles it: the row reads
+   `['VDSS over full Tj,range', '650', 'V']`.
+2. "The value does not parse either." FALSE. `typ=None` on an `unresolved` record is just how an
+   unresolved row is stored. Feed the same table a symbol map that matches and it returns
+   `typ=650.0, unit='V'` immediately.
+3. "It is a symbol-mapping gap; one name_map entry fixes it." FALSE, and this one was IMPLEMENTED
+   before it was proved - a name_map entry plus a new branch in `_parse_row`, in the shared code
+   path every datasheet of every device kind goes through. The baseline diff then showed
+   **0 added, 0 changed across all 7 datasheets**: completely inert. Reverted.
+
+The common error: diagnosing from the RAW TEXT and from `unresolved`, both of which make anything
+missing look like an extraction problem. The value had been read correctly the whole time. The
+question that would have gone straight to the answer is **"where does the value STOP?"** - walk it
+from table row to entry to review row - not "how is it read?".
+
+### WHAT MADE IT SAFE TO BE WRONG
+
+Before touching the extractor, a snapshot of every parameter every datasheet on file yields:
+79 keys with values and conditions across 7 vendor files (scratchpad/extract_baseline.py). The
+rule was that the only acceptable diff is a NEW key appearing. That is what caught theory 3 as
+inert instead of shipping it into the highest-blast-radius module in this area. Rebuild it before
+any change to `datasheet_extract.py` or the vendor templates.
+
+Suite 571 passed / 2 skipped (was 567). `datasheet_extract.py` and `vendor_templates.json` are
+untouched.

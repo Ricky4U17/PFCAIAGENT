@@ -269,7 +269,7 @@ flow and fixed several real calculation defects found along the way.
   and 478 at C219 (`test_parts_library.py`), 491 at C220 (`test_figure_temperatures.py`),
   503 at C221 (`test_derating_gate.py`), 525 at C222 (`test_diode_real_datasheets.py`),
   **536 at C224** (4 in `test_curve_extract.py`, 8 in `test_datasheet_flow.py`),
-  **551 at C225** (15 more in `test_datasheet_flow.py`).
+  **551 at C225**, **571 at C228** (API-flow, curve-survival and min-only guards).
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
@@ -330,6 +330,22 @@ Nothing is half-finished. Suggested order:
 ---
 
 ## Traps that have bitten more than once
+
+- **ASK WHERE THE VALUE STOPS, NOT HOW IT IS READ.** C228: V_DSS looked like an extraction
+  failure, was diagnosed as one three times over, and had been extracted correctly all along —
+  a filter three layers downstream (`_scalar_entry`, testing `typ`/`max` and not `min`) dropped
+  it. `unresolved` records and the raw text layer both make anything missing look like a parsing
+  problem. Walk the value from table row → entry → review row and find where it disappears
+  BEFORE theorising about the reader.
+- **BASELINE THE EXTRACTOR BEFORE TOUCHING IT.** `scratchpad/extract_baseline.py` snapshots every
+  parameter every datasheet on file yields — 79 keys across 7 vendor files, with values and
+  conditions. The only acceptable diff is a NEW key. That is what proved a C228 candidate fix
+  inert (0 added, 0 changed) instead of shipping it into the shared path every upload uses.
+  Rebuild it before any change to `datasheet_extract.py` or `vendor_templates.json`.
+- **A HELPER ADDED TO EXCLUDE ONE SHAPE WILL EXCLUDE MORE THAN INTENDED.** `_scalar_entry` was
+  written to keep a digitised curve out of a scalar slot and silently removed every min-only
+  parameter with it. When narrowing a selection, enumerate what legitimately passes — here the
+  caller reads min, typ AND max.
 
 - **A FEATURE CAN PASS EVERY TEST AND STILL BE DEAD IN THE GUI.** C215, C224 and C225 each shipped
   curve work that never reached the engine through the screen: `confirm()` deleted every accepted

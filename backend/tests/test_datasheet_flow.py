@@ -993,3 +993,42 @@ class TestConfirmDoesNotDestroyAcceptedCurves:
         assert blk["sw_method"] == "esw"
         assert blk["_esw_basis"]["ok"] is True
         assert len(blk["_figure_images"]) == len(up_keys)
+
+
+class TestAMinimumIsAValue:
+    """REGRESSION GUARD for a defect this file's own `_scalar_entry` introduced at C227.
+
+    That helper exists to keep a digitised CURVE from being read where a scalar belongs, and it
+    tested `typ` and `max` only. Every parameter a vendor quotes as a LOWER bound was therefore
+    dropped — and a breakdown voltage is exactly that. V_DSS was extracted correctly, at 650 V
+    with its bias conditions, and then discarded on the way to the review screen, which asked the
+    designer to type in a number the datasheet had already supplied.
+
+    The bug is worth a test rather than a comment because the symptom appeared three layers away
+    from the cause: it looked like an extraction failure, and the extraction was fine.
+    """
+
+    def test_a_min_only_entry_is_a_value(self):
+        e = [{"symbol": "VDSS", "min": 650.0, "provenance": "extracted",
+              "conditions": {"V_GS": 0.0}}]
+        assert DF._scalar_entry(e) is not None
+        assert DF._scalar_entry(e)["min"] == 650.0
+
+    def test_a_curve_is_still_not_a_scalar(self):
+        """The thing `_scalar_entry` was built for must keep working: a curve is not a value."""
+        e = [{"typ": [[1.0, 2.0], [3.0, 4.0]], "provenance": "digitised"}]
+        assert DF._scalar_entry(e) is None
+
+    def test_a_scalar_wins_over_a_curve_on_the_same_key(self):
+        e = [{"typ": [[1.0, 2.0], [3.0, 4.0]], "provenance": "digitised", "conditions": {}},
+             {"typ": 8.7e-6, "provenance": "extracted", "conditions": {"V_DS": 400.0}}]
+        assert DF._scalar_entry(e)["typ"] == pytest.approx(8.7e-6)
+
+    def test_the_breakdown_voltage_reaches_the_review_screen(self, pdf_bytes, store_root):
+        """End to end, on the real datasheet: V_DSS is the MOSFET's blocking rating and the one
+        parameter this part states only as a minimum."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        row = next(r for r in up["rows"] if r["key"] == "V_DSS")
+        assert row["supplied"] is True
+        assert row["provenance"] == "extracted"
+        assert row["value"] == pytest.approx(650.0)
