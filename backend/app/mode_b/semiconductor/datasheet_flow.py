@@ -839,16 +839,24 @@ def _scalar_entry(entries: list[dict]) -> Optional[dict]:
     reading a list where a value belongs. The two shapes are separated here rather than at each of
     the call sites, which is where one would eventually be forgotten.
 
-    MIN COUNTS. This tested `typ` and `max` only, which quietly dropped every parameter a vendor
-    quotes as a LOWER bound — and a breakdown voltage is exactly that. V_DSS was extracted
-    correctly (650 V at V_GS = 0, I_D = 0.57 mA, from the static-characteristics table) and then
-    discarded here, so the review screen reported it unsupplied and asked the designer to type in
-    a number the datasheet had already given. Introduced at C227; the three keys the caller reads
-    are min, typ and max, and all three are values.
+    IT IS DEFINED BY WHAT IT EXCLUDES, WHICH IS ONE THING: A CURVE. Written as an allow-list of
+    "number in typ or max" it silently swallowed two whole categories, one per release —
+    a LOWER bound (C228: V_DSS is 650 V stated as a minimum, so the screen asked the designer to
+    retype it) and then a TEXT value (device_class, dropped on all 7 datasheets on file, which is
+    what put "1 value still unsupplied" on every parameters tab). Both were extracted correctly
+    and discarded here.
+
+    Inverting it ends that: min, typ and max are all values, and a number, a string and a boolean
+    are all scalars. The only shape this rejects is the pair-of-sequences a digitised curve stores
+    in `typ`, which is the shape it was built to keep out of a slot expecting one value.
+
+    Callers that specifically need a NUMBER still check for one — `_tabulated_at_vds` guards with
+    `_is_number` — because "scalar" and "numeric" are not the same claim.
     """
-    return _pick_entry([e for e in entries
-                        if _is_number(e.get("typ")) or _is_number(e.get("max"))
-                        or _is_number(e.get("min"))])
+    def _scalar(e: dict) -> bool:
+        return any(e.get(k) is not None and not isinstance(e.get(k), (list, tuple))
+                   for k in ("typ", "max", "min"))
+    return _pick_entry([e for e in entries if _scalar(e)])
 
 
 # How far a digitised curve may sit from the value the same datasheet TABULATES on those axes

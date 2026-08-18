@@ -1032,3 +1032,89 @@ class TestAMinimumIsAValue:
         assert row["supplied"] is True
         assert row["provenance"] == "extracted"
         assert row["value"] == pytest.approx(650.0)
+
+
+class TestAScalarIsAnythingThatIsNotACurve:
+    """`_scalar_entry` was written as an allow-list of "a number in typ or max", and swallowed a
+    whole category per release: a LOWER bound (C228, V_DSS) and then a TEXT value (device_class,
+    on all seven datasheets on file — the "1 value still unsupplied" banner on every tab).
+
+    Defining it by what it EXCLUDES — a curve, and nothing else — is what stops the next category
+    going the same way. These tests pin the categories that must pass.
+    """
+
+    @staticmethod
+    def _e(**kw):
+        return [{"provenance": "extracted", "conditions": {}, **kw}]
+
+    def test_a_number_passes(self):
+        assert DF._scalar_entry(self._e(typ=33e-3)) is not None
+
+    def test_a_minimum_passes(self):
+        assert DF._scalar_entry(self._e(min=650.0)) is not None
+
+    def test_a_maximum_passes(self):
+        assert DF._scalar_entry(self._e(max=41e-3)) is not None
+
+    def test_text_passes(self):
+        """device_class is a string, and it is the value the sub-tab supplies."""
+        assert DF._scalar_entry(self._e(typ="sic_mosfet")) is not None
+
+    def test_a_boolean_passes(self):
+        assert DF._scalar_entry(self._e(typ=False)) is not None
+
+    def test_a_curve_is_the_one_thing_rejected(self):
+        assert DF._scalar_entry(self._e(typ=[[1.0, 2.0], [3.0, 4.0]])) is None
+
+    def test_a_scalar_still_wins_over_a_curve_on_the_same_key(self):
+        both = [{"typ": [[1.0, 2.0], [3.0, 4.0]], "provenance": "digitised", "conditions": {}},
+                {"typ": 8.7e-6, "provenance": "extracted", "conditions": {"V_DS": 400.0}}]
+        assert DF._scalar_entry(both)["typ"] == pytest.approx(8.7e-6)
+
+
+class TestNothingIsAskedForThatTheFlowAlreadyHas:
+    """The parameters screen counts rows it still needs. It must not count values it already has,
+    or it contradicts `validate_block` — which reported ok with nothing defaulted at the very
+    moment the banner claimed a value was missing."""
+
+    @staticmethod
+    def _needed(rows):
+        """The GUI's own filter: design inputs are edited above, derived values are computed."""
+        return [r["key"] for r in rows
+                if not r["supplied"] and r["source_kind"] not in ("design", "derived")]
+
+    def test_the_device_class_is_not_asked_for(self, pdf_bytes, store_root):
+        """It is set by the sub-tab the file was uploaded under, and shown in the selector."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        row = next(r for r in up["rows"] if r["key"] == "device_class")
+        assert row["supplied"] is True and row["value"] == "sic_mosfet"
+
+    def test_a_fully_read_datasheet_asks_for_nothing(self, pdf_bytes, store_root):
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        assert self._needed(up["rows"]) == []
+        res = DF.confirm(up["part_number"], {}, "sic_mosfet", root=store_root)
+        assert self._needed(res["rows"]) == []
+
+    def test_the_banner_agrees_with_the_validation_gate(self, pdf_bytes, store_root):
+        """The two must never contradict: if nothing is defaulted, nothing is missing."""
+        up = DF.upload(pdf_bytes, "mosfet", "sic_mosfet", root=store_root)
+        DF.confirm(up["part_number"], {}, "sic_mosfet", root=store_root)
+        prof = PS.load_profile(up["part_number"], kind="confirmed", root=store_root)
+        d = {k: v for k, v in DESIGN_INPUTS.items() if k != "sw_method"}
+        blk = DF.profile_to_block(prof, "sic_mosfet", d, root=store_root)
+        v = M.validate_block(blk, "sic_mosfet")
+        rows = DF.review_rows(prof, "sic_mosfet")
+        assert v["ok"] is True, v.get("defaulted")
+        assert self._needed(rows) == []
+
+    def test_a_value_the_datasheet_really_lacks_is_still_asked_for(self, store_root):
+        """THE NEGATIVE CONTROL. Widening what counts as supplied must not silence the warning:
+        this silicon part publishes no thermal resistance, and that must still be reported."""
+        import os
+        p = os.path.join(os.path.dirname(_MOSFET), "PFC Boost Diode",
+                         "SFAF1601G SERIES_H2105.pdf")
+        if not os.path.exists(p):
+            pytest.skip("SFAF1601G datasheet not available")
+        with open(p, "rb") as f:
+            up = DF.upload(f.read(), "diode", "si_diode", root=store_root)
+        assert "R_th_jc" in self._needed(up["rows"])

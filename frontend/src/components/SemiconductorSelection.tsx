@@ -798,7 +798,13 @@ export const SemiconductorSelection: React.FC<Props> = ({
     const up = dsUp[kind]; const conf = dsConf[kind]; const req = dsReq[kind]
     const tab = dsTab[kind]; const busy = !!dsBusy[kind]
     const rows = conf?.rows ?? up?.rows ?? []
-    const missing = rows.filter(r => !r.supplied && r.source_kind !== 'design')
+    // WHAT THE DESIGNER STILL HAS TO SUPPLY — which is neither of the two things this used to
+    // count. `design` rows are the editable inputs above, and `derived` rows are COMPUTED by the
+    // flow (V_plateau is V_GS(th) + 2 V, and lands in the block at 6.5 V) — neither is a value
+    // anyone is waiting on. Counting them made this banner contradict the authoritative check a
+    // few lines below, which reported `validation.ok` with nothing defaulted at the same moment.
+    const missing = rows.filter(r => !r.supplied
+                                  && r.source_kind !== 'design' && r.source_kind !== 'derived')
     const designGaps = new Set(rows.filter(r => !r.supplied && r.source_kind === 'design')
                                    .map(r => r.key))
     const perPoint = (res?.per_point ?? []) as Record<string, number>[]
@@ -1003,8 +1009,9 @@ export const SemiconductorSelection: React.FC<Props> = ({
 
             {missing.length > 0 && (
               <div style={{ fontSize: 10.5, color: C.amber, marginBottom: 6 }}>
-                {missing.length} value{missing.length > 1 ? 's' : ''} still unsupplied — the engine
-                will not run on a default for any of them.
+                {missing.length} value{missing.length > 1 ? 's' : ''} the datasheet did not
+                supply. Enter {missing.length > 1 ? 'them' : 'it'} below, or the engine would have
+                to fall back to a default nobody chose: {missing.map(m => m.key).join(', ')}.
               </div>)}
 
             {/* Design-sourced parameters are the editable row ABOVE; listing them again here
