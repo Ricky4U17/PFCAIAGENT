@@ -32,6 +32,15 @@ import pytest
 _SPECS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "specs")
 _MOSFET_PDF = os.path.join(_SPECS, "Review", "IMZA65R033M2HXKSA1.pdf")
+# All three from REAL vendor PDFs. Catalogue stubs publish no surge ratings and no curves, so
+# whole blocks of the chapter never render with them — Section 7.3.1's surge table among them,
+# which is how a second duplicate (the bridge worked derivation also numbered 7.3.1) survived the
+# first version of this file. A fixture that cannot reach a section cannot police its numbering.
+_PARTS = [("mosfet", "sic_mosfet", os.path.join(_SPECS, "Review", "IMZA65R033M2HXKSA1.pdf")),
+          ("diode", "sic_schottky", os.path.join(_SPECS, "Review", "PFC Boost Diode",
+                                                 "vs-4c16ep07l-m3.pdf")),
+          ("bridge", "bridge_rectifier", os.path.join(_SPECS, "Review",
+                                                      "Bridge Rectifier Update", "lve5060e.pdf"))]
 
 # TABLES ONLY, and deliberately. A table caption is unambiguous in extracted text because it is
 # prefixed by the literal word "Table". A section heading is not: it renders as "8.7 — Title", and
@@ -74,46 +83,50 @@ def ch7_catalogue():
 
 @pytest.fixture(scope="module")
 def ch7_datasheet():
-    """Chapter 7 with a confirmed datasheet MOSFET and every curve accepted — the configuration
-    the 7.4.2b clash needed, and the one a designer actually produces."""
+    """Chapter 7 with all three devices confirmed from their own datasheets and every offered
+    curve accepted — the document a designer actually produces, and the only configuration in
+    which the surge, derating and per-mechanism evidence blocks all render."""
     from fastapi.testclient import TestClient
     from app.mode_b.semiconductor import adapter as AD, parts_store as PS
     from app.mode_b.report_semiconductor import build_semiconductor_report
     import app.main as main
 
-    if not os.path.exists(_MOSFET_PDF):
-        pytest.skip("IMZA65R033M2HXKSA1 datasheet not available")
-    with open(_MOSFET_PDF, "rb") as f:
-        pdf_bytes = f.read()
+    for _, _, path in _PARTS:
+        if not os.path.exists(path):
+            pytest.skip(f"{os.path.basename(path)} not available")
 
+    design = dict(_design())
+    design.update({"n_parallel": 2, "dies_per_package": 1})
+    blocks = {}
     root = tempfile.mkdtemp(prefix="numbering_")
     orig, PS.DEFAULT_ROOT = PS.DEFAULT_ROOT, root
     try:
         c = TestClient(main.app)
-        c.post("/mode-b/semiconductor/datasheet/upload",
-               files={"file": ("m.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
-               data={"kind": "mosfet", "device_class": "sic_mosfet", "part_number": "NUMCHK"})
-        props = {p["key"]: p for p in c.post(
-            "/mode-b/semiconductor/datasheet/figures",
-            files={"file": ("m.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
-            data={"part_number": "NUMCHK"}).json()["proposals"]}
-        for key in ("E_oss_vs_VDS", "C_rss_vs_VDS", "R_DS_on_vs_Tj", "R_DS_on_vs_ID",
-                    "E_on_vs_ID", "E_off_vs_ID", "E_on_vs_Rg", "E_off_vs_Rg"):
-            q = props[key]
-            cu = q["curves"][(q.get("cross_check") or {}).get("curve_index", 0)]
-            c.post("/mode-b/semiconductor/datasheet/figure-confirm",
-                   json={"part_number": "NUMCHK", "key": key,
-                         "curve": {"x": cu["x"], "y": cu["y"], "caption": q.get("caption"),
-                                   "page": q.get("page"), "frame": q.get("frame")},
-                         "conditions": {}})
-        mos = c.post("/mode-b/semiconductor/datasheet/confirm",
-                     json={"part_number": "NUMCHK", "kind": "mosfet",
-                           "device_class": "sic_mosfet", "edits": {},
-                           "design": _design()}).json()["block"]
-        assert mos.get("sw_method") == "esw", "fixture must exercise the measured-curve path"
-        P = AD.REFERENCE_PARTS
-        return _text(build_semiconductor_report(_design(), mos, P["diode"],
-                                                P["bridge"], P["thermal"]))
+        for kind, cls, path in _PARTS:
+            with open(path, "rb") as f:
+                raw = f.read()
+            pn = f"NUM{kind[:3].upper()}"
+            c.post("/mode-b/semiconductor/datasheet/upload",
+                   files={"file": ("d.pdf", io.BytesIO(raw), "application/pdf")},
+                   data={"kind": kind, "device_class": cls, "part_number": pn})
+            for q in c.post("/mode-b/semiconductor/datasheet/figures",
+                            files={"file": ("d.pdf", io.BytesIO(raw), "application/pdf")},
+                            data={"part_number": pn}).json()["proposals"]:
+                cu = q["curves"][(q.get("cross_check") or {}).get("curve_index", 0)]
+                c.post("/mode-b/semiconductor/datasheet/figure-confirm",
+                       json={"part_number": pn, "key": q["key"],
+                             "curve": {"x": cu["x"], "y": cu["y"], "caption": q.get("caption"),
+                                       "page": q.get("page"), "frame": q.get("frame")},
+                             "conditions": {}})
+            blocks[kind] = c.post(
+                "/mode-b/semiconductor/datasheet/confirm",
+                json={"part_number": pn, "kind": kind, "device_class": cls,
+                      "edits": {}, "design": design}).json()["block"]
+        assert blocks["mosfet"].get("sw_method") == "esw", "must exercise the measured-curve path"
+        assert blocks["bridge"].get("ifsm_A") or blocks["bridge"].get("i2t_A2s"),             "the bridge must publish surge ratings, or Section 7.3.1 never renders"
+        return _text(build_semiconductor_report(design, blocks["mosfet"], blocks["diode"],
+                                                blocks["bridge"],
+                                                AD.REFERENCE_PARTS["thermal"]))
     finally:
         PS.DEFAULT_ROOT = orig
         shutil.rmtree(root, ignore_errors=True)

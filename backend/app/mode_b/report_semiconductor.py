@@ -75,45 +75,50 @@ _FIGURE_PURPOSE = {
 }
 
 
-def _datasheet_figures(story, block, sect, title, ch):
-    """Embed the datasheet plots every digitised curve in this block was read off.
+from app.mode_b.semiconductor.manifest import PROVENANCE_KEY as _PROV_KEY
 
-    The external review asked for these on all three components, and the reason is the strongest
-    argument in it: a digitised curve is the one input a reviewer cannot check against anything —
-    a table value can be looked up, a formula can be re-derived, but a shape read off a picture is
-    only as good as the picture it came from. Showing it turns the curve from an assertion into
-    evidence.
+
+def _basis(story, block, keys, read_off=None, ch=CH):
+    """The EVIDENCE for one loss mechanism, placed with the mechanism that consumes it.
+
+    A worked derivation states a number; this states where the number came from, and it belongs
+    beside the equation rather than in a panel four pages later. The rule the designer set:
+
+      * value read off a PLOT  -> show the plot, then say what was read, at which operating point,
+        what it gave, and which equation takes it;
+      * value from a TABLE     -> say so in one line and show NO plot. A figure that adds nothing
+        costs a page and teaches a reviewer to skim past figures that do matter.
+
+    `keys` are the canonical parameters this mechanism consumes, in the order they should appear.
+    `read_off` optionally maps a key to a sentence naming the value actually taken at the design's
+    operating point — the link that turns a picture into evidence.
     """
-    figs = [f for f in ((block or {}).get("_figure_images") or []) if f.get("path")]
-    if not figs:
-        return
-    sub_h(story, sect, title, ch)
-    _W(story,
-       "Every curve below was read off the plot shown beside it and confirmed against the "
-       "datasheet's own tabulated value on the same axes. Where the two disagreed the reading was "
-       "refused, so a figure appearing here has been checked, not merely extracted.")
-    # ONE PLOT CAN CARRY SEVERAL QUANTITIES — E_on and E_off are two traces of one figure — so the
-    # panel groups by image and lists what was taken from each. Printing the same plot twice in
-    # succession reads as a duplication error rather than as two separate readings.
-    # Grouped by the SOURCE PLOT (page + frame), not by the stored filename: each key writes its
-    # own PNG, so two quantities off one figure have different paths but identical pictures.
-    seen: dict = {}
-    for f in figs:
-        seen.setdefault((f.get("page"), tuple(f.get("frame") or ()) or f["path"]), []).append(f)
-    for _src_key, group in seen.items():
-        path = group[0]["path"]
-        try:
-            story.append(_img_path(path, width=CW * 0.52))
-        except Exception:
-            continue
-        g0 = group[0]
-        src = (f"{g0['figure']}, page {g0['page']}" if g0.get("figure")
-               else (f"page {g0['page']}" if g0.get("page") else "this datasheet"))
-        lines = []
-        for f in group:
-            what, why = _FIGURE_PURPOSE.get(f["key"], (f["key"], "used by this calculation"))
-            lines.append(f"<b>{what}</b> &#8212; {why}")
-        _W(story, f"Read from {src}. " + "; ".join(lines) + ".")
+    figs = {f["key"]: f for f in ((block or {}).get("_figure_images") or []) if f.get("path")}
+    prov = (block or {}).get(_PROV_KEY) or {}
+    shown: set = set()
+    for key in keys:
+        what, why = _FIGURE_PURPOSE.get(key, (key, "used by this calculation"))
+        f = figs.get(key)
+        note = (read_off or {}).get(key)
+        if f:
+            # one plot can carry several quantities (E_on and E_off share a figure); print it once
+            ident = (f.get("page"), tuple(f.get("frame") or ()) or f["path"])
+            if ident not in shown:
+                shown.add(ident)
+                try:
+                    story.append(_img_path(f["path"], width=CW * 0.52))
+                except Exception:
+                    pass
+            src = (f"{f['figure']}, page {f['page']}" if f.get("figure")
+                   else (f"page {f['page']}" if f.get("page") else "the datasheet"))
+            _W(story, f"<b>{what}</b> &#8212; read from {src}. {note or (why + '.')}")
+        elif prov.get(key) in ("extracted", "corrected"):
+            _W(story, f"<b>{what}</b> &#8212; taken from the datasheet's parameter TABLE, not a "
+                      f"plot; no figure is shown because there is none to read. "
+                      + (note or f"{why.capitalize()}."))
+        elif prov.get(key) == "derived":
+            _W(story, f"<b>{what}</b> &#8212; DERIVED, not published. "
+                      + (note or f"{why.capitalize()}."))
 
 
 _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "semiconductor", "assets")
@@ -336,7 +341,24 @@ def _bridge_section(story, traces, is_sync, bridge=None, sharing=None, derating=
                       + ("&nbsp;(+ bottom-diode crest share)" if _show_bd else ""),
                       lambda tr: (f"{_f(tr['P_bridge_top'])} W / {_f(tr['P_bridge_bottom'])} W"
                                   + (f" + {_f(float(tr.get('P_bridge_bd_share', 0) or 0))} W" if _show_bd else ""))))
-    _worked(story, "7.3.1", "Bridge Loss — Worked Derivation", steps, traces)
+    # 7.3a, not 7.3.1: Section 7.3.1 is the surge-withstand check and owns a table of that
+    # number. Both render whenever the bridge datasheet publishes I_FSM and I2t, which a real
+    # one does — so the clash was invisible with catalogue parts and appeared the moment a
+    # vendor PDF was used. Lettered suffixes are how tables under a section are already named
+    # here (7.2a-7.2e).
+    _worked(story, "7.3a", "Bridge Loss — Worked Derivation", steps, traces)
+    _btr = traces[0][1] if traces else {}
+    _basis(story, bridge, ["V_F_vs_IF", "V_F_vs_IF_hot"], {
+        "V_F_vs_IF": (
+            f"The per-diode forward drop is integrated along this curve at the instantaneous "
+            f"rectified current, not taken at a single point &#8212; which is also why no separate "
+            f"dynamic resistance r<sub>d</sub> is added: the slope is already in the curve. At "
+            f"{_f(_btr.get('Iin_rms', 0), 1)} A<sub>rms</sub> and the converged "
+            f"T<sub>j</sub> = {_f(_btr.get('Tj_brT', 0), 0)}{_DEG}C it gives the drop used above."),
+        "V_F_vs_IF_hot": (
+            "The hot curve the per-point drop interpolates towards; a rectifier's forward voltage "
+            "FALLS with temperature, so using the 25&#176;C curve alone overstates the loss."),
+    })
 
     _b = bridge or {}
     _est = list(_b.get("_estimated") or [])
@@ -397,6 +419,13 @@ def _bridge_section(story, traces, is_sync, bridge=None, sharing=None, derating=
               else "&#8212;")],
             ["Verdict", f"<b>{v}</b>"],
         ]
+        _basis(story, bridge, ["I_F_AV_vs_Tc"], {
+            "I_F_AV_vs_Tc": (
+                "The allowed average rectified current is read off this curve at the case "
+                "temperature the thermal solve converged to &#8212; matched on CASE temperature "
+                "specifically, because vendors print a free-air curve beside it rated several "
+                "times lower. That reading is the limit in the check below."),
+        })
         data_table(story, "7.3.3", "Bridge Derating Check",
             "A room-temperature I<sub>F(AV)</sub> rating does not say whether the part may carry "
             "this current at the temperature it actually runs at, and the two answers diverge "
@@ -423,7 +452,10 @@ def _bridge_section(story, traces, is_sync, bridge=None, sharing=None, derating=
 
 
 
-def _mosfet_section(story, traces, mosfet=None):
+def _mosfet_section(story, traces, mosfet=None, diode=None):
+    # `diode` is here for Section 7.4.4 alone: the charge dumped into the FET at turn-on is
+    # the DIODE's, so the plot that evidences it comes off the diode's datasheet even though
+    # the energy is dissipated in the MOSFET and booked to it.
     nch = int(traces[0][1]["Nch"]) if traces else 1
     # the recovery split the model ACTUALLY used, not a figure typed into the prose
     _frac = float(traces[0][1].get("rr_fet_frac", 0.85)) if traces else 0.85
@@ -459,6 +491,20 @@ def _mosfet_section(story, traces, mosfet=None):
         ("P<sub>cond</sub> = N<sub>ch</sub>&#183;R<sub>ds(on)</sub>&#183;I<sub>FET,rms</sub>&#178;",
          lambda tr: f"{nch}&#215;{_f(tr['rds_tj']*1e3,1)}m&#215;({_f(tr['i_fet_rms_ch'],3)})&#178; = <b>{_f(tr['P_cond_fet_tot'])} W</b>"),
     ], traces)
+    _tr0 = traces[0][1] if traces else {}
+    _basis(story, mosfet, ["R_DS_on", "R_DS_on_vs_Tj", "R_DS_on_vs_ID"], {
+        "R_DS_on": (f"The 25&#176;C value the curve is anchored on is "
+                    f"{_f(_tr0.get('rds_25', 0)*1e3, 1)} m{_OHM}."),
+        "R_DS_on_vs_Tj": (
+            f"Read at the converged junction temperature "
+            f"T<sub>j</sub> = {_f(_tr0.get('Tj_fet', 0), 0)}{_DEG}C, giving a factor of "
+            f"{_f(_tr0.get('rds_tj_factor', 0), 3)} and "
+            f"R<sub>DS(on)</sub> = {_f(_tr0.get('rds_tj', 0)*1e3, 1)} m{_OHM} &#8212; the value "
+            f"entering P<sub>cond</sub> in the derivation above."),
+        "R_DS_on_vs_ID": (
+            "Normalised on the current the parameter table states, so it contributes the SHAPE of "
+            "the rise with drain current while the table supplies the level."),
+    })
 
     sub_h(story, "7.4.2", "Switching loss (turn-on + turn-off)", CH)
     # WHICH MODEL IS ACTUALLY RUNNING DECIDES WHAT THIS SECTION SAYS. When a measured E(I_D) curve
@@ -545,6 +591,25 @@ def _mosfet_section(story, traces, mosfet=None):
             "figure for both would hide the design intent of an asymmetric gate drive.", CH)
         for _n in (_esw.get("notes") or []):
             annotation(story, "Esw NOTE", _n, CH)
+        _basis(story, mosfet, ["E_on_vs_ID", "E_off_vs_ID", "E_on_vs_Rg", "E_off_vs_Rg"], {
+            "E_on_vs_ID": (
+                f"Turn-on is read at the inductor VALLEY current at each line angle, then "
+                f"de-bundled by {_esw['debundled_J']*1e6:.1f} {_MU}J as Table 7.4.2b sets out. At "
+                f"the datasheet's own {_esw['i_test']:.1f} A test point the curve agrees with its "
+                f"table to {_esw['error_pct']['E_on']:.2f} %."),
+            "E_off_vs_ID": (
+                f"Turn-off is read at the PEAK current, and is not de-bundled &#8212; no "
+                f"C<sub>oss</sub> discharge or recovery charge flows through the device at "
+                f"turn-off. Agrees with the table to {_esw['error_pct']['E_off']:.2f} %."),
+            "E_on_vs_Rg": (
+                f"Supplies K<sub>Rg,on</sub> = {_esw['k_rg_on']:.3f} for the design's "
+                f"{float(_esw['rg_on'] or 0):g} {_OHM} turn-on path against the "
+                f"{_esw['rg_test']:g} {_OHM} the energies were measured at."),
+            "E_off_vs_Rg": (
+                f"Supplies K<sub>Rg,off</sub> = {_esw['k_rg_off']:.3f} for the "
+                f"{float(_esw['rg_off'] or 0):g} {_OHM} turn-off path, corrected independently of "
+                f"turn-on."),
+        })
 
     # M4b. When the switching model is anchored on published energies, the report MUST show the
     # de-bundling arithmetic: the whole basis for keeping a separate E_oss term alongside a
@@ -619,6 +684,13 @@ def _mosfet_section(story, traces, mosfet=None):
         ("P<sub>oss</sub> = N<sub>ch</sub>&#183;f<sub>sw</sub>&#183;E<sub>oss</sub>",
          lambda tr: f"{nch}&#215;{_f(tr['fsw']/1e3,0)}kHz&#215;{_uj(tr['eoss_vo'])} = <b>{_f(tr['P_oss_tot'])} W</b>"),
     ], traces)
+    _basis(story, mosfet, ["E_oss_vs_VDS"], {
+        "E_oss_vs_VDS": (
+            f"Read at the actual bus, V<sub>OUT</sub> = {_f((traces[0][1] if traces else {}).get('Vo', 0), 1)} V, "
+            f"giving {_uj((traces[0][1] if traces else {}).get('eoss_vo', 0))} &#8212; the energy "
+            f"dissipated every switching cycle in the derivation above. Taking the datasheet's "
+            f"400 V table value instead would misstate it."),
+    })
 
     sub_h(story, "7.4.4", "Diode charge dumped into the FET", CH)
     _W(story,
@@ -675,6 +747,11 @@ def _mosfet_section(story, traces, mosfet=None):
         (f"P<sub>rr&#8594;FET</sub> = N<sub>ch</sub>f<sub>sw</sub>&#183;V<sub>OUT</sub>Q<sub>c</sub>/(2&#8722;m) (SiC) / {_frac:.2f}&#183;Q<sub>rr</sub>V<sub>OUT</sub> (Si)",
          lambda tr: f"{_qrr_sub(tr)} = <b>{_f(tr['P_rr_fet_tot'])} W</b>"),
     ], traces)
+    # The charge is the DIODE's, so its evidence comes off the diode's datasheet even though the
+    # energy is dissipated here and booked to the MOSFET.
+    _basis(story, diode, ["Q_c", "Q_c_vs_VR", "E_c_vs_VR", "C_j_vs_VR"], {
+        "Q_c": "The published charge, moved to the design's bus voltage as shown above.",
+    })
 
     sub_h(story, "7.4.5", "Gate drive + leakage", CH)
     _W(story,
@@ -740,6 +817,17 @@ def _diode_section(story, traces, diode=None):
         ("Diode total",
          lambda tr: f"<b>{_f(tr['P_cond_dio_tot'] + tr['P_sw_dio_tot'])} W</b>"),
     ], traces)
+    _dtr = traces[0][1] if traces else {}
+    _basis(story, diode, ["V_F_vs_IF", "V_F_vs_IF_hot", "I_rev_vs_Tj", "I_rev_vs_VR"], {
+        "V_F_vs_IF": (
+            f"The forward drop is integrated ALONG this curve rather than taken at one point: at "
+            f"the {_f(_dtr.get('i_d_avg', 0), 2)} A average diode current and "
+            f"T<sub>j</sub> = {_f(_dtr.get('Tj_dio', 0), 0)}{_DEG}C it reads "
+            f"&#8776; {_f(_dtr.get('vf_d_pk', 0), 3)} V, the value in the derivation above."),
+        "V_F_vs_IF_hot": (
+            "The second temperature the per-point V<sub>f</sub> interpolates towards, so the drop "
+            "falls with junction temperature the way the device does."),
+    })
 
     # ── datasheet-first material (M8). Printed only when the block came from an uploaded
     # datasheet: a catalogue-sourced diode has none of this to show, and inventing a basis line
@@ -1101,7 +1189,6 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     # it reached the page, so a reviewer could see the number and not where it came from, which is
     # the one thing they cannot reconstruct for themselves.
     # Driven entirely by `_provenance`, so it cannot drift from what actually ran.
-    from app.mode_b.semiconductor.manifest import PROVENANCE_KEY as _PROVENANCE_KEY
     _PROV_WORD = {
         "extracted": "datasheet table",
         "digitised": "datasheet CURVE",
@@ -1114,7 +1201,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                  "R_DS_on_vs_Tj": "_rdson_tj_basis", "R_DS_on_vs_ID": "_rdson_id_basis"}
     _src_rows = []
     for _lbl, _blk in (("Bridge", bridge), ("MOSFET", mosfet), ("Diode", diode)):
-        _prov = (_blk or {}).get(_PROVENANCE_KEY) or {}
+        _prov = (_blk or {}).get(_PROV_KEY) or {}
         if not _prov:
             continue
         _figs = {f["key"]: f for f in ((_blk or {}).get("_figure_images") or [])}
@@ -1310,9 +1397,6 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             ["Rating", "Value", "Check"], _srows,
             col_widths=[CW*0.30, CW*0.22, CW*0.48], ch=CH)
 
-    _datasheet_figures(story, bridge, "7.3.4",
-                       "Datasheet evidence for the bridge loss model", CH)
-
     # ── 7.4 MOSFET ───────────────────────────────────────────────────────────
     sub_h(story, "7.4", "Boost MOSFET Loss", CH)
     annotation(story, "THEORY",
@@ -1320,7 +1404,7 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "output-capacitance (E<sub>oss</sub>) dissipation, the diode charge dumped into the FET, and "
         "gate-drive + leakage. Each is modelled below in its own sub-section: the equation we use, why "
         "that model is appropriate, and the worked numbers at the 90 V and 180 V corners.", CH)
-    _mosfet_section(story, traces, mosfet)
+    _mosfet_section(story, traces, mosfet, diode)
     # THE COLUMN WAS CALLED "RR" FOR A PART WITH NO REVERSE RECOVERY. For a SiC Schottky the
     # energy dumped into the channel at turn-on is the diode's junction CHARGE Q_c, not recovery
     # charge, and the external review flagged the label as actively misleading. The header now
@@ -1340,9 +1424,6 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
           _f(r['P_FET_rr']), _f(r['P_gate_driver'] + r['P_FET_leak']),
           f"{_f(r['P_FET_total'] + r['P_gate_driver'])} W"] for r in rows],
         col_widths=[CW*0.11, CW*0.12, CW*0.13, CW*0.12, CW*0.18, CW*0.16, CW*0.18], ch=CH)
-
-    _datasheet_figures(story, mosfet, "7.4.6",
-                       "Datasheet evidence for the MOSFET loss model", CH)
 
     # ── 7.5 Boost diode ──────────────────────────────────────────────────────
     sub_h(story, "7.5", "Boost Diode Loss", CH)
@@ -1366,9 +1447,6 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         col_widths=[CW*0.13, CW*0.21, CW*0.23, CW*0.22, CW*0.21], ch=CH)
 
     # ── 7.6 Thermal ──────────────────────────────────────────────────────────
-    _datasheet_figures(story, diode, "7.5.6",
-                       "Datasheet evidence for the boost-diode loss model", CH)
-
     sub_h(story, "7.6", "Thermal Network and Junction Temperatures", CH)
     _thermal_section(story, traces, thermal)
     data_table(story, "7.6", "Junction Temperatures vs Line Voltage",
