@@ -9252,3 +9252,85 @@ any change to `datasheet_extract.py` or the vendor templates.
 
 Suite 571 passed / 2 skipped (was 567). `datasheet_extract.py` and `vendor_templates.json` are
 untouched.
+
+## C229 - "1 value still unsupplied" was two false alarms
+
+The banner appeared on all three parameters tabs while `validate_block` reported ok with nothing
+defaulted - the screen contradicting the authoritative check a few lines below it.
+
+  device_class   banner: unsupplied   reality: 'sic_mosfet', set by the sub-tab and shown
+                                               in the selector directly above
+  V_plateau      banner: unsupplied   reality: vpl = 6.5 V in the block, provenance 'derived'
+
+CAUSE 1, `_scalar_entry` again. Written as an ALLOW-LIST ("a number in typ or max"), it dropped one
+category of legitimate value per release: a LOWER bound at C228 (V_DSS), a TEXT value here
+(device_class, on all 7 datasheets). Inverted rather than given a third exception: A SCALAR IS
+ANYTHING THAT IS NOT A CURVE. The single rejected shape is the pair-of-sequences a digitised curve
+stores in `typ`. Callers needing a NUMBER still test for one - "scalar" and "numeric" are not the
+same claim.
+
+CAUSE 2, the banner counted values the flow COMPUTES. V_plateau is derived (V_GS(th) + 2 V), so it
+is nobody's to supply. The banner now excludes `derived` rows alongside `design` ones and names
+what is missing instead of "the engine will not run on a default for any of them".
+
+AUDIT, every parameter of every datasheet: 1 key dropped before (device_class, 7/7 files), none
+after; extraction baseline 0 added / 0 changed / 0 removed. NEGATIVE CONTROL, because widening what
+counts as supplied could simply silence the warning: the SFAF1601G publishes no thermal resistance
+and R_th_jc is still reported. Suite 582.
+
+## C230 - Chapter 7 states the method it actually used, and shows where every number came from
+
+Table 7.2c hardcoded "MOSFET switching: analytic Eon/Eoff from Ciss/Rg/Qgd (Miller)" and kept
+saying so after the measured curves took over at C225, so the one table a reviewer reads to orient
+themselves disagreed with Section 7.4.2 two pages later. It now follows `sw_method`.
+
+Two tables shared the number 7.4.2b - C225 added "Measured Switching Energy" without noticing
+C209's "Switching-Energy Anchor" already held it, and both render once curves are confirmed. The
+anchor becomes 7.4.2c, titled for the cross-check role C225 demoted it to.
+
+NEW TABLE 7.2e, "Where Each Engine Input Came From": one row per engine input, driven by
+`_provenance` so it cannot drift. On the reference MOSFET, 22 keys - 10 datasheet table, 6
+datasheet CURVE, 2 derived, 4 design input, 0 engine defaults - with each digitised row carrying
+the check that justifies it ("agrees with the table to 0.03 %; plot on page 12"). Table 7.2d asks
+"did the engine estimate anything", the right question for a catalogue part; a part built from its
+own datasheet needs the other one. GUI vs report parity re-verified 9/9, 0 mismatch.
+
+## C231 - every loss term shows the plot its value was read off, or says there is no plot
+
+The graphs were already in the document - eight of them - grouped at the END of each component's
+section, four pages from the equation that consumed them, with the reader left to infer which plot
+fed which number. This RELOCATES rather than adds: each mechanism carries its evidence right after
+its worked derivation, and the caption closes the loop - what was read, at which operating point,
+what it gave, which equation takes it. 7.3a bridge V_f, 7.3.3 derating, 7.4.1 R_DS(on)(Tj) read at
+110 degC giving 46.9 mOhm, 7.4.2 E_on at valley / E_off at peak / K_Rg per gate path, 7.4.3 E_oss
+at the real bus, 7.4.4 the diode's Q_c, 7.5.1 diode V_f.
+
+THE RULE, BOTH WAYS: a value read off a plot shows the plot; a value from a parameter table says so
+in one line and shows NO plot (4 such lines in a full build). A figure that adds nothing costs a
+page and teaches a reviewer to skim past the figures that do matter.
+
+A SECOND DUPLICATE, found only by building with REAL parts: Table 7.3.1 was used by both the bridge
+worked derivation and the surge table, which renders only when the bridge publishes I_FSM and I2t -
+something catalogue stubs never do. Worked derivation renumbered 7.3a.
+
+That was a gap in the numbering test committed the same day: its fixture used a real MOSFET but
+STUB diode and bridge, so it could not reach Section 7.3.1 at all. **A fixture that cannot render a
+section cannot police its numbering.** It now builds all three from real vendor PDFs and asserts
+the bridge publishes surge ratings. Verified by reintroducing the clash.
+
+Relocation is net-zero on images (23 either way); 19 -> 21 pages only because all three real parts
+render their plots. Suite 615.
+
+## Two guards added alongside C229-C231 (committed separately, not C-numbered)
+
+`tests/test_review_completeness.py` (28 tests) - every value a profile holds must reach its review
+row, walked across all 7 vendor datasheets and written against whatever the profile CONTAINS rather
+than a key list, which would go stale exactly when it mattered. Verified to FAIL against both
+historical broken states of `_scalar_entry` before being trusted.
+
+`tests/test_report_numbering.py` (5 tests) - no two RENDERED tables may share a number, checked on
+built PDFs because that is the only place it shows. A source scan would be useless here: PENDING
+B10 lists 13 source-level collisions and most are if/else pairs where only one branch renders.
+Table captions only - a heading regex flags ordinary prose that wraps onto a cross-reference
+("8.7 - with the NTC shorted out ...", "9.1-9.2): what surge must be survived ..."), and a check
+that cries wolf is a check somebody switches off.

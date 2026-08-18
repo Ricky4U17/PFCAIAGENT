@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-13**, head = **`6b1193d` C225**, on `master`.
+**Start here after a restart.** Last updated **2026-08-17**, head = **`3953636` C231**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -50,6 +50,12 @@ entering the design must carry provenance.
 | C223 | 6 designer findings on the semiconductor page (GUI only) | requirement ignored `n_parallel` — per-package 18.87 → 9.43 A |
 | C224 | **M7-MOSFET** — grid-based plot finding, decade/lost-minus axes, 4 targets, curves reach the engine | 0 → 17 of 26 calibrate; 4 targets all agree with the part's own table; P_FET 9.10 → 8.78 W |
 | C225 | external review: **measured E_on/E_off curves** + de-bundled + per-path K_Rg; labels, leakage column, datasheet figures in the report | traces self-identify to ≤0.8 %; **found k_esw scaling a measured curve by 2.71** (P_FET 41 % high) |
+| C226 | R_g_common retired; gate drive into the FET total; **a hidden `sw_method:'analytic'` was disabling C225 entirely** | swept R_g_common 1.8→9999 Ω, loss identical; curves read+stored+shown then NOT used |
+| C227 | report 500 on a digitised curve (`_vf` printed all 244 points); I_F(AV) unnamed (`IF (1)` is a DIE INDEX); `is_sic` asked for while displayed | report would not build at all; both dies now kept with their case temperatures |
+| C228 | **a minimum is a value** — V_DSS extracted at 650 V and dropped 3 layers later by `_scalar_entry` | diagnosed wrong 3× before the baseline caught the inert "fix" |
+| C229 | "1 value still unsupplied" — two false alarms; `_scalar_entry` inverted to *not a curve* | device_class dropped on 7/7 datasheets; banner now agrees with `validate_block` |
+| C230 | Ch7 states the method it ran (7.2c followed `sw_method`); duplicate 7.4.2b split; **new Table 7.2e** | 22 engine inputs with their source; GUI↔report 9/9, 0 mismatch |
+| C231 | **every loss term shows the plot its value came off, or says there is no plot** | 7 mechanisms; 4 table-sourced values stated without a figure; found a 2nd duplicate (7.3.1) |
 
 **Settled convention B** (2026-08-05): a published E_on bundles the device overlap, its own E_oss,
 and the fixture's freewheeling charge. This engine counts the last two separately, so they are
@@ -273,8 +279,9 @@ flow and fixed several real calculation defects found along the way.
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
-  **The suite takes ~9 min** (555 s / 610 tests, measured 2026-08-17 on a quiet machine).
-  It is past the 10-minute foreground limit, so run it backgrounded. It was
+  **The suite takes ~10.5 min** (647 s / 615 tests, measured 2026-08-17 on a quiet machine).
+  It is past the 10-minute foreground limit, so ALWAYS run it backgrounded. The trend is one-way:
+  the two newest guards each build real datasheets, which is what makes them worth having. It was
   51 min until `tests/conftest.py` began memoising the two pure expensive reads — `extract` (~40 s,
   called ~34 times on the same few PDFs) and `digitise` — session-wide, keyed on the SHA-256 of the
   PDF bytes. **Every cache hit returns a DEEP COPY and that is load-bearing**: `upload` writes
@@ -301,7 +308,17 @@ flow and fixed several real calculation defects found along the way.
 
 ## What to pick up next
 
-Nothing is half-finished. Suggested order:
+Nothing is half-finished. The Chapter-7 documentation arc (C230-C231) is complete and the designer
+has run it; the agreed NEXT topic is **more graphs and supporting detail in the report**, discussed
+but not started. Two things were flagged during C231 and should shape it:
+
+- **Decide inline vs appendix before adding figures.** Chapter 7 is 21 pages with all three parts
+  real. C231 relocated the eight existing plots at net-zero cost; anything genuinely NEW grows the
+  chapter. Worth agreeing a structure first rather than discovering it at 30 pages.
+- **Run `tests/test_report_numbering.py` before and after** — it is now the gate on exactly the
+  activity that is next, and it has already caught two duplicates that nothing else could see.
+
+Then, in order:
 
 0. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: it is the only
    datasheet on file that cannot be read, and it fails safely today. Take it when a designer
@@ -332,6 +349,14 @@ Nothing is half-finished. Suggested order:
 
 ## Traps that have bitten more than once
 
+- **A FIXTURE THAT CANNOT RENDER A SECTION CANNOT POLICE IT.** C231: the numbering test shipped
+  that morning used a real MOSFET but STUB diode and bridge, so Section 7.3.1 (surge ratings, which
+  render only when the bridge publishes I_FSM/I²t) never appeared — and a duplicate 7.3.1 sat there
+  undetected. Report fixtures must build the configuration a designer actually produces: all three
+  parts from real vendor PDFs. `tests/test_report_numbering.py` now does, and asserts the bridge
+  really carries surge ratings so the section is guaranteed to render.
+- **`tests/test_report_numbering.py`** — no two RENDERED tables share a number, on built PDFs.
+  Run it before and after adding any section, table or figure to a report chapter.
 - **`tests/test_review_completeness.py` IS THE GUARD ON THIS WHOLE CLASS.** It walks every
   parameter of every vendor datasheet on file and asserts that nothing the profile holds is
   reported unsupplied — deliberately not written against a key list, which would go stale exactly
