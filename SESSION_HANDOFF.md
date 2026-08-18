@@ -273,7 +273,8 @@ flow and fixed several real calculation defects found along the way.
   The datasheet tests re-extract and re-digitise a 17-page PDF, so they dominate the runtime.
   C224/C225 tests run the whole M7 flow ONCE at module scope for that reason — if you add more,
   do the same rather than uploading per test.
-  **The suite takes ~8 min** (472 s / 567 tests, measured 2026-08-13 on a quiet machine). It was
+  **The suite takes ~9 min** (555 s / 610 tests, measured 2026-08-17 on a quiet machine).
+  It is past the 10-minute foreground limit, so run it backgrounded. It was
   51 min until `tests/conftest.py` began memoising the two pure expensive reads — `extract` (~40 s,
   called ~34 times on the same few PDFs) and `digitise` — session-wide, keyed on the SHA-256 of the
   PDF bytes. **Every cache hit returns a DEEP COPY and that is load-bearing**: `upload` writes
@@ -331,6 +332,12 @@ Nothing is half-finished. Suggested order:
 
 ## Traps that have bitten more than once
 
+- **`tests/test_review_completeness.py` IS THE GUARD ON THIS WHOLE CLASS.** It walks every
+  parameter of every vendor datasheet on file and asserts that nothing the profile holds is
+  reported unsupplied — deliberately not written against a key list, which would go stale exactly
+  when it mattered. It was verified to FAIL against both historical broken states of
+  `_scalar_entry` before being trusted. If a designer ever again reports being asked for a value
+  the datasheet prints, this file should have caught it: check why it did not.
 - **ASK WHERE THE VALUE STOPS, NOT HOW IT IS READ.** C228: V_DSS looked like an extraction
   failure, was diagnosed as one three times over, and had been extracted correctly all along —
   a filter three layers downstream (`_scalar_entry`, testing `typ`/`max` and not `min`) dropped
