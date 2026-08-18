@@ -582,7 +582,11 @@ def _mosfet_section(story, traces, mosfet=None):
                 f"E<sub>off</sub>, which carries no bundled charge, and asking what the fixture "
                 f"must then have contributed &#8212; gives "
                 f"{_anch.get('implied_q_fw_C', 0)*1e9:.0f} nC, inside that range.", CH)
-        data_table(story, "7.4.2b", "Switching-Energy Anchor",
+        # 7.4.2c, NOT 7.4.2b: C225 added a "Measured Switching Energy" table under 7.4.2b without
+        # noticing this one already held that number, and both render in the same document when
+        # the curves are in use. A duplicate table number is invisible to `ast.parse` and to any
+        # audit that only asks whether a series starts at 'a' — it shows up solely in a built PDF.
+        data_table(story, "7.4.2c", "Switching-Energy Anchor (analytic cross-check)",
             "Both factors are shown because their DIVERGENCE is the diagnostic: a magnitude error "
             "would scale turn-on and turn-off alike, so a large difference after de-bundling points "
             "at the model's shape rather than its size.",
@@ -1088,6 +1092,59 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         "&#8212; supplying the real curve or value removes the approximation entirely.",
         ["Device", "Selected part", "Datasheet", "Parameters the engine ESTIMATED"],
         _prov_rows, col_widths=[CW*0.11, CW*0.25, CW*0.16, CW*0.48], ch=CH)
+
+    # ── 7.2e ── WHERE EVERY ENGINE INPUT CAME FROM, one row per parameter.
+    # The table above answers "did the engine estimate anything", which was the right question
+    # while parts came from the parametric catalogue. A part built from its own datasheet raises a
+    # different one — a value can now be a table entry, a curve read off a plot, something derived
+    # from other entries, or a design input — and the block records which for EVERY key. None of
+    # it reached the page, so a reviewer could see the number and not where it came from, which is
+    # the one thing they cannot reconstruct for themselves.
+    # Driven entirely by `_provenance`, so it cannot drift from what actually ran.
+    from app.mode_b.semiconductor.manifest import PROVENANCE_KEY as _PROVENANCE_KEY
+    _PROV_WORD = {
+        "extracted": "datasheet table",
+        "digitised": "datasheet CURVE",
+        "derived":   "derived",
+        "manual":    "your design input",
+        "corrected": "you corrected it",
+        "default":   "ENGINE DEFAULT",
+    }
+    _BASIS_OF = {"E_oss_vs_VDS": "_eoss_basis", "C_rss_vs_VDS": "_crss_basis",
+                 "R_DS_on_vs_Tj": "_rdson_tj_basis", "R_DS_on_vs_ID": "_rdson_id_basis"}
+    _src_rows = []
+    for _lbl, _blk in (("Bridge", bridge), ("MOSFET", mosfet), ("Diode", diode)):
+        _prov = (_blk or {}).get(_PROVENANCE_KEY) or {}
+        if not _prov:
+            continue
+        _figs = {f["key"]: f for f in ((_blk or {}).get("_figure_images") or [])}
+        _esw = (_blk or {}).get("_esw_basis") or {}
+        for _k in sorted(_prov):
+            _p = _prov[_k]
+            _ev = ""
+            if _p == "digitised":
+                _b = (_blk or {}).get(_BASIS_OF.get(_k, "")) or {}
+                if _b.get("checked") and _b.get("error_pct") is not None:
+                    _ev = f"agrees with the table to {_b['error_pct']:.2f} %"
+                elif _k in ("E_on_vs_ID", "E_off_vs_ID") and _esw.get("ok"):
+                    _e = _esw["error_pct"].get("E_on" if "on" in _k else "E_off")
+                    _ev = f"agrees with the table to {_e:.2f} %"
+                elif _b.get("from_curve"):
+                    _ev = "read across the plotted range"
+                _pg = (_figs.get(_k) or {}).get("page")
+                if _pg:
+                    _ev += f"; plot on page {_pg}" if _ev else f"plot on page {_pg}"
+            _src_rows.append([f"{_lbl}", _k.replace("_", "&#8203;_"),
+                              _PROV_WORD.get(_p, _p), _ev or "&#8212;"])
+    if _src_rows:
+        data_table(story, "7.2e", "Where Each Engine Input Came From",
+            "One row per number the loss model consumes. A value read off a PLOT is neither a "
+            "table entry nor a fit, so it is named separately and carries the check that justifies "
+            "it: the plot and the parameter table are independent renderings of one measurement, "
+            "and their agreement is what says the curve was read correctly. Anything reading "
+            "ENGINE DEFAULT is a number nobody chose &#8212; there should be none.",
+            ["Device", "Parameter", "Source", "Evidence"],
+            _src_rows, col_widths=[CW*0.12, CW*0.28, CW*0.20, CW*0.40], ch=CH)
     annotation(story, "NOTE",
         "Datasheet parameters (R<sub>DS(on)</sub>, V<sub>f</sub> curves, Q<sub>g</sub>, E<sub>oss</sub>, "
         "R<sub>&#952;jc</sub> …) and the application inputs (gate drive, R<sub>g</sub>, R<sub>&#952;cs</sub>, "
@@ -1113,7 +1170,15 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         ["Mechanism", "Model / method", "Current basis"],
         [["Bridge conduction", "V<sub>f</sub>(i)&#183;i integrated; datasheet V-I curve", "average current"],
          ["MOSFET conduction", "R<sub>ds(on)</sub>(T<sub>j</sub>)&#183;I&#178;, duty-weighted; hot R<sub>ds</sub>", "on-state RMS"],
-         ["MOSFET switching", "analytic E<sub>on</sub>/E<sub>off</sub> from C<sub>iss</sub>/R<sub>g</sub>/Q<sub>gd</sub> (Miller)", "i at switch instants"],
+         # FOLLOWS WHAT ACTUALLY RAN. This row was a hardcoded "analytic ... (Miller)" and kept
+         # saying so after the measured E(I_D) curves took over, so the one table a reviewer reads
+         # to orient themselves contradicted Section 7.4.2 two pages later.
+         ["MOSFET switching",
+          ("datasheet E<sub>on</sub>/E<sub>off</sub>(I<sub>D</sub>) curves, de-bundled and "
+           "R<sub>g</sub>-corrected (Section 7.4.2)"
+           if (mosfet or {}).get("sw_method") == "esw" and ((mosfet or {}).get("_esw_basis") or {}).get("ok")
+           else "analytic E<sub>on</sub>/E<sub>off</sub> from C<sub>iss</sub>/R<sub>g</sub>/Q<sub>gd</sub> (Miller)"),
+          "i at switch instants"],
          ["MOSFET output cap", "f<sub>sw</sub>&#183;E<sub>oss</sub>(V<sub>OUT</sub>); datasheet energy curve", "&#8212; (voltage)"],
          ["Diode charge &#8594; FET", "Si Q<sub>rr</sub>&#183;V<sub>OUT</sub> split / SiC &#189;V<sub>OUT</sub>Q<sub>c</sub>; CCM only", "switch-off current"],
          ["Boost-diode conduction", "V<sub>f</sub>(i)&#183;i<sub>D</sub> integrated; datasheet V-I", "average current"],
