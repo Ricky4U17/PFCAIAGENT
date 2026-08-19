@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-19**, head = **`cd2fd84` C232**, on `master`.
+**Start here after a restart.** Last updated **2026-08-19**, head = **`cd2fd84` C232** (designer-verified in the GUI), on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -315,8 +315,10 @@ is **23 pages / 27 images** with all three parts real, and the inline-vs-appendi
 during C231 is settled by C232's shape: evidence stays INLINE with its mechanism, sweeps live in the
 **Section 7.10 appendix**. Keep to that when adding more.
 
-The designer has not yet run C232 — **build Chapter 7 in the GUI and look at Figures 7-5 to 7-8**
-before starting the next topic.
+**The designer ran C232 in the GUI on 2026-08-19 and accepted the graphs.** The arc is closed; the
+next topic is open. Note the report endpoint renders a fuller document than a bare
+`build_semiconductor_report` call — 28 pages / 39 images through the API against 23 / 27 in-process
+— so quote the API figure when talking about what the designer actually downloads.
 
 Then, in order:
 
