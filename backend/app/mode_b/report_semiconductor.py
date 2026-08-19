@@ -1471,18 +1471,34 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     sub_h(story, "7.7", "Loss and Temperature vs Line Voltage", CH)
     try:
         from app.mode_b.semiconductor import pfc_loss_model as engine, pfc_visualization as viz
-        sel = float(cfg["run"]["vac_list"][0])
+        # THE WORST-CASE POINT, not the first entry in the sweep. These two figures show a
+        # per-mechanism breakdown and the switching waveforms, and they were drawn at
+        # vac_list[0] = 90 Vac while the chapter is signed off at the worst case, 180 Vac and
+        # 7 W higher. A reviewer studying the breakdown was studying the wrong operating point.
+        sel = float(summ.get("worst_loss_Vac") or cfg["run"]["vac_list"][0])
         with tempfile.TemporaryDirectory() as td:
             files = viz.build_step4_visuals(cfg, selected_vac=sel, vac_list=cfg["run"]["vac_list"],
                                             output_prefix=os.path.join(td, "ch7"), backend=engine,
                                             tj_limits=tj_limit)
             for name, cap in [("losses_vs_vac", "Figure 7-1 — Semiconductor losses vs input voltage."),
                               ("temperatures_vs_vac", "Figure 7-2 — Junction temperatures vs input voltage."),
-                              ("loss_breakdown", f"Figure 7-3 — Per-mechanism loss breakdown at {sel:.0f} Vac."),
-                              ("waveforms", f"Figure 7-4 — Operating-point waveforms at {sel:.0f} Vac.")]:
+                              ("loss_breakdown",
+                               f"Figure 7-3 — Per-mechanism loss breakdown at {sel:.0f} Vac, the "
+                               f"WORST-CASE point of Table 7.8a, not an arbitrary corner."),
+                              ("waveforms",
+                               f"Figure 7-4 — Operating-point waveforms at {sel:.0f} Vac (worst case).")]:
                 if name in files:
                     story.append(_img_path(files[name]))
                     body(story, cap, CH)
+            # The same sweep as Figure 7-1, stacked: which MECHANISM dominates, and where
+            # conduction hands over to the voltage-dependent terms. Lives here rather than beside
+            # the budget table of Section 7.8b, which is gated on inductor and R_CS data from other
+            # chapters and so never renders in a standalone Chapter 7.
+            _stack = viz.plot_loss_stack_vs_vac(rows, os.path.join(td, "ch7_stack.png"))
+            story.append(_img_path(_stack))
+            body(story, "Figure 7-5 &#8212; Semiconductor loss budget by mechanism. Conduction "
+                        "dominates at low line, where the current is highest; the "
+                        "voltage-dependent terms take over as the line rises.", CH)
     except Exception:
         annotation(story, "NOTE", "Figures unavailable in this build.", CH)
 
@@ -1640,6 +1656,59 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             [[f"{r['Vac']:.0f} V", f"{_f(r['P_SYSTEM_total'],1)} W", f"{_f(r['P_SEMI_total'],1)} W",
               f"{_f(r['P_OTHER_implied'],1)} W"] for r in rows],
             col_widths=[CW*0.18, CW*0.27, CW*0.27, CW*0.28], ch=CH)
+
+    # ── 7.10 Sensitivity ─────────────────────────────────────────────────────
+    # Deliberately AFTER the conclusion rather than inside it. The main line is read once, in
+    # order; these answer the questions a reviewer asks when CHALLENGING a choice - what if the
+    # gate drive were different, what happens at part load, and is the de-bundling defensible -
+    # and each is a genuine re-run of the engine, not a formula, so it carries the thermal
+    # iteration and the measured curves exactly as the headline numbers do.
+    _sens = []
+    try:
+        from app.mode_b.semiconductor import pfc_loss_model as _eng2, pfc_visualization as _viz2
+        _sv = float(summ.get("worst_loss_Vac") or cfg["run"]["vac_list"][0])
+        with tempfile.TemporaryDirectory() as _td2:
+            try:
+                _sens.append((_viz2.plot_loss_vs_rg(cfg, os.path.join(_td2, "rg.png"),
+                                                    backend=_eng2, selected_vac=_sv),
+                    f"Figure 7-6 &#8212; MOSFET loss and junction temperature against gate "
+                    f"resistance at {_sv:.0f} Vac. The gate resistor is the designer's own choice "
+                    f"and the largest single lever on switching loss; the correction that makes "
+                    f"this curve meaningful is read from the datasheet's own E vs R<sub>g</sub> "
+                    f"plot (Section 7.4.2), not assumed."))
+            except Exception:
+                pass
+            try:
+                _sens.append((_viz2.plot_loss_vs_load(cfg, os.path.join(_td2, "load.png"),
+                                                      backend=_eng2, selected_vac=_sv),
+                    f"Figure 7-7 &#8212; Semiconductor loss and its share of the output against "
+                    f"load at {_sv:.0f} Vac. Every other figure sweeps line voltage at full power; "
+                    f"efficiency is normally specified across the load range, and light load is "
+                    f"where the fixed terms stop being negligible against a conduction loss that "
+                    f"falls with the square of current."))
+            except Exception:
+                pass
+            try:
+                _sens.append((_viz2.plot_debundling(mosfet, os.path.join(_td2, "deb.png")),
+                    "Figure 7-8 &#8212; The published turn-on energy against the device overlap "
+                    "the model actually uses. What is removed is a CONSTANT, not a fraction, "
+                    "because it is set by the test voltage rather than the current, and it is "
+                    "counted in Sections 7.4.3 and 7.4.4 instead. The remainder falling to about "
+                    "zero at the lowest plotted current is the check that the subtraction is the "
+                    "right size &#8212; overlap energy is proportional to current, so it must."))
+            except Exception:
+                pass
+            if _sens:
+                sub_h(story, "7.10", "Sensitivity — what moves these numbers", CH)
+                body(story,
+                     "Each sweep below re-runs the whole engine at every point, so it carries the "
+                     "same thermal iteration, the same measured curves and the same de-bundling as "
+                     "the headline result. None of it is a formula fitted to the answer.", CH)
+                for _path, _cap in _sens:
+                    story.append(_img_path(_path))
+                    body(story, _cap, CH)
+    except Exception:
+        pass
 
 
 def _doc(target):
