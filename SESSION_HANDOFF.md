@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-17**, head = **`3953636` C231**, on `master`.
+**Start here after a restart.** Last updated **2026-08-19**, head = **`cd2fd84` C232**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -308,15 +308,15 @@ flow and fixed several real calculation defects found along the way.
 
 ## What to pick up next
 
-Nothing is half-finished. The Chapter-7 documentation arc (C230-C231) is complete and the designer
-has run it; the agreed NEXT topic is **more graphs and supporting detail in the report**, discussed
-but not started. Two things were flagged during C231 and should shape it:
+Nothing is half-finished. The Chapter-7 documentation arc (C230-C232) is complete: C230 made the
+chapter state the method it used, C231 put each plot beside the mechanism that consumes it, C232
+fixed the operating point the figures were drawn at and added the four sensitivity sweeps. Chapter 7
+is **23 pages / 27 images** with all three parts real, and the inline-vs-appendix question flagged
+during C231 is settled by C232's shape: evidence stays INLINE with its mechanism, sweeps live in the
+**Section 7.10 appendix**. Keep to that when adding more.
 
-- **Decide inline vs appendix before adding figures.** Chapter 7 is 21 pages with all three parts
-  real. C231 relocated the eight existing plots at net-zero cost; anything genuinely NEW grows the
-  chapter. Worth agreeing a structure first rather than discovering it at 30 pages.
-- **Run `tests/test_report_numbering.py` before and after** — it is now the gate on exactly the
-  activity that is next, and it has already caught two duplicates that nothing else could see.
+The designer has not yet run C232 — **build Chapter 7 in the GUI and look at Figures 7-5 to 7-8**
+before starting the next topic.
 
 Then, in order:
 
@@ -357,6 +357,17 @@ Then, in order:
   really carries surge ratings so the section is guaranteed to render.
 - **`tests/test_report_numbering.py`** — no two RENDERED tables share a number, on built PDFs.
   Run it before and after adding any section, table or figure to a report chapter.
+- **A FIGURE INSIDE A GATED SECTION SILENTLY DOES NOT EXIST.** C232: Figure 7-5 was placed beside the
+  budget table in Section 7.8b, which is gated on inductor DCR and R_CS carried in from OTHER chapters
+  — a standalone Chapter 7 never reaches it, and 7.9 is dark for the same reason. The `try/except`
+  around the figure swallowed it and the build looked fine. Before placing a figure, check whether the
+  section around it renders in a chapter built ON ITS OWN.
+- **Report figures must be drawn at the chapter's OWN worst case, not `vac_list[0]`.** C232: Figures
+  7-3/7-4 sat at 90 Vac while Table 7.8a's worst case is 180 Vac — 58.40 W in the picture against
+  65.44 W in the headline. Use `summary["worst_loss_Vac"]` and say so in the caption.
+- **`simulate_point` PREFERS `iin_rms_curve` over deriving current from power.** C232: a load sweep
+  that scaled `po` alone left the current unchanged and the loss nearly flat. Scale `po_curve`,
+  `iin_rms_curve`, `pin_curve` and the scalars together.
 - **`tests/test_review_completeness.py` IS THE GUARD ON THIS WHOLE CLASS.** It walks every
   parameter of every vendor datasheet on file and asserts that nothing the profile holds is
   reported unsupplied — deliberately not written against a key list, which would go stale exactly

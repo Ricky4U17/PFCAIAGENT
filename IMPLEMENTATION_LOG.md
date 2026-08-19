@@ -9334,3 +9334,44 @@ B10 lists 13 source-level collisions and most are if/else pairs where only one b
 Table captions only - a heading regex flags ordinary prose that wraps onto a cross-reference
 ("8.7 - with the NTC shorted out ...", "9.1-9.2): what surge must be survived ..."), and a check
 that cries wolf is a check somebody switches off.
+
+# C232 - the loss figures were drawn at the wrong operating point, and four sweeps added
+
+Found while adding to this section, not by a test. Figures 7-3 and 7-4 - per-mechanism breakdown
+and operating-point waveforms - were drawn at `vac_list[0]`, the FIRST line point, while the
+chapter's worst case in Table 7.8a is 180 Vac. On the reference design: **58.40 W in the picture
+against 65.44 W in the headline**, a 12% disagreement with nothing in the caption to explain it.
+Both now follow `summary["worst_loss_Vac"]` and both captions name the point.
+
+Four sweeps added, each re-running the whole engine at every point - same thermal iteration, same
+measured curves, same de-bundling as the headline number:
+
+| fig | what | where |
+|---|---|---|
+| 7-5 | loss budget stacked by mechanism vs line | 7.7, beside 7-1 which sweeps the same axis |
+| 7-6 | loss and Tj vs gate resistance | new 7.10 |
+| 7-7 | loss and its share of output vs load | new 7.10 |
+| 7-8 | published E_on vs the overlap the model uses | new 7.10 |
+
+7-8 earns its place: de-bundling is the least obvious step in the chapter and was prose only. The
+plot shows the removed part is a CONSTANT not a fraction, and that the remainder falls to about
+zero at the lowest plotted current - which it must, since overlap energy is proportional to
+current. That is the check that the subtraction is the right SIZE.
+
+## Two traps, both new
+
+**A figure inside a gated section silently does not exist.** 7-5 first went beside the budget table
+in 7.8b, which is gated on inductor DCR and R_CS carried in from other chapters - a STANDALONE
+Chapter 7 never reaches it, and 7.9 is dark for the same reason (pre-existing). The try/except
+swallowed it. Anything that must appear in the chapter on its own cannot live inside that gate.
+
+**`simulate_point` prefers `iin_rms_curve` over deriving current from power.** The load sweep
+scaled `po` alone, so the current never moved and the loss came out nearly flat. It now scales
+`po_curve`, `iin_rms_curve`, `pin_curve` and the scalars together: 1.86% of output at 10% load,
+1.61% at 50%, 1.82% at 100% - the correct efficiency-curve shape.
+
+VERIFIED, all three parts from real vendor PDFs: 23 pp, 27 images, Figures 7-1..7-8 present and
+sequentially numbered, 7-3 captioned at 180 Vac; all 8 mechanisms still carry their evidence and 4
+table-sourced values still say so without a plot; no duplicate table numbers; GUI vs report Table
+7.4 9/9 rows and 0 mismatch; zero unrenderable glyphs. Suite 615 passed / 2 skipped.
+
