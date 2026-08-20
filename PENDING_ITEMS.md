@@ -530,6 +530,24 @@ asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
   showed why: two axis defects there fit a straight line with residual exactly zero, so the
   residual is not evidence — only the tabulated point is.
 
+### B20 — Chapter 3/4 report changes cannot be render-verified without a live GUI session  `CODE`
+
+C233 changed Table 3.6.1's caption, Table 4.2's copper column and Figure 4.5a's data series. All
+three were verified by reading the code and by the arithmetic in
+`tests/test_inductor_loss_budget.py`, but **none was verified on a rendered page**, because
+building Chapters 3-4 needs the full job state and there is no saved state to rebuild from — the
+report is generated from what the frontend posts, and nothing persists it.
+
+That is the same blind spot that let C233 itself survive: Chapter 7 has a real-parts fixture and
+its defects get caught, Chapters 3-6 have none.
+
+- **Done when:** a saved job-state fixture exists (one real design, checked into `backend/tests/`)
+  from which the full report can be built headlessly, and Tables 3.6.1 / 4.2 / Figure 4.5a are
+  asserted on the rendered output the way Table 7.8b now is.
+- **Interim:** after any Chapter 3-6 report edit, regenerate the full PDF from the GUI and look.
+- **Do not** assume the Chapter-7 fixture covers this. It builds Chapter 7 standalone and never
+  reaches Chapters 3-6 at all.
+
 ## C. GUI  `CODE`
 
 ### C1. Control Design page redesign

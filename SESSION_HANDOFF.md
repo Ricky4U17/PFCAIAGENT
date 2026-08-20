@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-19**, head = **`cd2fd84` C232** (designer-verified in the GUI), on `master`.
+**Start here after a restart.** Last updated **2026-08-19**, head = **`3bffff9` C233**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -315,10 +315,23 @@ is **23 pages / 27 images** with all three parts real, and the inline-vs-appendi
 during C231 is settled by C232's shape: evidence stays INLINE with its mechanism, sweeps live in the
 **Section 7.10 appendix**. Keep to that when adding more.
 
-**The designer ran C232 in the GUI on 2026-08-19 and accepted the graphs.** The arc is closed; the
-next topic is open. Note the report endpoint renders a fuller document than a bare
-`build_semiconductor_report` call — 28 pages / 39 images through the API against 23 / 27 in-process
-— so quote the API figure when talking about what the designer actually downloads.
+**The designer ran C232 in the GUI on 2026-08-19 and accepted the graphs.** Note the report endpoint
+renders a fuller document than a bare `build_semiconductor_report` call — 28 pages / 39 images
+through the API against 23 / 27 in-process — so quote the API figure when talking about what the
+designer actually downloads.
+
+## The designer's four report-review comments (2026-08-19) — 1 of 4 done
+
+From `specs/Review/PFC Report Review comments.docx`, all four confirmed against their report.
+**C233 closed comment 2.** The remaining three are agreed and unstarted, in the order settled with
+the designer (2 → 4 → 1 → 3):
+
+| # | Comment | State |
+|---|---|---|
+| 2 | Table 7.8b inductor loss disagrees with Ch3 | **DONE — C233** (it matched neither Ch3 nor Ch4) |
+| 4 | Figures B.2a/B.2b schematic values wrong | **NEXT.** R_RLPK renders 15 kΩ vs the BOM's 12.1 kΩ. Root cause is systemic: the schematic asks its context for 22 keys and `base` (report_steps1_8.py ~line 788) supplies 10, so 12 fall back to hardcoded defaults in `schematics.py`. `rfb_each` 3.63 MΩ and `rfb2` 23.2 kΩ agree with the BOM only by coincidence — change Vout and they will not. Table B.1 also hardcodes R_RLPK and R_IAC as string literals while its other 12 rows are live `ctx[...]`, and Section 6.3.2's heading hardcodes 12.1 kΩ too: three sources of truth for one value. |
+| 1 | Table 7.2e black squares | `report_semiconductor.py:1224` inserts `&#8203;` (U+200B) to wrap the narrow column; Helvetica has no glyph (measured width 7.61) so ReportLab draws a notdef box. One-line fix. **Also fix the glyph CHECK** — it counted U+FFFD/U+25A0 in extracted text, but a notdef extracts as `I`, so it can never see this. Greek/math chars outside cp1252 render fine via Symbol substitution, so "not in cp1252" is not the test either. |
+| 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
 
 Then, in order:
 
@@ -359,6 +372,17 @@ Then, in order:
   really carries surge ratings so the section is guaranteed to render.
 - **`tests/test_report_numbering.py`** — no two RENDERED tables share a number, on built PDFs.
   Run it before and after adding any section, table or figure to a report chapter.
+- **A REMAINDER COLUMN HIDES EVERY ERROR UPSTREAM OF IT.** C233: Table 7.8b's Balance is computed
+  as `P_system − (everything else)`, so an entire inductor's core loss could go missing and every
+  row still reconciled. Never assert that such a table "adds up" — it does so by construction.
+  The only assertion with teeth is against the chapter that OWNS the quantity.
+- **DO NOT LET A TEST RE-IMPLEMENT THE ARITHMETIC IT IS CHECKING.** The first draft of
+  `test_inductor_loss_budget.py` asserted against its own copy of the budget formula and passed
+  while the shipped report was still broken. Parse the RENDERED table instead: the numbers a
+  reviewer disputes are the ones on the page.
+- **PER-PHASE vs SYSTEM TOTAL must be stated wherever a loss is shown.** C233 existed because
+  Chapters 3/4 report one inductor and Chapter 7 reports all of them, and nothing said so — in the
+  report OR the GUI. An interleaved design has one core per phase; both copper and core scale.
 - **A FIGURE INSIDE A GATED SECTION SILENTLY DOES NOT EXIST.** C232: Figure 7-5 was placed beside the
   budget table in Section 7.8b, which is gated on inductor DCR and R_CS carried in from OTHER chapters
   — a standalone Chapter 7 never reaches it, and 7.9 is dark for the same reason. The `try/except`

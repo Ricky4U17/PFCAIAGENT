@@ -9375,3 +9375,55 @@ sequentially numbered, 7-3 captioned at 180 Vac; all 8 mechanisms still carry th
 table-sourced values still say so without a plot; no duplicate table numbers; GUI vs report Table
 7.4 9/9 rows and 0 mismatch; zero unrenderable glyphs. Suite 615 passed / 2 skipped.
 
+# C233 - an interleaved design has one core PER PHASE, and the budget counted one in total
+
+**Designer-found**, reviewing the 2026-08-19 report. Table 7.8b counted inductor COPPER for every
+channel and inductor CORE once:
+
+```
+p_lcu = nch * iphi * iphi * dcr
+p_ind = p_lcu + _core_at(vac)          # <- nch missing
+```
+
+An entire inductor's core loss missing: **+2.1 W at 90 Vac rising to +3.4 W at 180 Vac, 25.7 W
+across the sweep**, about a quarter of the inductor column. The reported comparison was against
+Table 3.6.1, but 7.8b in fact matched NEITHER chapter - 8.9 W where Ch3 said 7.25 and Ch4 said 5.51.
+
+## Why nothing caught it
+
+The Balance column is a **remainder**, so it absorbed the missing watts and every row still
+reconciled against P_system. Internal arithmetic was self-consistent by construction and proved
+nothing. And the whole 7.8b path had **zero test coverage**.
+
+## The cause was not the missing nch
+
+It was Chapter 7 re-deriving a number Chapter 4 already owns - the same "one engine per value"
+violation as C161 (inductor copper) and C171 (capacitor loss). Chapter 4 now hands over
+`Pcu_avg_W` per line beside the core loss, and Chapter 7 multiplies the PER-PHASE pair by N_ch
+rather than computing copper itself. That also recovers the HF skin/proximity term a plain
+`I_phi^2 * DCR` drops.
+
+## Two more of the same family, found while fixing it
+
+| where | what was wrong |
+|---|---|
+| Table 4.2 | printed the legacy CREST-basis `Pcu_W` beside the AVERAGED core and total, so the row did not add up - 0.035 W at 264 V rising to 0.22 W at 132 V, the gap tracking D@crest because that is where the ripple is largest. The engine was right (`Ptotal_avg_W = Pcore_avg_W + Pcu_avg_W`); only the column choice was wrong. |
+| Figure 4.5a | plotted crest-basis keys while its caption said "same values as Table 4.2" and its own title said "cycle-averaged" - three statements, two bases. |
+
+## Documentation and GUI
+
+Every place showing inductor loss now declares its basis. Tables 3.6.1 / 4.2 and Figure 4.5a say
+PER PHASE and name the x N_ch rule; Section 7.8's intro, note, caption and Equation 7.8 say it from
+the other side. No GUI screen shows a system total, so no GUI number was wrong - but Step 7 and the
+Review page displayed per-phase values with nothing saying so, which is the ambiguity that produced
+the defect, and both now say it.
+
+VERIFIED `tests/test_inductor_loss_budget.py` (4 tests) parses the RENDERED Table 7.8b and asserts
+against Chapter 4's published numbers. The first draft re-implemented the budget arithmetic and
+asserted against that - it would have passed while the report stayed broken. Reintroducing the bug
+fails 3 of 4. 9/9 rows reconcile; GUI vs report Table 7.4 still 9/9, 0 mismatch; no duplicate table
+numbers. Suite 619 passed / 2 skipped.
+
+NOT VERIFIED BY RENDER: Tables 3.6.1 / 4.2 and Figure 4.5a need a full-report build, which needs a
+live GUI session - there is no saved job state to rebuild from. See PENDING_ITEMS B20.
+
