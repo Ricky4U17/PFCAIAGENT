@@ -1519,12 +1519,14 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     body(story,
         "Because the design efficiency is an input, the total system loss is known exactly: "
         "P<sub>system</sub> = P<sub>out</sub>&#183;(1&#8722;&#951;)/&#951;. We now account for it component by "
-        "component. The semiconductors are computed in this chapter; the inductor copper loss and the "
-        "current-sense resistor loss are resistive (I<sup>2</sup>R on the per-phase RMS current, all "
-        "N<sub>ch</sub> channels); whatever remains is the inductor core loss + capacitor ESR loss + "
-        "control / auxiliary, detailed in Chapters 3&#8211;6.", CH)
-    eq_box(story, [r"P_{L,Cu}=N_{ch}\,I_{\varphi,rms}^2\,DCR,\qquad P_{R_{CS}}=N_{ch}\,I_{\varphi,rms}^2\,R_{CS}",
-                   r"P_{system}=\dfrac{P_{out}(1-\eta)}{\eta}=P_{semi}+P_{L,Cu}+P_{R_{CS}}+P_{other}"],
+        "component. The semiconductors are computed in this chapter; the inductor copper and core "
+        "loss come from Chapter 4 and the capacitor ESR loss from Chapter 5; whatever remains is "
+        "control / auxiliary. <b>Chapters 3 and 4 report the inductor PER PHASE</b> &#8212; this design "
+        "has one inductor, with its own core, in each of the N<sub>ch</sub> channels, so both the "
+        "copper and the core term are multiplied by N<sub>ch</sub> here. Counting only the copper "
+        "that many times would drop a whole core's loss into the Balance column.", CH)
+    eq_box(story, [r"P_{L}=N_{ch}\,(P_{Cu,\varphi}+P_{core,\varphi}),\qquad P_{R_{CS}}=N_{ch}\,I_{\varphi,rms}^2\,R_{CS}",
+                   r"P_{system}=\dfrac{P_{out}(1-\eta)}{\eta}=P_{semi}+P_{L}+P_{cap}+P_{R_{CS}}+P_{other}"],
            number="7.8", ch=CH)
     dcr = (float(extra["dcr_mohm"]) / 1e3) if extra.get("dcr_mohm") else None
     rcs = (float(extra["rcs_mohm"]) / 1e3) if extra.get("rcs_mohm") else None
@@ -1544,6 +1546,20 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             return float(_core_by_vac[round(float(vac))])
         except (KeyError, TypeError, ValueError):
             return float(_core_by_vac[min(_core_by_vac, key=lambda k: abs(float(k) - float(vac)))])
+    # Per-line inductor COPPER, per phase, on the same cycle-averaged basis as the core and from the
+    # same Chapter-4 row (Table 4.2 Pcu,avg). Preferred over re-deriving I_phi^2*DCR here, which
+    # drops the HF skin/proximity term the engine already integrated. DCR remains the fallback for
+    # state saved before the key existed, and the note below says which basis was actually used.
+    _cu_by_vac = extra.get("cu_loss_by_vac") or {}
+    def _cu_pp_at(vac, iphi):
+        """Inductor copper for ONE phase at this line voltage."""
+        if _cu_by_vac:
+            try:
+                return float(_cu_by_vac[round(float(vac))])
+            except (KeyError, TypeError, ValueError):
+                return float(_cu_by_vac[min(_cu_by_vac, key=lambda k: abs(float(k) - float(vac)))])
+        return iphi * iphi * dcr if dcr else 0.0
+    _cu_basis_engine = bool(_cu_by_vac)
     _cap_by_vac = extra.get("cap_loss_by_vac") or {}
     def _cap_at(vac):
         if not _cap_by_vac:
@@ -1557,23 +1573,35 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     if dcr or rcs:
         srcs = (f"R<sub>CS</sub> = {_f(extra['rcs_mohm'],2)} m{_OHM}, " if rcs else "")
         annotation(story, "NOTE",
-            f"Loss-budget inputs carried in: inductor DCR = {_f(extra.get('dcr_mohm', 0),1)} m{_OHM}/phase "
-            f"(copper), inductor core loss "
-            + (f"taken PER LINE from Chapter 4 Table 4.2 (cycle-averaged basis; {_f(core_w,2)} W at the "
-               f"design corner)" if _core_by_vac else f"= {_f(core_w,2)} W (Chapter 4)")
+            f"Loss-budget inputs carried in: inductor copper "
+            + (f"taken PER LINE and PER PHASE from Chapter 4 Table 4.2 (P<sub>cu</sub>,avg column, "
+               f"cycle-averaged basis &#8212; it carries the HF skin/proximity term that a plain "
+               f"I<sup>2</sup>&#183;DCR does not)" if _cu_basis_engine else
+               f"= I<sub>&#966;,rms</sub><sup>2</sup>&#183;DCR with DCR = "
+               f"{_f(extra.get('dcr_mohm', 0),1)} m{_OHM}/phase (Chapter 4 per-line copper "
+               f"unavailable in this run)")
+            + f", inductor core loss "
+            + (f"taken PER LINE and PER PHASE from Chapter 4 Table 4.2 (cycle-averaged basis; "
+               f"{_f(core_w,2)} W per phase at the design corner)" if _core_by_vac
+               else f"= {_f(core_w,2)} W per phase (Chapter 4)")
             + f", capacitor bank loss "
             + (f"{_f(cap_w,2)} W worst case at {_f(extra.get('cap_loss_worst_vac'),0)} Vac, taken PER LINE "
                f"from Chapter 5 Table 5.3.1 ({extra.get('cap_loss_n_cap','N')} caps &#215; per-cap ESR(T) loss)"
                if _cap_by_vac else f"{_f(cap_w,2)} W (Chapter 5)")
             + f", {srcs}across the per-phase RMS current I<sub>&#966;,rms</sub> from Chapter 5. The "
-            f"<b>Inductor</b> column is copper + core; the <b>Capacitor</b> column is the bank ESR loss; the "
-            f"remaining <b>Balance</b> is control / auxiliary (Ch 6).", CH)
+            f"<b>Inductor</b> column is N<sub>ch</sub> = {nch} &#215; (copper + core) per phase; the "
+            f"<b>Capacitor</b> column is the bank ESR loss; the remaining <b>Balance</b> is "
+            f"control / auxiliary (Ch 6).", CH)
         _bal_vals: list[float] = []
         brows = []
         for i, r in enumerate(rows):
             iphi = float(iph[i]); p_sys = float(r["P_SYSTEM_total"]); p_semi = float(r["P_SEMI_total"])
-            p_lcu = nch * iphi * iphi * dcr if dcr else 0.0
-            p_ind = p_lcu + _core_at(r["Vac"])           # inductor TOTAL = copper + core (per line)
+            # BOTH terms are PER PHASE and BOTH scale with N_ch. Counting copper for every channel
+            # while counting core once was the C233 defect: an interleaved design has one core per
+            # phase, so the second inductor's core loss simply vanished from the budget (2.1-3.4 W
+            # here) and the Balance column absorbed it without any row looking wrong.
+            p_lcu = nch * _cu_pp_at(r["Vac"], iphi)
+            p_ind = p_lcu + nch * _core_at(r["Vac"])     # inductor TOTAL = N_ch x (copper + core)
             p_rcs = nch * iphi * iphi * rcs if rcs else 0.0
             p_cap = _cap_at(r["Vac"])                    # per-line, == Chapter 5 Table 5.3.1
             p_other = p_sys - p_semi - p_ind - p_rcs - p_cap
@@ -1582,9 +1610,9 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             _bal_vals.append(p_other)      # #7 - so the note can describe the ACTUAL data
         data_table(story, "7.8b", "System Loss Budget vs Line Voltage (W)",
             "Every system loss reconciled against P<sub>system</sub> from the efficiency. The <b>Inductor</b> "
-            "column is copper (I&#178;&#183;DCR, per line) plus a <b>constant worst-case core loss held at the "
-            "Chapter-4 cycle-averaged core loss AT THAT LINE VOLTAGE</b> (Table 4.2, "
-            "P<sub>core</sub>,avg column) — the same engine, so the two tables agree row for row. The "
+            f"column is N<sub>ch</sub> = {nch} &#215; the PER-PHASE total of Chapter 4 Table 4.2 "
+            "(P<sub>cu</sub>,avg + P<sub>core</sub>,avg at that line voltage) &#8212; the same engine, so "
+            f"dividing this column by {nch} reproduces Table 4.2's P<sub>tot</sub> row for row. The "
             "averaged basis is used because it is the heat actually generated; the crest-point value is "
             "the saturation reference only. The <b>Capacitor</b> column is the per-line bank ESR loss "
             "taken directly from Chapter 5 Table 5.3.1 (P<sub>bank</sub> column) — again the same engine "
@@ -1608,13 +1636,15 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 if _bal_min is not None else ""))
             + " Surfacing exactly this kind of inconsistency is the purpose of the cross-check.", CH)
         wi = rows.index(wr); iw = float(iph[wi])
-        plcu_w = nch * iw * iw * dcr if dcr else 0.0; prcs_w = nch * iw * iw * rcs if rcs else 0.0
-        p_ind_w = plcu_w + core_w
+        plcu_w = nch * _cu_pp_at(wr["Vac"], iw); prcs_w = nch * iw * iw * rcs if rcs else 0.0
+        pcore_w = nch * _core_at(wr["Vac"])          # one core per phase - see the table above
+        p_ind_w = plcu_w + pcore_w
         _W(story,
            f"<b>At the worst-case point ({wr['Vac']:.0f} V<sub>AC</sub>):</b> of the "
            f"{_f(wr['P_SYSTEM_total'],1)} W system loss, the semiconductors take "
            f"{_f(wr['P_SEMI_total'],1)} W ({100*wr['P_SEMI_total']/max(wr['P_SYSTEM_total'],1e-9):.0f}%), "
-           f"the inductor {_f(p_ind_w,1)} W (copper {_f(plcu_w,1)} + core {_f(core_w,1)}), the capacitor "
+           f"the inductor {_f(p_ind_w,1)} W ({nch} &#215; [copper {_f(plcu_w/max(nch,1),1)} + core "
+           f"{_f(pcore_w/max(nch,1),1)}] per phase), the capacitor "
            f"{_f(cap_w,1)} W, the current-sense resistors {_f(prcs_w,1)} W, leaving "
            f"{_f(wr['P_SYSTEM_total']-wr['P_SEMI_total']-p_ind_w-cap_w-prcs_w,1)} W for control / auxiliary.")
         # ── realistic efficiency derived from the computed losses ──
@@ -1632,7 +1662,9 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
         erows = []
         for i, r in enumerate(rows):
             iphi = float(iph[i]); po = float(r["Po"])
-            pacc = float(r["P_SEMI_total"]) + (nch * iphi * iphi * dcr if dcr else 0.0) + (nch * iphi * iphi * rcs if rcs else 0.0)
+            # Same copper source as Table 7.8b, so the two sections cannot disagree. Core is
+            # deliberately still excluded here - that is what makes eta_calc an UPPER bound.
+            pacc = float(r["P_SEMI_total"]) + nch * _cu_pp_at(r["Vac"], iphi) + (nch * iphi * iphi * rcs if rcs else 0.0)
             eta_calc = 100.0 * po / (po + pacc)
             eta_ass = float(r["eta_in_%"])
             flag = "&#10003;" if eta_ass <= eta_calc + 1e-6 else "optimistic"

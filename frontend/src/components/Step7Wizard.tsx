@@ -1334,6 +1334,9 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                 </div>
                 <div style={{marginTop:8,fontSize:10.5,color:C.muted,lineHeight:1.6}}>
                   <b style={{color:C.text}}>Reading this table.</b>{' '}
+                  Every column is <b>PER PHASE</b> — one inductor. This design runs {nPhGui} interleaved
+                  channels, each with its own inductor and its own core, so the system inductor loss is
+                  {' '}{nPhGui}× these numbers. That is how Chapter 7's loss budget totals them.{' '}
                   <b>Pcore cycle-max</b> is identical at every high-line point <i>by construction</i>:
                   B<sub>ac</sub> ∝ V<sub>in</sub>·D = V<sub>in</sub>(1 − V<sub>in</sub>/V<sub>out</sub>),
                   which peaks at V<sub>in</sub> = V<sub>out</sub>/2 ≈ {Math.round((confirmedState as any)?.intake?.application?.output_bus_voltage_v ?? 393)/2} V.

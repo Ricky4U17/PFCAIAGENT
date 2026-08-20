@@ -2865,12 +2865,23 @@ def doc_generate_report(req: _DocReportReq):
                 # understates core loss by an order of magnitude (D at the crest collapses).
                 _extra["core_loss_w"] = _ad.get("Pcore_avg_W") or _ad.get("Pcore_W")
                 _core_by_vac = {}
+                _cu_by_vac = {}
                 for _r in (_ad.get("loss_table_100C") or []):
                     _v = _r.get("Vin_rms"); _a = _r.get("Pcore_avg_W")
                     if _v is not None and _a is not None:
                         _core_by_vac[round(float(_v))] = float(_a)
+                    # Inductor COPPER on the same cycle-averaged basis as the core, from the SAME
+                    # engine row. Chapter 7 used to re-derive this as I_phi^2*DCR, which silently
+                    # dropped the HF skin/proximity term that Pcu_avg_W carries (largest near
+                    # D = 0.5, ~0.2 W/phase here) and made Table 7.8b unreconcilable with Table 4.2.
+                    # Both keys are PER PHASE; Chapter 7 multiplies by N_ch.
+                    _c = _r.get("Pcu_avg_W")
+                    if _v is not None and _c is not None:
+                        _cu_by_vac[round(float(_v))] = float(_c)
                 if _core_by_vac:
                     _extra["core_loss_by_vac"] = _core_by_vac
+                if _cu_by_vac:
+                    _extra["cu_loss_by_vac"] = _cu_by_vac
                 # Capacitor bank loss comes from the ONE engine that owns it (Chapter 5's ESR(T)
                 # thermal model), per operating point — NOT re-derived here as I_rms^2 * ESR from a
                 # nominal ESR. The old re-derivation used the series-level ESR table and silently fell

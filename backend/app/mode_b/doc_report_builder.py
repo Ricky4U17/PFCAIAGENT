@@ -3645,8 +3645,12 @@ def _ch3(story, state, d):
         ])
 
     data_table(story, "3.6.1", "Inductor Loss vs Input Voltage — First-Pass (Nominal A_L)",
-        "Amber row = worst-case total loss. P<sub>cu</sub> (DC I<super>2</super>R + HF skin/proximity) "
-        "at 25°C and 100°C shown separately. P<sub>core</sub> is peak-point Steinmetz estimate only.",
+        "<b>All columns are PER PHASE</b> &#8212; one inductor; the system total is N<sub>ch</sub> times "
+        "these (Chapter 7 Section 7.8b). Amber row = worst-case total loss. P<sub>cu</sub> "
+        "(DC I<super>2</super>R + HF skin/proximity) at 25°C and 100°C shown separately. "
+        "P<sub>core</sub> is peak-point Steinmetz estimate only &#8212; this is the conservative "
+        "first pass; Chapter 4 Table 4.2 recomputes both terms on the cycle-averaged basis and "
+        "<b>that</b> is what the efficiency budget uses.",
         ["V<sub>in,rms</sub> (V)", "V<sub>in,pk</sub> (V)", "D@crest",
          "I<sub>φ,rms</sub> (A)", "B<sub>ac,pk</sub> (T)",
          "P<sub>cu,25C</sub> (W)", "P<sub>cu,100C</sub> (W)",
@@ -4290,18 +4294,25 @@ def _ch4(story, state, d):
     # 9-voltage loss overlay (report notes #2) — engine loss_table values across all points.
     if lt100:
         _lvx = [float(r.get("Vin_rms", 0) or 0) for r in lt100]
-        _lsr = [("P_total", [float(r.get("Ptotal_W", 0) or 0) for r in lt100], "#dc2626"),
-                ("P_core",  [float(r.get("Pcore_W", 0) or 0) for r in lt100], "#ea580c"),
-                ("P_cu",    [float(r.get("Pcu_W", 0) or 0) for r in lt100], "#2563eb")]
+        # AVERAGED basis, to match Table 4.2 beside it and this figure's own title. It used to plot
+        # the legacy CREST keys while the caption claimed "same values as Table 4.2" and the title
+        # said "cycle-averaged" - three statements, two bases. Legacy keys remain the fallback for
+        # runs where the averaged series is not computable.
+        def _avg(r, avg_key, legacy_key):
+            v = r.get(avg_key)
+            return float((v if v is not None else r.get(legacy_key, 0)) or 0)
+        _lsr = [("P_total", [_avg(r, "Ptotal_avg_W", "Ptotal_W") for r in lt100], "#dc2626"),
+                ("P_core",  [_avg(r, "Pcore_avg_W", "Pcore_W") for r in lt100], "#ea580c"),
+                ("P_cu",    [_avg(r, "Pcu_avg_W", "Pcu_W") for r in lt100], "#2563eb")]
         _lov = _fig_vin_overlay(_lvx, _lsr, "Loss (W)",
                                 "Loss vs input voltage — all 9 operating points (cycle-averaged)")
         if _lov:
             story.append(_lov)
             fig_caption(story,
-                "Figure 4.5a — Core, copper and total loss across the nine operating voltages "
-                "(same values as Table 4.2, Section 4.6). Copper loss rises toward low line with the "
-                "input current; core loss falls as the duty cycle nears 0.5 — total loss peaks "
-                "at the low-line corner.", 4)
+                "Figure 4.5a — Core, copper and total loss across the nine operating voltages, "
+                "PER PHASE and on the cycle-averaged basis (the same values as Table 4.2, "
+                "Section 4.6). Copper loss rises toward low line with the input current; core loss "
+                "falls as the duty cycle nears 0.5 — total loss peaks at the low-line corner.", 4)
 
     # Item 12 — Pcore(t) waveform: low line vs high line (double-hump signature).
     _pfig = _fig_pcore_waveform(d, state)
@@ -4342,21 +4353,31 @@ def _ch4(story, state, d):
                 wmax = pt; worst = i
             _crest = r.get("Pcore_crest_W", r.get("Pcore_W"))
             _avg   = r.get("Pcore_avg_W")
+            # Copper on the AVERAGED basis, to match the averaged core and the averaged Ptot beside
+            # it. The legacy `Pcu_W` is the CREST-basis value: its HF ripple comes from the crest
+            # dIpp, so printing it here left the row not adding up (by 0.03-0.22 W, largest near
+            # D = 0.5 where the ripple is largest) and no reader could reconcile Ptot by hand.
+            _cu = r.get("Pcu_avg_W")
+            if _cu is None:
+                _cu = r.get("Pcu_W")
             Prows.append([
                 _f(r.get("Vin_rms"),0), _f(r.get("Vin_pk"),1), _f(r.get("D_crest"),4),
                 _f(r.get("Irms"),3), _f(r.get("Bac_pk"),5),
-                _f(r.get("Fd"),4), _f(r.get("Pcu_W"),3),
+                _f(r.get("Fd"),4), _f(_cu,3),
                 _f(_crest,3), _f(_avg,3),
                 _f(r.get("Ptotal_avg_W") or r.get("Ptotal_W"),3),
             ])
         data_table(story, "4.2",
             "Loss vs Input Voltage — Core Loss on BOTH Bases (100°C, all 9 points)",
-            "Amber row = worst-case total loss on the AVERAGED basis. P<sub>core</sub>,crest is the "
-            "line-crest value used for the saturation check; P<sub>core</sub>,avg is the "
-            "cycle-averaged iGSE value used for temperature rise and efficiency. P<sub>tot</sub> "
-            "uses the AVERAGED core loss.",
+            "<b>All columns are PER PHASE</b> &#8212; one inductor. Amber row = worst-case total loss "
+            "on the AVERAGED basis. P<sub>core</sub>,crest is the line-crest value used for the "
+            "saturation check; P<sub>core</sub>,avg is the cycle-averaged iGSE value used for "
+            "temperature rise and efficiency. P<sub>cu</sub>,avg is the copper on that same "
+            "cycle-averaged basis, so <b>P<sub>tot</sub> = P<sub>cu</sub>,avg + P<sub>core</sub>,avg "
+            "adds up exactly as printed</b>. The Chapter-7 Section 7.8b budget multiplies this "
+            "P<sub>tot</sub> by N<sub>ch</sub> to get the system inductor loss.",
             ["V<sub>in</sub> (V)","V<sub>pk</sub> (V)","D@crest","I<sub>rms</sub> (A)",
-             "B<sub>ac,pk</sub> (T)","F(D)","P<sub>cu</sub> (W)",
+             "B<sub>ac,pk</sub> (T)","F(D)","P<sub>cu</sub>,avg (W)",
              "P<sub>core</sub>,crest (W)","P<sub>core</sub>,avg (W)","P<sub>tot</sub> (W)"],
             Prows,
             col_widths=[CW*0.08,CW*0.08,CW*0.09,CW*0.10,CW*0.11,CW*0.07,
