@@ -1591,7 +1591,9 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
             + f", {srcs}across the per-phase RMS current I<sub>&#966;,rms</sub> from Chapter 5. The "
             f"<b>Inductor</b> column is N<sub>ch</sub> = {nch} &#215; (copper + core) per phase; the "
             f"<b>Capacitor</b> column is the bank ESR loss; the remaining <b>Balance</b> is "
-            f"control / auxiliary (Ch 6).", CH)
+            f"control / auxiliary (Ch 6). <b>This column does not match Chapter 3 Table 3.6.1, and "
+            f"is not meant to</b> &#8212; that is the conservative first-pass estimate on the "
+            f"crest basis, for one phase. Table 4.2a reconciles the three figures in one place.", CH)
         _bal_vals: list[float] = []
         brows = []
         for i, r in enumerate(rows):

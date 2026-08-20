@@ -3650,7 +3650,9 @@ def _ch3(story, state, d):
         "(DC I<super>2</super>R + HF skin/proximity) at 25°C and 100°C shown separately. "
         "P<sub>core</sub> is peak-point Steinmetz estimate only &#8212; this is the conservative "
         "first pass; Chapter 4 Table 4.2 recomputes both terms on the cycle-averaged basis and "
-        "<b>that</b> is what the efficiency budget uses.",
+        "<b>that</b> is what the efficiency budget uses. <b>The totals here are therefore HIGHER "
+        "than Chapter 4's and are superseded by them</b>; Table 4.2a reconciles this table, Table "
+        "4.2 and the Chapter-7 system budget side by side.",
         ["V<sub>in,rms</sub> (V)", "V<sub>in,pk</sub> (V)", "D@crest",
          "I<sub>φ,rms</sub> (A)", "B<sub>ac,pk</sub> (T)",
          "P<sub>cu,25C</sub> (W)", "P<sub>cu,100C</sub> (W)",
@@ -4387,6 +4389,82 @@ def _ch4(story, state, d):
                 f"Worst-case total loss: {Prows[worst][9]} W at {Prows[worst][0]} "
                 "V<sub>rms</sub> (amber row). This corner drives the thermal design "
                 "in Section 4.7."))
+
+        # ── 4.2a Reconciliation ──────────────────────────────────────────────────────────
+        # Three tables in this report give three different inductor losses for the SAME design,
+        # and the designer twice reported that as a defect (2026-08-19). They are all correct and
+        # deliberately different, but the reasons were spread across two captions in two chapters
+        # and a reviewer had to infer the chain. Answered ONCE here, with the arithmetic shown.
+        #
+        # Every figure comes from the SAME lt100 row, which already carries both bases, so this
+        # table cannot drift from the tables it reconciles.
+        try:
+            _rr = lt100[worst]
+            _n_ph = 2
+            try:
+                from app.design_state import DesignState
+                _n_ph = int(DesignState.model_validate(state).selected_channels or 2)
+            except Exception:
+                pass
+            _v = _f(_rr.get("Vin_rms"), 0)
+            _cu_c = float(_rr.get("Pcu_W", 0) or 0)                       # crest-ripple copper
+            _co_c = float(_rr.get("Pcore_crest_W", _rr.get("Pcore_W", 0)) or 0)
+            _cu_a = float(_rr.get("Pcu_avg_W", _cu_c) or 0)               # cycle-averaged copper
+            _co_a = float(_rr.get("Pcore_avg_W", _co_c) or 0)
+            _t_first = _cu_c + _co_c
+            _t_avg = _cu_a + _co_a
+            data_table(story, "4.2a",
+                f"Inductor Loss Reconciliation &#8212; First Pass &#8594; Averaged &#8594; System "
+                f"(at {_v} V<sub>rms</sub>)",
+                "<b>Why three tables in this report give three different inductor losses for the "
+                "same design.</b> Two things change between them, one after the other, and neither "
+                "is a correction of an error: first the BASIS (crest &#8594; cycle average), then the "
+                "SCOPE (one phase &#8594; all phases). Read down the Total column; each row's "
+                "arithmetic is shown in full.",
+                ["Stage", "Where", "Basis", "Copper (W)", "Core (W)", "Total (W)", "Scope"],
+                [["1. First pass", "same basis as Table 3.6.1",
+                  "Core at the LINE CREST (peak-point Steinmetz); copper with crest ripple",
+                  _f(_cu_c, 3), _f(_co_c, 3), _f(_t_first, 3), "one phase"],
+                 ["2. Refined", "Table 4.2 (this section)",
+                  "Core CYCLE-AVERAGED over the half cycle (iGSE); copper on the same basis",
+                  _f(_cu_a, 3), _f(_co_a, 3), _f(_t_avg, 3), "one phase"],
+                 ["3. System budget", "Table 7.8b (Ch 7)",
+                  f"As row 2, &#215; N<sub>ch</sub> = {_n_ph} &#8212; one inductor, with its own "
+                  f"core, per channel",
+                  _f(_n_ph * _cu_a, 3), _f(_n_ph * _co_a, 3),
+                  f"<b>{_f(_n_ph * _t_avg, 3)}</b>", f"all {_n_ph} phases"]],
+                col_widths=[CW*0.13, CW*0.16, CW*0.30, CW*0.10, CW*0.09, CW*0.10, CW*0.12], ch=4,
+                interpretation=(
+                    f"Row 1 &#8594; row 2 is the BASIS change: "
+                    f"{_f(_t_first,2)} &#8594; {_f(_t_avg,2)} W per phase. The crest value is the "
+                    f"SATURATION reference and is not the heat generated &#8212; the flux only "
+                    f"reaches its crest twice per line cycle. Row 2 &#8594; row 3 is the SCOPE "
+                    f"change: &#215; {_n_ph}. <b>Row 2 is the authoritative per-phase number and row "
+                    f"3 is the authoritative system number.</b> Row 1 is a conservative sizing pass "
+                    f"and is deliberately left in the report as the first-cut estimate it was; it "
+                    f"is not used by the efficiency budget."))
+            annotation(story, "NOTE",
+                "<b>Do not expect Table 3.6.1 and Table 7.8b to agree.</b> They differ by both "
+                "steps above, in opposite directions &#8212; the basis change lowers the number and "
+                "the scope change raises it &#8212; so the two happen to land within a factor of "
+                "about 1.5 of each other, which is close enough to look like a discrepancy and far "
+                "enough to be one if they were meant to match. They are not: the only pair that "
+                "must agree is Table 4.2 and Table 7.8b &#247; N<sub>ch</sub>, and those agree "
+                "exactly, row for row.<br/><br/>"
+                "<b>Row 1 is computed on THIS section's sweep</b>, not copied from Table 3.6.1. "
+                "Both apply the same first-pass basis, but Chapter 3 evaluates it independently on "
+                "its own nominal-A<sub>L</sub> sweep, so the two can differ by a few percent away "
+                "from the low-line anchor where they coincide. Neither is used for the efficiency "
+                "budget &#8212; row 2 is &#8212; so the difference does not propagate; it is "
+                "flagged here rather than hidden.", 4)
+        except Exception as _e:
+            # Visible, not silent. C232: a figure wrapped in a bare `except: pass` never rendered
+            # and the build looked clean. A reconciliation that quietly disappears is worse than
+            # none, because the two tables it explains stay in the document disagreeing.
+            annotation(story, "NOTE",
+                "<b>Loss reconciliation unavailable in this build.</b> Table 4.2 above is the "
+                "authoritative per-phase inductor loss and the Chapter-7 Section 7.8b budget is "
+                f"that figure &#215; N<sub>ch</sub>. ({type(_e).__name__})", 4)
 
         # Worked example at the worst-case corner — full chain with engine numbers.
         wr  = lt100[worst]

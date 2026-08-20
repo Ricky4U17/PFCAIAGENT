@@ -386,10 +386,13 @@ class TestCombinedReport:
 
     def test_page_count_is_full_report(self, combined):
         pages = combined["pages"]
-        # ~183 pp with the full Chapter 5 + §6.8.7 schematics (C108) + §6.10.12/6.11.9 load-sweep
-        # Bode figures (C109). A drop to ~171 means selected_cap was dropped (Ch5 §5.3/5.4/5.5 gated).
-        assert 178 <= pages <= 190, \
-            f"combined report has {pages} pages, expected ~183 (≤171 => selected_cap missing)"
+        # ~191 pp with the full Chapter 5 + §6.8.7 schematics (C108) + §6.10.12/6.11.9 load-sweep
+        # Bode figures (C109) + Table 4.2a loss reconciliation (C234).
+        # The LOWER bound is the one that matters: a drop to ~171 means selected_cap was dropped
+        # and Ch5 §5.3/5.4/5.5 silently vanished. The upper bound only catches runaway growth, so
+        # it is raised deliberately when a section is added rather than treated as a failure.
+        assert 178 <= pages <= 200, \
+            f"combined report has {pages} pages, expected ~191 (≤171 => selected_cap missing)"
 
     def test_no_legacy_fallback(self, combined):
         # The chapter builder falls back to the OLD generator on ANY exception; this stale phrase
@@ -402,6 +405,41 @@ class TestCombinedReport:
         assert "Ripple Current and Voltage Verification" in t, "§5.3 missing (selected_cap gate)"
         assert "Capacitor Life Time Period" in t, "§5.4 (Life Time Period) missing"
         assert "Capacitor Bank Summary" in t, "§5.5 (Bank Summary) missing"
+
+    def test_inductor_loss_reconciliation_present_and_consistent(self, combined):
+        """Table 4.2a must RENDER and its row 3 must be N_ch x row 2.
+
+        C233 fixed Chapter 7 counting one core for a two-phase design; C234 added 4.2a because the
+        designer twice read Table 3.6.1 and Table 7.8b as contradicting each other. The table is
+        built inside a try/except so a missing prerequisite degrades to a note instead of killing
+        the chapter — which means its ABSENCE is silent, exactly the C232 trap. Hence this check.
+        """
+        import re
+        t = combined["text"]
+        assert "Inductor Loss Reconciliation" in t, "Table 4.2a did not render"
+        assert "Loss reconciliation unavailable" not in t, \
+            "Table 4.2a fell through to its fallback note"
+        # Each row ends "copper, core, total, scope" — match on the scope cell, which is the only
+        # unambiguous anchor (the Basis cells contain digits like "4.2" and "N_ch = 2").
+        # `\s*` around every newline: this harness's text carries a leading space on each extracted
+        # line, which a regex written against a plain fitz dump does not see.
+        rows = re.findall(r"(\d+\.\d+)\s*\n\s*(\d+\.\d+)\s*\n\s*(\d+\.\d+)\s*\n\s*"
+                          r"(one phase|all (\d+) phases)", t)
+        assert len(rows) >= 3, f"could not parse Table 4.2a rows (found {len(rows)})"
+        r1, r2, r3 = rows[-3:]
+        assert r2[3] == "one phase" and r3[3].startswith("all "), \
+            f"unexpected scope cells: {r1[3]!r}, {r2[3]!r}, {r3[3]!r}"
+        # every row must add up: copper + core == total
+        for tag, r in (("1 first-pass", r1), ("2 refined", r2), ("3 system", r3)):
+            cu, core, tot = float(r[0]), float(r[1]), float(r[2])
+            assert abs(cu + core - tot) < 0.01, \
+                f"Table 4.2a row {tag}: {cu} + {core} != {tot}"
+        # and row 3 must be row 2 scaled by the channel count — BOTH terms, which is the C233 defect
+        nch = int(r3[4])
+        for i, term in ((0, "copper"), (1, "core"), (2, "total")):
+            assert abs(float(r3[i]) - nch * float(r2[i])) < 0.01, (
+                f"Table 4.2a {term}: row 3 = {r3[i]}, expected {nch} x row 2 "
+                f"({r2[i]}) = {nch * float(r2[i]):.3f} — the C233 defect")
 
     def test_chapter4_crosscheck_and_chapter6_present(self, combined):
         t = combined["text"]
