@@ -9427,3 +9427,60 @@ numbers. Suite 619 passed / 2 skipped.
 NOT VERIFIED BY RENDER: Tables 3.6.1 / 4.2 and Figure 4.5a need a full-report build, which needs a
 live GUI session - there is no saved job state to rebuild from. See PENDING_ITEMS B20.
 
+# C234 - Table 4.2a reconciles the three inductor losses; and the combined report CAN be built headlessly
+
+The designer read Table 3.6.1 against Table 7.8b twice and reported a defect both times. The second
+time **C233 was already in and the numbers were correct** - the report still was not answering the
+question. Three tables give three inductor losses for one design and the reasons were spread across
+two captions in two chapters.
+
+Table 4.2a states it once, at the worst-case corner, arithmetic shown:
+
+| row | where | basis | scope |
+|---|---|---|---|
+| 1 | same basis as Table 3.6.1 | crest core + crest-ripple copper | one phase |
+| 2 | Table 4.2 | cycle-averaged core and copper | one phase |
+| 3 | Table 7.8b | row 2 x N_ch | all phases |
+
+Two changes in order - the BASIS, then the SCOPE - and **they move the number in opposite
+directions**, which is why 7.25 and 11.02 land within ~1.5x of each other: close enough to look
+like a discrepancy, far enough to be one if they were meant to match. Ch3's caption and Ch7's note
+both point here, so the explanation has one home.
+
+## I was wrong about the fixture, and it cost the designer a wasted report run
+
+C233 filed PENDING B20 saying Chapters 3-6 could not be render-verified for want of saved job
+state. **There is a fixture**: `tests/verify_combined_report.build_combined` builds the whole
+191-page document headlessly and `TestCombinedReport` has used it all along. I never looked, and
+the claim went into the handoff and PENDING as fact.
+
+Used properly it found this commit's own defect inside a minute - the page-count guard tripped at
+191 - and then found a real one.
+
+## A third peak-point core loss, disagreeing with the other two
+
+Table 3.6.1 `P_core` and Table 4.2 `P_core,crest` are the same quantity, same basis, same design,
+computed from two independent arrays:
+
+| Vac | Ch3 | Ch4 | delta |
+|---|---|---|---|
+| 90 | 3.666 | 3.666 | 0.0% |
+| 132 | 4.816 | 4.718 | +2.1% |
+| 230 | 1.490 | 1.601 | -6.9% |
+| 264 | 0.148 | 0.195 | -24.1% |
+
+Exact at 90 Vac, diverging away from it with a sign change - one series is anchored at low line and
+the other is not. Neither reaches the efficiency budget so nothing propagates, but two
+identical-looking numbers that differ by 24% is a trust problem. Row 1 of 4.2a is therefore
+labelled "same basis as Table 3.6.1", NOT "Table 3.6.1". **PENDING B20** now holds this.
+
+VERIFIED Table 4.2a rendered IN SITU in the 191-page combined report, not merely standalone.
+`test_inductor_loss_reconciliation_present_and_consistent` asserts it renders, did not fall through
+to its fallback note, every row adds up, and row 3 is N_ch x row 2 in copper, core AND total.
+Reintroducing the C233 bug fails it on the exact term. Page guard 190 -> 200 (its LOWER bound is
+what detects truncation). Suite 620 passed / 2 skipped.
+
+The table is built inside a try/except, so its absence would be silent - the C232 trap. The except
+branch emits a visible note naming the exception instead of `pass`, and the test asserts that note
+is absent.
+
