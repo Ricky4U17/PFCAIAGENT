@@ -166,10 +166,15 @@ def build_steps_1_8(story, data: dict):
     body(story, "The FAN9672-D oscillator (the RI pin sources 1.2 V/R<sub>RI</sub>) sets the "
                 "per-phase frequency in its 50–75 kHz range. R<sub>RI</sub> is computed from the "
                 "target f<sub>SW</sub> — not hardcoded:", C6)
+    # The prose directly above states R_RI is "computed from the target f_SW - not hardcoded", and
+    # this worked line used to hardcode 70,000 and the 17.143 k intermediate while printing a LIVE
+    # answer. Change f_sw and the equation contradicted its own caption (C238).
+    _fsw641 = float((data.get("inputs") or {}).get("fsw", 70000) or 70000)
     eq_box(story, [r"f_{SW}=\dfrac{1.2\times10^{9}}{R_{RI}+3430}\ \mathrm{Hz}\quad(R_{RI}\ \mathrm{in}\ \Omega)",
                    r"R_{RI}=\dfrac{1.2\times10^{9}}{f_{SW}}-3430",
-                   r"R_{RI}=\dfrac{1.2\times10^{9}}{70\,000}-3430=17.143\,\mathrm{k}-3.43\,\mathrm{k}=%.2f\ \mathrm{k\Omega}\ \ (\mathrm{calculated})"
-                   % (s4["rri_calc"]/1e3)],
+                   r"R_{RI}=\dfrac{1.2\times10^{9}}{%s}-3430=%.3f\,\mathrm{k}-3.43\,\mathrm{k}=%.2f\ \mathrm{k\Omega}\ \ (\mathrm{calculated})"
+                   % (f"{_fsw641:,.0f}".replace(",", r"\,"), 1.2e9 / _fsw641 / 1e3,
+                      s4["rri_calc"] / 1e3)],
            heading="Oscillator resistor", number="6.4.1", ch=C6)
     sub_h(story, "6.4.2", "Standard Value Selection", C6)
     data_table(story, "6.4.1", "R_RI Standard-Value Candidates (computed)",
@@ -299,9 +304,15 @@ def _build_step6(story, data):
         "where V<sub>EA,eff</sub> = V<sub>EA,max</sub> − 0.6 V is the effective linear range of the "
         "V<sub>EA</sub> signal. AND9925-D recommends setting V<sub>EA,max</sub> in the range 4 V to "
         "5 V for stable, well-centred control.", C6)
+    # K_RLPK, R_RLPK and R_RLPK^2 were retyped into this worked line as literals while the ANSWER
+    # was live - the same shape as the C235 schematic defaults. R_RLPK in particular already had
+    # three sources of truth before C235; this was a fourth (C238).
+    _c662 = data.get("const") or {}
+    _krl, _rrl = _c662.get("k_rlpk", 2.465), _c662.get("r_rlpk", 12100.0)
     _wstep(story, "Common denominator factor (same for all points):",
-           r"8\times(2.465)^2\times(12\,100)^2=8\times6.076\times%s=%s"
-           % (_sci(1.4641e8), _sci(s6["den_common"])))
+           r"8\times(%g)^2\times(%s)^2=8\times%.3f\times%s=%s"
+           % (_krl, f"{_rrl:,.0f}".replace(",", r"\,"), _krl ** 2,
+              _sci(_rrl ** 2), _sci(s6["den_common"])))
     body(story, "<b>Low Line sweep</b> (R<sub>IAC</sub> = 6 MΩ, P<sub>max</sub>/N<sub>ch</sub> = %.1f W); "
                 "denominator base = %s." % (s6["pmax_nch_lo"], _sct(s6["m2_den_base_ll"])), C6)
     data_table(story, "6.6.2a", "Method 2 R_CS — Low Line V_EA,max Sweep",
@@ -651,9 +662,16 @@ def _build_step8(story, data):
         "Eq. 39 uses the per-phase inductance and the selected R<sub>CS</sub> — changing the shunt "
         "in Section 6.6 moves R<sub>LS</sub> proportionally. Update them together.", C6)
     sub_h(story, "6.8.3", "Soft Start — C_SS (AN4165-D Eq. 64)", C6)
-    eq_box(story, [r"C_{SS}=\dfrac{I_{SS}\,t_{SS}}{V_{SS}}=\dfrac{20\,\mu A\times100\,\mathrm{ms}}{5\,\mathrm{V}}=%.0f\ \mathrm{nF}"
-                   % (s8["c_ss"]*1e9)], ch=C6)
-    body(story, "Decision: C<sub>SS</sub> = 390 nF → realized t<sub>SS</sub> = %.0f ms." % (s8["t_ss_real"]*1e3), C6)
+    # I_SS / t_SS / V_SS were retyped into the equation, and the SELECTED C_SS ("390 nF") into the
+    # decision line - while the engine held it in a LOCAL variable, `css_sel`, that nothing could
+    # read. The engine's own summary table retyped it too. Now exported and read in both (C238).
+    _c683 = data.get("const") or {}
+    eq_box(story, [r"C_{SS}=\dfrac{I_{SS}\,t_{SS}}{V_{SS}}=\dfrac{%.0f\,\mu A\times%.0f\,\mathrm{ms}}{%.0f\,\mathrm{V}}=%.0f\ \mathrm{nF}"
+                   % (_c683.get("i_ss", 20e-6) * 1e6, _c683.get("t_ss", 0.1) * 1e3,
+                      _c683.get("v_ss", 5.0), s8["c_ss"] * 1e9)], ch=C6)
+    body(story, "Decision: C<sub>SS</sub> = %.0f nF (nearest standard value to the %.0f nF "
+                "calculated) → realized t<sub>SS</sub> = %.0f ms."
+                % (s8["css_sel"] * 1e9, s8["c_ss"] * 1e9, s8["t_ss_real"] * 1e3), C6)
     sub_h(story, "6.8.4", "ILIMIT — Current-Command Clamp (Eqs. 32, 35, 38)", C6)
     annotation(story, "CONCEPT",
         "The ILIMIT pin sources a current mirrored from R<sub>RI</sub>; the pin voltage (÷4 "
@@ -682,8 +700,12 @@ def _build_step8(story, data):
         r"=\dfrac{%.1f\times%.2f\times%.4f\times4}{%.2f\times10^{-6}}=%.0f\ \Omega\ (%.2f\ \mathrm{k\Omega})"
         % (s8["ilimit_clamp_ratio"], s8["ilimit_clamp_ratio"], s8["crest_cmd"], s8["rcs_sel"],
            s8["i_ilimit"]*1e6, s8["r_ilimit"], s8["r_ilimit"]/1e3)], ch=C6)
+    # C_ILIMIT had no single home: this prose asserted 18 nF, the schematic drew 18 nF, and the
+    # GUI dropdown offered 10 nF as its default - so screen and document disagreed. It is now one
+    # engine field that all three read (C238).
     body(story, "Decision: R<sub>ILIMIT</sub> = %.1f kΩ (E96) → command clamp ≈ %.1f× crest (window "
-                "1.2–2.0×). C<sub>ILIMIT</sub> = 18 nF." % (s8["r_ilimit_sel"]/1e3, s8["ilimit_clamp_ratio"]), C6)
+                "1.2–2.0×). C<sub>ILIMIT</sub> = %.0f nF."
+                % (s8["r_ilimit_sel"]/1e3, s8["ilimit_clamp_ratio"], s8["c_ilimit"]*1e9), C6)
     sub_h(story, "6.8.5", "ILIMIT2 — Cycle-by-Cycle Peak Limit (Eqs. 33, 36, 37)", C6)
     body(story, "The peak inductor current I<sub>L,pk</sub> is the per-phase peak, taken as the "
                 "<b>worst of both corners</b> (%.0f Vac and %.0f Vac). Values used: R<sub>RI</sub> = "
@@ -815,6 +837,7 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
         # ── previously defaulted inside schematics.py; now threaded from the engine ──
         rrlpk=_c.get("r_rlpk"),                      # was 15 kOhm; BOM and Section 6.3.2 say 12.1
+        cil=s8.get("c_ilimit"),                      # was an 18 nF literal; GUI offered 10 nF
         rfb_each=_s5.get("rfb1_unit"),               # PER-UNIT (x3 in the drawing) - not the total
         rfb2=_s5.get("rfb2"),
     )

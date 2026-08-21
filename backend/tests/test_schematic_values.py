@@ -22,7 +22,10 @@ import pytest
 
 # Keys with no engine value: genuinely fixed-practice parts, drawn grey and labelled "(typ)" in the
 # figure. They are ALLOWED to default. Everything else must come from the engine.
-FIXED_PRACTICE = {"rf", "cf", "cil", "cil2", "clpk", "crlpk", "rpin8", "css"}
+FIXED_PRACTICE = {"rf", "cf", "cil2", "clpk", "crlpk", "rpin8", "css"}
+# `cil` (C_ILIMIT) left this set at C238: it had three different values across the GUI dropdown
+# (10 nF), the report prose (18 nF) and this drawing (18 nF), so it is now one engine field and
+# must be supplied like any other sized part.
 
 
 @pytest.fixture(scope="module")
@@ -52,6 +55,7 @@ def ctx():
         i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
         rrlpk=c.get("r_rlpk"), rfb_each=s5.get("rfb1_unit"), rfb2=s5.get("rfb2"),
+        cil=s8.get("c_ilimit"),
     )
     return {"base": base, "const": c, "step5": s5, "prior": prior}
 

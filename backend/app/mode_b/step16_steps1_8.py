@@ -57,6 +57,9 @@ DEFAULT_INPUTS = dict(
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
     c_gc=430e-12, c_ls=240e-12,
+    # C_ILIMIT had no home: the GUI dropdown defaulted to 10 nF, the report prose asserted
+    # 18 nF and the schematic drew 18 nF. One value, read by all three (C238).
+    c_ilimit=18e-9,
     rcs=None,                       # designer R_CS override (Ω); None → computed best-of-both-methods default
 )
 
@@ -381,6 +384,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     r_ilimit2 = c["ilimit2_ratio"] * vcs_pk / i_ilimit2
     out["step8"] = {
         "ratio": ratio, "r_gc": r_gc, "r_ls": r_ls, "c_ss": c_ss, "t_ss_real": t_ss_real,
+        "css_sel": css_sel, "c_ilimit": p["c_ilimit"],
         "c_gc": c_gc, "c_ls": c_ls, "f_gc": f_gc, "f_ls": f_ls,
         "r_gc_sel": r_gc_sel, "r_ls_sel": r_ls_sel,
         "i_ilimit": i_ilimit, "crest_ll": crest_ll, "crest_hl": crest_hl, "crest_cmd": crest_cmd,
@@ -400,7 +404,7 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
             ["R_LS", "AN4165 Eq. 39", f"{r_ls/1e3:.3f} kΩ", f"{r_ls_sel/1e3:.1f} kΩ",
              "12–87 kΩ", "PASS" if 12e3 <= r_ls <= 87e3 else "CHECK"],
             ["C_LS", "pin filter", "—", f"{c_ls*1e12:.0f} pF", f"pole {f_ls/1e3:.3f} kHz", "—"],
-            ["C_SS", "AN4165 Eq. 64", f"{c_ss*1e9:.0f} nF", "390 nF", f"t_SS {t_ss_real*1e3:.0f} ms", "PASS"],
+            ["C_SS", "AN4165 Eq. 64", f"{c_ss*1e9:.0f} nF", f"{css_sel*1e9:.0f} nF", f"t_SS {t_ss_real*1e3:.0f} ms", "PASS"],
             ["R_ILIMIT", "AN4165 Eq. 38", f"{r_ilimit/1e3:.3f} kΩ", f"{_nearest_e96(r_ilimit)/1e3:.1f} kΩ",
              "1.2–2.0× crest", "PASS"],
             ["R_ILIMIT2", "AN4165 Eq. 33", f"{r_ilimit2/1e3:.3f} kΩ", f"{_nearest_e96(r_ilimit2)/1e3:.2f} kΩ",

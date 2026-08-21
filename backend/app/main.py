@@ -444,8 +444,12 @@ def control_components(req: _ComponentsReq):
              "default_pf": 470, "r_assoc_ohm": round(s8["r_gc_sel"], 1), "role": "with R_GC", "options_pf": CAP_PF},
             {"key": "c_rlpk", "name": "RLPK filter cap", "symbol": "C_RLPK",
              "default_pf": 10000, "r_assoc_ohm": round(c["r_rlpk"], 1), "role": "with R_RLPK", "options_pf": CAP_PF},
+            # default from the ENGINE, not a second opinion: this dropdown offered 10 nF while
+            # the report prose and the schematic both said 18 nF, so the screen and the document
+            # disagreed on a component the designer is asked to choose (C238).
             {"key": "c_ilimit", "name": "ILIMIT filter cap", "symbol": "C_ILIMIT",
-             "default_pf": 10000, "r_assoc_ohm": round(s8["r_ilimit_sel"], 1), "role": "with R_ILIMIT", "options_pf": CAP_PF},
+             "default_pf": round(s8.get("c_ilimit", 18e-9) * 1e12),
+             "r_assoc_ohm": round(s8["r_ilimit_sel"], 1), "role": "with R_ILIMIT", "options_pf": CAP_PF},
             {"key": "c_ilimit2", "name": "ILIMIT2 filter cap", "symbol": "C_ILIMIT2",
              "default_pf": 10000, "r_assoc_ohm": round(s8["r_ilimit2_sel"], 1), "role": "with R_ILIMIT2", "options_pf": CAP_PF},
             {"key": "c_vir", "name": "VIR filter cap", "symbol": "C_VIR",
