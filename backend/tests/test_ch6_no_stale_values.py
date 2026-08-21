@@ -183,3 +183,41 @@ def test_gui_component_endpoint_agrees_with_the_engine():
         assert sym in rows, f"{sym} missing from the GUI component list"
         assert rows[sym] == ohm(want), \
             f"{sym}: GUI shows {rows[sym]}, engine says {ohm(want)}"
+
+def test_screen2_capacitor_selections_reach_the_engine():
+    """C240. The designer's Screen-2 choice must WIN over the engine default - for all six.
+
+    `_control_inputs_from_step16` forwarded only `c_gc_pf` and `c_ls_pf`, so a designer who changed
+    C_RLPK, C_ILIMIT, C_ILIMIT2 or C_VIR saw the new value on screen and got the DEFAULT in the
+    report and on the schematic. The selection was accepted and silently discarded, which is worse
+    than refusing it.
+
+    Deliberately picks values that are NOT the defaults, so a dropped selection cannot pass.
+    """
+    from app.main import _control_inputs_from_step16
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8, DEFAULT_INPUTS
+
+    s2 = {"c_gc_pf": 1000, "c_rlpk_pf": 4700, "c_ilimit_pf": 22000,
+          "c_ilimit2_pf": 33000, "c_vir_pf": 47000, "c_ls_pf": 680}
+    s8 = compute_steps_1_8(_control_inputs_from_step16({"s2": s2}))["step8"]
+    for sel, eng in (("c_gc_pf", "c_gc"), ("c_rlpk_pf", "c_rlpk"), ("c_ilimit_pf", "c_ilimit"),
+                     ("c_ilimit2_pf", "c_ilimit2"), ("c_vir_pf", "c_vir"), ("c_ls_pf", "c_ls")):
+        picked = s2[sel] * 1e-12
+        assert picked != pytest.approx(DEFAULT_INPUTS[eng]),             f"{sel}: fixture value equals the default, so a dropped selection would still pass"
+        assert s8[eng] == pytest.approx(picked), (
+            f"{sel}: designer picked {s2[sel]} pF, engine used {s8[eng]*1e12:.0f} pF "
+            "- the selection was discarded")
+
+
+def test_table_b1_lists_the_six_pin_filter_capacitors():
+    """C240. Table B.1 called itself the Control Bill of Materials and listed none of them, so a
+    designer building from it was six parts short. Values follow the Screen-2 selection."""
+    from app.mode_b.appendices import _appendix_ctx
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    prior = compute_steps_1_8({})
+    ctx = _appendix_ctx(prior, {}, {})
+    s8 = prior["step8"]
+    for key in ("c_gc", "c_rlpk", "c_ilimit", "c_ilimit2", "c_vir", "c_ls"):
+        assert key in ctx, f"{key} missing from the Table B.1 context"
+        assert ctx[key] == pytest.approx(s8[key]),             f"{key}: BOM shows {ctx[key]}, engine says {s8[key]}"

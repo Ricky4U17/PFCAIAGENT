@@ -2477,13 +2477,19 @@ def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if js.get("vType") in ("type2", "type3"):
         out["comp_type"] = js["vType"]
     # Screen-2 designer selections (R_CS + filter caps) — override engine defaults.
+    #
+    # ALL SIX capacitors, not two. This forwarded only c_gc and c_ls, so a designer who changed
+    # C_RLPK, C_ILIMIT, C_ILIMIT2 or C_VIR on Screen 2 saw the selection on screen and got the
+    # ENGINE DEFAULT in the report and on the schematic — the choice was silently discarded (C240).
+    # The engine merges these over DEFAULT_INPUTS, so an absent key keeps the default.
     s2 = sp.get("s2") or {}
     if _num(s2.get("rcs_mohm")) is not None:
         out["rcs"] = _num(s2["rcs_mohm"]) / 1000.0
-    if _num(s2.get("c_gc_pf")) is not None:
-        out["c_gc"] = _num(s2["c_gc_pf"]) * 1e-12
-    if _num(s2.get("c_ls_pf")) is not None:
-        out["c_ls"] = _num(s2["c_ls_pf"]) * 1e-12
+    for _sel, _eng in (("c_gc_pf", "c_gc"), ("c_ls_pf", "c_ls"), ("c_rlpk_pf", "c_rlpk"),
+                       ("c_ilimit_pf", "c_ilimit"), ("c_ilimit2_pf", "c_ilimit2"),
+                       ("c_vir_pf", "c_vir")):
+        if _num(s2.get(_sel)) is not None:
+            out[_eng] = _num(s2[_sel]) * 1e-12
     return out
 
 

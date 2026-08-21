@@ -21,6 +21,16 @@ from app.mode_b.doc_report_builder import (
 CH = 6
 
 
+def _fc(x):
+    """Capacitance in the unit a BOM reader expects: pF / nF / uF, no trailing zeros."""
+    x = float(x)
+    if x >= 1e-6:
+        return f"{x*1e6:g} µF"
+    if x >= 1e-9:
+        return f"{x*1e9:g} nF"
+    return f"{x*1e12:g} pF"
+
+
 def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
     """Assemble the live design values the appendices quote, from the Step 1-14 results, so Appendix A
     (Table A.2, §A.7.7-A.7.9), Table B.1 (BOM) and Appendix E stop carrying hardcoded numbers. Genuine
@@ -30,6 +40,7 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
     reproduces the selected 390 nF / 1.1 nF / 24 nF and auto-updates with the design)."""
     p  = prior or {}
     p4 = p.get("step4", {}); p5 = p.get("step5", {}); p6 = p.get("step6", {})
+    p8 = p.get("step8", {})          # pin-filter caps for Table B.1 (C240)
     s10 = s10 or {}; s11 = s11 or {}
     cm  = s11.get("comp", {}); v = s11.get("src", {})
     vout   = p5.get("vout_spec") or v.get("vout") or 394.0
@@ -75,6 +86,15 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
         # defaulted (to a DIFFERENT value) inside schematics.py - three sources for one number,
         # and the schematic's disagreed. Read from the engine constants like everything else.
         "r_rlpk": float((p.get("const") or {}).get("r_rlpk", 12100.0)),
+        # The six pin-filter capacitors. Table B.1 called itself the Control Bill of Materials and
+        # listed none of them, so a designer building from it was six parts short (C240). Values
+        # follow the Screen-2 selection, which the engine merges over its defaults.
+        "c_gc": float(p8.get("c_gc") or 430e-12),
+        "c_rlpk": float(p8.get("c_rlpk") or 1e-9),
+        "c_ilimit": float(p8.get("c_ilimit") or 18e-9),
+        "c_ilimit2": float(p8.get("c_ilimit2") or 75e-9),
+        "c_vir": float(p8.get("c_vir") or 100e-9),
+        "c_ls": float(p8.get("c_ls") or 240e-12),
         "riac_fr": float((p.get("const") or {}).get("riac_fr", 6e6)),
         "riac_hv": float((p.get("const") or {}).get("riac_hv", 12e6)),
         # PWM ramp amplitude from the current-loop solve — was hardcoded to 5 V at the
@@ -502,7 +522,20 @@ def _appendix_b(story, ctx, prior=None, inp=None):
          ["R3", f"{ctx['r3']/1e6:.2f} MΩ", "Thin film", "1%", "Voltage comp R3 (Section 6.11)"],
          ["C1", f"{ctx['c1']*1e9:.0f} nF", "Film", "5%", "Voltage comp C1 (Section 6.11)"],
          ["C2", f"{ctx['c2']*1e9:.1f} nF", "C0G/NP0", "5%", "Voltage comp C2 (Section 6.11)"],
-         ["C3", f"{ctx['c3']*1e9:.0f} nF", "Film/C0G", "5%", "Voltage comp C3 (Section 6.11)"]],
+         ["C3", f"{ctx['c3']*1e9:.0f} nF", "Film/C0G", "5%", "Voltage comp C3 (Section 6.11)"],
+         # The six pin-filter capacitors. Their absence made this a Bill of Materials a designer
+         # could not build from; each follows the Screen-2 selection (C240).
+         ["C_GC", _fc(ctx["c_gc"]), "C0G/NP0", "5%", "GC pin filter, with R_GC (Section 6.8.1)"],
+         ["C_RLPK", _fc(ctx["c_rlpk"]), "C0G/NP0", "5%",
+          "RLPK peak-detector filter, with R_RLPK (Section 6.3)"],
+         ["C_ILIMIT", _fc(ctx["c_ilimit"]), "C0G/NP0", "5%",
+          "ILIMIT clamp filter, with R_ILIMIT (Section 6.8.4)"],
+         ["C_ILIMIT2", _fc(ctx["c_ilimit2"]), "C0G/NP0", "5%",
+          "ILIMIT2 peak-limit filter, with R_ILIMIT2 (Section 6.8.5)"],
+         ["C_VIR", _fc(ctx["c_vir"]), "C0G/NP0", "5%",
+          "VIR line-range threshold filter, with R_VIR (Section 6.3)"],
+         ["C_LS", _fc(ctx["c_ls"]), "C0G/NP0", "5%",
+          "LS current-predict filter, across R_LS (Section 6.8.2)"]],
         col_widths=[CW*0.14, CW*0.13, CW*0.26, CW*0.09, CW*0.38], ch=CH)
     annotation(story, "PITFALL",
         "Use C0G/NP0 or film dielectrics for every compensator capacitor. Class-II ceramics (X7R and "
