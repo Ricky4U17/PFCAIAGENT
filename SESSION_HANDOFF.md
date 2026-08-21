@@ -328,7 +328,7 @@ the designer (2 → 4 → 1 → 3):
 
 | # | Comment | State |
 |---|---|---|
-| 2 | Table 7.8b inductor loss disagrees with Ch3 | **DONE — C233 + C234.** C233 fixed the arithmetic (it matched neither Ch3 nor Ch4); the designer re-reported it anyway, because correct numbers still did not explain themselves. C234 added Table 4.2a. **Awaiting the designer's confirmation on a regenerated report.** |
+| 2 | Table 7.8b inductor loss disagrees with Ch3 | **CLOSED — C233 + C234**, confirmed by the designer on 2026-08-20: 7.8b reads 11.0 W at 90 Vac / 12.4 at 180, and Table 4.2a renders. C233 fixed the arithmetic; the designer re-reported it anyway because correct numbers still did not explain themselves, so C234 added the reconciliation. |
 | 4 | Figures B.2a/B.2b schematic values wrong | **NEXT.** R_RLPK renders 15 kΩ vs the BOM's 12.1 kΩ. Root cause is systemic: the schematic asks its context for 22 keys and `base` (report_steps1_8.py ~line 788) supplies 10, so 12 fall back to hardcoded defaults in `schematics.py`. `rfb_each` 3.63 MΩ and `rfb2` 23.2 kΩ agree with the BOM only by coincidence — change Vout and they will not. Table B.1 also hardcodes R_RLPK and R_IAC as string literals while its other 12 rows are live `ctx[...]`, and Section 6.3.2's heading hardcodes 12.1 kΩ too: three sources of truth for one value. |
 | 1 | Table 7.2e black squares | `report_semiconductor.py:1224` inserts `&#8203;` (U+200B) to wrap the narrow column; Helvetica has no glyph (measured width 7.61) so ReportLab draws a notdef box. One-line fix. **Also fix the glyph CHECK** — it counted U+FFFD/U+25A0 in extracted text, but a notdef extracts as `I`, so it can never see this. Greek/math chars outside cp1252 render fine via Symbol substitution, so "not in cp1252" is not the test either. |
 | 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
@@ -383,6 +383,10 @@ Then, in order:
 - **PER-PHASE vs SYSTEM TOTAL must be stated wherever a loss is shown.** C233 existed because
   Chapters 3/4 report one inductor and Chapter 7 reports all of them, and nothing said so — in the
   report OR the GUI. An interleaved design has one core per phase; both copper and core scale.
+- **THAT FIXTURE BUILDS NO CHAPTER 7.** `build_combined` never posts a `semiconductor` payload and
+  `main.py` gates the whole chapter on `if req.semiconductor:`, so its 191-page document has no
+  Chapter 7 at all — the `Table 7.8b` strings in it are cross-references from Ch3/Ch4 prose. Do not
+  read a green `TestCombinedReport` as covering anything in Chapter 7. **`PENDING_ITEMS.md` B21.**
 - **THE COMBINED REPORT CAN BE BUILT HEADLESSLY — `tests/verify_combined_report.build_combined`.**
   It returns `(pdf, pages, text, meta)` for the whole ~191-page document and `TestCombinedReport`
   has used it for many commits. C233 asserted the opposite in this file and in PENDING, purely

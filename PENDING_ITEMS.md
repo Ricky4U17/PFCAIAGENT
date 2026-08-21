@@ -558,6 +558,33 @@ Table 3.6.1, so the report no longer implies they must match.
 - **Do not** simply copy Chapter 4's array into Chapter 3. Chapter 3's first pass runs before the
   Chapter-4 sweep exists; the ordering is why there are two arrays in the first place.
 
+### B21 — the combined-report fixture builds NO Chapter 7 at all  `CODE`
+
+`verify_combined_report.build_combined` posts only `state` / `approved_design` / `step15_result` /
+`step16_params`. The whole Chapter-7 block in `main.py` is gated on `if req.semiconductor:`, and
+that key is never sent — so the 191-page fixture document **contains no Chapter 7**. The only
+`Table 7.8b` strings in it are cross-references from Chapter 3/4 prose; there is no Semiconductor
+Loss chapter, no MOSFET tables, no Section 7.8b.
+
+Consequences, found while closing the designer's comment 2 (C233/C234):
+
+- **The C233 inductor-budget fix has no coverage on the combined path.** It is covered only by
+  `tests/test_inductor_loss_budget.py`, which builds Chapter 7 standalone.
+- Every `TestCombinedReport` assertion describes a document the designer never receives. The real
+  report is ~218 pages; the fixture's 178-200 page guard is for a Ch7-less build.
+- Any future Chapter-7 regression on the COMBINED path — the path that actually ships — is
+  invisible to the suite.
+
+- **Done when:** `build_combined` also posts a `semiconductor` payload (the three real vendor
+  datasheets already used by `tests/test_report_numbering.py` and `test_inductor_loss_budget.py`
+  are the obvious source), the fixture renders Chapter 7, and the page guard is re-based on that
+  document.
+- **Watch:** adding Chapter 7 will roughly double the fixture's build time. It may belong behind a
+  marker so the fast suite stays fast, but it must run somewhere.
+- **Note:** C234's commit message says "the combined report CAN be built headlessly". True, and it
+  was the right correction to C233's claim — but it builds a report WITHOUT Chapter 7, which is
+  the part both of those commits were changing.
+
 ## C. GUI  `CODE`
 
 ### C1. Control Design page redesign
