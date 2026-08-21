@@ -338,7 +338,7 @@ def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None
     x = 974; W(x, icB+30, x, icB+50); NODE(x, icB+50); W(x-18, icB+50, x+22, icB+50)
     W(x-18, icB+50, x-18, icB+62); RV(x-18, icB+86, fo(g("rvir", 10e3 if mode_lo else 470e3)), "R_VIR", -1)
     W(x-18, icB+116, x-18, icB+124); GND(x-18, icB+126)
-    W(x+22, icB+50, x+22, icB+66); CV(x+22, icB+86, "0.1 µF (typ)", "C_VIR", 1); W(x+22, icB+108, x+22, icB+124); GND(x+22, icB+126)
+    W(x+22, icB+50, x+22, icB+66); CV(x+22, icB+86, fc(g("cvir", 100e-9)), "C_VIR", 1); W(x+22, icB+108, x+22, icB+124); GND(x+22, icB+126)
     T(x, icB+150, ("V_VIR < 1.5 V → FR" if mode_lo else "V_VIR > 3.5 V → HV"), "n")
 
     # ── RIGHT networks ──

@@ -57,9 +57,14 @@ DEFAULT_INPUTS = dict(
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
     c_gc=430e-12, c_ls=240e-12,
-    # C_ILIMIT had no home: the GUI dropdown defaulted to 10 nF, the report prose asserted
-    # 18 nF and the schematic drew 18 nF. One value, read by all three (C238).
-    c_ilimit=18e-9,
+    # THE PIN-FILTER CAPACITOR FAMILY. None of these had a single home: the GUI dropdown offered a
+    # uniform 10 nF placeholder for four of them while the schematic drew its own literals and the
+    # report quoted a third value. C238 fixed only C_ILIMIT; the designer found C_VIR and C_RLPK
+    # still disagreeing, so the whole family now lives here (C239). Values are the ones the
+    # SCHEMATIC has always drawn - the figures the designer has been reviewing - not the GUI's
+    # uniform placeholder. No engine calculation consumes them; they set RC poles with their
+    # associated resistors, which the GUI displays.
+    c_ilimit=18e-9, c_ilimit2=75e-9, c_rlpk=1e-9, c_vir=100e-9, c_lpk=1e-9,
     rcs=None,                       # designer R_CS override (Ω); None → computed best-of-both-methods default
 )
 
@@ -384,7 +389,8 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     r_ilimit2 = c["ilimit2_ratio"] * vcs_pk / i_ilimit2
     out["step8"] = {
         "ratio": ratio, "r_gc": r_gc, "r_ls": r_ls, "c_ss": c_ss, "t_ss_real": t_ss_real,
-        "css_sel": css_sel, "c_ilimit": p["c_ilimit"],
+        "css_sel": css_sel, "c_ilimit": p["c_ilimit"], "c_ilimit2": p["c_ilimit2"],
+        "c_rlpk": p["c_rlpk"], "c_vir": p["c_vir"], "c_lpk": p["c_lpk"],
         "c_gc": c_gc, "c_ls": c_ls, "f_gc": f_gc, "f_ls": f_ls,
         "r_gc_sel": r_gc_sel, "r_ls_sel": r_ls_sel,
         "i_ilimit": i_ilimit, "crest_ll": crest_ll, "crest_hl": crest_hl, "crest_cmd": crest_cmd,

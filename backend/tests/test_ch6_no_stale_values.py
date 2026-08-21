@@ -98,6 +98,50 @@ def test_soft_start_reports_the_selected_capacitor_from_the_engine(at70):
         f"the CALCULATED value should be shown beside the selected one: {line}")
 
 
+def test_every_pin_filter_cap_is_one_value_across_gui_schematic_and_engine():
+    """C239. C238 unified C_ILIMIT alone and the designer then found C_VIR and C_RLPK still
+    disagreeing - the GUI offered a uniform 10 nF placeholder for four of the five while the
+    drawing carried its own literals. Checked as a FAMILY so fixing one cannot leave siblings.
+
+    C_VIR is the reason this is worth a test: it was a hardcoded STRING in the drawing ("0.1 uF
+    (typ)"), so it never passed through `g()` and the C235 default-check could not see it at all.
+    """
+    from fastapi.testclient import TestClient
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+    from app.mode_b.schematics import fan9672_application_schematic
+    import app.main as main
+
+    d = compute_steps_1_8({})
+    c, s8 = d["const"], d["step8"]
+    gui = {r["symbol"]: r for r in TestClient(main.app).post(
+        "/mode-b/control/components", json={"inputs": {}}).json().get("selectable", [])}
+    assert gui, "the GUI component endpoint offered no selectable caps"
+
+    ctx = {"crest_A": 0.0, "iphi_pk_A": 0.0}
+    for skey, ekey in (("c_gc", "c_gc"), ("crlpk", "c_rlpk"), ("cil", "c_ilimit"),
+                       ("cil2", "c_ilimit2"), ("cvir", "c_vir"), ("c_ls", "c_ls"),
+                       ("clpk", "c_lpk"), ("css", "css_sel")):
+        ctx[skey] = s8[ekey]
+    resolved = {}
+    fan9672_application_schematic(ctx, is_high=False, _resolved=resolved)
+
+    for sym, ekey, skey in (("C_GC", "c_gc", "c_gc"), ("C_RLPK", "c_rlpk", "crlpk"),
+                            ("C_ILIMIT", "c_ilimit", "cil"), ("C_ILIMIT2", "c_ilimit2", "cil2"),
+                            ("C_VIR", "c_vir", "cvir"), ("C_LS", "c_ls", "c_ls")):
+        eng = s8[ekey]
+        assert sym in gui, f"{sym} not offered by the GUI endpoint"
+        assert gui[sym]["default_pf"] == pytest.approx(eng * 1e12, rel=1e-6), (
+            f"{sym}: GUI default {gui[sym]['default_pf']} pF, engine {eng*1e12:.0f} pF")
+        assert resolved[skey]["value"] == pytest.approx(eng), (
+            f"{sym}: schematic draws {resolved[skey]['value']}, engine {eng}")
+        assert resolved[skey]["defaulted"] is False, f"{sym} still using a drawing literal"
+
+    # the drawing must show the SELECTED C_SS, matching Section 6.8.3 - it was handed the
+    # CALCULATED 400 nF while the report stated 390 nF
+    assert resolved["css"]["value"] == pytest.approx(s8["css_sel"]),         f"schematic C_SS {resolved['css']['value']} != selected {s8['css_sel']}"
+    assert s8["css_sel"] != s8["c_ss"], "fixture cannot distinguish selected from calculated"
+
+
 def test_c_ilimit_is_one_value_across_gui_report_and_schematic(at70):
     """6.8.4. The three-way disagreement: GUI 10 nF, report 18 nF, schematic 18 nF."""
     from app.mode_b.step16_steps1_8 import compute_steps_1_8

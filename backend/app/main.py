@@ -439,23 +439,29 @@ def control_components(req: _ComponentsReq):
                   10000, 15000, 22000, 33000, 47000, 68000, 100000]
         RLS_KOHM = [12, 13, 15, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82]
         # designer-selectable filter caps: default + associated R (frontend computes the live pole)
+        # Every default comes from the ENGINE, one field each. They used to be typed here, and a
+        # uniform 10 nF placeholder was given to four of the five while the schematic drew 1 nF /
+        # 75 nF / 0.1 uF and the report quoted its own numbers. C238 fixed only C_ILIMIT; the
+        # designer then found C_VIR and C_RLPK still disagreeing, so the whole family moved (C239).
         selectable = [
             {"key": "c_gc", "name": "Gain-control filter cap", "symbol": "C_GC",
-             "default_pf": 470, "r_assoc_ohm": round(s8["r_gc_sel"], 1), "role": "with R_GC", "options_pf": CAP_PF},
+             "default_pf": round(s8["c_gc"] * 1e12),
+             "r_assoc_ohm": round(s8["r_gc_sel"], 1), "role": "with R_GC", "options_pf": CAP_PF},
             {"key": "c_rlpk", "name": "RLPK filter cap", "symbol": "C_RLPK",
-             "default_pf": 10000, "r_assoc_ohm": round(c["r_rlpk"], 1), "role": "with R_RLPK", "options_pf": CAP_PF},
-            # default from the ENGINE, not a second opinion: this dropdown offered 10 nF while
-            # the report prose and the schematic both said 18 nF, so the screen and the document
-            # disagreed on a component the designer is asked to choose (C238).
+             "default_pf": round(s8["c_rlpk"] * 1e12),
+             "r_assoc_ohm": round(c["r_rlpk"], 1), "role": "with R_RLPK", "options_pf": CAP_PF},
             {"key": "c_ilimit", "name": "ILIMIT filter cap", "symbol": "C_ILIMIT",
-             "default_pf": round(s8.get("c_ilimit", 18e-9) * 1e12),
+             "default_pf": round(s8["c_ilimit"] * 1e12),
              "r_assoc_ohm": round(s8["r_ilimit_sel"], 1), "role": "with R_ILIMIT", "options_pf": CAP_PF},
             {"key": "c_ilimit2", "name": "ILIMIT2 filter cap", "symbol": "C_ILIMIT2",
-             "default_pf": 10000, "r_assoc_ohm": round(s8["r_ilimit2_sel"], 1), "role": "with R_ILIMIT2", "options_pf": CAP_PF},
+             "default_pf": round(s8["c_ilimit2"] * 1e12),
+             "r_assoc_ohm": round(s8["r_ilimit2_sel"], 1), "role": "with R_ILIMIT2", "options_pf": CAP_PF},
             {"key": "c_vir", "name": "VIR filter cap", "symbol": "C_VIR",
-             "default_pf": 10000, "r_assoc_ohm": round(c["r_vir_fr"], 1), "role": "with R_VIR (FR)", "options_pf": CAP_PF},
+             "default_pf": round(s8["c_vir"] * 1e12),
+             "r_assoc_ohm": round(c["r_vir_fr"], 1), "role": "with R_VIR (FR)", "options_pf": CAP_PF},
             {"key": "c_ls", "name": "Current-predict filter cap (across R_LS)", "symbol": "C_LS",
-             "default_pf": 470, "r_assoc_ohm": round(s8["r_ls_sel"], 1), "role": "with R_LS", "options_pf": CAP_PF},
+             "default_pf": round(s8["c_ls"] * 1e12),
+             "r_assoc_ohm": round(s8["r_ls_sel"], 1), "role": "with R_LS", "options_pf": CAP_PF},
         ]
         rls_default = min(RLS_KOHM, key=lambda x: abs(x - s8["r_ls_sel"] / 1e3))  # nearest standard
         r_ls = {"default_kohm": rls_default, "calc_kohm": round(s8["r_ls"] / 1e3, 1),

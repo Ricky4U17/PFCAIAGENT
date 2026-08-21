@@ -22,10 +22,11 @@ import pytest
 
 # Keys with no engine value: genuinely fixed-practice parts, drawn grey and labelled "(typ)" in the
 # figure. They are ALLOWED to default. Everything else must come from the engine.
-FIXED_PRACTICE = {"rf", "cf", "cil2", "clpk", "crlpk", "rpin8", "css"}
-# `cil` (C_ILIMIT) left this set at C238: it had three different values across the GUI dropdown
-# (10 nF), the report prose (18 nF) and this drawing (18 nF), so it is now one engine field and
-# must be supplied like any other sized part.
+FIXED_PRACTICE = {"rf", "cf", "rpin8"}
+# The whole pin-filter family left this set. C238 moved `cil` alone; the designer then found C_VIR
+# and C_RLPK still disagreeing with the GUI, so C239 moved `cil2`, `crlpk`, `cvir` and `clpk` too,
+# and `css` now carries the SELECTED value rather than the calculated one. Only the CS-sense filter
+# (rf/cf) and the pin-8 pull-up genuinely have no engine value left.
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +48,7 @@ def ctx():
         cb1=b.get("cb1"), cb2=b.get("cb2"),
         r_gc_sel=s8.get("r_gc_sel"), c_gc=s8.get("c_gc"),
         r_ilimit_sel=s8.get("r_ilimit_sel"), r_ilimit2_sel=s8.get("r_ilimit2_sel"),
-        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"), css=s8.get("c_ss"),
+        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"), css=s8.get("css_sel"),
         rri=s8.get("rri"), rcs_mohm=(s8.get("rcs_sel") or 0.015) * 1e3,
         r_ic=d10.get("ric"), c_ic1=d10.get("cic1"), c_ic2=d10.get("cic2"),
         r_vc=cm.get("r2s"), c_vc1=cm.get("c1s"), c_vc2=cm.get("c3s"),
@@ -55,7 +56,8 @@ def ctx():
         i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
         rrlpk=c.get("r_rlpk"), rfb_each=s5.get("rfb1_unit"), rfb2=s5.get("rfb2"),
-        cil=s8.get("c_ilimit"),
+        cil=s8.get("c_ilimit"), cil2=s8.get("c_ilimit2"), crlpk=s8.get("c_rlpk"),
+        cvir=s8.get("c_vir"), clpk=s8.get("c_lpk"),
     )
     return {"base": base, "const": c, "step5": s5, "prior": prior}
 

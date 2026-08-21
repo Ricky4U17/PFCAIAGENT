@@ -726,7 +726,8 @@ def _build_step8(story, data):
         % (s8["ilimit2_ratio"], s8["ilimit2_ratio"], s8["vcs_pk"], s8["i_ilimit2"]*1e6,
            s8["r_ilimit2"], s8["r_ilimit2"]/1e3)], ch=C6)
     body(story, "Decision: R<sub>ILIMIT2</sub> = %.2f kΩ (E96) → no nuisance trips in normal "
-                "operation. C<sub>ILIMIT2</sub> = 75 nF." % (s8["r_ilimit2_sel"]/1e3), C6)
+                "operation. C<sub>ILIMIT2</sub> = %.0f nF."
+                % (s8["r_ilimit2_sel"]/1e3, s8["c_ilimit2"]*1e9), C6)
     sub_h(story, "6.8.6", "Component Scorecard", C6)
     data_table(story, "6.8.6", "Component Scorecard — GC, LS, Soft-Start, Current Limits",
         "Gain-control, current-predict, soft-start and current-limit components.",
@@ -828,7 +829,10 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
         cb1=b.get("cb1"), cb2=b.get("cb2"),
         r_gc_sel=s8.get("r_gc_sel"), c_gc=s8.get("c_gc"),
         r_ilimit_sel=s8.get("r_ilimit_sel"), r_ilimit2_sel=s8.get("r_ilimit2_sel"),
-        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"), css=s8.get("c_ss"),
+        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"),
+        # the SELECTED C_SS, not the calculated one: Section 6.8.3 states 390 nF while the
+        # drawing was being handed the 400 nF calculated value (C239).
+        css=s8.get("css_sel"),
         rri=s8.get("rri"), rcs_mohm=(s8.get("rcs_sel") or 0.015) * 1e3,
         r_ic=d10.get("ric"), c_ic1=d10.get("cic1"), c_ic2=d10.get("cic2"),
         r_vc=cm.get("r2s"), c_vc1=cm.get("c1s"), c_vc2=cm.get("c3s"),
@@ -837,7 +841,8 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
         # ── previously defaulted inside schematics.py; now threaded from the engine ──
         rrlpk=_c.get("r_rlpk"),                      # was 15 kOhm; BOM and Section 6.3.2 say 12.1
-        cil=s8.get("c_ilimit"),                      # was an 18 nF literal; GUI offered 10 nF
+        cil=s8.get("c_ilimit"), cil2=s8.get("c_ilimit2"), crlpk=s8.get("c_rlpk"),
+        cvir=s8.get("c_vir"), clpk=s8.get("c_lpk"),   # the whole pin-filter family (C239)
         rfb_each=_s5.get("rfb1_unit"),               # PER-UNIT (x3 in the drawing) - not the total
         rfb2=_s5.get("rfb2"),
     )
