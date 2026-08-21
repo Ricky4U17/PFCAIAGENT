@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-20**, head = **`563dc5b` C234**, on `master`.
+**Start here after a restart.** Last updated **2026-08-20**, head = **`044efa8` C236**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -329,9 +329,15 @@ the designer (2 → 4 → 1 → 3):
 | # | Comment | State |
 |---|---|---|
 | 2 | Table 7.8b inductor loss disagrees with Ch3 | **CLOSED — C233 + C234**, confirmed by the designer on 2026-08-20: 7.8b reads 11.0 W at 90 Vac / 12.4 at 180, and Table 4.2a renders. C233 fixed the arithmetic; the designer re-reported it anyway because correct numbers still did not explain themselves, so C234 added the reconciliation. |
-| 4 | Figures B.2a/B.2b schematic values wrong | **NEXT.** R_RLPK renders 15 kΩ vs the BOM's 12.1 kΩ. Root cause is systemic: the schematic asks its context for 22 keys and `base` (report_steps1_8.py ~line 788) supplies 10, so 12 fall back to hardcoded defaults in `schematics.py`. `rfb_each` 3.63 MΩ and `rfb2` 23.2 kΩ agree with the BOM only by coincidence — change Vout and they will not. Table B.1 also hardcodes R_RLPK and R_IAC as string literals while its other 12 rows are live `ctx[...]`, and Section 6.3.2's heading hardcodes 12.1 kΩ too: three sources of truth for one value. |
+| 4 | Figures B.2a/B.2b schematic values wrong | **DONE — C235.** Two values were wrong, not one: R_RLPK (15 → 12.1 kΩ) and R_FB1-per-unit, drawn as 3.63 MΩ ×3 = 10.89 MΩ when 3.63 MΩ is the TOTAL and the per-unit is 1.21 MΩ. Ten of the twelve defaulted keys were right *by coincidence*. All sized keys now threaded; `tests/test_schematic_values.py` guards the class. **Awaiting the designer's look at a regenerated report.** ~~was:~~ R_RLPK renders 15 kΩ vs the BOM's 12.1 kΩ. Root cause is systemic: the schematic asks its context for 22 keys and `base` (report_steps1_8.py ~line 788) supplies 10, so 12 fall back to hardcoded defaults in `schematics.py`. `rfb_each` 3.63 MΩ and `rfb2` 23.2 kΩ agree with the BOM only by coincidence — change Vout and they will not. Table B.1 also hardcodes R_RLPK and R_IAC as string literals while its other 12 rows are live `ctx[...]`, and Section 6.3.2's heading hardcodes 12.1 kΩ too: three sources of truth for one value. |
 | 1 | Table 7.2e black squares | `report_semiconductor.py:1224` inserts `&#8203;` (U+200B) to wrap the narrow column; Helvetica has no glyph (measured width 7.61) so ReportLab draws a notdef box. One-line fix. **Also fix the glyph CHECK** — it counted U+FFFD/U+25A0 in extracted text, but a notdef extracts as `I`, so it can never see this. Greek/math chars outside cp1252 render fine via Symbol substitution, so "not in cp1252" is not the test either. |
 | 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
+
+**Chapter 7 has been audited for the C233 class of defect and is clean** (C236): 144 per-line cell
+comparisons across Tables 7.3/7.4/7.5/7.6, GUI vs engine vs report, 0 mismatches, now guarded by
+`tests/test_ch7_three_way_parity.py`. The GUI does exactly ONE piece of arithmetic of its own
+(`P_FET_total + P_gate_driver`); everything else it renders verbatim from `/calculate`, so GUI ==
+engine holds by construction — if that ever changes, the test's docstring is what goes stale.
 
 Then, in order:
 
@@ -349,6 +355,27 @@ Then, in order:
    understates its benefit (~1 W shown vs ~4–5 W real).
 4. **`PENDING_ITEMS.md` B4** — status-vocabulary unification. Parked by the designer; Ch8 and Ch9 use
    different word sets. Do it as one project-wide pass, not per chapter.
+
+---
+
+## Traps from C235-C236
+
+- **A DEFAULT THAT IS RIGHT BY COINCIDENCE IS WORSE THAN ONE THAT IS WRONG.** C235: twelve schematic
+  keys fell back to literals; ten matched this design exactly and would have passed any value
+  check while drifting silently on the next spec change. Assert the CLASS ("nothing sized falls
+  back to a drawing literal"), not the values.
+- **VALUES DRAWN INTO A RASTER IMAGE ARE UNREACHABLE BY EVERY PDF TEXT CHECK.** That is why C235's
+  two wrong resistors survived to a designer's eye. `fan9672_application_schematic(..., _resolved=d)`
+  now records what each key resolved to; use it rather than OCR.
+- **BOUND A TABLE-PARSING REGEX AT THE NEXT CAPTION.** C236: every per-line Chapter-7 table starts
+  its rows with `<Vac> V`, so a fixed-size window silently compares cells from the following table
+  — it reported a 200 °C junction temperature. Looks exactly like a catastrophic data defect.
+- **COMPARE A RENDERED CELL AT THE PRECISION IT IS PRINTED AT.** Table 7.6 prints whole degrees
+  against an engine carrying 70.65; asserting on the raw float flags all nine rows. Use
+  `rendered == round(engine, dp)`.
+- **CONFIRM AN INJECTED BUG ACTUALLY LANDED.** C236: a bad `sed`-style patch matched nothing, the
+  suite went green, and that green proved nothing. Check the injection took effect before trusting
+  either outcome.
 
 ---
 

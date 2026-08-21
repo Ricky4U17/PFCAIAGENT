@@ -9484,3 +9484,73 @@ The table is built inside a try/except, so its absence would be silent - the C23
 branch emits a visible note naming the exception instead of `pass`, and the test asserts that note
 is absent.
 
+# C235 - the schematic drew its own defaults, and two of them were wrong
+
+Designer comment 4. Figures B.2a/B.2b showed values disagreeing with the BOM. **Two were wrong:**
+
+| | schematic drew | engine value |
+|---|---|---|
+| R_RLPK | 15 kOhm | **12.1 kOhm** (the one the designer spotted) |
+| R_FB1 per unit | 3.63 MOhm x3 = **10.89 MOhm** | **1.21 MOhm x3 = 3.63 MOhm** |
+
+The second was NOT reported and is the worse one: 3.63 MOhm is the TOTAL the BOM quotes, so the
+drawing showed a feedback divider top leg three times too large. Against R_FB2 = 23.2 kOhm that
+sets a completely different output voltage.
+
+**Cause:** the drawing asks its context for 22 keys and the report supplied 10. Twelve fell back to
+literals in `schematics.py`, and **ten of those literals happened to be right for this design** -
+worse than wrong, because they agree only by coincidence and drift the moment a spec changes. Both
+real defects were among the other two. R_RLPK had **three** sources of truth (Table B.1 literal,
+Section 6.3.2 heading literal, schematics.py default) and the schematic's was the odd one out.
+
+Everything with an engine value is now threaded; R_IAC and R_VIR per sheet since they legitimately
+differ. `g()` also now treats a present-but-None key as missing, so threading from an engine that
+did not compute a value can no longer render "None" onto a buildable schematic.
+
+VERIFIED by reading the RENDERED drawing - these values are in a raster image and no text assertion
+on the PDF can reach them. HV: R_RLPK 12.1 k, R_FB1 "1.21 M x3", R_IAC 12 M, R_VIR 470 k. FR:
+R_IAC "(3 x 2 MOhm ser.) 6 MOhm", so the mode pair is not inverted.
+
+**Not left eyeball-only** (the designer asked for it fixed, not filed): `fan9672_application_schematic`
+takes an optional `_resolved` dict recording what each key resolved to and whether it defaulted, so
+drawn values are assertable without OCR. `tests/test_schematic_values.py` (6 tests) asserts no
+SIZED component falls back to a drawing literal - the CLASS, not the two values, since ten
+coincidentally-correct defaults would pass a value check while staying a trap.
+
+# C236 - Chapter 7 audited three ways: GUI == engine == report
+
+The designer asked whether Chapter 7 carried the C233 class of defect. **It does not** - audited,
+and now guarded rather than asserted. Every per-line cell against the engine field it claims:
+
+| table | columns |
+|---|---|
+| 7.3 | Iin_rms, P_BRIDGE_total |
+| 7.4 | cond, switch, Coss, Qc->FET, gate+leak, FET total |
+| 7.5 | conduction, recovery, blocking, total |
+| 7.6 | T_sink, Tj FET, Tj diode, Tj bridge |
+
+**144 cell comparisons, 0 mismatches**, plus the summary maxima and the worst-case line voltages
+that decide where Figures 7-3/7-4 are drawn (the C232 defect).
+
+**The GUI needs no separate fixture**: `SemiconductorSelection.tsx` renders the `/calculate`
+response verbatim with exactly ONE piece of arithmetic of its own,
+`r.P_FET_total + r.P_gate_driver`. GUI == engine holds by construction everywhere else. That
+reasoning is in the test docstring because it is what goes stale if the GUI starts deriving more.
+
+## Two things the audit itself got wrong first
+
+A fixed-size window after a table caption runs into the NEXT table, and every per-line table starts
+its rows with `<Vac> V` - so it compared cells from the wrong table and reported a **200 degC**
+bridge junction. A parser artefact that looks exactly like a catastrophic data defect.
+
+Comparing a rendered cell to the raw engine float flags all nine rows of Table 7.6, which prints
+WHOLE degrees against an engine carrying 70.65. The check is `rendered == round(engine, dp)`.
+
+**Also found:** Table 7.5's column headed "Recovery (Qrr)" reads engine field `P_D_sw`; there is no
+`P_D_rr`. The GUI reads P_D_sw too so nothing disagrees, but heading and field name differ and a
+future "correction" of the key would break parity. Named in the test.
+
+VERIFIED by injecting +2% into the Table 7.5 conduction column: caught at every operating point. An
+earlier injection silently failed to patch anything and the green run proved nothing - the
+injection was confirmed to have landed before the result was trusted. Suite 620 -> 633.
+
