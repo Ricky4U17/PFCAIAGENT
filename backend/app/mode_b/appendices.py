@@ -70,6 +70,13 @@ def _appendix_ctx(prior, s10, s11, s12=None, s13=None):
         # BOM extras
         "rri": float(p4.get("rri_selected", 11500.0)), "rfb2": float(p5.get("rfb2", 23200.0)),
         "rcs": float(p6.get("rcs_sel", 0.015)),
+        # R_RLPK and R_IAC were the only two Table B.1 rows written as string literals while the
+        # other twelve were live. R_RLPK was also hardcoded in the Section 6.3.2 heading and
+        # defaulted (to a DIFFERENT value) inside schematics.py - three sources for one number,
+        # and the schematic's disagreed. Read from the engine constants like everything else.
+        "r_rlpk": float((p.get("const") or {}).get("r_rlpk", 12100.0)),
+        "riac_fr": float((p.get("const") or {}).get("riac_fr", 6e6)),
+        "riac_hv": float((p.get("const") or {}).get("riac_hv", 12e6)),
         # PWM ramp amplitude from the current-loop solve — was hardcoded to 5 V at the
         # R_CS/V_RAMP equation below, which would misstate the ratio for any other controller.
         "vramp": float((s10.get("p") or {}).get("v_ramp", 5.0) or 5.0),
@@ -485,8 +492,9 @@ def _appendix_b(story, ctx, prior=None, inp=None):
          ["R_FB1", f"{ctx['r1']/1e6:.2f} MΩ", "HV divider, ≥ 200 V", "1%", "Output sense top (Section 6.5)"],
          ["R_FB2", f"{ctx['rfb2']/1e3:.1f} kΩ", "Thin film", "1%", "Output sense bottom (Section 6.5)"],
          ["R_CS", f"{ctx['rcs']*1e3:.0f} mΩ", "Kelvin shunt, 3 W", "1%", "Current sense (Section 6.6)"],
-         ["R_IAC", "6 / 12 MΩ", "HV, ≥ 400 V", "1%", "IAC line sense, FR/HV (Section 6.3)"],
-         ["R_RLPK", "12.1 kΩ", "Thin film", "1%", "Peak detector (Section 6.3)"],
+         ["R_IAC", f"{ctx['riac_fr']/1e6:.0f} / {ctx['riac_hv']/1e6:.0f} MΩ", "HV, ≥ 400 V", "1%",
+          "IAC line sense, FR/HV (Section 6.3)"],
+         ["R_RLPK", f"{ctx['r_rlpk']/1e3:.1f} kΩ", "Thin film", "1%", "Peak detector (Section 6.3)"],
          ["R_IC", f"{ctx['ric']/1e3:.0f} kΩ", "Thin film", "1%", "Current comp gain (Section 6.10)"],
          ["C_IC1", f"{ctx['cic1']*1e9:.1f} nF", "C0G/NP0", "5%", "Current comp zero (Section 6.10)"],
          ["C_IC2", f"{ctx['cic2']*1e12:.0f} pF", "C0G/NP0", "5%", "Current comp pole (Section 6.10)"],

@@ -192,17 +192,34 @@ def _fmt_cap(x):
     return f"{x*1e12:g} pF"
 
 
-def fan9672_application_schematic(v, is_high=False, max_frac=1.0):
+def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None):
     """Full FAN9672 (LQFP-32) application schematic — IC body + every external pin network —
     rendered with matplotlib for the report (white-page theme). Component values are identical at
     both line ranges; only the mode-dependent items differ with `is_high`: the R_IAC series count
     (FR 3×2 MΩ / HV 6×2 MΩ), the VIR mode threshold, and the title/mode labels. `v` is a dict of
     component values + this line's operating annotations; missing keys fall back to fixed-practice
-    defaults so the figure always renders. Returns a ReportLab Image sized to the content width."""
+    defaults so the figure always renders. Returns a ReportLab Image sized to the content width.
+
+    `_resolved`, if given a dict, records what each key ACTUALLY resolved to and whether it came
+    from `v` or from a fixed-practice default. The values are drawn into a raster image, so nothing
+    downstream can read them back — which is how R_RLPK sat at a defaulted 15 kOhm while the BOM
+    and Section 6.3.2 both said 12.1 (C235). This makes the drawn values assertable without OCR;
+    `tests/test_schematic_values.py` is the consumer."""
     import matplotlib.pyplot as plt
     from reportlab.lib.utils import ImageReader
     from reportlab.platypus import Image
-    g = lambda k, d=None: v.get(k, d) if isinstance(v, dict) else d
+
+    def g(k, d=None):
+        # A key present-but-None must fall back to the default, not propagate None into the
+        # formatters: threading a value through from an engine that did not compute it would
+        # otherwise render "None" on a schematic a designer might build from.
+        val = v.get(k) if isinstance(v, dict) else None
+        defaulted = val is None
+        if defaulted:
+            val = d
+        if _resolved is not None:
+            _resolved[k] = {"value": val, "defaulted": defaulted, "default": d}
+        return val
     fo, fc = _fmt_ohm, _fmt_cap
     mode_lo = not is_high
     # ── colours (light theme for the printed page) ───────────────────────────

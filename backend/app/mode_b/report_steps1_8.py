@@ -123,10 +123,16 @@ def build_steps_1_8(story, data: dict):
         ["Range / Mode", "V_AC", "V_IN,pk (V)", "R_IAC (Ω)", "I_AC,pk (µA)", "< 65 µA?"],
         data["step3_1"]["rows"], col_widths=[CW*0.18, CW*0.12, CW*0.18, CW*0.20, CW*0.18, CW*0.14], ch=C6)
     annotation(story, "DECISION",
-        "R<sub>IAC</sub> = 6 MΩ (FR) and 12 MΩ (HV). Both produce identical I<sub>AC,pk</sub> = "
+        f"R<sub>IAC</sub> = {float((data.get('const') or {}).get('riac_fr', 6e6))/1e6:.0f} MΩ (FR) "
+        f"and {float((data.get('const') or {}).get('riac_hv', 12e6))/1e6:.0f} MΩ (HV). "
+        "Both produce identical I<sub>AC,pk</sub> = "
         "31.11 µA, confirming symmetry. Use 1% resistors split into series strings for voltage "
         "rating and creepage compliance.", C6)
-    sub_h(story, "6.3.2", "V_LPK Check at R_RLPK = 12.1 kΩ", C6)
+    # Live, not a literal: R_RLPK had three sources of truth (this heading, Table B.1, and a
+    # DIFFERENT default inside schematics.py) and the schematic's disagreed with the other two.
+    _c632 = (data.get("const") or {})
+    _rrlpk_632 = float(_c632.get("r_rlpk", 12100.0))
+    sub_h(story, "6.3.2", f"V_LPK Check at R_RLPK = {_rrlpk_632/1e3:.1f} kΩ", C6)
     body(story, "The peak-detector output V<sub>LPK</sub> is formed from I<sub>AC</sub> and "
                 "R<sub>RLPK</sub>. In FR mode the multiplier is 2×; in HV mode it is 4× (the FAN9672 "
                 "internally doubles I<sub>RLPK</sub>). The C-input to the gain modulator uses the 2× "
@@ -779,6 +785,16 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
     from app.mode_b.step16_step10_iloop import compute_step10_iloop
     from app.mode_b.step16_step11_vloop import compute_step11_vloop
     s8 = prior.get("step8", {}) if isinstance(prior, dict) else {}
+    # The schematic asks its context for 22 keys; `base` used to supply 10 and the other 12 fell
+    # back to literals inside schematics.py. Two of those literals were WRONG (C235):
+    #   R_RLPK      drawn 15 kOhm, engine value 12.1 kOhm (CONST.r_rlpk) - the BOM said 12.1 all along
+    #   R_FB1 unit  drawn 3.63 MOhm and labelled "x3", i.e. a 10.89 MOhm string; the engine's
+    #               PER-UNIT value is 1.21 MOhm and 3.63 MOhm is the TOTAL the BOM reports
+    # The rest happened to match, which is worse than being wrong: they agree only for this design
+    # and would drift silently the moment a spec changed. Everything with an engine value is now
+    # threaded from it.
+    _c = prior.get("const", {}) if isinstance(prior, dict) else {}
+    _s5 = prior.get("step5", {}) if isinstance(prior, dict) else {}
     try:    b = compute_step9_bibo(inp)
     except Exception: b = {}
     try:    d10 = compute_step10_iloop(inp, prior)
@@ -797,6 +813,10 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
         r3=cm.get("r3s"), c_v3=cm.get("c2s"), vType=cm.get("type", "type3"),
         i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
         vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
+        # ── previously defaulted inside schematics.py; now threaded from the engine ──
+        rrlpk=_c.get("r_rlpk"),                      # was 15 kOhm; BOM and Section 6.3.2 say 12.1
+        rfb_each=_s5.get("rfb1_unit"),               # PER-UNIT (x3 in the drawing) - not the total
+        rfb2=_s5.get("rfb2"),
     )
     sub_h(story, sec, "FAN9672 Application Schematic — Low Line and High Line", _ch)
     body(story,
@@ -816,6 +836,11 @@ def _build_app_schematic_section(story, inp, prior, sec="6.8.7", fig_prefix="6.8
         v = dict(base)
         v["crest_A"]   = s8.get("crest_hl" if hi else "crest_ll") or 0
         v["iphi_pk_A"] = s8.get("ilpk_hl" if hi else "ilpk_ll") or 0
+        # Mode-set items: these are the two components that legitimately DIFFER between the sheets,
+        # so they are set per sheet rather than in `base`. Same values the drawing defaulted to,
+        # now read from the engine so a change to the constants reaches the figure.
+        v["riac"] = _c.get("riac_hv") if hi else _c.get("riac_fr")
+        v["rvir"] = _c.get("r_vir_hv") if hi else _c.get("r_vir_fr")
         body(story, f"<b>Figure {fig_prefix}{tag} — FAN9672 application schematic ({lab})</b>", _ch)
         body(story,
              ("High-line (HV) mode: R<sub>IAC</sub> = 6×2 MΩ and the VIR high-range threshold; "
