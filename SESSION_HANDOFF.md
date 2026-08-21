@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-20**, head = **`3cad550` C238**, on `master`.
+**Start here after a restart.** Last updated **2026-08-20**, head = **`cbcf9c3` C240**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -333,6 +333,13 @@ the designer (2 → 4 → 1 → 3):
 | 1 | Table 7.2e black squares | **DONE — C237.** A zero-width space (U+200B) inserted to wrap a column that never needed wrapping — Helvetica has no glyph, so ReportLab drew a notdef box. The glyph CHECK was wrong too and is replaced: a notdef does not extract as a box (see traps). Designer has not yet re-run the report. |
 | 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
 
+**C239-C240 followed, and both came from the designer checking my work.** C238 unified ONE
+capacitor (C_ILIMIT) and left its five siblings — C239 had to do the family. Then the sharper point:
+the values must follow the **Screen-2 selection**, and `_control_inputs_from_step16` was forwarding
+only two of six, so four dropdown choices were accepted and silently discarded (C240). Table B.1
+also gained the six pin-filter caps it had never listed. **Lesson: when a defect's character is
+"no single home", fix the whole family in one go — a one-at-a-time fix reads as complete and is not.**
+
 **Chapter 6 has been audited too** (C238): structurally sound — both GUI endpoints and the report
 call `compute_steps_1_8` — but four values were RETYPED into prose and worked equations, and
 `C_ILIMIT` genuinely disagreed three ways (GUI 10 nF / report 18 nF / schematic 18 nF). All now one
@@ -376,6 +383,15 @@ Then, in order:
 - **A LITERAL THAT IS CORRECT TODAY IS INDISTINGUISHABLE FROM A LIVE VALUE.** The only way to tell
   them apart is to change the input and see whether the output moves. C238's frequency checks build
   twice, at 70 kHz and 60 kHz, for exactly this reason.
+- **A SELECTION ACCEPTED AND SILENTLY DISCARDED IS WORSE THAN ONE REFUSED.** C240: Screen 2 offered
+  six capacitor dropdowns and the bridge forwarded two. The GUI echoed the choice back, so nothing
+  told the designer it had not taken. When adding a GUI input, check the WHOLE bridge, not the field.
+- **FIX THE FAMILY, NOT THE MEMBER.** C238 unified C_ILIMIT alone; the designer found C_VIR and
+  C_RLPK still broken the next day. If a value has no single home, its siblings almost certainly
+  have none either — enumerate them and check as a set.
+- **A HARDCODED STRING IS INVISIBLE TO A "NOTHING DEFAULTED" TEST.** C239: `C_VIR` was drawn as the
+  literal `"0.1 µF (typ)"`, never passing through `g()`, so the C235 guard could not see it. Check
+  that every value a test claims to cover actually flows through the mechanism it inspects.
 - **A VALUE HELD IN A LOCAL VARIABLE WILL BE RETYPED ELSEWHERE.** C238: `css_sel = 390e-9` was local
   to the engine, so "390 nF" was typed again in the engine's own table and again in the report. If
   two places need it, export it.

@@ -9633,3 +9633,57 @@ checks build TWICE, at 70 kHz and 60 kHz.
 VERIFIED `tests/test_ch6_no_stale_values.py` (5 tests). Re-hardcoding the R_RI equation fails it.
 Suite 633 -> 641 passed / 2 skipped.
 
+# C239 - the whole pin-filter capacitor family, not just C_ILIMIT
+
+The designer checked after C238 and found C_VIR and C_RLPK still reading 10 nF on the GUI component
+list while the schematic drew something else. **C238 unified ONE capacitor and left its five
+siblings** - the wrong shape of fix for a defect whose whole character is "no single home".
+
+| symbol | GUI dropdown | schematic | engine | |
+|---|---|---|---|---|
+| C_GC | 470 pF | 430 pF (live) | 430 pF | GUI wrong |
+| C_LS | 470 pF | 240 pF (live) | 240 pF | GUI wrong |
+| C_RLPK | 10 nF | 1 nF literal | — | no home |
+| C_ILIMIT2 | 10 nF | 75 nF literal | — | no home |
+| C_VIR | 10 nF | `"0.1 µF (typ)"` | — | no home |
+| C_ILIMIT | 18 nF | 18 nF | 18 nF | fixed at C238 |
+
+**Why the C235 test missed C_VIR:** it was a hardcoded STRING in the drawing —
+`CV(..., "0.1 µF (typ)", "C_VIR", 1)` — so it never passed through `g()`. A test that checks "no
+key falls back to its default" is blind to a value that was never a key.
+
+**C_SS was wrong a third way:** the drawing was handed `s8["c_ss"]`, the CALCULATED 400 nF, while
+Section 6.8.3 states the SELECTED 390 nF. Drawing and prose disagreed about which part to fit.
+
+All six now live in the engine as one field each. Values are the ones the SCHEMATIC has always
+drawn, because those are the figures in every report the designer has reviewed; the GUI's uniform
+10 nF was a placeholder.
+
+# C240 - the designer's Screen-2 capacitor selections were being discarded
+
+The more serious half. C239 gave the six caps one home each, but that home held **defaults**. The
+designer's point was sharper: the values must be whatever was chosen on Control Design Screen 2.
+
+They were not. `_control_inputs_from_step16` forwarded **two of six**:
+
+```python
+if _num(s2.get("c_gc_pf")) is not None:  out["c_gc"] = ...
+if _num(s2.get("c_ls_pf")) is not None:  out["c_ls"] = ...
+```
+
+C_RLPK, C_ILIMIT, C_ILIMIT2 and C_VIR were dropped. Screen 2 offered the dropdown, accepted the
+choice, echoed it on the review screen — and the report and schematic used the default anyway.
+**A selection that is accepted and silently ignored is worse than one that is refused**, because
+nothing tells the designer it did not take.
+
+All six now forward; the engine merges over `DEFAULT_INPUTS` so an untouched cap keeps its default.
+
+**Table B.1 gains the six capacitors.** It called itself the Control Bill of Materials and listed
+fourteen resistors and compensator caps but no pin filters - somebody building from it was six
+parts short. 192 pp (was 191).
+
+VERIFIED A Screen-2 payload picking six NON-DEFAULT values (1000 / 4700 / 22000 / 33000 / 47000 /
+680 pF) arrives at the engine unchanged: 0 discarded, was 4. The test asserts each fixture value
+differs from its default FIRST, so a dropped selection cannot pass by coincidence. Narrowing the
+bridge back to two fails it by name. Suite 642 -> 644 passed / 2 skipped.
+
