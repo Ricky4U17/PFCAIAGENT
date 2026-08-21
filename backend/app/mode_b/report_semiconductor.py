@@ -1221,7 +1221,12 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 _pg = (_figs.get(_k) or {}).get("page")
                 if _pg:
                     _ev += f"; plot on page {_pg}" if _ev else f"plot on page {_pg}"
-            _src_rows.append([f"{_lbl}", _k.replace("_", "&#8203;_"),
+            # The canonical key VERBATIM. This used to insert a zero-width space (U+200B) before
+            # each underscore to let the narrow column wrap - but ReportLab's Helvetica has no
+            # U+200B glyph and draws a notdef BOX for it, which is the row of black squares the
+            # designer reported. It was also unnecessary: the widest key here is `dies_per_package`
+            # at 65 pt against a 135 pt column, so nothing ever needed to wrap.
+            _src_rows.append([f"{_lbl}", _k,
                               _PROV_WORD.get(_p, _p), _ev or "&#8212;"])
     if _src_rows:
         data_table(story, "7.2e", "Where Each Engine Input Came From",
