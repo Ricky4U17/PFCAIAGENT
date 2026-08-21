@@ -221,3 +221,31 @@ def test_table_b1_lists_the_six_pin_filter_capacitors():
     for key in ("c_gc", "c_rlpk", "c_ilimit", "c_ilimit2", "c_vir", "c_ls"):
         assert key in ctx, f"{key} missing from the Table B.1 context"
         assert ctx[key] == pytest.approx(s8[key]),             f"{key}: BOM shows {ctx[key]}, engine says {s8[key]}"
+
+
+def test_every_screen2_selection_reaches_the_engine_including_r_ls():
+    """C241. The systematic sweep for the C240 class found ONE more: R_LS.
+
+    Screen 2 serves `r_ls.options_kohm` and renders a dropdown, but `r_ls_kohm` appeared NOWHERE in
+    backend/app - the pick was discarded and the engine used its own E96 snap. Found by scanning
+    every designer-looking key the frontend sends against everything the backend reads, rather than
+    by inspecting the fields one at a time.
+
+    This asserts the whole Screen-2 payload at once, so the next field added to that screen has to
+    be forwarded or this fails.
+    """
+    from app.main import _control_inputs_from_step16
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    base = compute_steps_1_8({})["step8"]
+    s2 = {"rcs_mohm": 12.0, "c_gc_pf": 1000, "c_rlpk_pf": 4700, "c_ilimit_pf": 22000,
+          "c_ilimit2_pf": 33000, "c_vir_pf": 47000, "c_ls_pf": 680, "r_ls_kohm": 47.0}
+    s8 = compute_steps_1_8(_control_inputs_from_step16({"s2": s2}))["step8"]
+
+    assert base["r_ls_sel"] != pytest.approx(47_000.0),         "fixture R_LS equals the default, so a dropped selection would still pass"
+    assert s8["r_ls_sel"] == pytest.approx(47_000.0), (
+        f"designer picked 47 kOhm, engine used {s8['r_ls_sel']/1e3:.1f} kOhm "
+        "- the R_LS selection was discarded")
+    for sel, eng in (("c_rlpk_pf", "c_rlpk"), ("c_vir_pf", "c_vir")):
+        assert s8[eng] == pytest.approx(s2[sel] * 1e-12), f"{sel} discarded"
+

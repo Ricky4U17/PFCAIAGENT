@@ -2490,6 +2490,9 @@ def _control_inputs_from_step16(sp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                        ("c_vir_pf", "c_vir")):
         if _num(s2.get(_sel)) is not None:
             out[_eng] = _num(s2[_sel]) * 1e-12
+    # R_LS is a Screen-2 dropdown too and was being dropped the same way (C241).
+    if _num(s2.get("r_ls_kohm")) is not None:
+        out["r_ls_sel"] = _num(s2["r_ls_kohm"]) * 1e3
     return out
 
 

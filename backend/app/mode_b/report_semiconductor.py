@@ -1746,8 +1746,14 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 for _path, _cap in _sens:
                     story.append(_img_path(_path))
                     body(story, _cap, CH)
-    except Exception:
-        pass
+    except Exception as _e:
+        # Visible, never silent. C232 put this section behind a bare `except: pass`, and C234 fixed
+        # exactly that pattern for Table 4.2a while leaving it here - a whole section could vanish
+        # and the build still looked clean (C241).
+        annotation(story, "NOTE",
+            "<b>Sensitivity figures unavailable in this build.</b> The headline losses and "
+            "temperatures above are unaffected; only the what-if sweeps are missing. "
+            f"({type(_e).__name__})", CH)
 
 
 def _doc(target):

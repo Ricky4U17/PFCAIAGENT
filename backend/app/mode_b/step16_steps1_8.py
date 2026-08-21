@@ -57,6 +57,7 @@ DEFAULT_INPUTS = dict(
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
     c_gc=430e-12, c_ls=240e-12,
+    r_ls_sel=None,                  # designer R_LS override (ohms); None -> E96 snap of the calc
     # THE PIN-FILTER CAPACITOR FAMILY. None of these had a single home: the GUI dropdown offered a
     # uniform 10 nF placeholder for four of them while the schematic drew its own literals and the
     # report quoted a third value. C238 fixed only C_ILIMIT; the designer found C_VIR and C_RLPK
@@ -367,6 +368,11 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     r_ls = l_pfc / (1.5e-9 * rcs_sel * ratio)
     c_gc, c_ls = p["c_gc"], p["c_ls"]
     r_gc_sel, r_ls_sel = _nearest_e96(r_gc), _nearest_e96(r_ls)
+    # Screen 2 offers R_LS as a dropdown (main.py serves `r_ls.options_kohm`), so the
+    # designer's pick must win over the E96 snap - it was being discarded, exactly like the
+    # four capacitors in C240 and on the same screen (C241).
+    if p.get("r_ls_sel"):
+        r_ls_sel = float(p["r_ls_sel"])
     f_gc = 1.0 / (2 * math.pi * r_gc_sel * c_gc)         # GC pin-filter pole
     f_ls = 1.0 / (2 * math.pi * r_ls_sel * c_ls)         # LS pin-filter pole
     c_ss = c["i_ss"] * c["t_ss"] / c["v_ss"]

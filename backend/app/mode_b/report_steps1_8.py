@@ -410,8 +410,10 @@ def _build_step6(story, data):
             "Per-phase shunt loss and the total over %d channels, at every operating point." % _nch,
             ["V_AC", "I<sub>&#966;,rms</sub>", "Per phase", "Total (%d ch)" % _nch],
             _rows, col_widths=[CW*0.22, CW*0.26, CW*0.26, CW*0.26], ch=C6)
-    except Exception:
-        pass
+    except Exception as _e:
+        annotation(story, "NOTE",
+            "<b>Per-line R<sub>CS</sub> loss table unavailable in this build.</b> The worked "
+            f"low/high-line totals above still apply. ({type(_e).__name__})", C6)
     annotation(story, "DECISION",
         "R<sub>CS</sub> = " + _rms + " mΩ. Use a minimum 3 W, 4-terminal Kelvin metal-element current-sense "
         "shunt per phase (derate to 50% for thermal reliability). The Kelvin package eliminates PCB "

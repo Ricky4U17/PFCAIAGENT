@@ -551,8 +551,13 @@ def _appendix_b(story, ctx, prior=None, inp=None):
                  "sheet is on its own page for direct comparison against the bill of materials above.", CH)
             _build_app_schematic_section(story, inp or {}, prior,
                                          sec="B.2", fig_prefix="B.2", one_per_page=True, ch=CH)
-        except Exception:
-            pass
+        except Exception as _e:
+            # The prose directly above promises "the complete control circuit below". If the
+            # drawing fails, saying nothing leaves a promise with nothing under it (C241).
+            annotation(story, "NOTE",
+                "<b>The application schematics could not be rendered in this build.</b> Table B.1 "
+                "above remains the authoritative component list; the two line-range sheets are "
+                f"missing from this copy. ({type(_e).__name__})", CH)
 
 
 # ════════════════════════════ Appendix C ════════════════════════════════════

@@ -4273,9 +4273,12 @@ def _ch4(story, state, d):
         def _igse_steps(r):
             if not r:
                 return
+            from app.mode_b.step7_magnetic_calc import IGSE_C as _IGSE_C
             D = float(r.get("D_crest", 0) or 0); Fd = float(r.get("Fd", 0) or 0)
             eq_box(story, [
-                rf"F(D) = K_{{iGSE}}\,[\,D^{{1-c}} + (1-D)^{{1-c}}\,],\ c = 1.444 "
+                # c from the engine's IGSE_C, not retyped: the same shape as the C238 equations,
+                # where a hardcoded input sat beside a live answer (C241).
+                rf"F(D) = K_{{iGSE}}\,[\,D^{{1-c}} + (1-D)^{{1-c}}\,],\ c = {_IGSE_C:g} "
                 rf"\ \Rightarrow\ F({D:.3f}) = {Fd:.4f}",
                 rf"P_{{core}} = P_v(B_{{ac,pk}},\,f_{{sw}},\,T)\cdot F(D)\cdot V_e "
                 rf"= {_f(r.get('Pcore_W'),3)}\ \mathrm{{W}}\quad(B_{{ac,pk}} = {_f(r.get('Bac_pk'),5)}\ \mathrm{{T}})",
