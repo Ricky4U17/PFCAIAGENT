@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-20**, head = **`044efa8` C236**, on `master`.
+**Start here after a restart.** Last updated **2026-08-20**, head = **`3cad550` C238**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -329,9 +329,15 @@ the designer (2 → 4 → 1 → 3):
 | # | Comment | State |
 |---|---|---|
 | 2 | Table 7.8b inductor loss disagrees with Ch3 | **CLOSED — C233 + C234**, confirmed by the designer on 2026-08-20: 7.8b reads 11.0 W at 90 Vac / 12.4 at 180, and Table 4.2a renders. C233 fixed the arithmetic; the designer re-reported it anyway because correct numbers still did not explain themselves, so C234 added the reconciliation. |
-| 4 | Figures B.2a/B.2b schematic values wrong | **DONE — C235.** Two values were wrong, not one: R_RLPK (15 → 12.1 kΩ) and R_FB1-per-unit, drawn as 3.63 MΩ ×3 = 10.89 MΩ when 3.63 MΩ is the TOTAL and the per-unit is 1.21 MΩ. Ten of the twelve defaulted keys were right *by coincidence*. All sized keys now threaded; `tests/test_schematic_values.py` guards the class. **Awaiting the designer's look at a regenerated report.** ~~was:~~ R_RLPK renders 15 kΩ vs the BOM's 12.1 kΩ. Root cause is systemic: the schematic asks its context for 22 keys and `base` (report_steps1_8.py ~line 788) supplies 10, so 12 fall back to hardcoded defaults in `schematics.py`. `rfb_each` 3.63 MΩ and `rfb2` 23.2 kΩ agree with the BOM only by coincidence — change Vout and they will not. Table B.1 also hardcodes R_RLPK and R_IAC as string literals while its other 12 rows are live `ctx[...]`, and Section 6.3.2's heading hardcodes 12.1 kΩ too: three sources of truth for one value. |
-| 1 | Table 7.2e black squares | `report_semiconductor.py:1224` inserts `&#8203;` (U+200B) to wrap the narrow column; Helvetica has no glyph (measured width 7.61) so ReportLab draws a notdef box. One-line fix. **Also fix the glyph CHECK** — it counted U+FFFD/U+25A0 in extracted text, but a notdef extracts as `I`, so it can never see this. Greek/math chars outside cp1252 render fine via Symbol substitution, so "not in cp1252" is not the test either. |
+| 4 | Figures B.2a/B.2b schematic values wrong | **DONE — C235.** Two values were wrong, not one: R_RLPK (15 → 12.1 kΩ) and R_FB1-per-unit, drawn as 3.63 MΩ ×3 = 10.89 MΩ when 3.63 MΩ is the TOTAL and the per-unit is 1.21 MΩ. The drawing asked for 22 keys and got 10; **ten of the twelve defaults were right by coincidence**. All sized keys now threaded from the engine; `tests/test_schematic_values.py` guards the class. Designer has not yet re-run the report. |
+| 1 | Table 7.2e black squares | **DONE — C237.** A zero-width space (U+200B) inserted to wrap a column that never needed wrapping — Helvetica has no glyph, so ReportLab drew a notdef box. The glyph CHECK was wrong too and is replaced: a notdef does not extract as a box (see traps). Designer has not yet re-run the report. |
 | 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
+
+**Chapter 6 has been audited too** (C238): structurally sound — both GUI endpoints and the report
+call `compute_steps_1_8` — but four values were RETYPED into prose and worked equations, and
+`C_ILIMIT` genuinely disagreed three ways (GUI 10 nF / report 18 nF / schematic 18 nF). All now one
+engine field each; `tests/test_ch6_no_stale_values.py` guards them. **The GUI's C_ILIMIT default
+changed 10 nF → 18 nF** — tell the designer if they notice.
 
 **Chapter 7 has been audited for the C233 class of defect and is clean** (C236): 144 per-line cell
 comparisons across Tables 7.3/7.4/7.5/7.6, GUI vs engine vs report, 0 mismatches, now guarded by
@@ -358,7 +364,21 @@ Then, in order:
 
 ---
 
-## Traps from C235-C236
+## Traps from C235-C238
+
+- **A NOTDEF BOX DOES NOT EXTRACT AS A BOX.** C237: a zero-width space rendered as a black square,
+  and extracting the page gave back the letter **I** (`R_th_cs` → `RI_thI_cs`). Every scan of
+  extracted text for U+FFFD / U+25A0 / format characters runs CLEAN on the broken document. The
+  working check is a ROUND-TRIP against the expected string. Do not trust a "zero bad glyphs" pass.
+- **AN EQUATION RENDERED BY `eq_box` IS AN IMAGE.** Its text never reaches the PDF text layer, so no
+  assertion on the built document can read it — the same blind spot as the raster schematic. Capture
+  the strings handed to `eq_box`/`body` during the build instead.
+- **A LITERAL THAT IS CORRECT TODAY IS INDISTINGUISHABLE FROM A LIVE VALUE.** The only way to tell
+  them apart is to change the input and see whether the output moves. C238's frequency checks build
+  twice, at 70 kHz and 60 kHz, for exactly this reason.
+- **A VALUE HELD IN A LOCAL VARIABLE WILL BE RETYPED ELSEWHERE.** C238: `css_sel = 390e-9` was local
+  to the engine, so "390 nF" was typed again in the engine's own table and again in the report. If
+  two places need it, export it.
 
 - **A DEFAULT THAT IS RIGHT BY COINCIDENCE IS WORSE THAN ONE THAT IS WRONG.** C235: twelve schematic
   keys fell back to literals; ten matched this design exactly and would have passed any value

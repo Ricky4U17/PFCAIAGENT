@@ -9554,3 +9554,82 @@ VERIFIED by injecting +2% into the Table 7.5 conduction column: caught at every 
 earlier injection silently failed to patch anything and the green run proved nothing - the
 injection was confirmed to have landed before the result was trusted. Suite 620 -> 633.
 
+# C237 - the black squares were a zero-width space, and the check that missed them
+
+Designer comment 1. Table 7.2e's Parameter column rendered a black box through every key. One line:
+
+```python
+_k.replace("_", "&#8203;_")     # zero-width space, so the narrow column could wrap
+```
+
+ReportLab's Helvetica has no U+200B glyph, so it drew a notdef box for each. **The wrap was never
+needed**: measured, the widest key `dies_per_package` is 65 pt against a 135 pt column. Deleted.
+
+## The check that should have caught it, and why it could not
+
+Every build this session reported "zero unrenderable glyphs" while the squares were on the page.
+**A notdef box does not extract as a box.** Measured directly - rendering `R&#8203;_th&#8203;_cs`
+and extracting it back gives:
+
+```
+'RI_thI_cs'    ->  U+0052 U+0049 U+005F ...
+```
+
+The zero-width space has become an ordinary capital **I**. No scan of extracted text - for U+FFFD,
+for U+25A0, for format characters, for zero-width marks - can see this. I wrote that scan first and
+it runs clean on the exact document that shows the squares.
+
+"Not encodable in cp1252" is not the test either: the chapter legitimately carries Omega, phi,
+theta, pi, sqrt, which ReportLab renders correctly via the Symbol font. A check that cries wolf on
+those gets switched off.
+
+**What works is a ROUND-TRIP**: the Parameter column must extract back to exactly the engine's key
+strings. Anything inserted for layout changes the string, whatever it degrades into.
+
+VERIFIED `tests/test_report_glyphs.py` (3 tests). Reintroducing the zero-width space fails the
+round-trip naming eight keys and **passes** the invisible-character scan - which is why that scan
+is documented as a secondary net, not the guard. A third test pins the extraction behaviour, so if
+a future ReportLab/PyMuPDF round-trips U+200B faithfully, it fails and the reasoning gets revisited.
+
+# C238 - Chapter 6 audited: one real GUI/report disagreement and four retyped values
+
+The C236 treatment applied to Chapter 6, after C235 found the schematic drawing its own values.
+
+**Structurally it was already sound.** `/mode-b/control/components` and `/control/coefficients` both
+call `compute_steps_1_8`, the same engine `report_steps1_8` renders from, so GUI == engine holds by
+construction. What does NOT hold by construction is prose and worked equations, where a value can
+be retyped - and that is where all of it was.
+
+## One genuine three-way disagreement
+
+| | value |
+|---|---|
+| GUI dropdown default | 10 nF |
+| report prose | 18 nF |
+| schematic | 18 nF |
+
+`C_ILIMIT` had **no engine field at all**. Now one field all three read. **The GUI default moves
+10 nF -> 18 nF**, matching what the design documents always said.
+
+## Four retyped values - dead equation, live answer
+
+| where | what was retyped |
+|---|---|
+| 6.4.1 | `70,000` and the `17.143 k` intermediate, under prose reading *"computed from the target f_SW - not hardcoded"*. Reintroducing it renders `1.2e9/70,000 - 3430 = 16.57 kOhm`: three stale numbers and one live one on the same line. |
+| 6.6.2 | K_RLPK 2.465, R_RLPK 12,100, R_RLPK^2 as 1.4641e8 - **R_RLPK's fourth source of truth** after C235 found three |
+| 6.8.3 | I_SS / t_SS / V_SS in the equation, and the selected `390 nF` in the report AND the engine's own summary table - while the engine kept it in a LOCAL, `css_sel`, that nothing could read. Now exported; the line states the calculated 400 nF beside the selected 390 nF. |
+| 6.3 | R_IAC prose and the 6.3.2 heading (done in C235) |
+
+## Why equations need a different kind of test
+
+`eq_box` renders through matplotlib into an **image**, so equation text never reaches the PDF text
+layer and no assertion on the built document can read it - the same blind spot that let C235's
+wrong resistors reach the designer. The tests capture the STRINGS handed to `eq_box`/`body`.
+
+And **a literal that is correct today is indistinguishable from a live value.** The only way to tell
+them apart is to change the input and see whether the output moves, so the frequency-dependent
+checks build TWICE, at 70 kHz and 60 kHz.
+
+VERIFIED `tests/test_ch6_no_stale_values.py` (5 tests). Re-hardcoding the R_RI equation fails it.
+Suite 633 -> 641 passed / 2 skipped.
+
