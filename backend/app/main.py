@@ -472,7 +472,15 @@ def control_components(req: _ComponentsReq):
         rls_default = min(RLS_KOHM, key=lambda x: abs(x - s8["r_ls_sel"] / 1e3))  # nearest standard
         r_ls = {"default_kohm": rls_default, "calc_kohm": round(s8["r_ls"] / 1e3, 1),
                 "options_kohm": RLS_KOHM, "role": "current-predict; valid 12–87 kΩ"}
-        return {"fixed": fixed, "rcs": rcs, "selectable": selectable, "r_ls": r_ls}
+        # NUMERIC divider values for the embedded design tool. Its r1fb / r4fb fields are
+        # readonly and titled "fixed by Step 5, not editable here" - but nothing ever wrote Step
+        # 5's values into them, so it designed its voltage loop against its own hardcoded
+        # 3.63 M / 23.2 k. The divider ratio also sets R_GC, so the error propagated (C243).
+        divider = {"rfb1_ohm": float(s5["rfb1"]), "rfb2_ohm": float(s5["rfb2"]),
+                   "rfb1_unit_ohm": float(s5.get("rfb1_unit") or s5["rfb1"]),
+                   "rfb1_count": int(s5.get("rfb1_count") or 1)}
+        return {"fixed": fixed, "rcs": rcs, "selectable": selectable, "r_ls": r_ls,
+                "divider": divider}
     except Exception as e:
         log.exception("control components"); raise HTTPException(500, str(e))
 

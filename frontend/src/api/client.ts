@@ -332,6 +332,8 @@ export interface ControlComponents {
          m1_ll_mohm: number; m1_hl_mohm: number; m2_lo_mohm?: number; m2_hi_mohm?: number; note: string }
   selectable: SelComp[]
   r_ls: { default_kohm: number; calc_kohm: number; options_kohm: number[]; role: string }
+  // numeric Step-5 divider, for the embedded tool's readonly r1fb / r4fb fields
+  divider?: { rfb1_ohm: number; rfb2_ohm: number; rfb1_unit_ohm: number; rfb1_count: number }
 }
 export const controlComponents = (inputs: Record<string, unknown>): Promise<ControlComponents> =>
   fetch(`${BASE}/mode-b/control/components`, {

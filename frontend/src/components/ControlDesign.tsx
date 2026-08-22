@@ -20,6 +20,7 @@ import { docGenerateReport } from '../api/client'
 import { downloadBlob, reportFilename } from '../api/download'
 import { PowerPlantReview } from './PowerPlantReview'
 import { ComponentsSelect, type ComponentSelections } from './ComponentsSelect'
+import { controlComponents, type ControlComponents } from '../api/client'
 import { CoreReview } from './CoreReview'
 
 interface Props {
@@ -56,6 +57,9 @@ export const ControlDesign: React.FC<Props> = ({
     (savedStep16Params?.s2 as ComponentSelections | undefined) ?? null)
   const [reportGen, setReportGen] = useState(false)
   const injectedRef = useRef(false)
+  // Step-5 output divider for the embedded tool (C243). Its r1fb / r4fb are readonly and
+  // titled "fixed by Step 5", but nothing was ever writing Step 5's values into them.
+  const [divider, setDivider] = useState<ControlComponents['divider']|null>(null)
   const TOOL_TAB: Record<string, string> = { s4: 'screen2', s5: 'screen3', s6: 'screen4', s7: 'screen5' }
   const WIZ_NEXT: Record<string, Scr> = { s4: 's5', s5: 's6', s6: 's7' }
   const WIZ_PREV: Record<string, Scr> = { s4: 's3', s5: 's4', s6: 's5', s7: 's6' }
@@ -111,6 +115,10 @@ export const ControlDesign: React.FC<Props> = ({
     return () => window.removeEventListener('message', onMsg)
   }, [])
 
+  useEffect(() => {
+    controlComponents({}).then(d => setDivider(d.divider ?? null)).catch(() => setDivider(null))
+  }, [])
+
   // ── Build Python plant parameters ─────────────────────────────────────────
   const tsi  = (confirmedState as any)?.topology_specific_inputs ?? {}
   const app  = (confirmedState as any)?.intake?.application ?? {}
@@ -149,11 +157,15 @@ export const ControlDesign: React.FC<Props> = ({
           c_vir_pf:     s2sel?.c_vir_pf,
           c_ls_pf:      s2sel?.c_ls_pf,
           r_ls_kohm:    s2sel?.r_ls_kohm,
+          // Step-5 output divider — the tool's r1fb/r4fb are readonly and claim to come from
+          // Step 5, but nothing was sending them (C243).
+          rfb1_Mohm:    divider ? divider.rfb1_ohm / 1e6 : undefined,
+          rfb2_kohm:    divider ? divider.rfb2_ohm / 1e3 : undefined,
         },
       },
       '*'
     )
-  }, [params, s2sel])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params, s2sel, divider])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // The iframe now loads before S2 is confirmed, so re-inject the designer's R_CS
   // into the tool once S2 is locked in (rcs drives the compensator sizing / Bode).

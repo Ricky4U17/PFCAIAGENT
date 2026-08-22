@@ -2565,6 +2565,11 @@ window.setPythonValues = function(p){
   // own pole fields, so its schematic disagreed with Screen 2 on five of seven parts - which is
   // exactly what the designer reported (C242). Written straight into the BOM override store so a
   // single recalc picks them all up.
+  // Step-5 output divider. r1fb / r4fb are readonly here and titled "fixed by Step 5" - but
+  // nothing wrote Step 5's values into them, so this tool designed against its own hardcoded
+  // 3.63 M / 23.2 k. The divider ratio also sets R_GC, so the error did not stay local (C243).
+  if(p.rfb1_Mohm != null) $('r1fb').value = p.rfb1_Mohm;
+  if(p.rfb2_kohm != null){ $('r4fb').value = p.rfb2_kohm; const e2=$('rfb2'); if(e2) e2.value = p.rfb2_kohm; }
   const _sel={aux_CGC:p.c_gc_pf, aux_CRLPK:p.c_rlpk_pf, aux_CIL:p.c_ilimit_pf,
               aux_CIL2:p.c_ilimit2_pf, aux_CVIR:p.c_vir_pf, aux_CLS:p.c_ls_pf};
   for(const k in _sel){ const v=+_sel[k]; if(Number.isFinite(v)&&v>0) state.bom[k]={auto:false,val:v*1e-12}; }
