@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`208f8be` C247**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`eab9428` C248**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -414,10 +414,15 @@ Two things there are counter-intuitive and are asserted deliberately:
 - the capacitor case rise is **sub-unity** (23.1 °C for a 30 °C step) because ESR-driven
   self-heating falls as the part warms. A 1:1 rise would be the defect.
 
-**OPEN, awaiting a designer decision:** inductor copper is priced at a fixed 100 °C while the
-winding converges to ~84 °C at 50 °C ambient — ~5 % overstated, ~0.3 W on the system budget. It is
-the only component that solves for a temperature and then prices its loss at another. Fixing it
-moves published numbers.
+**DONE at C248:** inductor copper is now priced at the converged temperature, not a fixed 100 °C —
+core and copper in the same row had been on different temperatures. Effect was **−1 %** on the
+inductor total (not the ~5 % first estimated: that compared against the two-node winding node, while
+the engine uses the SA single node). Copper now tracks the room: 3.20 W at 50 °C, 2.97 W at 30 °C.
+
+**Still open, and deliberately so:** copper uses the **SA single-node** temperature (92.8 °C), not
+the **two-node winding** node (84.0 °C). Moving it would mix two thermal models — the convergence
+loop, the pass/fail criterion and the loss would stop sharing a temperature. Flagged in the code;
+needs a designer decision, not a quiet change.
 
 ---
 

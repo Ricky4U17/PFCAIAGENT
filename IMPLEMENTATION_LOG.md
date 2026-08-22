@@ -9952,3 +9952,54 @@ Inductor copper is still evaluated at a fixed 100 °C while the winding converge
 for a temperature and then prices its loss at a different one. Changing it moves published numbers,
 so it waits for a decision. Suite 656 → 661 passed / 3 skipped.
 
+# C248 - the inductor priced its core and its copper at two different temperatures
+
+Approved by the designer after C247 held it. The defect was one argument, and it sat directly beside
+the one that contradicted it:
+
+```python
+res._cyc_ctx = dict(...,
+    T_core_C = T_core,                       # the CONVERGED temperature, 92.8 C at 50 C ambient
+    Rdc = DCR_100, Rac = DCR_100 * Rac_Rdc)  # a FIXED 100 C
+```
+
+Every row of `loss_table_100C` priced its **core** loss at the temperature the design actually
+reaches and its **copper** at 100 C. The consequence the designer cared about: **copper barely
+responded to the entered ambient**, because it was pinned.
+
+The 100 C basis was deliberate once — the docstring said it made `Pcu_avg_W` algebraically identical
+to `Pcu_final_100`, "which removes the last scalar-vs-table disagreement". That predates the ambient
+work, and it bought agreement with a scalar at the cost of consistency WITHIN the row. `Rdc_Tc` /
+`Rac_Tc` are the same resistances the convergence loop twelve lines earlier used for its own
+`Pcu_T`, so the table now agrees with the thermal solve it came out of.
+
+## Deliberately not changed
+
+Copper is priced at the **SA single-node** temperature (92.8 C), not the finer **two-node winding**
+node (84.0 C at the same ambient). Moving it there would mix two thermal models — the loop, the
+pass/fail criterion and the loss would stop sharing a temperature. Flagged in the code as a separate
+decision rather than silently taken.
+
+## What moved, at the spec's 50 C ambient
+
+| Vac | Ch4 P_tot | 7.8b inductor |
+|---|---|---|
+| 90 | 5.413 → 5.343 | 10.8 → 10.7 |
+| 132 | 4.706 → 4.672 | 9.4 → 9.3 |
+| 180 | 7.129 → 7.050 | 14.3 → 14.1 |
+| 264 | 4.021 → 3.982 | 8.0 → 8.0 |
+
+About **−1 %** on the inductor total. The C233 invariant holds: 7.8b ÷ Table 4.2 P_tot = 2.003.
+Copper now tracks the room — **3.20 W at 50 C ambient, 2.97 W at 30 C**; before, both sat near 3.2 W.
+
+## I estimated 5 %, it was 1 %
+
+When scoping I compared against the two-node WINDING temperature (84 C) rather than the SA node the
+engine actually uses (92.8 C). **The third time this week a measurement corrected one of my own
+claims** — the pattern being that a scoping estimate is worth less than a five-minute probe.
+
+VERIFIED `test_inductor_copper_is_priced_at_the_converged_temperature` asserts copper FALLS with
+ambient and by more than 2 % across a 30 C swing — a near-identical pair means the temperature is
+not reaching the resistance. Suite 661 → 662 passed / 3 skipped, **no existing expectation needed
+revision**.
+
