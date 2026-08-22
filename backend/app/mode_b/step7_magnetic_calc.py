@@ -1029,8 +1029,21 @@ def design_one_core(
                         Ve_m3=Ve, Le_s=Le_s, L0_nom_H=L0_nom_H,
                         Icrest_ref_A=I_phi_avg_crest, Vout_V=Vout_V, fsw_Hz=fsw_Hz,
                         T_core_C=T_core, f_line_Hz=f_line_Hz,
-                        # 100 C basis, matching loss_table_100C AND Pcu_final_100 exactly
-                        Rdc=DCR_100, Rac=DCR_100 * Rac_Rdc)
+                        # AT THE CONVERGED TEMPERATURE, not a fixed 100 C.
+                        #
+                        # These two lines used to disagree with each other: `T_core_C` was the
+                        # converged temperature (92.8 C at a 50 C ambient) while `Rdc` was DCR_100,
+                        # so every row priced its CORE loss at the temperature the design actually
+                        # reaches and its COPPER loss at 100 C. The 100 C basis was chosen to match
+                        # `Pcu_final_100` exactly; that predates the ambient work, and the designer
+                        # has since asked that everything be computed at the entered ambient (C248).
+                        #
+                        # `Rdc_Tc` is the SAME resistance the convergence loop above used for
+                        # `Pcu_T`, so the table now agrees with the thermal solve it came from.
+                        # It is the SA single-node temperature, deliberately: switching copper to
+                        # the finer two-node WINDING node (84 C here) would mix two thermal models,
+                        # which is a separate decision.
+                        Rdc=Rdc_Tc, Rac=Rac_Tc)
 
     # ── Medical creepage check ────────────────────────────────────────────────
     if app_class == "Medical":
@@ -1338,10 +1351,14 @@ def _add_cycle_avg_core_loss(rows: list, l_vs_vin: list, *, material_key: str, c
     The legacy `Pcore_W` / `Pcu_W` keys are left untouched so existing readers keep their meaning.
 
     COPPER is averaged here too, for the same reason as the core: the row's `Pcu_W` derives its HF
-    ripple from the CREST dIpp, which overstates the cycle-averaged ripple RMS by ~40%. Passing
-    Rdc/Rac at the table's own temperature makes this Pcu_avg_W algebraically identical to the
-    design's Pcu_final_100 (both are Irms^2*Rdc + IhfRms^2*(Rdc + (Rac-Rdc)*K_HARM) over the same
-    integration), which is what removes the last scalar-vs-table disagreement.
+    ripple from the CREST dIpp, which overstates the cycle-averaged ripple RMS by ~40%.
+
+    THE CALLER PASSES Rdc/Rac AT THE CONVERGED TEMPERATURE (C248). It used to pass DCR_100 so that
+    `Pcu_avg_W` came out algebraically identical to the design's `Pcu_final_100` — but that pinned
+    copper to 100 C while `T_core_C`, the argument right beside it, carried the temperature the
+    design actually reaches. Core and copper in the same row were priced at different temperatures.
+    They now share one, and `Pcu_avg_W` no longer matches `Pcu_final_100`: that scalar remains a
+    fixed-100 C reference, which is what Chapter 3's first-pass table reports.
     """
     if not rows or N <= 0 or Ae_m2 <= 0 or Le_s <= 0:
         return rows

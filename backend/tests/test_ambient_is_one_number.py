@@ -89,6 +89,37 @@ def test_the_inductor_thermal_solve_follows_the_ambient():
         f"{cold['dT_rise_C']} at {COLD:g} degC and {hot['dT_rise_C']} at {HOT:g} degC")
 
 
+def test_inductor_copper_is_priced_at_the_converged_temperature():
+    """C248. Core and copper in the same row must be priced at the SAME temperature.
+
+    `_cyc_ctx` passed `T_core_C=T_core` (converged) next to `Rdc=DCR_100` (fixed 100 C), so every
+    row of `loss_table_100C` priced its core loss at the temperature the design reaches and its
+    copper at 100 C. Copper therefore barely moved with the entered ambient - it was pinned.
+
+    Measured after the fix: 3.20 W at 50 degC ambient, 2.97 W at 30 degC. Before it sat near 3.2 W
+    at both.
+    """
+    hot, cold = _inductor_at(HOT), _inductor_at(COLD)
+
+    def cu90(d):
+        rows = {round(float(r["Vin_rms"])): r for r in (d.get("loss_table_100C") or [])}
+        return rows[90]["Pcu_avg_W"]
+
+    h, c = float(cu90(hot)), float(cu90(cold))
+    assert h > c, (
+        f"inductor copper did not fall with ambient ({c} at {COLD:g} degC vs {h} at {HOT:g} degC) "
+        "- Rdc may be pinned to a fixed temperature again")
+    # copper resistivity moves ~0.39 %/degC, so a 30 degC swing is worth several percent; a
+    # near-identical pair means the temperature is not reaching the resistance.
+    assert (h - c) / h > 0.02, (
+        f"copper moved only {100*(h-c)/h:.1f} % across a {HOT - COLD:g} degC ambient change - too "
+        "little for copper's tempco; check that Rdc_Tc, not DCR_100, reaches _add_cycle_avg_core_loss")
+
+    # and it must agree with the temperature the row itself reports
+    for d, amb in ((hot, HOT), (cold, COLD)):
+        assert float(d["T_core_C"]) > amb, "converged core temperature must exceed ambient"
+
+
 # -- Ch5 capacitor ------------------------------------------------------------
 def _cap_worst_at(tamb):
     from verify_combined_report import pick_selected_cap
