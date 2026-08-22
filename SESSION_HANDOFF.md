@@ -375,15 +375,23 @@ starting anything here; do not trust a summary of it, including this one.
    the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
    double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already
    supports. **The old "paralleling understates by 4 W" framing is the retracted claim.**
-3. **Group 2 of the designer review** — the report shows the ranking default instead of the selected
-   part. See the review findings list.
-4. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: the only
-   datasheet on file that cannot be read, and it fails safely today. Take it when a designer
-   actually needs a Toshiba part.
+3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **Cannot be started
+   today: there is no Toshiba datasheet in `specs/` any more** (checked 2026-08-22). It fails safely,
+   so take it only when a designer supplies the file.
 
-**Already closed, do not re-pick:** B5 (`_extra["esr_mohm"]`, closed C178 — only the explanatory
-comment remains in `main.py`), B4 (done 2026-08-01; its residual is internal enum names, deliberate
-and not user-visible), B20 and B21 (both C245).
+**Already closed, do not re-pick** — every one of these was verified against the CODE on 2026-08-22,
+not just against its PENDING header:
+
+| item | closed | evidence |
+|---|---|---|
+| B5 `_extra["esr_mohm"]` | C178 | only the explanatory comment remains in `main.py` |
+| **Group 2** (report names the ranking default) | C178 | `sel_row = _sel_matched … else 0` in Ch3; §8.9.2 carries the selected-part basis and its "no part selected yet" fallback. **All three parts — 2a, 2b, 2c — were done.** |
+| B4 status vocabulary | 2026-08-01 | residual is internal enum names, deliberate, not user-visible |
+| B20, B21 | C245 | both guarded |
+
+**Two of the five entries on this list were picked by the designer and turned out to be already
+done** (B5, then Group 2) — both closed in the SAME commit, C178, which nobody removed from the
+list. If an entry looks small and old, verify it is still open before writing any code.
 
 ---
 
