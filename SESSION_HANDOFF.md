@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`c6b5e38` C244**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`dac8176` C245**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -399,6 +399,15 @@ Then, in order:
   `r1fb`/`r4fb` are readonly and titled "fixed by Step 5" — and nothing ever sent Step 5's values,
   so the tool designed its voltage loop against hardcoded defaults while the tooltip claimed
   otherwise. Editable, the designer could have corrected it.
+- **A FIXTURE CAN OMIT AN ENTIRE CHAPTER AND STILL LOOK LIKE THE FULL REPORT.** C245/B21: the
+  combined harness sent no `semiconductor` payload, so for many commits every `TestCombinedReport`
+  assertion described a 191-page document with no Chapter 7 — and the `Table 7.8b` strings in it
+  were cross-references from other chapters' prose. **The page-count floor is the cheapest guard
+  against this** and has now caught it twice. It is fixed and guarded; keep the floor honest.
+- **A TABLE THAT SCALES ONE ANCHOR IS NOT COMPUTING THE QUANTITY IT PRINTS.** C245/B20: Chapter 3's
+  core loss was `Pcore_pk*(bac/Bac_val)**2.1` — a fixed exponent, not the material's β — so it was
+  exact at the anchor and −24% away from it. If two tables print the same quantity, one of them
+  should be reading the other's engine, not approximating it.
 - **THE CONTROL-DESIGN TOOL IS SERVED FROM `frontend/public/`, NOT `src/assets/`.** C244: the repo
   held two tracked, byte-identical copies and every C242/C243 edit went into the dead one, so two
   rounds of "fixed" never reached the browser. The duplicate is deleted and

@@ -9785,3 +9785,63 @@ loudly as "the fix is missing". Verified by recreating the duplicate.
 
 **Designer confirmed 2026-08-22: Screen 2 and the Application Schematic now match.**
 
+# C245 - the combined fixture built no Chapter 7 (B21), and Chapter 3 never computed core loss (B20)
+
+Two PENDING items, both opened by this week's own work. Committed together because their guards
+share a file and splitting them would leave an intermediate commit that fails its own suite.
+
+## B21 - the combined-report fixture contained no Chapter 7
+
+`main.py` gates the whole chapter on `if req.semiconductor:`, and `build_combined` sent only
+state / approved_design / step15_result / step16_params. **The 191-page document the entire
+`TestCombinedReport` class asserted against had no Chapter 7** — the `Table 7.8b` strings in it were
+cross-references from Chapter 3/4 prose, not the table.
+
+So C233's inductor-budget fix had **no coverage on the path that ships**; it was guarded only by
+`test_inductor_loss_budget.py`, which builds Chapter 7 standalone.
+
+Fixed with CATALOGUE parts — the chapter renders either way and the datasheet digitiser would double
+the fixture runtime for nothing this needs. 191 → 212 pp, ~100 s.
+
+Three guards, because a vanishing chapter is silent:
+
+| guard | |
+|---|---|
+| page floor 178 → 205 | its LOWER bound has now caught a missing chapter **twice**: selected_cap dropping Ch5 (~171 pp) and this (~191 pp) |
+| presence by name | Chapter 7, Tables 7.4 / 7.6 / 7.8b |
+| **7.8b == N_ch × Table 4.2 P_tot** | the C233 property, asserted END TO END for the first time; ratio 2.00–2.01 at all nine points |
+
+## B20 - Chapter 3 scaled one anchor by a guessed exponent
+
+Table 3.6.1's `P_core` and Table 4.2's `P_core,crest` are the same quantity — peak-point Steinmetz,
+one design, one operating point — and disagreed: exact at 90 Vac, then apart in both directions,
++2.1% at 132 V, **−6.9% at 230 V, −24.1% at 264 V**, with a sign change between. Because Chapter 3
+was not computing it:
+
+```python
+Pcore_pk * (bac / Bac_val) ** 2.1
+```
+
+A power law off a **single anchor** with a **fixed exponent of 2.1** — not the material's own
+Steinmetz β. That is the entire signature: exact at the anchor, drifting away from it, drift sign
+set by whether the real exponent is above or below 2.1.
+
+Chapter 3 now reads the engine's per-point crest value — the same array Chapter 4 prints — with the
+power law surviving only as a fallback for runs with no loss table. **0.000 W difference at all nine
+points**, was 8 of 9 wrong.
+
+Neither figure ever reached the efficiency budget (that uses Chapter 4's AVERAGED basis, made
+authoritative by C233), so no result moves. It was a trust problem.
+
+## A parser note, because it cost a round
+
+Table 4.2 has ten columns but `F(D)` renders across **two** lines, so a row is **eleven** numeric
+tokens. Indexing by column position silently returns `P_core,avg` instead of `P_tot` and every
+ratio comes out ~3.5 rather than 2 — which reads exactly like a real defect. Both new tests carry
+the note.
+
+VERIFIED B21: all three guards fail when the payload is removed. B20: reintroducing the power law
+fails at 110 Vac naming both values. Suite 647 → 652 passed / 2 skipped. **Confirmed on the LIVE
+server over HTTP**: 212 pp, Chapter 7 present, Ch3 vs Ch4 core loss 9 points / 0 mismatch.
+Closes PENDING B20 and B21.
+
