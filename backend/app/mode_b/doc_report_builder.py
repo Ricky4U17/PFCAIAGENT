@@ -3616,15 +3616,31 @@ def _ch3(story, state, d):
         return vpk * d_ / (N * Ae_m2 * fsw) / 2 if N and Ae_m2 else Bac_val
 
     def _pcore_for(bac):
+        # FALLBACK ONLY. A power-law scaling off a single anchor with a FIXED exponent of 2.1 —
+        # not the material's own Steinmetz beta, and exact only at the anchor itself. That is why
+        # this table used to agree with Chapter 4 exactly at 90 Vac and drift away from it in both
+        # directions: +2.1% at 132 V, -6.9% at 230 V, -24.1% at 264 V (PENDING B20).
         if Pcore_pk and Bac_val:
             return Pcore_pk * (bac / max(Bac_val, 1e-9)) ** 2.1
         return 0
+
+    # The engine's own per-point CREST core loss — the same array Chapter 4 Table 4.2 prints in its
+    # P_core,crest column. Both tables state the peak-point Steinmetz value for one design, so they
+    # must be the same number; computing it twice is the "one engine per value" violation that
+    # C161 and C171 also came from (C246).
+    _eng_core = {}
+    for _r in (d.get("loss_table_100C") or []):
+        _v, _pc = _r.get("Vin_rms"), _r.get("Pcore_crest_W", _r.get("Pcore_W"))
+        if _v is not None and _pc is not None:
+            _eng_core[round(float(_v))] = float(_pc)
 
     loss_rows = []
     worst_loss = 0; wp = -1
     for i, op in enumerate(ops_all):
         bac_i   = _bac_for(op)
-        pc_i    = _pcore_for(bac_i)
+        pc_i    = _eng_core.get(round(float(op["Vin"])))
+        if pc_i is None:
+            pc_i = _pcore_for(bac_i)
         irms_i  = op["Iph_rms"]
         dc25_i,  ac25_i  = _pcu_for(op, DCR25)   # DC + HF proximity (matches §3.6.2/§3.6.3)
         dc100_i, ac100_i = _pcu_for(op, DCR100)

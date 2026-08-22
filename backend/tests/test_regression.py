@@ -366,6 +366,9 @@ class TestModeBPDFReport:
 
 # ── Combined design report (Ch1-5 doc agent + Ch6 control) ──────────────────
 
+DASH = "—"
+
+
 class TestCombinedReport:
     """Full combined report via /mode-b/documentation/generate-report, built by the shared
     verify_combined_report harness. The harness ALWAYS carries a real selected_cap because
@@ -386,13 +389,15 @@ class TestCombinedReport:
 
     def test_page_count_is_full_report(self, combined):
         pages = combined["pages"]
-        # ~191 pp with the full Chapter 5 + §6.8.7 schematics (C108) + §6.10.12/6.11.9 load-sweep
-        # Bode figures (C109) + Table 4.2a loss reconciliation (C234).
-        # The LOWER bound is the one that matters: a drop to ~171 means selected_cap was dropped
-        # and Ch5 §5.3/5.4/5.5 silently vanished. The upper bound only catches runaway growth, so
-        # it is raised deliberately when a section is added rather than treated as a failure.
-        assert 178 <= pages <= 200, \
-            f"combined report has {pages} pages, expected ~191 (≤171 => selected_cap missing)"
+        # ~212 pp: full Chapter 5 + §6.8.7 schematics (C108) + §6.10.12/6.11.9 load-sweep Bode
+        # figures (C109) + Table 4.2a loss reconciliation (C234) + CHAPTER 7 (C245 — the harness
+        # sent no `semiconductor` payload before, so the whole chapter was silently absent).
+        # The LOWER bound is the one that matters: it catches a whole chapter vanishing, which has
+        # now happened twice — selected_cap dropping Ch5 §5.3/5.4/5.5 (~171 pp), and the missing
+        # semiconductor payload dropping Ch7 (~191 pp). The upper bound only catches runaway
+        # growth and is raised deliberately when a section is added.
+        assert 205 <= pages <= 235, \
+            f"combined report has {pages} pages, expected ~212 (<205 => a whole chapter is missing)"
 
     def test_no_legacy_fallback(self, combined):
         # The chapter builder falls back to the OLD generator on ANY exception; this stale phrase
@@ -440,6 +445,88 @@ class TestCombinedReport:
             assert abs(float(r3[i]) - nch * float(r2[i])) < 0.01, (
                 f"Table 4.2a {term}: row 3 = {r3[i]}, expected {nch} x row 2 "
                 f"({r2[i]}) = {nch * float(r2[i]):.3f} — the C233 defect")
+
+    def test_chapter7_is_in_the_combined_report(self, combined):
+        """B21 / C245. For many commits this harness built a document with NO Chapter 7.
+
+        `main.py` gates the whole chapter on `if req.semiconductor:` and the harness never sent
+        that payload, so every assertion here described a report the designer does not receive -
+        and C233's inductor-budget fix had no coverage on the path that actually ships.
+        """
+        t = combined["text"]
+        for probe, what in (("Semiconductor Loss", "Chapter 7 itself"),
+                            ("MOSFET Loss Breakdown", "Table 7.4"),
+                            ("Junction Temperatures vs Line", "Table 7.6"),
+                            ("System Loss Budget", "Table 7.8b")):
+            assert probe in t, f"{what} missing from the combined report"
+
+    def test_inductor_budget_agrees_with_chapter4_in_the_combined_report(self, combined):
+        """The C233 property end to end: 7.8b's inductor column == N_ch x Table 4.2 P_tot.
+
+        `test_inductor_loss_budget.py` guards this on a STANDALONE Chapter 7; this is the same
+        property on the combined path, which is the one that ships.
+        """
+        import re
+        t = combined["text"]
+
+        def seg(tag):
+            i = t.find(tag)
+            assert i > 0, f"{tag} did not render"
+            j = t.find(chr(10) + "Table ", i + len(tag))
+            return t[i:j if j > 0 else i + 3000]
+
+        # Table 4.2 has 10 columns but F(D) renders across TWO lines -> 11 tokens per row.
+        # Indexing by column position instead silently returns P_core,avg and every ratio comes
+        # out ~3.5 rather than 2 - it cost a debugging round, hence the note.
+        toks = re.findall(r"^\s*(-?\d+\.?\d*)\s*$", seg("Table 4.2 " + DASH), re.M)
+        ch4 = {round(float(toks[k])): float(toks[k + 10]) for k in range(0, len(toks) - 10, 11)}
+        _row = (r"^\s*(\d+) V\s*" + chr(10) + r"\s*([-\d.]+)\s*" + chr(10)
+                + r"\s*([-\d.]+)\s*" + chr(10))
+        ind = {int(m.group(1)): float(m.group(3))
+               for m in re.finditer(_row, seg("Table 7.8b " + DASH), re.M)}
+        common = sorted(set(ch4) & set(ind))
+        assert len(common) >= 9, f"parsed only {len(common)} comparable rows"
+
+        for v in common:
+            assert ind[v] == pytest.approx(2 * ch4[v], rel=0.02), (
+                f"{v} Vac: Table 7.8b inductor {ind[v]} W is not 2 x Table 4.2 P_tot "
+                f"{ch4[v]} W - the C233 defect, on the combined path")
+
+    def test_chapters_3_and_4_agree_on_peak_core_loss(self, combined):
+        """PENDING B20 / C246. Table 3.6.1 P_core and Table 4.2 P_core,crest are the SAME quantity.
+
+        Same basis, same design, same operating point - but they came from two independent
+        computations. Chapter 3 did not compute core loss at all: it power-law scaled a single
+        anchor with a FIXED exponent of 2.1 rather than the material's own Steinmetz beta, so the
+        two agreed exactly at the 90 Vac anchor and drifted apart away from it - +2.1% at 132 V,
+        -6.9% at 230 V, -24.1% at 264 V, with a sign change in between. Neither figure reached the
+        efficiency budget, so nothing propagated; it was a trust problem, and the designer would
+        reasonably expect two identical-looking numbers to be identical.
+
+        Chapter 3 now reads the engine's per-point value, the same array Chapter 4 prints.
+        """
+        import re
+        t = combined["text"]
+
+        def seg(tag):
+            i = t.find(tag)
+            assert i > 0, f"{tag} did not render"
+            j = t.find(chr(10) + "Table ", i + len(tag))
+            return t[i:j if j > 0 else i + 3000]
+
+        # 3.6.1 has 9 numeric columns per row, P_core is index 7; 4.2 has 10 but F(D) wraps to two
+        # lines, so 11 tokens with P_core,crest at index 8.
+        t36 = re.findall(r"^\s*(-?\d+\.?\d*)\s*$", seg("Table 3.6.1 " + DASH), re.M)
+        ch3 = {round(float(t36[k])): float(t36[k + 7]) for k in range(0, len(t36) - 8, 9)}
+        t42 = re.findall(r"^\s*(-?\d+\.?\d*)\s*$", seg("Table 4.2 " + DASH), re.M)
+        ch4 = {round(float(t42[k])): float(t42[k + 8]) for k in range(0, len(t42) - 10, 11)}
+
+        common = sorted(set(ch3) & set(ch4))
+        assert len(common) >= 9, f"parsed only {len(common)} comparable rows"
+        for v in common:
+            assert ch3[v] == pytest.approx(ch4[v], abs=0.002), (
+                f"{v} Vac: Table 3.6.1 P_core {ch3[v]} W != Table 4.2 P_core,crest {ch4[v]} W - "
+                "the same quantity computed twice")
 
     def test_chapter4_crosscheck_and_chapter6_present(self, combined):
         t = combined["text"]

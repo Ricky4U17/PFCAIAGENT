@@ -119,9 +119,28 @@ def build_combined(fcv_Hz: float = 17.0):
         "eta_lo": 0.945, "eta_hi": 0.965, "nch": 2, "fci_Hz": 8000.0, "fcv_Hz": float(fcv_Hz),
     }
 
-    # 4) Combined report
+    # 4) Semiconductor payload — WITHOUT this the whole of Chapter 7 is skipped (`if
+    #    req.semiconductor:` in main.py), and for many commits this harness built a document with
+    #    no Chapter 7 at all while claiming to be the full report. That is how C233's inductor
+    #    budget fix ended up with no coverage on the path that actually ships (B21 / C245).
+    #    Catalogue parts, not datasheet uploads: Chapter 7 renders either way and the digitiser
+    #    would double the fixture's runtime for nothing this test needs.
+    from app.mode_b.semiconductor import adapter as _AD
+    _scd = dict(_AD.REFERENCE_DESIGN)
+    _scd.update({"eta": 0.95, "pf": 0.99, "V_GS_drive": 18.0, "R_g_on": 4.7, "R_g_off": 10.0,
+                 "R_th_cs": 0.3, "nch": int(step16["nch"]), "vout": step16["Vout_V"],
+                 "fsw": step16["fsw_Hz"]})
+    semiconductor = {
+        "design": _scd,
+        "mosfet": _AD.REFERENCE_PARTS["mosfet"], "diode": _AD.REFERENCE_PARTS["diode"],
+        "bridge": _AD.REFERENCE_PARTS["bridge"], "thermal": _AD.REFERENCE_PARTS["thermal"],
+        "tj_limit": {"fet": 150, "diode": 150, "bridge": 130},
+    }
+
+    # 5) Combined report
     r = client.post("/mode-b/documentation/generate-report", json={"state": state,
-        "approved_design": approved, "step15_result": step15, "step16_params": step16})
+        "approved_design": approved, "step15_result": step15, "step16_params": step16,
+        "semiconductor": semiconductor})
     r.raise_for_status()
     pdf = r.content
     reader = PdfReader(io.BytesIO(pdf))
