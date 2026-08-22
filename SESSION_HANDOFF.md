@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`dac8176` C245**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`c129d10` C246**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -370,7 +370,12 @@ starting anything here; do not trust a summary of it, including this one.
    GDT impulse-sparkover + follow-current on 172/172. **Criterion A cannot reach PASS until this
    lands** — M1–M3 made that blocker legible rather than hidden. The designer's "improve the
    database" batch, and the largest genuinely-open item.
-2. **`PENDING_ITEMS.md` B3** — the bridge **temperature model**, NOT `rd`. The entry's premise was
+2. ~~**`PENDING_ITEMS.md` B3**~~ — **rescoped and closed as far as code goes (C246).** The entry
+   is rewritten with measurements. What remains is DATA: a bridge datasheet that publishes a hot
+   V–I figure. The catalogue path *cannot* be fixed — its workbook has one forward-voltage column
+   and no temperature data. Guarded by `tests/test_bridge_temperature_model.py`, and the GUI now
+   states the limitation where a catalogue bridge is selected.
+   *(kept for the reasoning:)* the bridge **temperature model**, NOT `rd`. The entry's premise was
    corrected on 2026-08-01: `rd = 0.0` is self-consistent and correct, because `Bridge.vf()` returns
    the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
    double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already

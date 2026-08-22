@@ -9845,3 +9845,53 @@ fails at 110 Vac naming both values. Suite 647 → 652 passed / 2 skipped. **Con
 server over HTTP**: 212 pp, Chapter 7 present, Ch3 vs Ch4 core loss 9 points / 0 mismatch.
 Closes PENDING B20 and B21.
 
+# C246 (B3) - the bridge temperature model: guarded, rescoped, and now visible on the screen
+
+B3 asked for something that **cannot be done**, and had already been half-solved by work written
+after the entry. Scoping it first turned up more than doing it would have.
+
+## Measured, not assumed — 20 A, 100 °C rise
+
+| path | hot data | ΔV(125 − 25 °C) | basis |
+|---|---|---|---|
+| catalogue (Digi-Key parametric) | none | −0.200 V | **assumed** `vf_tco = −0.002 V/°C` |
+| LVE5060E via datasheet upload | hot V_F in the table | −0.120 V | **measured**, the part's own |
+
+The datasheet path does not merely add a curve — it replaces an assumed temperature correction with
+a measured one, **40% of the whole correction** on this part. The entry predates C217/C218/C222 and
+reads as though none of that exists.
+
+## A claim of mine the measurement killed
+
+While scoping I told the designer the datasheet path "solves it" for uploaded parts. **It does not,
+quite.** Both of LVE5060E's curves are SINGLE points (`vf_curve [[25],[0.89]]`,
+`vf_curve_hot [[25],[0.77]]`), so the drop is constant in current and the cold/hot pair never
+converges. Capturing the crossover needs a hot **V–I figure**; this vendor prints only a cold one.
+`datasheet_flow` already raises a `check` note when one of the pair is digitised and the other is not.
+
+## Why the catalogue path cannot be fixed from the catalogue
+
+`bridge_rectifiers_combined_sorted.xlsx` has exactly one forward-voltage column —
+`Voltage - Forward (Vf) (Max) @ If` — and no temperature columns beyond "Operating Temperature".
+The `vf_hot` / `vf_if_hot` columns the old entry asked for **cannot be imported, because the data is
+not in the source.** Same story as the MOSFET catalogue's 0-of-1311.
+
+## What was actually done
+
+1. **Guards** — `tests/test_bridge_temperature_model.py` (5 tests). `test_bridge_datasheet.py`
+   asserted the hot curve's VALUES; nothing asserted the consequence. These pin both states a
+   designer can be in, and one is deliberately **paired**: if a catalogue bridge ever gains a hot
+   curve, the test fails, because Section 7.3's limitation note would then be lying. The scalar's
+   flat-shift-at-every-current is asserted directly — that IS the artifact.
+2. **Entry rewritten** with the measurements, both corrected premises (`rd = 0.0` is right; the
+   datasheet path already replaces the tempco), and what genuinely remains: a bridge datasheet
+   publishing a hot V–I figure. **DATA, not code** — nothing to build until such a part is picked.
+3. **The screen now says it.** Section 7.3 has carried the limitation since 2026-08-01, but only in
+   the report — choosing a catalogue bridge showed nothing. An amber note now appears on the bridge
+   form in database mode, naming the consequence (paralleling understated, can invert) and the
+   remedy (upload the datasheet), with the 0.12 V vs 0.20 V figures.
+
+VERIFIED 5 bridge-temperature tests pass (1 skips by design when both curves share a source);
+`SemiconductorSelection.tsx` compiles and the banner text is present in the served module.
+Suite 652 → 656 passed / 3 skipped.
+
