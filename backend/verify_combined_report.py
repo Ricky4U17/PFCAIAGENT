@@ -130,10 +130,23 @@ def build_combined(fcv_Hz: float = 17.0):
     _scd.update({"eta": 0.95, "pf": 0.99, "V_GS_drive": 18.0, "R_g_on": 4.7, "R_g_off": 10.0,
                  "R_th_cs": 0.3, "nch": int(step16["nch"]), "vout": step16["Vout_V"],
                  "fsw": step16["fsw_Hz"]})
+    # THERMAL AMBIENT COMES FROM THE INTAKE SPEC, exactly as the GUI does it
+    # (`SemiconductorSelection.tsx`: `_specAmbient = intake.thermal.ambient_temp_c_max`, pre-filled
+    # into the thermal form and re-synced until the designer edits it).
+    #
+    # C245 sent `REFERENCE_PARTS["thermal"]` here, which pins t_ambient = 45. `main.py` only falls
+    # back to the spec when the payload's value is ABSENT, so 45 won: the fixture reported "Ambient
+    # 45 degC" no matter what the spec said, and could not have detected a chapter that stopped
+    # tracking the designer's entered ambient. That is the one thing this fixture most needs to
+    # catch, so the harness now mirrors the GUI (C247).
+    _spec_amb = float((state.get("intake", {}).get("thermal", {})
+                       .get("ambient_temp_c_max") or 45))
+    _sc_thermal = dict(_AD.REFERENCE_PARTS["thermal"])
+    _sc_thermal["t_ambient"] = _spec_amb
     semiconductor = {
         "design": _scd,
         "mosfet": _AD.REFERENCE_PARTS["mosfet"], "diode": _AD.REFERENCE_PARTS["diode"],
-        "bridge": _AD.REFERENCE_PARTS["bridge"], "thermal": _AD.REFERENCE_PARTS["thermal"],
+        "bridge": _AD.REFERENCE_PARTS["bridge"], "thermal": _sc_thermal,
         "tj_limit": {"fet": 150, "diode": 150, "bridge": 130},
     }
 

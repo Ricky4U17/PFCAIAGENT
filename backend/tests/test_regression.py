@@ -369,6 +369,13 @@ class TestModeBPDFReport:
 DASH = "—"
 
 
+def _std_intake_ambient():
+    """The ambient the harness's intake spec carries — the designer's first-page field."""
+    from verify_combined_report import _std_state
+    return (_std_state().get("intake", {}).get("thermal", {})
+            .get("ambient_temp_c_max") or 45)
+
+
 class TestCombinedReport:
     """Full combined report via /mode-b/documentation/generate-report, built by the shared
     verify_combined_report harness. The harness ALWAYS carries a real selected_cap because
@@ -527,6 +534,26 @@ class TestCombinedReport:
             assert ch3[v] == pytest.approx(ch4[v], abs=0.002), (
                 f"{v} Vac: Table 3.6.1 P_core {ch3[v]} W != Table 4.2 P_core,crest {ch4[v]} W - "
                 "the same quantity computed twice")
+
+    def test_the_report_states_the_designers_entered_ambient(self, combined):
+        """Every chapter must work at the ambient the designer typed on the FIRST page.
+
+        `intake.thermal.ambient_temp_c_max` is the single source: the GUI pre-fills the Chapter-7
+        thermal form from it and re-syncs until the designer edits it, and Chapters 4 and 5 read it
+        directly. C245 sent a hardcoded 45 degC in this harness's semiconductor payload, and
+        `main.py` only falls back to the spec when the payload value is ABSENT - so the fixture
+        reported "Ambient 45 degC" whatever the spec said. A chapter that quietly stopped tracking
+        the entered ambient would have looked identical (C247).
+        """
+        import re
+        spec = float(_std_intake_ambient())
+        t = " ".join(combined["text"].split())
+        stated = {float(x) for x in re.findall(r"Ambient\s*(\d+(?:\.\d+)?)\s*°?C", t)}
+        assert stated, "no chapter states its ambient at all"
+        wrong = {v for v in stated if abs(v - spec) > 0.51}
+        assert not wrong, (
+            f"the intake spec says {spec:g} degC but the report states {sorted(wrong)} - a chapter "
+            "is using its own ambient instead of the designer's")
 
     def test_chapter4_crosscheck_and_chapter6_present(self, combined):
         t = combined["text"]
