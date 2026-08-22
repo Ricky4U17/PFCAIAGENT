@@ -362,20 +362,28 @@ engine holds by construction — if that ever changes, the test's docstring is w
 
 Then, in order:
 
-0. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: it is the only
+**This list was audited on 2026-08-22 and three of its five entries were stale** — the designer
+picked "B5" and it had been closed for sixty-odd commits. Re-read `PENDING_ITEMS.md` before
+starting anything here; do not trust a summary of it, including this one.
+
+1. **Chapter 9 M4 (data)** — `PENDING_ITEMS.md` A2/A3. MOV `Vc @ In` missing on 1140/1140 parts,
+   GDT impulse-sparkover + follow-current on 172/172. **Criterion A cannot reach PASS until this
+   lands** — M1–M3 made that blocker legible rather than hidden. The designer's "improve the
+   database" batch, and the largest genuinely-open item.
+2. **`PENDING_ITEMS.md` B3** — the bridge **temperature model**, NOT `rd`. The entry's premise was
+   corrected on 2026-08-01: `rd = 0.0` is self-consistent and correct, because `Bridge.vf()` returns
+   the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
+   double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already
+   supports. **The old "paralleling understates by 4 W" framing is the retracted claim.**
+3. **Group 2 of the designer review** — the report shows the ranking default instead of the selected
+   part. See the review findings list.
+4. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. Optional: the only
    datasheet on file that cannot be read, and it fails safely today. Take it when a designer
-   actually needs a Toshiba part, not before.
-1. **`PENDING_ITEMS.md` B5** — delete the dead `_extra["esr_mohm"]` in `main.py`. Small, and it still
-   carries the `or`-chain pattern that caused C171.
-   *(Group 2 of the designer review — report shows the ranking default instead of the selected part —
-   is the other natural next step; see the review findings list.)*
-2. **Chapter 9 M4 (data)** — `PENDING_ITEMS.md` A2/A3. MOV `Vc @ In` is missing on 1140/1140 parts and
-   GDT impulse-sparkover + follow-current on 172/172. **Criterion A cannot reach PASS until this lands** —
-   M1–M3 made that blocker legible rather than hidden. This is the designer's "improve the database" batch.
-3. **`PENDING_ITEMS.md` B3** — bridge rectifier `rd`. DB-selected bridges run with `rd = 0`, so paralleling
-   understates its benefit (~1 W shown vs ~4–5 W real).
-4. **`PENDING_ITEMS.md` B4** — status-vocabulary unification. Parked by the designer; Ch8 and Ch9 use
-   different word sets. Do it as one project-wide pass, not per chapter.
+   actually needs a Toshiba part.
+
+**Already closed, do not re-pick:** B5 (`_extra["esr_mohm"]`, closed C178 — only the explanatory
+comment remains in `main.py`), B4 (done 2026-08-01; its residual is internal enum names, deliberate
+and not user-visible), B20 and B21 (both C245).
 
 ---
 
