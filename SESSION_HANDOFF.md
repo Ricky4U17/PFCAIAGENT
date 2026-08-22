@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`c129d10` C246**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`208f8be` C247**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -397,6 +397,27 @@ not just against its PENDING header:
 **Two of the five entries on this list were picked by the designer and turned out to be already
 done** (B5, then Group 2) — both closed in the SAME commit, C178, which nobody removed from the
 list. If an entry looks small and old, verify it is still open before writing any code.
+
+---
+
+## The ambient is ONE number — `intake.thermal.ambient_temp_c_max`
+
+Settled at C247 and guarded. The designer's first-page max ambient is the single source for all
+three thermal engines: magnetics (`step7_run_sizing` → `T_amb_C`), capacitor (`step15_capacitor`),
+and semiconductors (the GUI pre-fills the thermal form from it and re-syncs until edited). **Do not
+add a second ambient input.** `tests/test_ambient_is_one_number.py` asserts every chapter's numbers
+move, and in the right direction, when it changes.
+
+Two things there are counter-intuitive and are asserted deliberately:
+- the inductor's **`dT_rise` FALLS as the room cools** — `dT_budget = hotspot − ambient`, so a
+  cooler room grants a bigger budget and the optimiser picks a smaller, hotter core;
+- the capacitor case rise is **sub-unity** (23.1 °C for a 30 °C step) because ESR-driven
+  self-heating falls as the part warms. A 1:1 rise would be the defect.
+
+**OPEN, awaiting a designer decision:** inductor copper is priced at a fixed 100 °C while the
+winding converges to ~84 °C at 50 °C ambient — ~5 % overstated, ~0.3 W on the system budget. It is
+the only component that solves for a temperature and then prices its loss at another. Fixing it
+moves published numbers.
 
 ---
 

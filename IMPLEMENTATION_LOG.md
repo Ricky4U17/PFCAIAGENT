@@ -9895,3 +9895,60 @@ VERIFIED 5 bridge-temperature tests pass (1 skips by design when both curves sha
 `SemiconductorSelection.tsx` compiles and the banner text is present in the served module.
 Suite 652 → 656 passed / 3 skipped.
 
+# C247 - one ambient, the designer's first-page value, and the guards to keep it that way
+
+The designer asked that everything be calculated at the max ambient entered on the first
+specification page — and, after a week of wiring defects, that it be **proved rather than asserted**.
+
+## The product already did this
+
+Verified, not assumed:
+
+| chapter | reads |
+|---|---|
+| Ch3/4 magnetics | `step7_run_sizing:1582` reads `intake.thermal.ambient_temp_c_max`, passes `T_amb_C` into the thermal solve (line 1690) |
+| Ch5 capacitor | `step15_capacitor:485` — ESR(T), ripple headroom, lifetime |
+| Ch7 semiconductors | `SemiconductorSelection.tsx:293` sets `_specAmbient` from the same field, pre-fills the thermal form and **re-syncs** until the designer edits it |
+
+**One field, three consumers, no second source. There was nothing to rewire.**
+
+## What was broken was my own test harness (C245)
+
+Auditing this, I found the combined report printing "Ambient 45 °C" while the spec said 30. Not the
+product: **C245** added a semiconductor payload sending `REFERENCE_PARTS["thermal"]`, which pins
+`t_ambient = 45`, and `main.py` falls back to the spec only when the payload value is **absent** —
+so 45 won. The fixture reported 45 °C whatever the spec said, and could never have detected a
+chapter that stopped tracking the entered ambient. The harness now mirrors the GUI.
+
+## Two guards, catching different failures
+
+**`test_the_report_states_the_designers_entered_ambient`** — free, on the existing build: no chapter
+may STATE an ambient other than the spec's. Verified by pinning the harness back to 45: fails with
+*"the intake spec says 50 degC but the report states [45.0]"*.
+
+**`tests/test_ambient_is_one_number.py`** (4 tests) — engine level, ~33 s, no PDF builds. A stated
+ambient can still be a computed lie, and catching that needs two runs at different ambients; two
+full report builds would cost ~200 s. Each check asserts the **direction**, because "it changed"
+passes on a sign error:
+
+- every junction temperature rises at least 0.8× the ambient step
+- the inductor core rises with the room while **`dT_rise` FALLS** — `dT_budget = hotspot − ambient`,
+  so a cooler room grants a larger budget and the optimiser picks a smaller, hotter-running core.
+  Counter-intuitive, and getting either backwards is a real defect, so both are asserted.
+- the capacitor case rises and its ESR falls
+
+## A measurement that corrected the test
+
+The capacitor case moves only **23.1 °C for a 30 °C** ambient step (42.6 → 65.7). My first threshold
+called that a failure. It is the model working: self-heating falls from **17.6 K to 10.7 K** over the
+same span, because the ESR producing it drops as the part warms. The bound is now 0.5× with an
+UPPER bound too — a 1:1 rise would mean ESR had stopped tracking — and the docstring says not to
+"fix" the sub-unity gain.
+
+## Held, at the designer's instruction
+
+Inductor copper is still evaluated at a fixed 100 °C while the winding converges to **~84 °C at
+50 °C ambient** (~5% overstated, ~0.3 W on the system budget). It is the only component that solves
+for a temperature and then prices its loss at a different one. Changing it moves published numbers,
+so it waits for a decision. Suite 656 → 661 passed / 3 skipped.
+
