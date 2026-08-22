@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`cad9a89` C243**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`c6b5e38` C244**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -399,6 +399,12 @@ Then, in order:
   `r1fb`/`r4fb` are readonly and titled "fixed by Step 5" — and nothing ever sent Step 5's values,
   so the tool designed its voltage loop against hardcoded defaults while the tooltip claimed
   otherwise. Editable, the designer could have corrected it.
+- **THE CONTROL-DESIGN TOOL IS SERVED FROM `frontend/public/`, NOT `src/assets/`.** C244: the repo
+  held two tracked, byte-identical copies and every C242/C243 edit went into the dead one, so two
+  rounds of "fixed" never reached the browser. The duplicate is deleted and
+  `tests/test_no_duplicate_frontend_assets.py` guards it. **After changing any URL-loaded asset,
+  curl the URL the browser fetches** — editing, linting and the Python suite all pass on the wrong
+  file.
 - **"CONTROL LOOP DESIGN → APPLICATION SCHEMATIC" IS NOT THE PYTHON REPORT.** It is
   `frontend/src/assets/control_design.html`, a standalone JS tool in an iframe with its own engine,
   reached via `postMessage`. Python feeds it plant parameters + Screen-2 selections and reads its

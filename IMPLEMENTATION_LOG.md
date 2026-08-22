@@ -9750,3 +9750,38 @@ VERIFIED endpoint returns the numeric divider; both React modules and the tool's
 Chapter-6 guards 11 passed; suite 647 / 2 skipped. NOT changed on purpose: the 30 JS-owned tuning
 inputs.
 
+# C244 - C242 and C243 never reached the GUI: I edited the copy nobody serves
+
+The designer ran the GUI after C243 and reported the values still did not match. Correct — neither
+fix was ever loaded by the browser.
+
+The repo held **two copies** of the 200 KB control-design tool:
+
+| file | |
+|---|---|
+| `frontend/public/control_design.html` | **served at `/control_design.html`** — what the iframe loads |
+| `frontend/src/assets/control_design.html` | referenced by **nothing** |
+
+Both tracked in git, byte-identical apart from line endings. `grep` found the dead one first and
+every C242/C243 edit went into it. `ControlDesign.tsx` states it in its own header — "served as a
+static public asset" — and I read past it twice.
+
+## Why every check still passed
+
+Each verification was real and each was aimed at the wrong file: the edits applied cleanly, the
+extracted JS passed `node --check`, the Python suite was green, and the live backend genuinely
+served the new C242/C243 values — **the backend was never the problem**. The one check that would
+have caught it is the one not done: probe the URL the browser actually fetches. That returns 0 hits
+for `aux_CVIR` before the fix and 2 after.
+
+## Fixed, and the duplicate deleted rather than synced
+
+A second copy that nothing imports is not a backup; it is a trap that had already cost two rounds.
+
+GUARD `tests/test_no_duplicate_frontend_assets.py` — exactly one copy of each URL-loaded asset
+outside `dist/`, and it must be in `public/`; plus a check that the SERVED file carries the Screen-2
+wiring, the C_VIR override and the divider injection, so "the fix is in the wrong file" fails as
+loudly as "the fix is missing". Verified by recreating the duplicate.
+
+**Designer confirmed 2026-08-22: Screen 2 and the Application Schematic now match.**
+
