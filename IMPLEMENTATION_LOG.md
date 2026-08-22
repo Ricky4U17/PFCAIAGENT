@@ -9687,3 +9687,66 @@ VERIFIED A Screen-2 payload picking six NON-DEFAULT values (1000 / 4700 / 22000 
 differs from its default FIRST, so a dropped selection cannot pass by coincidence. Narrowing the
 bridge back to two fails it by name. Suite 642 -> 644 passed / 2 skipped.
 
+# C242 - Screen 2 showed 100 pF because I gave it defaults its dropdown could not offer
+
+The designer compared Screen 2 against the Application Schematic page and found five of seven
+components different. Three causes; the first is mine.
+
+## A default that cannot be selected is silently replaced by one that can
+
+C239 set the six capacitor defaults to the drawing's values — 430 pF, 1 nF, 18 nF, 75 nF, 0.1 µF,
+240 pF — but the Screen-2 dropdown offered only an **E6 subset**. Four of those are ordinary E24
+parts that simply were not in the list, so those `<select>`s had no matching `<option>`, the browser
+fell back to the FIRST entry, and Screen 2 read **100 pF**. Whatever the dropdown displays is what
+gets stored and sent, so the report would have received 100 pF for four capacitors *as though the
+designer had chosen them*.
+
+It predicts the report exactly: C_RLPK (1 nF) and C_VIR (100 nF) **are** in E6 and displayed
+correctly; the other four are not, and all four read 100 pF.
+
+Two fixes, because either alone leaves the trap: the dropdown offers full E24 (19 → 73 values), and
+a test asserts every default is among its own options.
+
+## The caps should never have been constants
+
+The designer's actual instruction — values must follow the **pole frequency** — is right, and the
+interactive tool has always done `C = 1/(2π·R·f_pole)` snapped to E24. C239 froze them as literals,
+so moving R_GC / R_ILIMIT / R_LS would have silently moved the pole. The engine now derives them,
+poles as inputs (GC 10 kHz, LS 10 kHz, ILIMIT 0.5 kHz), designer override still winning.
+
+## The two pages are two different programs
+
+"Application Schematic — FAN9672 Pin Networks" is not the Python report: it is a standalone JS tool
+in an iframe. `ControlDesign.tsx` injected only the plant parameters and R_CS, so the tool
+re-derived its own capacitors from its own pole fields. Its 68 nF / 360 pF / 45.3 kΩ came from ITS
+resistors. `C_VIR` was a hardcoded `'0.1 µF (typ)'` string there too — the "(typ)" the designer
+quoted, the same defect C239 fixed on the Python side and never in the JS.
+
+# C243 - the rest of the JS-tool components, swept the same way
+
+The obvious follow-up: what about every OTHER component? Swept, not sampled.
+
+`control_design.html` designs from **37 numeric fields**; seven were injected. Most of the other 30
+are legitimately its own — crossovers, compensator targets, phase-margin goals, pin-filter poles are
+what the designer TUNES there, and Python reads them back via `js_design_state`. **The JS is the
+source and Python follows**; forwarding them would be backwards.
+
+Diffing the `designState` payload against what `_control_inputs_from_step16` reads: 21 posted, 13
+consumed. `mode` is view state, five `dc*` keys are verification outputs. One is real:
+
+> **`r4fb`**, the output-divider bottom resistor — and the direction is the OPPOSITE of C240.
+
+Both `r1fb` and `r4fb` are **readonly** in the tool, titled *"fixed by Step 5, not editable here"*.
+They are not editable because they are supposed to arrive from Step 5. **Nothing ever sent them.**
+
+It does not stay local: the divider ratio sets R_GC (`6e6/ratio`) and the loop gain
+`H_div = R4/(R1+R4)`, so a V_out that moved Step 5's divider would have left the tool's R_GC,
+crossover and Bode plots designed for the wrong divider — while the field asserted it showed Step 5.
+
+**A readonly field that nobody populates is worse than an editable one.** Editable, the designer
+could have corrected it; readonly, it looks authoritative and cannot be touched.
+
+VERIFIED endpoint returns the numeric divider; both React modules and the tool's JS compile;
+Chapter-6 guards 11 passed; suite 647 / 2 skipped. NOT changed on purpose: the 30 JS-owned tuning
+inputs.
+

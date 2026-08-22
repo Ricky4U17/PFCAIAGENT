@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-20**, head = **`cbcf9c3` C240**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`cad9a89` C243**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -333,6 +333,14 @@ the designer (2 → 4 → 1 → 3):
 | 1 | Table 7.2e black squares | **DONE — C237.** A zero-width space (U+200B) inserted to wrap a column that never needed wrapping — Helvetica has no glyph, so ReportLab drew a notdef box. The glyph CHECK was wrong too and is replaced: a notdef does not extract as a box (see traps). Designer has not yet re-run the report. |
 | 3 | Table 7.2e mixes temperature conditions | The profiles already carry per-entry `conditions` (`{"T_c": 25.0}` etc.) — 31 of 58 parameters across the three real parts, 14 with a temperature — so this is surfacing a column, not new extraction. **Blocked on a question already put to the designer:** state each value's own datasheet condition, normalise to one ambient, or both? The design runs at Ta = 45 °C while the comment mentions 25/50 °C. |
 
+**C241-C243: a systematic sweep, then two more the designer found.** C241 built a scanner per
+defect class and swept repo-wide (see the traps). C242 was mine: the C239 defaults were not in the
+Screen-2 dropdown's option list, so four `<select>`s silently showed 100 pF — **and would have sent
+it**. Fixed by deriving each cap from its pole frequency and widening the list to E24. C242 also
+exposed that **"Control loop design → Application Schematic" is a separate JS tool in an iframe**,
+not the Python report, fed only the plant parameters. C243 swept its whole interface: 37 fields, 7
+injected, and of the 21 keys it posts back Python reads 13. The one that mattered was `r4fb`.
+
 **C239-C240 followed, and both came from the designer checking my work.** C238 unified ONE
 capacitor (C_ILIMIT) and left its five siblings — C239 had to do the family. Then the sharper point:
 the values must follow the **Screen-2 selection**, and `_control_inputs_from_step16` was forwarding
@@ -383,6 +391,19 @@ Then, in order:
 - **A LITERAL THAT IS CORRECT TODAY IS INDISTINGUISHABLE FROM A LIVE VALUE.** The only way to tell
   them apart is to change the input and see whether the output moves. C238's frequency checks build
   twice, at 70 kHz and 60 kHz, for exactly this reason.
+- **A DEFAULT THAT IS NOT AMONG ITS OWN `<option>`s IS SILENTLY REPLACED BY ONE THAT IS.** C242:
+  four Screen-2 dropdowns showed 100 pF — the first entry — because the engine defaults were valid
+  E24 parts absent from an E6 option list, and the displayed value is what gets SENT. Whenever a
+  default and its option list come from different places, assert the default is in the list.
+- **A READONLY FIELD THAT NOBODY POPULATES IS WORSE THAN AN EDITABLE ONE.** C243: the JS tool's
+  `r1fb`/`r4fb` are readonly and titled "fixed by Step 5" — and nothing ever sent Step 5's values,
+  so the tool designed its voltage loop against hardcoded defaults while the tooltip claimed
+  otherwise. Editable, the designer could have corrected it.
+- **"CONTROL LOOP DESIGN → APPLICATION SCHEMATIC" IS NOT THE PYTHON REPORT.** It is
+  `frontend/src/assets/control_design.html`, a standalone JS tool in an iframe with its own engine,
+  reached via `postMessage`. Python feeds it plant parameters + Screen-2 selections and reads its
+  `designState` back. When the designer compares "the GUI" against "the report", establish WHICH
+  of the three renderers they mean before diagnosing.
 - **A SELECTION ACCEPTED AND SILENTLY DISCARDED IS WORSE THAN ONE REFUSED.** C240: Screen 2 offered
   six capacitor dropdowns and the bridge forwarded two. The GUI echoed the choice back, so nothing
   told the designer it had not taken. When adding a GUI input, check the WHOLE bridge, not the field.
