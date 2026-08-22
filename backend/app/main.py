@@ -434,9 +434,15 @@ def control_components(req: _ComponentsReq):
             "note": "Valid band is the intersection of Method-1 (AN4165 V_RM limit) and "
                     "Method-2 (AND9925 V_EA 4–5 V window) at both HL and LL.",
         }
-        # standard E6 capacitor values (pF) offered in every cap dropdown
-        CAP_PF = [100, 150, 220, 330, 470, 680, 1000, 1500, 2200, 3300, 4700, 6800,
-                  10000, 15000, 22000, 33000, 47000, 68000, 100000]
+        # E24 capacitor values (pF) - the series capacitors are actually stocked in, and the one
+        # the engine snaps its pole-derived values to. This was an E6 SUBSET, which is what broke
+        # Screen 2: 430 pF / 18 nF / 75 nF / 240 pF are all valid E24 parts but none of them
+        # appeared here, so those four <select>s had no matching <option>, fell back to their first
+        # entry (100 pF), and sent 100 pF onward as if the designer had chosen it (C242).
+        from app.mode_b.step16_steps1_8 import _E24 as _E24M
+        CAP_PF = [round(m * (10 ** d))
+                  for d in range(2, 6) for m in _E24M
+                  if 100 <= m * (10 ** d) <= 100000]
         RLS_KOHM = [12, 13, 15, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82]
         # designer-selectable filter caps: default + associated R (frontend computes the live pole)
         # Every default comes from the ENGINE, one field each. They used to be typed here, and a

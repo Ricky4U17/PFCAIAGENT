@@ -32,6 +32,19 @@ _E96 = [1.00,1.02,1.05,1.07,1.10,1.13,1.15,1.18,1.21,1.24,1.27,1.30,1.33,1.37,1.
         8.66,8.87,9.09,9.31,9.53,9.76]
 
 
+def _nearest_e24(v: float) -> float:
+    """Nearest E24 capacitor value. Capacitors are stocked in E24, not the E6 subset the GUI
+    dropdown used to offer - which is how C239's 430 pF / 18 nF / 75 nF / 240 pF defaults ended up
+    UNSELECTABLE on Screen 2, so four dropdowns fell back to their first option (100 pF) and sent
+    that to the report (C242)."""
+    if v <= 0:
+        return v
+    dec = math.floor(math.log10(v))
+    base = v / (10 ** dec)
+    cands = _E24 + [10.0]          # decade wrap, same reasoning as _nearest_e96
+    return min(cands, key=lambda c: abs(math.log(c / base))) * (10 ** dec)
+
+
 def _nearest_e96(v: float) -> float:
     if v <= 0:
         return v
@@ -56,7 +69,12 @@ DEFAULT_INPUTS = dict(
     # designer-selected output-divider upper resistor (fixed series of 3 × R_FB1_unit)
     rfb1_unit=1.21e6, rfb1_count=3,
     # designer-selected pin-filter capacitors (set the GC / LS filter pole frequencies)
-    c_gc=430e-12, c_ls=240e-12,
+    # PIN-FILTER POLES are the design input; each capacitor is DERIVED from its pole and the
+    # associated resistor, then snapped to E24 - the same procedure the interactive tool uses, and
+    # what the designer asked for. C239 instead froze the four caps as constants copied from the
+    # drawing, which made them wrong the moment R_GC / R_ILIMIT / R_LS moved (C242).
+    f_pole_gc=10e3, f_pole_ls=10e3, f_pole_ilimit=500.0,
+    c_gc=None, c_ls=None,           # None -> derive from the pole; a number overrides
     r_ls_sel=None,                  # designer R_LS override (ohms); None -> E96 snap of the calc
     # THE PIN-FILTER CAPACITOR FAMILY. None of these had a single home: the GUI dropdown offered a
     # uniform 10 nF placeholder for four of them while the schematic drew its own literals and the
@@ -65,7 +83,9 @@ DEFAULT_INPUTS = dict(
     # SCHEMATIC has always drawn - the figures the designer has been reviewing - not the GUI's
     # uniform placeholder. No engine calculation consumes them; they set RC poles with their
     # associated resistors, which the GUI displays.
-    c_ilimit=18e-9, c_ilimit2=75e-9, c_rlpk=1e-9, c_vir=100e-9, c_lpk=1e-9,
+    c_ilimit=None, c_ilimit2=None,  # None -> derive from f_pole_ilimit
+    # no pole to derive from: fixed-practice anchors, but snapped to E24 so the GUI can offer them
+    c_rlpk=1e-9, c_vir=100e-9, c_lpk=1e-9,
     rcs=None,                       # designer R_CS override (Ω); None → computed best-of-both-methods default
 )
 
@@ -366,13 +386,28 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     r_gc = 6e6 / ratio
     l_pfc = p["lphi_uH"] * 1e-6
     r_ls = l_pfc / (1.5e-9 * rcs_sel * ratio)
-    c_gc, c_ls = p["c_gc"], p["c_ls"]
     r_gc_sel, r_ls_sel = _nearest_e96(r_gc), _nearest_e96(r_ls)
     # Screen 2 offers R_LS as a dropdown (main.py serves `r_ls.options_kohm`), so the
     # designer's pick must win over the E96 snap - it was being discarded, exactly like the
     # four capacitors in C240 and on the same screen (C241).
     if p.get("r_ls_sel"):
         r_ls_sel = float(p["r_ls_sel"])
+
+    def _pin_cap(override, r_assoc, f_pole):
+        """C = 1/(2*pi*R*f_pole), snapped to E24. A designer override wins outright.
+
+        The capacitor FOLLOWS its resistor and its target pole. Freezing it as a constant (C239)
+        meant that changing R_GC, R_ILIMIT or R_LS moved the pole silently, and that the frozen
+        value might not even be offerable in the dropdown - which is what put 100 pF on Screen 2.
+        """
+        if override:
+            return float(override)
+        if not (r_assoc and f_pole):
+            return None
+        return _nearest_e24(1.0 / (2 * math.pi * float(r_assoc) * float(f_pole)))
+
+    c_gc = _pin_cap(p.get("c_gc"), r_gc_sel, p.get("f_pole_gc"))
+    c_ls = _pin_cap(p.get("c_ls"), r_ls_sel, p.get("f_pole_ls"))
     f_gc = 1.0 / (2 * math.pi * r_gc_sel * c_gc)         # GC pin-filter pole
     f_ls = 1.0 / (2 * math.pi * r_ls_sel * c_ls)         # LS pin-filter pole
     c_ss = c["i_ss"] * c["t_ss"] / c["v_ss"]
@@ -395,8 +430,11 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     r_ilimit2 = c["ilimit2_ratio"] * vcs_pk / i_ilimit2
     out["step8"] = {
         "ratio": ratio, "r_gc": r_gc, "r_ls": r_ls, "c_ss": c_ss, "t_ss_real": t_ss_real,
-        "css_sel": css_sel, "c_ilimit": p["c_ilimit"], "c_ilimit2": p["c_ilimit2"],
-        "c_rlpk": p["c_rlpk"], "c_vir": p["c_vir"], "c_lpk": p["c_lpk"],
+        "css_sel": css_sel,
+        "c_ilimit": _pin_cap(p.get("c_ilimit"), _nearest_e96(r_ilimit), p.get("f_pole_ilimit")),
+        "c_ilimit2": _pin_cap(p.get("c_ilimit2"), _nearest_e96(r_ilimit2), p.get("f_pole_ilimit")),
+        "c_rlpk": _nearest_e24(p["c_rlpk"]), "c_vir": _nearest_e24(p["c_vir"]),
+        "c_lpk": _nearest_e24(p["c_lpk"]),
         "c_gc": c_gc, "c_ls": c_ls, "f_gc": f_gc, "f_ls": f_ls,
         "r_gc_sel": r_gc_sel, "r_ls_sel": r_ls_sel,
         "i_ilimit": i_ilimit, "crest_ll": crest_ll, "crest_hl": crest_hl, "crest_cmd": crest_cmd,

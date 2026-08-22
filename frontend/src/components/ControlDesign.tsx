@@ -132,8 +132,25 @@ export const ControlDesign: React.FC<Props> = ({
   // ── Inject via postMessage once iframe loads and setPythonValues is ready ──
   const sendValues = useCallback(() => {
     if (!iframeRef.current?.contentWindow) return
+    // The WHOLE Screen-2 selection, not just R_CS. Forwarding only R_CS left the embedded tool
+    // deriving its own capacitors from its own pole fields, so its Application Schematic disagreed
+    // with Screen 2 on five of seven components — the designer compared the two pages and found
+    // C_GC, C_ILIMIT, C_ILIMIT2, C_LS and R_LS all different (C242).
     iframeRef.current.contentWindow.postMessage(
-      { type: 'setPythonValues', params: { ...params, rcs_mohm: s2sel?.rcs_mohm } },
+      {
+        type: 'setPythonValues',
+        params: {
+          ...params,
+          rcs_mohm:     s2sel?.rcs_mohm,
+          c_gc_pf:      s2sel?.c_gc_pf,
+          c_rlpk_pf:    s2sel?.c_rlpk_pf,
+          c_ilimit_pf:  s2sel?.c_ilimit_pf,
+          c_ilimit2_pf: s2sel?.c_ilimit2_pf,
+          c_vir_pf:     s2sel?.c_vir_pf,
+          c_ls_pf:      s2sel?.c_ls_pf,
+          r_ls_kohm:    s2sel?.r_ls_kohm,
+        },
+      },
       '*'
     )
   }, [params, s2sel])  // eslint-disable-line react-hooks/exhaustive-deps

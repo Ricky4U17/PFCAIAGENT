@@ -249,3 +249,46 @@ def test_every_screen2_selection_reaches_the_engine_including_r_ls():
     for sel, eng in (("c_rlpk_pf", "c_rlpk"), ("c_vir_pf", "c_vir")):
         assert s8[eng] == pytest.approx(s2[sel] * 1e-12), f"{sel} discarded"
 
+
+def test_every_capacitor_default_is_actually_offered_by_its_dropdown():
+    """C242. The default a <select> is given MUST exist among its <option>s.
+
+    C239 set the six defaults to 430 pF / 1 nF / 18 nF / 75 nF / 0.1 uF / 240 pF but the dropdown
+    only offered an E6 subset. Four had no matching option, so the browser showed the FIRST entry -
+    100 pF - and that is what the designer saw and what would have been sent onward as their
+    choice. A default that cannot be selected is silently replaced by one that can.
+    """
+    from fastapi.testclient import TestClient
+    import app.main as main
+
+    d = TestClient(main.app).post("/mode-b/control/components", json={"inputs": {}}).json()
+    for row in d.get("selectable", []):
+        opts, dflt = row.get("options_pf") or [], row.get("default_pf")
+        assert dflt in opts, (
+            f"{row['symbol']}: default {dflt} pF is not among the {len(opts)} offered options — "
+            f"the dropdown will silently show {opts[0] if opts else '?'} pF instead")
+
+
+def test_pin_filter_capacitors_are_derived_from_their_pole_frequency():
+    """C242. The capacitor FOLLOWS its resistor and target pole; it is not a frozen constant.
+
+    C239 hardcoded the four, so moving R_GC / R_ILIMIT / R_LS silently moved the pole. Halving a
+    resistor must double its capacitor to hold the pole.
+    """
+    import math
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    s8 = compute_steps_1_8({})["step8"]
+    for ck, rk, fk in (("c_gc", "r_gc_sel", "f_pole_gc"), ("c_ls", "r_ls_sel", "f_pole_ls"),
+                       ("c_ilimit", "r_ilimit_sel", "f_pole_ilimit"),
+                       ("c_ilimit2", "r_ilimit2_sel", "f_pole_ilimit")):
+        target = compute_steps_1_8({})["inputs"][fk]
+        got = 1.0 / (2 * math.pi * s8[rk] * s8[ck])
+        # E24 snapping moves the realised pole a few percent off target, never more
+        assert abs(got - target) / target < 0.12, (
+            f"{ck}: realised pole {got:.1f} Hz vs target {target:.1f} Hz — not derived from it")
+
+    # doubling the LS pole must roughly halve C_LS
+    fast = compute_steps_1_8({"f_pole_ls": 20e3})["step8"]
+    assert fast["c_ls"] < s8["c_ls"] * 0.62,         f"C_LS did not follow its pole: {s8['c_ls']*1e12:.0f} pF -> {fast['c_ls']*1e12:.0f} pF"
+

@@ -1082,6 +1082,7 @@ function renderAux(p){
   const rpin8=bomGet('aux_RPIN8',4.75e3,p.serR);
   const clpk=bomGet('aux_CLPK',1e-9,p.serC);
   const crlpk=bomGet('aux_CRLPK',1e-9,p.serC);
+  const cvir=bomGet('aux_CVIR',100e-9,p.serC);   // was a hardcoded '0.1 uF (typ)' label
   const bomRowT=(key,name,defV,ser,sel,check)=>{
     const opts=nearestList(defV,ser,7);
     if(!opts.some(v=>Math.abs(Math.log(v/sel))<1e-6))opts.push(sel),opts.sort((a,b)=>a-b);
@@ -1098,7 +1099,7 @@ function renderAux(p){
   $('auxBomLS').innerHTML=AUXHEAD+
     bomRow4('aux_RLS','R_LS',rlsCalc,p.serR,rls,pill(rlsOK,rlsOK?'12–87 kΩ ✓':'outside 12–87 kΩ ✗'))+
     bomRow4('aux_CLS','C_LS',clsCalc,p.serC,cls,'pole '+fmtHz(1/(2*Math.PI*rls*cls)));
-  return{css,ril1,cil,ril2,cil2,rgc,cgc,rls,cls,tssAct,vilAct:vlim,vil2Act:vlim2,rlsOK,rpin8,clpk,crlpk};
+  return{css,ril1,cil,ril2,cil2,rgc,cgc,rls,cls,tssAct,vilAct:vlim,vil2Act:vlim2,rlsOK,rpin8,clpk,crlpk,cvir};
 }
 
 
@@ -1201,7 +1202,7 @@ function renderSchematic(p,dci,dcv,aux){
   // VIR
   {const x=974;W(x,icB+30,x,icB+50);NODE(x,icB+50);W(x-18,icB+50,x+22,icB+50);
   W(x-18,icB+50,x-18,icB+62);RV(x-18,icB+86,fo(p.rvir),'R_VIR',-1);W(x-18,icB+116,x-18,icB+124);GND(x-18,icB+126);
-  W(x+22,icB+50,x+22,icB+66);CV(x+22,icB+86,'0.1 µF (typ)','C_VIR',1);W(x+22,icB+108,x+22,icB+124);GND(x+22,icB+126);
+  W(x+22,icB+50,x+22,icB+66);CV(x+22,icB+86,fc2(aux.cvir),'C_VIR',1);W(x+22,icB+108,x+22,icB+124);GND(x+22,icB+126);
   T(x,icB+152,(state.mode==='low'?'V_VIR < 1.5 V → FR':'V_VIR > 3.5 V → HV'),'n')}
   // ---------- RIGHT networks ----------
   {const y=rowY(0);W(1055,y,1070,y);GND(1070,y+2);T(1088,y+4,'signal GND','t','start')}
@@ -2560,6 +2561,14 @@ window.setPythonValues = function(p){
   $('pout').value = (state.mode==='low') ? POUT_LO : POUT_HI;
   $('eta').value  = (state.mode==='low') ? ETA_LO  : ETA_HI;
   if(p.rcs_mohm != null){ const v=+p.rcs_mohm; if(v>0){ state.rcsSel=v; state.rcsUser=true; const el=$('rcsCustom'); if(el) el.value=v; } }
+  // Screen-2 component selections. Without these this tool re-derived its own capacitors from its
+  // own pole fields, so its schematic disagreed with Screen 2 on five of seven parts - which is
+  // exactly what the designer reported (C242). Written straight into the BOM override store so a
+  // single recalc picks them all up.
+  const _sel={aux_CGC:p.c_gc_pf, aux_CRLPK:p.c_rlpk_pf, aux_CIL:p.c_ilimit_pf,
+              aux_CIL2:p.c_ilimit2_pf, aux_CVIR:p.c_vir_pf, aux_CLS:p.c_ls_pf};
+  for(const k in _sel){ const v=+_sel[k]; if(Number.isFinite(v)&&v>0) state.bom[k]={auto:false,val:v*1e-12}; }
+  if(p.r_ls_kohm!=null){ const v=+p.r_ls_kohm; if(v>0) state.bom.aux_RLS={auto:false,val:v*1e3}; }
   recalc();
 };
 
