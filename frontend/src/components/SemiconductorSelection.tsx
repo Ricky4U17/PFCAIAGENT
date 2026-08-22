@@ -1431,6 +1431,25 @@ export const SemiconductorSelection: React.FC<Props> = ({
           </div>
         )}
       </div>
+      {/* PENDING B3. A catalogue bridge has no hot V-I data, so the engine falls back to a single
+          tempco applied at EVERY current. A real rectifier's tempco is negative only below its
+          crossover, so the flat scalar penalises a cooler (paralleled) device at every operating
+          point. Measured on this catalogue part the assumed shift is -0.200 V over 100 degC where
+          the LVE5060E datasheet's own measured shift is -0.120 V - a 40% difference in the entire
+          temperature correction. Section 7.3 of the report says this; the screen did not. */}
+      {which === 'bridge' && mode === 'database' && (
+        <div style={{ fontSize: 10.5, color: C.amber, background: C.amberL,
+          border: `1px solid ${C.amber}55`, borderRadius: 6,
+          padding: '6px 9px', margin: '8px 0 0', lineHeight: 1.5 }}>
+          ⚠ <b>Catalogue part — temperature is approximated.</b> The parametric table carries one
+          forward-voltage point and no hot data, so V<sub>f</sub>(T) falls back to a single tempco
+          applied at every current. A real rectifier's tempco turns positive above its crossover, so
+          this <b>understates the benefit of paralleling</b> and can invert it on some parts.
+          Uploading the datasheet replaces the assumed shift with the part's own measured one — on
+          the reference bridge that is 0.12 V against an assumed 0.20 V. Chapter 7 Section 7.3
+          states this limitation wherever it applies.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: C.muted }}>Source:</span>
         {([['database', '🔍 From database'], ['manual', '✎ Manual / external'], ['upload', '📄 Upload datasheet']] as [SrcMode, string][])

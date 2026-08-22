@@ -163,34 +163,50 @@ so the report cannot draw B(t)/L(t)/P(t) families over the cycle for all 9 input
 re-deriving them (which would break the one-engine rule). Needs the engine to export the per-Vin time
 series into the approved payload.
 
-### B3. Bridge rectifier tempco is a scalar — `rd = 0` is NOT the defect  `CORRECTED 2026-08-01`
+### B3. Bridge temperature model — measured hot data vs an assumed scalar  `RESCOPED 2026-08-22`
 
-> **PREMISE CORRECTED.** This entry previously said `to_block` should derive `rd` from the Vf–If
-> slope. **Do not do that — it double-counts.** `Bridge.vf()` returns the curve value and the model
-> then adds `rd·i` on top (`pfc_loss_model.py` line 210), so `rd` is a term ADDITIONAL to the curve.
-> `_vf_curve` already synthesises a sloped curve — measured implied slope 10.0 / 5.0 / 13.3 mΩ for
-> Vf 1.0 V@20 A, 1.1 V@40 A, 0.95 V@15 A. Populating `rd` from that same slope would count the I²R
-> term twice and overstate bridge loss. **`rd = 0.0` is self-consistent and correct.**
+> **TWO PREMISES HAVE NOW BEEN CORRECTED. Read this before picking the entry up.**
 >
-> Paralleling is also modelled correctly through the curve: each device carries i/n and sits lower
-> on its own curve. The designer's original "identical 32.7 W" was the `share_worst = 1.0` case
-> (see the note below), not a missing `rd`.
+> **(1) `rd = 0.0` is correct** (2026-08-01). `Bridge.vf()` returns the curve value and the model
+> adds `rd·i` on top, so deriving `rd` from the same curve slope double-counts. The original
+> "paralleling understates by ~4 W" measurements below belong to that retracted premise.
+>
+> **(2) The datasheet path already replaces the assumed tempco** (2026-08-22). This entry was
+> written before the datasheet-first bridge work (C217/C218/C222) and reads as though nothing
+> exists. It does.
 
-**The actual defect** is the temperature model, and the engine already has the right mechanism for
-it. `Bridge.vf()` supports `vf_curve_hot` (a second, hot V–I curve) and interpolates per current
-point — its own comment says this "captures the NTC threshold AND the PTC series resistance, which a
-single vf_tco scalar cannot (the curves converge/cross at high current)". DB-selected bridges never
-get a hot curve, so they fall back to `vf_tco = −0.002 V/°C` applied at EVERY current. A real Si
-rectifier's tempco is negative only below its crossover (≈ rated current) and positive above it, so a
-constant negative tempco makes a cooler device look worse — which is why paralleling measured as a
-LOSS INCREASE on 54 of 70 sampled parts. That is an artifact of the scalar, not physics.
+**Measured 2026-08-22, both paths, same 100 °C rise at 20 A:**
 
-- **Designer decision 2026-08-01: option (a)** — correct the record, warn against the `rd`
-  double-count, and document the limitation in the report (done: Section 7.3 "BASIS — HOW THE BRIDGE
-  FORWARD DROP IS MODELLED"). No loss numbers changed.
-- **Real fix (DATA):** add `vf_hot` / `vf_if_hot` columns to the bridge workbook and pass a hot
-  curve through `to_block`. Then the approximation disappears entirely.
-- **Rejected:** synthesising a hot curve with an assumed crossover — it is still a guess and would
+| path | hot data | ΔV(125 − 25 °C) | basis |
+|---|---|---|---|
+| catalogue (Digi-Key parametric) | none | −0.200 V | **assumed** `vf_tco = −0.002 V/°C` |
+| LVE5060E via datasheet upload | hot V_F from the table | −0.120 V | **measured**, the part's own |
+
+So uploading the datasheet does not merely add a curve — it replaces an assumed temperature
+correction with a measured one, a **40 % difference in the whole correction** on this part.
+
+**What is still not captured, and why it is not a code defect.** Both of LVE5060E's "curves" are
+SINGLE points (`vf_curve [[25],[0.89]]`, `vf_curve_hot [[25],[0.77]]`), so the drop is constant in
+current and the cold/hot pair never converges. Capturing the crossover needs a hot **V–I figure**,
+and this vendor prints only a cold one. `datasheet_flow` already raises a `check` note when one of
+the pair is digitised and the other is not.
+
+**Why the catalogue path cannot be fixed from the catalogue.** The bridge workbook
+(`bridge_rectifiers_combined_sorted.xlsx`) has exactly one forward-voltage column —
+`Voltage - Forward (Vf) (Max) @ If` — and no temperature columns beyond "Operating Temperature".
+The `vf_hot` / `vf_if_hot` columns the old entry asked for **cannot be imported because the data is
+not in the source**. This is the MOSFET story again: the catalogue lacks the fields the engine needs,
+which is why datasheet-first exists.
+
+- **Done (option a, 2026-08-01):** the limitation is stated in Section 7.3, conditional on the part
+  actually lacking a hot curve, so it fires for catalogue parts and stays silent for datasheet ones.
+- **Done (2026-08-22):** `tests/test_bridge_temperature_model.py` guards both states — a datasheet
+  bridge must carry a measured hot curve, a catalogue bridge must not and must keep its tempco, the
+  measured and assumed tempcos must differ, and the scalar fallback must be a flat shift at every
+  current (which is the artifact the note describes).
+- **Remaining, and it is DATA not code:** a bridge datasheet that publishes a hot V–I figure, so the
+  pair can be digitised and the crossover captured. Nothing to build until such a part is chosen.
+- **Rejected:** synthesising a hot curve with an assumed crossover — still a guess, and it would
   silently move every bridge loss figure.
 
 <details><summary>Original entry (superseded — kept for the measurements)</summary>
@@ -199,11 +215,6 @@ LOSS INCREASE on 54 of 70 sampled parts. That is an artifact of the scalar, not 
 `database.to_block(rec, "bridge")` sets `topology / vf_curve / vf_tco / n_parallel / rth_jc / rth_cs`
 but **never `rd`**, so every DB-selected bridge runs with the engine default `rd = 0.0`
 (`pfc_loss_model.Bridge.rd`).
-
-Why it matters: bridge loss is `2·mean(vf(i·a)·i + rd·a·i²)` where `a = 1/n_parallel`. The `rd·a·i²`
-term is exactly the one that halves when devices are paralleled. With `rd = 0` the only benefit of
-paralleling is the shape of the Vf curve, and that is partly or wholly cancelled by the negative
-`vf_tco = −0.002 V/°C`: two packages run cooler, and a cooler Si diode has a HIGHER Vf.
 
 Measured on the 9-point sweep (2-ch, 90–264 Vac, 1700/3600 W), worst-case-over-line:
 
@@ -214,17 +225,12 @@ Measured on the 9-point sweep (2-ch, 90–264 Vac, 1700/3600 W), worst-case-over
 | same, rd = 5 mΩ | 30.80 W | 27.83 W | −2.97 W |
 | same, rd = 5 mΩ and tco = 0 | 37.59 W | 32.60 W | −4.99 W |
 
-Across a random 70-part sample, paralleling **increased** worst-case loss for 54 parts and decreased it
-for 16 — the sign is dominated by the temperature effect rather than by current sharing.
+Across a random 70-part sample, paralleling **increased** worst-case loss for 54 parts and decreased
+it for 16 — the sign is dominated by the temperature effect rather than by current sharing.
 
-- **Done when:** `to_block` derives `rd` from the datasheet (slope of the Vf–If curve above the knee, or
-  a dedicated `rd` column), so the I²R term is present and paralleling behaves physically.
-- **Related `DATA` need:** the bridge workbook has a single `Vf @ If` point; `_vf_curve` synthesises a
-  3-point curve around it (shape is an ESTIMATE, already flagged). A real datasheet Vf–If curve would fix
-  both `rd` and the curve shape.
-- **Note (not a bug):** setting `share_worst = 1.0` on the bridge form makes `n_parallel` have literally
-  zero effect (`a` clamps to 1.0). That is correct — it declares that one die carries the whole arm —
-  but it does mean the loss will not move at all when paralleling is changed.
+- **Note (not a bug):** setting `share_worst = 1.0` on the bridge form makes `n_parallel` have
+  literally zero effect (`a` clamps to 1.0). That is correct — it declares that one die carries the
+  whole arm — but the loss will not move when paralleling changes.
 - Raised 2026-07-30 by a designer report that 1 vs 2 bridges gave identical loss.
 
 </details>
