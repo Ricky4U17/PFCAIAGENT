@@ -530,63 +530,6 @@ asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
   showed why: two axis defects there fit a straight line with residual exactly zero, so the
   residual is not evidence — only the tabulated point is.
 
-### B20 — Chapter 3 and Chapter 4 compute peak-point core loss twice, and disagree  `CODE`
-
-Found while building the C234 reconciliation table. Table 3.6.1's `P_core` and Table 4.2's
-`P_core,crest` are the SAME quantity on the SAME basis for the SAME design, but come from two
-independently computed arrays and do not match:
-
-| Vac | Ch3 P_core | Ch4 P_core,crest | delta |
-|---|---|---|---|
-| 90 | 3.666 | 3.666 | 0.0% |
-| 132 | 4.816 | 4.718 | +2.1% |
-| 230 | 1.490 | 1.601 | -6.9% |
-| 264 | 0.148 | 0.195 | -24.1% |
-
-They agree exactly at 90 Vac and diverge away from it, with a sign change around 180 Vac — the
-signature of one series being anchored at the low-line corner and the other not.
-
-Neither figure reaches the efficiency budget (that uses Chapter 4's AVERAGED basis, which C233
-made authoritative), so this does not propagate into any result. It is a presentation and trust
-problem: two numbers in one document that a reviewer can reasonably expect to be identical.
-Table 4.2a states plainly that row 1 is computed on Chapter 4's sweep rather than copied from
-Table 3.6.1, so the report no longer implies they must match.
-
-- **Done when:** one engine owns peak-point core loss and both chapters read it, per the settled
-  "one engine per value" convention — or, if the two are deliberately different models, they carry
-  different NAMES so nobody expects them to agree.
-- **Do not** simply copy Chapter 4's array into Chapter 3. Chapter 3's first pass runs before the
-  Chapter-4 sweep exists; the ordering is why there are two arrays in the first place.
-
-### B21 — the combined-report fixture builds NO Chapter 7 at all  `CODE`
-
-`verify_combined_report.build_combined` posts only `state` / `approved_design` / `step15_result` /
-`step16_params`. The whole Chapter-7 block in `main.py` is gated on `if req.semiconductor:`, and
-that key is never sent — so the 191-page fixture document **contains no Chapter 7**. The only
-`Table 7.8b` strings in it are cross-references from Chapter 3/4 prose; there is no Semiconductor
-Loss chapter, no MOSFET tables, no Section 7.8b.
-
-Consequences, found while closing the designer's comment 2 (C233/C234):
-
-- **The C233 inductor-budget fix has no coverage on the combined path.** It is covered only by
-  `tests/test_inductor_loss_budget.py`, which builds Chapter 7 standalone.
-- Every `TestCombinedReport` assertion describes a document the designer never receives. The real
-  report is ~218 pages; the fixture's 178-200 page guard is for a Ch7-less build.
-- Any future Chapter-7 regression on the COMBINED path — the path that actually ships — is
-  invisible to the suite.
-
-- **Done when:** `build_combined` also posts a `semiconductor` payload (the three real vendor
-  datasheets already used by `tests/test_report_numbering.py` and `test_inductor_loss_budget.py`
-  are the obvious source), the fixture renders Chapter 7, and the page guard is re-based on that
-  document.
-- **Watch:** adding Chapter 7 will roughly double the fixture's build time. It may belong behind a
-  marker so the fast suite stays fast, but it must run somewhere.
-- **Note:** C234's commit message says "the combined report CAN be built headlessly". True, and it
-  was the right correction to C233's claim — but it builds a report WITHOUT Chapter 7, which is
-  the part both of those commits were changing.
-
-## C. GUI  `CODE`
-
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
@@ -781,6 +724,16 @@ is otherwise indistinguishable from a good one.
 ---
 
 ## Recently closed (kept briefly for context)
+
+- **B21 — the combined-report fixture built no Chapter 7** (C245). `build_combined` sent no
+  `semiconductor` payload and `main.py` gates the chapter on it, so every `TestCombinedReport`
+  assertion described a 191-page document the designer never receives, and C233's inductor fix had
+  no coverage on the shipping path. Fixed with catalogue parts (212 pp); three guards, including
+  Table 7.8b == N_ch x Table 4.2 P_tot asserted end to end.
+- **B20 — Chapter 3 and Chapter 4 disagreed on peak core loss** (C245). Chapter 3 was not computing
+  it: `Pcore_pk * (bac/Bac_val)**2.1`, a power law off one anchor with a fixed exponent instead of
+  the material's Steinmetz beta — exact at 90 Vac, −24% at 264 Vac. It now reads the engine's
+  per-point value; agreement exact at all nine points.
 
 | Item | Closed by |
 |---|---|
