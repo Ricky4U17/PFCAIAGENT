@@ -725,7 +725,34 @@ asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
 
-### C2. Report download fails intermittently — SAVE-PATH FIX NOW COVERS ALL 8 SITES (C251); the fallback link is still deferred
+### C2. Report download fails intermittently — CLOSED PENDING RECURRENCE (designer, 2026-08-23)
+**Closed by the designer on evidence, not by a code argument.** Three downloads succeeded on
+2026-08-23 with no failures reported, on the paths that used to fail:
+
+| File | Time | Which path |
+|---|---|---|
+| `PFC_Report_pfc-FUll report Latest.pdf` (15.9 MB) | 14:13 | full combined report — the ~111 s generate, the case where user-activation expiry would bite |
+| `PFC_Ch7_Semiconductor_Loss (1).pdf` (1.3 MB) | 16:04 | **the standalone Chapter 7 — the 8th site, genuinely broken until C251** |
+| `PFC_Report_pfc-1787525546065_Steps1_17.pdf` (14.7 MB) | 16:10 | full combined report again |
+
+The Chapter-7 one is the meaningful result: until C251 that path revoked the object URL on the
+statement after `click()` with the anchor never in the document, on the largest single-chapter PDF
+the GUI emits. It now saves.
+
+**Why "pending recurrence" and not simply closed.** The original symptom was *intermittent*, and
+three successes cannot prove absence of an intermittent fault. The second mechanism in this entry —
+transient user activation expiring across the long generate — was never disproved, only
+un-observed, and its fix (**the visible fallback link, proposal 1**) remains unbuilt and deferred.
+
+- **If it recurs:** do not re-diagnose from scratch. Build the fallback link. It is robust whatever
+  the root cause, `downloadBlob` already returns the object URL for it, and it needs UI on the six
+  report screens plus the Chapter-7 button.
+- Guarded against regression by `tests/test_downloads_go_through_helper.py`, which counts the
+  download sites from the tree rather than checking a list — a list is what went stale and let the
+  8th site through.
+
+<details><summary>Full diagnosis (retained — the symptom leaves no trace to re-derive)</summary>
+
 **Status 2026-08-22.** Re-audited on the designer's question "is this still open?", and it was —
 not because the fix had regressed, but because the fix was never exclusive. The seven screens
 migrated to `src/api/download.ts` are all still correct (10-minute hold on both the object URL and
@@ -815,6 +842,8 @@ blocked-download icon; "Always allow" there is an immediate workaround.
 2. **`allow-downloads` on two sandboxed iframes** — see C3 below.
 3. *(bigger, optional)* split generation from download so the save is always a direct user click.
 
+</details>
+
 ### C3. Studio iframes sandboxed without `allow-downloads`  `FIXED at C252`
 **There were three, not two.** The entry named `ReviewMagnetics` and `CapacitorSimAgent`;
 `SimulationAgent.tsx` was written after C3 was logged and nobody re-counted the sites — the
@@ -829,6 +858,51 @@ is blocked by the browser with no console error and no visible failure: the expo
 does nothing.
 
 ---
+
+### C5. The standalone Chapter 7 and the combined report disagree — flat L vs the bias curve
+**Found by the designer, 2026-08-23,** comparing Table 7.1 between the two documents they had just
+downloaded. The L<sub>φ</sub> column reads per-point in one and a constant in the other:
+
+| | 90 V | 110 V | 120 V | 132 V | 180 V |
+|---|---|---|---|---|---|
+| combined report | 102 | 120 | 128 | 136 | 111 µH |
+| standalone Ch 7 | **127** | **127** | **127** | **127** | **127 µH** |
+
+**It is not cosmetic — it moves the loss numbers.** ΔI<sub>L,pp</sub> at 90 V is 12.115 A vs
+9.689 A, which changes the RMS currents and therefore conduction and switching loss. Worst-case
+semiconductor dissipation is **54.82 W (combined) vs 54.64 W (standalone)**; MOSFET conduction at
+90 V differs by 0.15 W. Small, but it is the same chapter reporting two different answers, which is
+the class of defect C233/C251/C252 were all about.
+
+**Root cause, exact.** Both endpoints call the same builder, but they do not pass the same inputs:
+
+- `/mode-b/documentation/generate-report` (`main.py:2866`) computes
+  `_bias_L_curve(approved_design, L_final, design)` and injects `design["L_phi_curve"]`.
+- `/mode-b/semiconductor/report` (`main.py:795`) passes `req.design` straight through. Its request
+  model carries no `approved_design`, so there is no curve to inject and the engine falls back to
+  the flat `L_phi_uH`.
+
+**The endpoint's own docstring asserts the property this disproves:** *"This is the same builder the
+combined report calls, so the two cannot disagree — it is the same chapter, not a second
+rendering of it."* Same builder, different inputs. That sentence is why nobody looked.
+
+**Table 7.1's caption also states a basis the standalone build cannot honour** — "ΔI<sub>L,pp</sub>
+uses the bias-adjusted per-point inductance L<sub>φ</sub>(V<sub>AC</sub>) from Chapter 3" — when
+in that build there is no Chapter 3 and L is flat.
+
+**Fix (scoped, not started).** The GUI already has the data: `SemiconductorSelection.tsx` holds
+`approvedInductorDesign` and already sends it on three other calls (lines 367, 648, 681).
+1. Frontend: include `approved_design` in the `semiconductorReport` request.
+2. Backend: `/mode-b/semiconductor/report` injects `L_phi_curve` exactly as the combined endpoint
+   does, from the same `_bias_L_curve` helper — one code path, not a copy.
+3. When no approved inductor is available (the part-screening case, before Step 7 is approved), the
+   report must SAY the inductance is a flat nominal rather than printing the Chapter-3 caption.
+4. Delete or correct the docstring's "cannot disagree" claim.
+
+- **Done when:** Table 7.1 and every loss table match row for row between the two documents for the
+  same design, asserted by a test that builds both and diffs them — the check that would have
+  caught this, and which no existing test performs (`test_ch7_three_way_parity` builds only the
+  standalone one).
 
 ### C4. A review-screen correction lands on one entry; the engine may select another
 `confirm(edits)` applies a corrected value to whichever entry `_pick_entry` returns for that
