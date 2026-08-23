@@ -10224,3 +10224,91 @@ the way the original predicate would have.
 VERIFIED combined report 212 pages, exit 0, `TestCombinedReport` 11 -> 12 passed with the new
 black-square assertion; the material DB validates clean (0 errors, was 66); every edited backend
 file compiles; frontend `tsc --noEmit` clean. Suite 663 -> 672.
+
+# C253 - A10 action 1, then the three Chapter-7 loss refinements
+
+## A10 action 1 - two untracked workbooks, not one
+
+The entry named `ferroxcube_cores_database (1).xlsx`. `Power_Relays_Database.xlsx` was untracked
+too, and both are opened at runtime - ferroxcube by `magnetics/db.py` and `mode_b/data_loader.py`,
+the relay workbook by `inputprotection/database.py`. Every other file in `specs/Database/` was
+already tracked, so those two were the only files in the repository whose deletion was permanent.
+Both committed.
+
+Third entry this week whose list of sites was short: C2 named seven download paths and there were
+eight, C3 named two iframes and there were three. A list goes stale; a count does not.
+
+## B16 - the SiC junction charge is taken where the drain actually is
+
+`P_rr_to_fet` was a scalar at full V_OUT with no angle dimension and no DCM mask, while the silicon
+branch has carried `rr_active` all along. It is now per angle. For `C_j(v) = C0*v^-m` the stored
+charge scales as `(v/Vo)^(1-m)`, so the dissipated energy `v*Q_c(v)/(2-m)` scales as `(v/Vo)^(2-m)`;
+CCM has `v_pre = V_OUT` and reduces to the previous scalar exactly.
+
+Settling to `v` in DCM is deliberately conservative - an undamped node reaches `2v - V_OUT` at the
+first valley, lower still and often clamped at zero - so the correction is understated rather than
+resting on a ringing phase the model does not track.
+
+Measured -0.033 W, at 264 Vac only, which independently confirms the entry's claim that DCM appears
+nowhere else (`DCM_% = 0` at the other eight points, 6 % at 264 Vac). The drop is almost exactly the
+DCM fraction, because DCM sits near the zero crossings where there is barely any charge to dump.
+
+## B17 - the reason for deferring had expired
+
+The entry deferred this because "the datasheet publishes V_F at ONE current per temperature, so the
+curve is flat and sampling it at ten points returns ten identical values". Not true any more: the
+reference SiC diode carries a real 3-point curve (1.05/1.35/1.70 V at 1/5/16 A) and C222 put real
+diode datasheets through the extractor. So it was checked before being believed, and implemented.
+
+The safety property is what makes it safe to ship: the mean of a linear ramp is its mid-value, so a
+single-point forward curve reproduces the old number exactly, and every catalogue part is in that
+state. Asserted directly rather than argued.
+
+TWO THINGS I GOT WRONG AND THE MEASUREMENT CORRECTED.
+
+  1. The sign. The entry reasoned "V_F is concave, so evaluating at the mean understates slightly",
+     and I carried that into the work. The integrand is `V_F(i)*i`, whose curvature runs the other
+     way: conduction RISES, by 0.020-0.066 W. Conservative direction, but not the predicted one.
+  2. The quadrature. My first version averaged `linspace(0, 1, N)`, which gives both endpoints full
+     weight and is not a quadrature rule - 0.7 % biased. The convergence test I had written with a
+     made-up tolerance ("9 -> 33 points moves under 0.1 mW", asserted without measuring) is what
+     caught it, by failing. Midpoint sampling fixes it and keeps the flat-curve identity exact.
+     N = 17 against a 4097-point reference: N=9 is 0.043 % out - about 5 mW, a tenth of the effect
+     being modelled, too coarse to be worth having - N=17 is 0.012 %, N=33 is 0.003 % and agrees
+     with N=17 to 0.1 mW on the full sweep. N=17 costs 1 ms.
+
+## B18 - the bridge finally has a leakage term
+
+`Bridge` gained `irev_curve` and `I_rev_vs_Tj` is declared for `bridge_rectifier`; both together,
+because `audit_device_classes()` flags one without the other, and that is the C211 disconnect
+(the value parsed onto a diode-only key and was silently dropped).
+
+THREE HALVES, NOT TWO - and the suite is what found the third. With the dataclass field and the
+registry declaration both in place every check passed, and the value still went nowhere:
+`_bridge_block` never read `I_rev_vs_Tj`, so a real bridge datasheet's leakage would have parsed
+cleanly and then been dropped - the C211 defect verbatim, in the very entry that exists to fix it.
+
+It surfaced only because the negative control in
+`test_a_scoped_template_may_only_map_keys_valid_for_its_own_classes` used `IR -> I_rev_vs_Tj` as
+its example of an INVALID mapping. B18 made that mapping legitimate, so the control stopped biting
+and the test failed; chasing why led straight to the missing builder half. The control now uses
+`C_iss`, declared for the three transistor classes and never for a bridge. Two lessons in one
+failure: a negative control can be invalidated by the very change it is meant to police, and
+"declared" is not "wired".
+
+Verified end to end: a two-point profile yields `irev_curve = [[25, 125], [5e-6, 50e-6]]`, the
+engine accepts the block, and the leakage comes out 23.75 mW at 125 degC and 50 uA - the hand
+figure. A single published point yields None plus a note, because leakage decades with temperature
+and one point would invent the slope.
+
+The entry's own magnitude estimate was ~4x high: "400 V bus x 10 uA x 4 diodes ~ 16 mW". A bridge's
+legs block the LINE voltage, not the bus, and only two block at a time, so it is
+`2*mean(|v_line|)*I_R = 2*(2*Vpk/pi)*I_R` = 4.75 mW at 373 Vpk and 10 uA - matched to 1e-9 against
+a hand calculation in the test. Zero for every catalogue part, since the workbook has no leakage
+column, and the no-curve path is asserted bit-identical to before the field existed.
+
+## Net effect
+
+Worst-case P_SEMI 65.5616 -> 65.6022 W (+0.06 %), max |dTj| 0.056 degC. No verdict changes and no
+selection changes - these remove three known approximations rather than fixing wrong answers, which
+is exactly how they were logged.

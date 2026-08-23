@@ -126,7 +126,7 @@ docstrings) — nothing opens them, nothing broke. The genuinely exposed categor
 
 **Agreed actions, in priority order:**
 
-1. **Commit `specs/Database/ferroxcube_cores_database (1).xlsx`** — it is currently UNTRACKED, so
+1. ~~**Commit the untracked workbooks**~~ **DONE at C253.** There were TWO, not one: `ferroxcube_cores_database (1).xlsx` AND `Power_Relays_Database.xlsx` (loaded by `inputprotection/database.py`). Both are now tracked, so every workbook in that folder is recoverable. Original text: it is currently UNTRACKED, so
    deleting it is PERMANENT. Every other workbook in that folder is tracked and recoverable. This is
    the only unrecoverable exposure; highest value, smallest effort.
 2. **Add a startup/test check** asserting the runtime-loaded workbooks exist. A folder cannot give
@@ -565,7 +565,7 @@ checking individually before any renumbering work touches them.
 
 ---
 
-### B16. SiC Q_c is not gated to CCM, the silicon recovery term is
+### B16. SiC Q_c is not gated to CCM, the silicon recovery term is  `DONE at C253`
 `pfc_loss_model.loss()` applies the silicon branch as `fsw*avg(rr_fet_frac*E_rec*rr_active)` — the
 `rr_active` mask is zero wherever the point is in DCM. The SiC branch is (re-read 2026-08-23; the
 formula this entry used to quote predates the C-j grading term)
@@ -581,11 +581,23 @@ half-cycle**, where the SiC term is ~1.3 W — so the error is under 0.2 W, at a
 is not the thermal worst case (90 Vac is). Found during C210; the report prose was corrected to
 describe what the code does rather than claim CCM-gating for both branches.
 
-- **Done when:** the SiC branch carries the same per-angle treatment as the silicon one, with the
-  charge taken at the actual pre-turn-on drain voltage in DCM rather than at V_OUT. Needs its own
-  verification pass — it moves numbers, so it does not belong in a datasheet-sourcing milestone.
+**DONE at C253.** The branch is now per-angle. For `C_j(v) = C0·v^-m` the stored charge scales as
+`(v/Vo)^(1-m)`, so the dissipated energy `v·Q_c(v)/(2-m)` scales as `(v/Vo)^(2-m)`; in CCM
+`v_pre = V_OUT` and the expression is *identical* to the old scalar, in DCM it takes the settled
+switch-node voltage.
 
-### B17. Diode V_F is evaluated at the mid-current, not across the ripple triangle
+Settling to `v` is deliberately the conservative choice — an undamped node reaches `2v - V_OUT` at
+the first valley, lower still and often clamped at zero — so the correction is understated rather
+than resting on a ringing phase the model does not track.
+
+**Measured:** −0.033 W, at 264 Vac only, which independently confirms the entry's claim that DCM
+appears nowhere else (`DCM_% = 0` at all eight other points, 6 % at 264 Vac). The drop is almost
+exactly the DCM fraction, because DCM occurs near the zero crossings where `v` is small and there
+is barely any charge to dump. Guarded both ways by `tests/test_ch7_loss_refinements.py`: a fully
+CCM point must equal the full-V_OUT scalar to 1e-9, and a DCM point must fall, but by no more than
+its DCM fraction.
+
+### B17. Diode V_F is evaluated at the mid-current, not across the ripple triangle  `DONE at C253`
 `pfc_loss_model.loss()` computes diode conduction as `vf(i_d_repr)*i_d_density + rd*ms_dio`, where
 `i_d_repr` is the mid-value of the conducting current. **Re-verified 2026-08-23** at
 `pfc_loss_model.py:359` — `P_cond_dio = avg(dio.vf(i_d_repr, Tj_dio)*i_d_density + dio.rd*ms_dio)`
@@ -598,15 +610,36 @@ current ramp instead. That is a genuine refinement, second-order here: V_F is co
 at the mean understates slightly, and the error grows with ripple depth (dI_L reaches ~12 A on a
 ~16 A peak at low line).
 
-It is deferred rather than done because it only pays once the V-I curve is real. On the parts seen
-so far the datasheet publishes V_F at ONE current per temperature, so the "curve" is flat and
-sampling it at ten points returns ten identical values. Do this WITH M7, not before.
+**DONE at C253 — and the reason it was deferred had expired.** The entry said the parts seen so far
+publish V_F at one current per temperature, so the curve is flat and sampling it returns identical
+values. That stopped being true: the reference SiC diode carries a genuine 3-point curve
+(1.05 / 1.35 / 1.70 V at 1 / 5 / 16 A), and C222 brought real diode datasheets through the
+extractor.
 
-- **Done when:** the digitised V_F(i, T_j) curve is available and conduction is integrated across
-  the ripple triangle; compare against the present mid-current result on the same part to show what
-  the refinement was worth.
+Conduction is now integrated across the ramp — `i_off → i_on` in CCM, `Ip → 0` in DCM — by
+`vf_i_ramp()`. `r_d·ms_dio` already carried the linear part, so only the curve term moved.
 
-### B18. The bridge rectifier has no leakage term at all
+**Two things worth recording.**
+
+*The safety property.* The mean of a linear ramp is its mid-value, so a single-point forward curve
+reproduces the old number exactly. Every catalogue part is in that state, and none of their reports
+move. Asserted directly.
+
+*The sign is the opposite of what the entry predicted.* It reasoned "V_F is concave, so evaluating
+at the mean understates slightly" — but the integrand is `V_F(i)·i`, whose curvature runs the other
+way. Measured: diode conduction **rises** 0.020–0.066 W across the sweep. Conservative direction,
+but not the predicted one.
+
+*A quadrature bug found on the way.* The first implementation averaged `linspace(0, 1, N)`, which
+weights both endpoints fully and is not a quadrature rule — 0.7 % biased. Midpoint sampling fixed
+it and preserves the flat-curve identity. N = 17 against a 4097-point reference: N=9 is 0.043 %
+out (~5 mW, a tenth of the effect being modelled), N=17 is 0.012 %, N=33 is 0.003 % and agrees with
+N=17 to 0.1 mW. N=17 costs 1 ms on the full sweep.
+
+Net on the system: worst-case P_SEMI 65.5616 → 65.6022 W (+0.06 %), max ΔTj 0.056 °C. No verdict
+changes.
+
+### B18. The bridge rectifier has no leakage term at all  `DONE at C253`
 `Bridge` (pfc_loss_model.py) has no `irev_curve` and no leakage field of any kind, while `Diode` and
 `Mosfet` both do. So `I_rev_vs_Tj` is declared for the two diode classes only, and a bridge
 datasheet's reverse current has nowhere to go — the `diodes_inc_rectifier` template used to map `IR`
@@ -616,9 +649,31 @@ onto that diode-only key, where the value parsed and was then silently dropped (
 a model on its own; it becomes worth having if a bridge is ever run hot enough for leakage to matter,
 or if the reverse-recovery placeholder in `Bridge.loss()` is ever made real.
 
-- **Done when:** either `Bridge` gains a leakage term and `I_rev_vs_Tj` is declared for
-  `bridge_rectifier` (both, or `audit_device_classes()` will flag it), or the decision to leave it
-  out is recorded as final and the report says so where bridge loss is reported.
+**DONE at C253 — and it was THREE halves, not the two the entry asked for.** `Bridge` has an
+`irev_curve` field, `I_rev_vs_Tj` is declared for `bridge_rectifier`, and `audit_device_classes()`
+is clean — but with only those two in place every check still passed while the value went nowhere,
+because `_bridge_block` never read the key. That is the C211 defect verbatim, inside the entry
+written to fix it.
+
+It surfaced because the negative control in
+`test_a_scoped_template_may_only_map_keys_valid_for_its_own_classes` used `IR → I_rev_vs_Tj` as its
+example of an *invalid* mapping. B18 made that mapping legitimate, so the control stopped biting
+and the test failed — which is how the missing builder half was found. The control now uses
+`C_iss`. **A negative control can be invalidated by the very change it polices**, and "declared" is
+not "wired".
+
+Verified end to end: a two-point profile yields `irev_curve = [[25, 125], [5e-6, 50e-6]]` and the
+engine returns 23.75 mW at 125 °C / 50 µA — the hand figure. A single published point yields
+`None` plus a note, because leakage decades with temperature and one point would invent the slope.
+
+**The entry's own magnitude estimate was ~4× high.** It used "400 V bus × ~10 µA × 4 diodes ≈
+16 mW", but a bridge's legs block the **line** voltage, not the bus, and only two block at a time.
+The correct figure is `2 · mean(|v_line|) · I_R = 2 · (2·Vpk/π) · I_R` — **4.75 mW** at 373 Vpk and
+10 µA, matched to 1e-9 by the test against a hand calculation.
+
+Still small, and still zero for every catalogue part, because the workbook has no leakage column —
+the default path is bit-identical to before the field existed, which is asserted. "Small" and
+"absent" are different claims though, and only one of them can be checked.
 
 ### B22. Table 7.2e states no temperature conditions  `CODE` — *designer review comment 3*
 The last of the designer's four report-review comments (2026-08-19). Table 7.2e lists every engine

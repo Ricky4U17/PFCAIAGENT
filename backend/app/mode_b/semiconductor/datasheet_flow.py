@@ -1881,6 +1881,31 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict,
             "commutates at LINE frequency, so the term is negligible beside conduction and the "
             "engine treats it as a placeholder rather than a model. It is not counted as a gap.")})
 
+    # 3a-bis. reverse leakage (PENDING B18, C253). Same shape as the diode builder's block above.
+    # Until C253 `Bridge` had no leakage field at all and `I_rev_vs_Tj` was declared for the two
+    # diode classes only, so a bridge datasheet's I_R parsed cleanly and was then DROPPED — the
+    # C211 defect. Declaring the key and adding the dataclass field is not enough on its own; the
+    # builder has to carry it, or the value still goes nowhere and every check still passes.
+    #
+    # Two points minimum, because a single I_R is a number, not a curve, and leakage roughly
+    # decades with temperature — interpolating from one point would invent the slope.
+    irev_br = [(float((e.get("conditions") or {}).get("T_j")), float(e.get("typ") or e.get("max")),
+                (e.get("conditions") or {}).get("V_R"))
+               for e in _entries_of(profile, "I_rev_vs_Tj")
+               if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
+    if len(irev_br) >= 2:
+        irev_br.sort()
+        put("I_rev_vs_Tj", [[t for t, _, _ in irev_br], [v for _, v, _ in irev_br]])
+        vrs_br = {float(v) for _, _, v in irev_br if v}
+        if vrs_br:
+            blk["_irev_at_VR"] = sorted(vrs_br)
+    elif len(irev_br) == 1:
+        notes.append({"key": "I_rev_vs_Tj", "severity": "note", "message": (
+            "Only one reverse-leakage point is published, so no I_R(T_j) curve can be built and "
+            "the blocking-loss term stays at zero. The term is small either way — two legs block "
+            "the line voltage, so it is roughly 2*(2*Vpk/pi)*I_R, a few milliwatts — but it is "
+            "reported as absent rather than guessed from a single point.")})
+
     # 3b. the surge figures. Not loss parameters — they are the Chapter 8 inrush and fuse-
     # coordination inputs, and they were being extracted and then dropped because nothing carried
     # them onto the block. `meta_field` is how a non-engine quantity travels.

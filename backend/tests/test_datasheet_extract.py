@@ -258,7 +258,13 @@ class TestTemplates:
         # and the rule must actually bite, not just pass because nothing violates it today
         bad = copy.deepcopy(VT.load())
         tmpl = next(t for t in bad["templates"] if t["template_id"] == "diodes_inc_rectifier")
-        tmpl["symbol_map"]["IR"] = "I_rev_vs_Tj"        # diode-only key on a bridge template
+        # A MOSFET-only key on a bridge template. This used to be `IR -> I_rev_vs_Tj`, which was a
+        # valid control while that key was declared for the two diode classes only. B18 (C253) gave
+        # Bridge an `irev_curve` and declared I_rev_vs_Tj for bridge_rectifier, so that mapping is
+        # now LEGITIMATE — a bridge datasheet's reverse current finally has somewhere to land — and
+        # the control stopped biting. C_iss is declared for the three transistor classes and never
+        # for a bridge, so it violates the rule the way IR used to.
+        tmpl["symbol_map"]["CISS"] = "C_iss"
         with pytest.raises(ValueError, match="declared only for"):
             VT._validate(bad)
 

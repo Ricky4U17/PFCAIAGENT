@@ -30,6 +30,34 @@ from typing import Optional
 
 def curve(x, xs, ys):
     return np.interp(x, np.asarray(xs, float), np.asarray(ys, float))
+
+# Sample count for integrating a device curve across the switching-ripple triangle (PENDING B17).
+# MIDPOINT sampling, not endpoint-inclusive: a plain mean over `linspace(0, 1, N)` counts both
+# endpoints at full weight, which is not a quadrature rule at all and left a 0.7 % bias. Midpoints
+# give the second-order rule and keep the flat-curve identity exact, because the midpoints of a
+# linear ramp still average to its mid-value.
+#
+# N = 17 measured against a 4097-point reference on the reference diode's curve: N=9 is 0.043 %
+# out (~5 mW, a tenth of the effect being modelled — too coarse to be worth having), N=17 is
+# 0.012 %, N=33 is 0.003 %. N=17 and N=33 agree to 0.1 mW on the full sweep and N=17 costs 1 ms.
+_N_RIPPLE = 17
+_RAMP_W = (np.arange(_N_RIPPLE) + 0.5)/_N_RIPPLE
+
+
+def vf_i_ramp(dev, i_lo, i_hi, Tj):
+    """Time-average of v_F(i)*i across a linear current ramp, per line angle.
+
+    The conduction integrand is evaluated ACROSS the ripple triangle instead of once at its
+    mid-current. v_F(i) is concave, so a single mid-point sample misprices the curvature; the
+    linear part is already carried separately by r_d, which is why only the curve term needs this.
+
+    Exact no-op on a flat curve: the mean of a linear ramp is its mid-value, so a device whose
+    datasheet gives one forward voltage reproduces the previous number to the last digit. That
+    property is asserted in tests/test_diode_ripple_integration.py.
+    """
+    i_lo = np.asarray(i_lo, float); i_hi = np.asarray(i_hi, float)
+    grid = i_lo[None, :] + (i_hi - i_lo)[None, :]*_RAMP_W[:, None]
+    return np.mean(dev.vf(grid, Tj)*grid, axis=0)
 SQRT2 = np.sqrt(2.0)
 
 def transient_tj(p_theta, fline, foster, t_case, periods=12, span=None):
@@ -194,6 +222,13 @@ class Bridge:
     rdson_bottom_25: float = 0.020; rdson_bottom_tj: tuple = ((25,125),(1.0,1.5))
     qg_bottom: float = 0.0; vg_bottom: float = 12.0          # bottom sync-FET gate (line-freq)
     qrr: float = 0.0
+    # Reverse leakage vs T_j (PENDING B18). Diode and Mosfet both carried one; Bridge did not, so
+    # a bridge datasheet's I_R had nowhere to go and the `diodes_inc_rectifier` template used to
+    # map it onto the diode-only key, where it parsed and was then silently dropped.
+    # Magnitude is small — the two blocking legs see the LINE voltage, not the bus, so it is
+    # 2*mean(|v_line|)*I_R ~ 5 mW at 264 Vac and 10 uA — but "small" and "absent" are different
+    # claims, and only one of them can be checked.
+    irev_curve: Optional[tuple] = None
     rth_jc: float = 1.0; rth_cs: float = 0.5
     rth_jc_bottom: float = 0.8; rth_cs_bottom: float = 0.5
     zth_foster: list = field(default_factory=list)
@@ -211,6 +246,12 @@ class Bridge:
         # Optional line-frequency bridge recovery. Normally NEGLIGIBLE vs the switching stage and
         # independent of current waveform -- a placeholder, not a high-fidelity recovery model.
         rr = 2.0*self.qrr*Vpk*(2.0*fline)
+        # B18. Blocking loss. In a full-wave bridge two legs conduct while two block, and the
+        # blocking pair stands off the instantaneous LINE voltage — mean |v_line| = 2*Vpk/pi over
+        # the cycle — not the DC bus. Taken at the top-side junction temperature, which is the one
+        # the leakage curve is indexed on and the hotter of the two.
+        leak = (2.0*(2.0*Vpk/np.pi)*float(curve(Tj_top, *self.irev_curve))
+                if self.irev_curve else 0.0)
         if self.topology == "sync_bottom":
             n_top = max(self.n_parallel_top, 1)
             # worst-die current fraction: ideal 1/n unless a sharing derate is declared
@@ -238,7 +279,7 @@ class Bridge:
             bot    = mean(v*i_fet)          # bypass-FET channel share
             bot_bd = mean(v*i_bd)           # bottom-diode share (nonzero only past the knee)
             gate_bot = self.qg_bottom*self.vg_bottom*2.0*fline*self.n_parallel_bottom
-            return {"total": top+bot+bot_bd+gate_bot+rr, "top": top+rr, "bottom": bot+gate_bot,
+            return {"total": top+bot+bot_bd+gate_bot+rr+leak, "top": top+rr+leak, "bottom": bot+gate_bot,
                     "bottom_bd": bot_bd,
                     "ndev_top": n_top, "ndev_bot": self.n_parallel_bottom,
                     # bridge PACKAGES carrying the diode losses (thermal is per package)
@@ -246,7 +287,7 @@ class Bridge:
         n_par = max(self.n_parallel, 1)
         a = min(max(self.share_worst or 1.0/n_par, 1.0/n_par), 1.0)   # worst-die share derate
         idev = i_in*a
-        tot = 2.0*mean(self.vf(idev,Tj_top)*i_in + (self.rd*a)*i_in**2) + rr
+        tot = 2.0*mean(self.vf(idev,Tj_top)*i_in + (self.rd*a)*i_in**2) + rr + leak
         # 'diode' topology: n_parallel=1 is one package; n_parallel=2 is the split dual-bridge
         # arrangement (each package permanently carries ONE arm = total/2).
         return {"total": tot, "top": tot, "bottom": 0.0, "bottom_bd": 0.0,
@@ -332,10 +373,15 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
     ms_fet = np.zeros_like(theta); ms_dio = np.zeros_like(theta)
     i_on = np.zeros_like(theta); i_off = np.zeros_like(theta)
     i_d_density = np.zeros_like(theta); i_d_repr = np.zeros_like(theta); rr_active = np.ones_like(theta)
+    # Diode conduction ramp per line angle (B17) and the pre-turn-on switch-node voltage (B16).
+    d_cond = np.zeros_like(theta); i_lo = np.zeros_like(theta); i_hi = np.zeros_like(theta)
+    v_pre = np.full_like(theta, Vo)
     msc = i_ch**2 + di**2/12.0
     ms_fet[ccm] = msc[ccm]*d[ccm]; ms_dio[ccm] = msc[ccm]*(1.0-d[ccm])
     i_on[ccm] = np.maximum(i_ch[ccm]-di[ccm]/2.0, 0.0); i_off[ccm] = i_ch[ccm]+di[ccm]/2.0
     i_d_density[ccm] = i_ch[ccm]*(1.0-d[ccm]); i_d_repr[ccm] = i_ch[ccm]
+    # CCM: the diode carries the inductor current for (1-d), ramping DOWN from i_off to i_on.
+    d_cond[ccm] = 1.0-d[ccm]; i_lo[ccm] = i_on[ccm]; i_hi[ccm] = i_off[ccm]
     if np.any(dcm):
         v = vin[dcm]; ich = np.maximum(i_ch[dcm],1e-9); Tsw = 1.0/fsw
         ton = np.sqrt(ich*2.0*L_op*Tsw*(Vo-v)/(v*Vo)); Ip = v*ton/L_op; toff = Ip*L_op/(Vo-v)
@@ -343,6 +389,15 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         ms_fet[dcm] = Ip**2*d1/3.0; ms_dio[dcm] = Ip**2*d2/3.0
         i_on[dcm] = 0.0; i_off[dcm] = Ip
         i_d_density[dcm] = 0.5*Ip*d2; i_d_repr[dcm] = (2.0/3.0)*Ip; rr_active[dcm] = 0.0
+        # DCM: the diode ramps from Ip to zero over d2.
+        d_cond[dcm] = d2; i_lo[dcm] = 0.0; i_hi[dcm] = Ip
+        # B16. Once the inductor current reaches zero the diode stops conducting and the switch
+        # node rings, settling toward the input voltage — so at the MOSFET's next turn-on the
+        # drain is at v, not at V_OUT, and the diode's junction charge is taken from there.
+        # Settling to v is the conservative choice: an undamped node reaches 2v - V_OUT at the
+        # first valley, which is lower still (and often clamped at zero), so this understates the
+        # correction rather than inventing a ringing phase the model does not track.
+        v_pre[dcm] = np.minimum(v, Vo)
 
     eta_dummy, Tj_fet, Tj_dio, Tj_brT, Tj_brB = 0, 110.0, 110.0, 95.0, 95.0
     for _ in range(80):
@@ -356,7 +411,10 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         P_gate = fsw*mos.qg*mos.k_qg*mos.vg_drive
         P_leak_fet = mos.p_leak(Vo, Tj_fet, avg(1.0-d))
 
-        P_cond_dio = avg(dio.vf(i_d_repr, Tj_dio)*i_d_density + dio.rd*ms_dio)
+        # B17: v_F(i)*i integrated across the ripple triangle, not sampled once at its mid-current.
+        # r_d*ms_dio already carries the linear part (ms_dio includes di^2/12), so only the curve
+        # term moves. Reduces exactly to the old expression for a single-point forward curve.
+        P_cond_dio = avg(d_cond*vf_i_ramp(dio, i_lo, i_hi, Tj_dio) + dio.rd*ms_dio)
         didt = mos.didt(i_off, Vo); Qrr = dio.qrr_eff(i_off, didt, Tj_dio)
         if dio.is_sic:
             # SiC Schottky: no minority-carrier reverse recovery. Its junction-capacitance charge
@@ -367,7 +425,13 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
             # in that capacitance and is returned at the next turn-off, when the inductor charges
             # the switch node. What the MOSFET actually dissipates is the difference, and for
             # C_j ~ v^-m that difference is exactly V*Q_c/(2-m). At m = 0 this IS 0.5*V*Q_c.
-            P_rr_to_fet = fsw*Vo*dio.qc*dio.k_qc/(2.0 - min(dio.cj_grading, 0.95))
+            # B16. Per line angle, at the voltage the node is ACTUALLY at when the FET turns on.
+            # For C_j(v) = C0*v^-m the stored charge scales as (v/Vo)^(1-m), so the dissipated
+            # energy v*Q_c(v)/(2-m) scales as (v/Vo)^(2-m). In CCM v_pre = V_OUT and this is
+            # identical to the previous scalar; in DCM the drain has already resonated below
+            # V_OUT, where charging it at full V_OUT overstated the term.
+            _m_cj = min(dio.cj_grading, 0.95)
+            P_rr_to_fet = fsw*dio.qc*dio.k_qc*avg(v_pre*(v_pre/Vo)**(1.0 - _m_cj))/(2.0 - _m_cj)
             P_sw_dio = fsw*dio.e_fr
         else:
             E_rec = Qrr*Vo

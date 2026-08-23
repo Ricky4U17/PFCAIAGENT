@@ -910,7 +910,8 @@
     {
       "key": "I_rev_vs_Tj",
       "si_unit": "A", "display_unit": "A",
-      "device_classes": ["sic_schottky", "si_diode"],
+      "device_classes": ["sic_schottky", "si_diode",
+      "bridge_rectifier"],
       "source": "datasheet", "required": false, "is_curve": true,
       "condition_qualified": true, "conditions": ["V_R", "T_j"],
       "consumed_by": ["loss_engine"],
