@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`3202fa1` C253**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`abe6d56` C254**, on `master`.
 
 **PENDING_ITEMS.md was audited against the code at C252** — read its header block before working
 from it. The `DATA` section (A1–A7) is exact; four entries were stale and are fixed or closed; five
