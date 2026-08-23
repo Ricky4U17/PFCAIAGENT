@@ -931,6 +931,20 @@ def _thermal_section(story, traces, thermal):
         ("T<sub>j,diode</sub>", lambda tr: f"{_f(tr['Tj_dio'],1)}{_DEG}C"),
         ("T<sub>j,bridge</sub>", lambda tr: f"{_f(tr['Tj_brT'],1)}{_DEG}C"),
     ], traces)
+    # P_SIGMA HERE IS NOT THE SEMICONDUCTOR TOTAL OF SECTION 7.8, and the difference is gate drive.
+    # A designer reconciling the two chapters found the ~0.1 W gap and reasonably read it as an
+    # arithmetic error; it is a real physical distinction that the report simply never stated
+    # (C250, designer-reported).
+    annotation(story, "NOTE",
+        "<b>Why P<sub>&#931;</sub> here is smaller than the semiconductor total in Table 7.8b.</b> "
+        "The heatsink carries only what is dissipated IN THE PACKAGES bolted to it &#8212; MOSFET "
+        "and diode conduction, switching, output-capacitance and recovery loss, plus the bridge. "
+        "<b>Gate-drive power is excluded</b>, because the gate charge is dissipated in the driver "
+        "IC's output stage and the external R<sub>g</sub> resistors, not in the MOSFET die: it "
+        "never crosses the junction-to-case path and cannot raise T<sub>j</sub>. Table 7.8b DOES "
+        "include it, because that table accounts for every watt drawn from the supply, wherever it "
+        "ends up. Both are correct; they answer different questions, and on this design they "
+        "differ by the gate-drive term alone.", CH)
 
 
 def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_limit=None, extra=None):

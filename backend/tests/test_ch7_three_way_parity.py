@@ -186,3 +186,45 @@ def test_worst_case_line_voltages_point_at_the_right_rows(built):
         assert round(float(su["worst_loss_Vac"])) == max(pp, key=lambda v: pp[v]["P_SEMI_total"])
     if su.get("worst_TjFET_Vac") is not None:
         assert round(float(su["worst_TjFET_Vac"])) == max(pp, key=lambda v: pp[v]["Tj_FET"])
+
+
+def test_gate_drive_is_counted_once_and_consistently(built):
+    """C250, designer-reported. Gate drive belongs in some totals and not others; both must be
+    deliberate, and the two that DO include it must agree.
+
+    The designer reconciled Table 7.4 against the OLD Table 7.8a and found ~0.1 W missing: 7.4's
+    MOSFET TOTAL is `P_FET_total + P_gate_driver` while 7.8a's MOSFET row was `P_FET_max`, which
+    excludes gate. C249 replaced 7.8a; this pins the two together so they cannot drift apart again.
+
+    The OTHER difference the designer found is NOT a defect, and is asserted here as intended
+    behaviour: the heatsink solve uses `Psemi_main = P_fet_total + P_dio_total` - no gate - because
+    the gate charge is dissipated in the driver IC and the external R_g, never crossing the
+    junction-to-case path. Section 7.6.1 now states that instead of leaving a 0.1 W puzzle.
+    """
+    dash = "\u2014"
+    t74 = _parse(built["txt"], "Table 7.4 " + dash, r"W?", 6)
+    t8a = _parse(built["txt"], "Table 7.8a " + dash, r"W?", 4)
+    assert t74 and t8a, "Table 7.4 or 7.8a did not render"
+
+    common = sorted(set(t74) & set(t8a))
+    assert len(common) >= 9, f"parsed only {len(common)} comparable rows"
+    for v in common:
+        assert t74[v][5] == pytest.approx(t8a[v][0], abs=0.02), (
+            f"{v} Vac: Table 7.4 MOSFET total {t74[v][5]} W but Table 7.8a says {t8a[v][0]} W "
+            "- one of them has dropped gate drive")
+
+    # 7.4 must add across: the five mechanism columns ARE the total
+    for v, cells in t74.items():
+        assert sum(cells[:5]) == pytest.approx(cells[5], abs=0.02), (
+            f"{v} Vac: Table 7.4 columns sum to {sum(cells[:5]):.2f} W but its TOTAL says "
+            f"{cells[5]:.2f} W")
+
+    # 7.8a must add across too, and its total is what 7.8b carries
+    for v, cells in t8a.items():
+        assert sum(cells[:3]) == pytest.approx(cells[3], abs=0.02), (
+            f"{v} Vac: Table 7.8a components sum to {sum(cells[:3]):.2f} W but its Total says "
+            f"{cells[3]:.2f} W")
+
+    # and the thermal path must deliberately EXCLUDE gate drive, in writing
+    assert "Gate-drive power is excluded" in " ".join(built["txt"].split()), \
+        "Section 7.6.1 no longer explains why its P_sigma is smaller than Table 7.8b's total"
