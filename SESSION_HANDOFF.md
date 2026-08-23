@@ -1,6 +1,6 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`eab9428` C248**, on `master`.
+**Start here after a restart.** Last updated **2026-08-22**, head = **`d26b1d0` C250**, on `master`.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
@@ -397,6 +397,29 @@ not just against its PENDING header:
 **Two of the five entries on this list were picked by the designer and turned out to be already
 done** (B5, then Group 2) — both closed in the SAME commit, C178, which nobody removed from the
 list. If an entry looks small and old, verify it is still open before writing any code.
+
+---
+
+## Gate drive: in the budget, out of the thermal path
+
+Settled at C249-C250 after the designer traced a 0.1 W discrepancy by hand. Gate-drive power is
+dissipated in the driver IC and the external R_g, **not in the MOSFET die**, so:
+
+- **IN** the loss budget — `P_SEMI_total`, Table 7.4's MOSFET TOTAL, Table 7.8a's MOSFET column,
+  Table 7.8b's Semicond. column. Every watt drawn from the supply is accounted somewhere.
+- **OUT** of the thermal solve — `Psemi_main = P_fet_total + P_dio_total` feeds the heatsink and
+  T_j. Gate charge never crosses the junction-to-case path.
+
+Both are correct and they differ by exactly the gate term. Section 7.6.1 states this; do not
+"reconcile" them. `test_gate_drive_is_counted_once_and_consistently` guards all of it.
+
+**LEAKAGE IS NOT A SEPARATE TERM** — it lives inside `P_fet_each` (cond+sw+Coss+rr+leak), so it is
+never missing from a MOSFET total. Only gate sits outside `P_FET_total`.
+
+**A summary maximum is not an operating point.** `P_FET_max`, `P_DIODE_max` and `P_BRIDGE_max` are
+each an independent max over the line sweep and can come from three different voltages, while
+`P_SEMI_max` is the max of the SUM at a fourth. Table 7.8a presented all four as one condition and
+was 2.81 W out. Never build a "worst case" row from independent per-component maxima.
 
 ---
 

@@ -10003,3 +10003,79 @@ ambient and by more than 2 % across a 30 C swing — a near-identical pair means
 not reaching the resistance. Suite 661 → 662 passed / 3 skipped, **no existing expectation needed
 revision**.
 
+# C249 - Table 7.8a listed four numbers from four different operating points
+
+Designer-reported. The table read as a single worst-case condition and was nothing of the kind:
+
+```python
+[["MOSFET loss (all ch)", summary["P_FET_max"]],
+ ["Diode loss (all ch)",  summary["P_DIODE_max"]],
+ ["Bridge loss",          summary["P_BRIDGE_max"]],
+ ["Total semiconductor",  summary["P_SEMI_max"], "@ {worst_loss_Vac} Vac"]]
+```
+
+Each `P_*_max` is that component's largest value ANYWHERE on the sweep, taken independently:
+
+| | value | at |
+|---|---|---|
+| `P_FET_max` | 17.56 W | **90 Vac** |
+| `P_DIODE_max` | 15.20 W | 180 Vac |
+| `P_BRIDGE_max` | 35.48 W | 180 Vac |
+| sum | **68.25 W** | — |
+| `P_SEMI_max` | **65.44 W** | 180 Vac — the max of the SUM, a fifth quantity |
+
+The rows disagreed with their own total by **2.81 W** under a caption naming one voltage. The
+designer spotted it from the other side — *"total 54.41 W at 90 Vac but it considers diode loss for
+180 Vac"*. And the MOSFET row omitted **gate drive**, which sits outside `P_FET_total`.
+
+**Replaced as the designer proposed** with one row per operating point: MOSFET (incl. gate), Diode,
+Bridge, Total. The columns ADD ACROSS, and the Total column is the same `P_SEMI_total` that Section
+7.8b carries — verified equal at all nine points. The interpretation names where each component
+peaks, so "the largest total is not the sum of the largest parts" is stated rather than left looking
+like an arithmetic error. The three T_j rows moved to a NOTE: they had the same defect in miniature,
+and Table 7.6 already gives them per point with verdicts.
+
+**On the first reported item** — "GUI total missing MOSFET gate + leak" — I could not reproduce it.
+All three places a total appears were checked: the Results per-point table (FET column is
+`P_FET_total + P_gate_driver`; FET+Diode+Bridge equals SEMI exactly), the summary card
+(`P_SEMI_max`, includes gate), and the MOSFET sub-tab (explicit Gate and Leakage columns). My read
+is that this WAS 7.8a seen from the other direction.
+
+# C250 - the 0.1 W the designer chased was two things, one already fixed and one never explained
+
+The designer traced ~0.1 W through Chapter 7 by hand and found it twice. Both real; neither an
+engine error.
+
+## 1. Table 7.4 said 15.05 W, Table 7.8a and the GUI said 14.96 W
+
+7.4's TOTAL is `P_FET_total + P_gate_driver`; the OLD 7.8a used `P_FET_max`, the max of
+`P_FET_total` alone. They differed by exactly the gate term — the 0.09 W in the designer's own
+"Gate+Leak" column. **Already fixed by C249**; verified on the current build that 7.4 and 7.8a agree
+at all nine points, delta 0.00.
+
+The designer's instinct named "gate + leak" and was half right: **leakage was never missing**, it
+sits inside `P_fet_each` (cond+sw+Coss+rr+leak). Gate was the only term that moved between totals.
+
+## 2. Section 7.6.1 used 54.3 W for the heatsink, Table 7.8b said 54.4 W
+
+**Not a defect.** `Psemi_main = P_fet_total + P_dio_total` deliberately excludes gate drive, because
+the gate charge is dissipated in the driver IC's output stage and the external R_g resistors, not in
+the MOSFET die — it never crosses the junction-to-case path and cannot raise T_j. Table 7.8b
+includes it because that table accounts for every watt drawn from the supply.
+
+Both correct, answering different questions — and **the report never said so**, which is why a
+careful reader spent time on it. Section 7.6.1 now carries a note naming gate drive as the whole of
+the difference.
+
+## Checking "deeply at each and every step"
+
+Decomposed the MOSFET total field by field against the engine: `cond + sw + Coss + rr + leak`
+reconciles with `P_FET_total` to **0.000000 W**, and the five printed columns reconcile with the
+printed TOTAL to **0.000000 W**. The engine arithmetic is exact; the 0.1 W was entirely about which
+totals carry gate drive.
+
+VERIFIED `test_gate_drive_is_counted_once_and_consistently` pins four properties: 7.4's total equals
+7.8a's MOSFET column at every point; 7.4's five columns add to its total; 7.8a's three components
+add to its total; and 7.6.1 still explains the exclusion in words. Dropping gate from 7.8a again
+fails it reproducing the designer's exact observation. Suite 662 → 663 passed / 3 skipped.
+
