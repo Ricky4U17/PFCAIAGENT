@@ -416,7 +416,7 @@ percent, this is documentation-only; if it diverges like the fixture, it is a li
   advisory box either disappears or is reworded to match the chosen model.
 - **Do NOT** silently make the divergence check a gate — it would block designs that are correct.
 
-### B12. Guard against unrenderable entities (black squares)
+### B12. Guard against unrenderable entities (black squares)  `DONE at C252`
 Item 6.3 traced the designer's "black square" comments to two numeric entities whose codepoints
 have NO glyph in Helvetica's WinAnsi encoding AND are absent from ReportLab's symbol-substitution
 table, so ReportLab draws a filled box: `&#8209;` (U+2011 non-breaking hyphen) and `&#9679;`
@@ -802,7 +802,7 @@ release sign-off and must be listed as a blocker, but the designer can always st
 This is now the general rule behind [[feedback-selection-never-blocked]] — D1 below is one instance of
 it, and it is the answer to the MOV review's request for BLOCKED on a negative clamp margin.
 
-### D1. Hot restart — DECISION-REQUIRED, not BLOCKED  *(instance of D0b)*
+### D1. Hot restart — DECISION-REQUIRED, not BLOCKED  `SETTLED` *(instance of D0b)*
 `specs/NTC/NTC Improvement.docx` asks for hot restart to be marked **BLOCKED** until a restart policy
 exists. We implement it as **DECISION-REQUIRED**: it gates the final release sign-off but never blocks
 NTC part selection.
