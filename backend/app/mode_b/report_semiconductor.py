@@ -1044,11 +1044,24 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                    r"d(\theta)=1-\dfrac{\sqrt{2}\,V_{AC}\sin\theta}{V_{OUT}},\qquad "
                    r"\Delta I_{L,pp}=\dfrac{V_{in,pk}\,D_{pk}}{L_{\varphi}(V_{AC})\,f_{sw}}"],
            number="7.1", ch=CH)
+    # C5. The caption must describe the inductance THIS build actually used. It stated the
+    # Chapter-3 bias basis unconditionally, and a standalone build with no approved inductor has no
+    # such curve — it runs on a flat nominal, so the caption was claiming a basis that was not in
+    # force and Table 7.1 quietly disagreed with the same table in the combined report.
+    _L_curve_live = bool((design or {}).get("L_phi_curve"))
+    _l_basis = (
+        "&#916;I<sub>L,pp</sub> uses the bias-adjusted per-point inductance "
+        "L<sub>&#966;</sub>(V<sub>AC</sub>) from Chapter 3 &#8212; L<sub>&#966;</sub> is lowest "
+        "where the peak current (DC bias) is highest and recovers as the current falls."
+        if _L_curve_live else
+        "<b>&#916;I<sub>L,pp</sub> uses a FLAT nominal inductance</b>, because this build was given "
+        "no approved inductor design and therefore no per-point bias curve. The combined report "
+        "uses the Chapter-3 curve L<sub>&#966;</sub>(V<sub>AC</sub>), which is lower at low line "
+        "where the DC bias is highest &#8212; so the ripple, and every loss that follows it, will "
+        "differ slightly from the same table in the full document. Approve the Step-7 inductor and "
+        "regenerate to get the as-built basis.")
     data_table(story, "7.1", "Operating Points (identical to Chapters 2, 3 & 5)",
-        "Currents from the Step-2 / Step-5 equations (3 decimals). &#916;I<sub>L,pp</sub> uses the "
-        "bias-adjusted per-point inductance L<sub>&#966;</sub>(V<sub>AC</sub>) from Chapter 3 — "
-        "L<sub>&#966;</sub> is lowest where the peak current (DC bias) is highest and recovers as the "
-        "current falls.",
+        "Currents from the Step-2 / Step-5 equations (3 decimals). " + _l_basis,
         ["V_AC", "P_out", "&#951; %", "PF", "I_in,rms", "I_&#966;,rms", "&#916;I_L,pp", "L_&#966;", "DCM%"],
         [[f"{s2['Vin_rms'][i]:.0f} V", f"{r['Po']:.0f} W", _f(r['eta_in_%'], 1), _f(r['PF_in'], 4),
           f"{_f(s2['Iin_rms'][i], 3)} A", f"{_f(iph[i], 3)} A",

@@ -859,7 +859,7 @@ does nothing.
 
 ---
 
-### C5. The standalone Chapter 7 and the combined report disagree — flat L vs the bias curve
+### C5. The standalone Chapter 7 and the combined report disagreed — flat L vs the bias curve  `FIXED at C255`
 **Found by the designer, 2026-08-23,** comparing Table 7.1 between the two documents they had just
 downloaded. The L<sub>φ</sub> column reads per-point in one and a constant in the other:
 
@@ -899,7 +899,19 @@ in that build there is no Chapter 3 and L is flat.
    report must SAY the inductance is a flat nominal rather than printing the Chapter-3 caption.
 4. Delete or correct the docstring's "cannot disagree" claim.
 
-- **Done when:** Table 7.1 and every loss table match row for row between the two documents for the
+**FIXED at C255.** `_apply_asbuilt_L` already existed and was already called from three
+endpoints — including `/semiconductor/calculate`, so the GUI and the combined report had agreed all
+along. The standalone report endpoint was the one path that never called it, because its request
+model had no `approved_design` to call it with; and on the frontend `downloadCh7` copied six fields
+by name out of `body()` and so dropped the seventh, which `body()` carries with a comment saying it
+exists to prevent exactly this. **Two stale lists, one at each end of the same request.**
+
+Verified: Table 7.1's L<sub>φ</sub> column is now identical in both documents at all nine points —
+`134 146 150 154 130 137 142 145 150 µH`. With no approved inductor the standalone build prints a
+flat nominal *and says so in bold*, instead of repeating the Chapter-3 caption over a basis that is
+not in force.
+
+- **Superseded done-when:** Table 7.1 and every loss table match row for row between the two documents for the
   same design, asserted by a test that builds both and diffs them — the check that would have
   caught this, and which no existing test performs (`test_ch7_three_way_parity` builds only the
   standalone one).

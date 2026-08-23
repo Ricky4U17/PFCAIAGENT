@@ -790,17 +790,34 @@ class _SemiReportReq(BaseModel):
     thermal:  Dict[str, Any] = {}
     tj_limit: Optional[Dict[str, Any]] = None
     extra:    Dict[str, Any] = {}
+    # PENDING C5. Without this the standalone chapter runs on a FLAT inductance while the combined
+    # report runs on the as-built bias curve, and the two documents print different losses.
+    approved_design: Optional[Dict[str, Any]] = None   # inductor design → as-built per-point L
 
 
 @app.post("/mode-b/semiconductor/report", tags=["mode-b"])
 def semiconductor_report(req: _SemiReportReq):
     """Chapter 7 on its own, as a PDF.
 
-    The full document is ~190 pages and takes minutes to build; checking a loss calculation should
-    not require either. This is the same builder the combined report calls, so the two cannot
-    disagree — it is the same chapter, not a second rendering of it."""
+    The full document is ~210 pages and takes minutes to build; checking a loss calculation should
+    not require either.
+
+    SAME BUILDER IS NOT THE SAME DOCUMENT. This used to claim the two "cannot disagree — it is the
+    same chapter, not a second rendering of it", and that was false in the way that matters: the
+    builder was shared but the INPUTS were not. `/documentation/generate-report` enriched the
+    design with the as-built per-point inductance and this endpoint did not, so Table 7.1 printed a
+    flat 127 µH against the combined report's 102–136 µH curve and every loss that depends on the
+    ripple followed it (worst case 54.64 W here vs 54.82 W there). The designer found it by reading
+    both documents side by side; no test compared them, and the docstring is why nobody looked.
+
+    Both paths now go through `_apply_asbuilt_L`, and `test_ch7_standalone_matches_combined.py`
+    builds both and diffs them rather than trusting this sentence."""
     from app.mode_b.report_semiconductor import build_semiconductor_report
     try:
+        # C5: same enrichment the Results tab and the combined report apply. A no-op when the
+        # caller has no approved inductor yet (part screening before Step 7), which is the case
+        # the report itself has to declare rather than silently show a nominal as if measured.
+        _apply_asbuilt_L(req.design, req.approved_design)
         pdf = build_semiconductor_report(req.design, req.mosfet, req.diode, req.bridge,
                                          req.thermal, req.tj_limit, req.extra or None)
         return Response(content=pdf, media_type="application/pdf", headers={

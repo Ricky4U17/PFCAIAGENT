@@ -10337,3 +10337,53 @@ Note the report deliberately says the term is small AND prints it. "Negligible" 
 reader should be able to check, not one the report should ask them to take on trust - and leakage
 rises steeply with junction temperature, so it is precisely the kind of term that stops being
 negligible on a hotter design than this one.
+
+# C255 (C5) - the standalone Chapter 7 ran on a flat inductance; the combined report did not
+
+The designer found it by reading Table 7.1 in the two documents they had just downloaded. L_phi was
+per-point in one and a constant in the other:
+
+    combined    102  120  128  136  111 uH ...
+    standalone  127  127  127  127  127 uH
+
+Not cosmetic. The ripple follows the inductance, the RMS currents follow the ripple, and the losses
+follow those: dI_L,pp 12.115 A vs 9.689 A at 90 V, worst-case semiconductor 54.82 W vs 54.64 W,
+MOSFET conduction 0.15 W apart at 90 V. Same chapter, two answers.
+
+## Cause
+
+`_apply_asbuilt_L(design, approved_design)` already existed and was already called from three
+endpoints - including `/semiconductor/calculate`, so the GUI and the combined report agreed all
+along. `/mode-b/semiconductor/report` was the one path that never called it, because
+`_SemiReportReq` had no `approved_design` field to call it with. And on the frontend, `downloadCh7`
+built its request by copying six fields BY NAME out of `body()`, so it dropped the seventh -
+`approved_design` - which `body()` carries with a comment saying it exists to stop exactly this
+divergence.
+
+Two lists, both stale in the same way, at the two ends of one request.
+
+## The docstring is the reason nobody looked
+
+    """...This is the same builder the combined report calls, so the two cannot disagree -
+       it is the same chapter, not a second rendering of it."""
+
+Same builder, different inputs. The sentence was true about the code and false about the outcome,
+and it sat directly above the endpoint that was missing the enrichment. It now says what actually
+happened and points at the test instead of asserting the property.
+
+## Fix
+
+  1. `_SemiReportReq` gains `approved_design`; the endpoint calls `_apply_asbuilt_L` like the other
+     three. One helper, not a copy.
+  2. `downloadCh7` sends `body()` whole instead of a hand-picked subset.
+  3. Table 7.1's caption now describes the inductance THIS build used. With a curve it states the
+     Chapter-3 bias basis as before; without one it says, in bold, that the run is on a flat
+     nominal, that the combined report is not, and that approving the Step-7 inductor and
+     regenerating gives the as-built basis. A caption asserting a basis that is not in force is how
+     a wrong number reads as a right one.
+
+VERIFIED end to end: standalone WITHOUT an approved design gives a flat 235 uH at all nine points
+and prints the flat-basis caption; WITH one it gives 134/146/150/154/130/137/142/145/150 uH and the
+Chapter-3 caption. `tests/test_ch7_standalone_matches_combined.py` builds both documents and
+compares them - the check no existing test performed, because `test_ch7_three_way_parity` builds
+only the standalone one and so could never see a disagreement between two documents.

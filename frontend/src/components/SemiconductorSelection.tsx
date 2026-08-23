@@ -592,9 +592,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
   const downloadCh7 = async () => {
     setRptBusy(true); setErr(null)
     try {
-      const b = body()
-      const blob = await semiconductorReport({ design: b.design, mosfet: b.mosfet, diode: b.diode,
-        bridge: b.bridge, thermal: b.thermal, tj_limit: b.tj_limit } as any)
+      // Send the WHOLE body, not a hand-picked subset. It used to copy six fields by name and so
+      // silently dropped `approved_design` — the one field body() carries specifically to keep the
+      // as-built per-point inductance in play. Without it the standalone chapter ran on a flat L
+      // and printed different losses from the same chapter in the combined report (PENDING C5).
+      // A field-by-field copy is a list, and a list goes stale the moment a field is added.
+      const blob = await semiconductorReport(body())
       // Through download.ts, never a local anchor dance: this path revoked the object URL on
       // the statement after click() and never put the anchor in the document — both halves of
       // the silent-download bug (PENDING C2), on the largest single-chapter PDF the GUI emits.
