@@ -1510,17 +1510,46 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
     # ── 7.8 Summary + cross-check ────────────────────────────────────────────
     sub_h(story, "7.8", "Summary and Efficiency Cross-Check", CH)
     wr = max(rows, key=lambda r: r["P_SEMI_total"])   # worst-case operating point
-    data_table(story, "7.8a", "Worst-Case Semiconductor Loss and Margin",
-        f"Worst semiconductor dissipation occurs at {wr['Vac']:.0f} Vac.",
-        ["Quantity", "Worst-case value", "Limit / margin"],
-        [["MOSFET loss (all ch)", f"{_f(summ['P_FET_max'])} W", "—"],
-         ["Diode loss (all ch)", f"{_f(summ['P_DIODE_max'])} W", "—"],
-         ["Bridge loss", f"{_f(summ['P_BRIDGE_max'])} W", "—"],
-         ["Total semiconductor loss", f"{_f(summ['P_SEMI_max'])} W", f"@ {summ['worst_loss_Vac']:.0f} Vac"],
-         ["Tj FET (max)", f"{_f(summ['Tj_FET_max'],0)} &#176;C", f"limit {tj_limit['fet']} &#176;C"],
-         ["Tj Diode (max)", f"{_f(summ['Tj_DIODE_max'],0)} &#176;C", f"limit {tj_limit['diode']} &#176;C"],
-         ["Tj Bridge (max)", f"{_f(summ['Tj_BRIDGE_max'],0)} &#176;C", f"limit {tj_limit['bridge']} &#176;C"]],
-        col_widths=[CW*0.40, CW*0.30, CW*0.30], ch=CH)
+    # PER OPERATING POINT, not four independent maxima. This table used to list
+    # summary["P_FET_max"], ["P_DIODE_max"] and ["P_BRIDGE_max"] - each the largest value that
+    # component reaches ANYWHERE on the line sweep, so on the reference design it showed a MOSFET
+    # figure from 90 Vac beside a diode and a bridge from 180 Vac, under a caption naming a single
+    # worst-case voltage. The three added to 68.25 W while the Total row (the max of the SUM, a
+    # different quantity again) said 65.44 W - 2.81 W apart, with nothing to say why. The MOSFET
+    # row also omitted gate drive, which lives outside P_FET_total.
+    #
+    # Every row is now ONE operating point, the columns add across, and the Total column is the
+    # same P_SEMI_total that Section 7.8b's Semicond. column carries (C249, designer-reported).
+    _wi = rows.index(wr)
+    _sa_rows = [[f"{r['Vac']:.0f} V",
+                 f"{_f(float(r['P_FET_total']) + float(r.get('P_gate_driver') or 0.0))}",
+                 f"{_f(r['P_DIODE_total'])}",
+                 f"{_f(r['P_BRIDGE_total'])}",
+                 f"{_f(r['P_SEMI_total'])} W"] for r in rows]
+    data_table(story, "7.8a", "Semiconductor Loss by Component vs Line Voltage (W)",
+        "One row per operating point, so the columns ADD ACROSS to the total. The MOSFET column "
+        "includes gate drive, as Table 7.4 does &#8212; gate charge is dissipated in the driver and "
+        "the gate resistors, not the channel, but it is drawn from the supply and belongs in the "
+        "budget. The <b>Total</b> column is the figure Section 7.8b carries in its Semicond. "
+        "column, and the amber row is the worst-case operating point.",
+        ["V_AC", "MOSFET (all ch, incl gate)", "Diode (all ch)", "Bridge", "Total semiconductor"],
+        _sa_rows, col_widths=[CW*0.14, CW*0.27, CW*0.20, CW*0.17, CW*0.22],
+        worst_rows=[_wi], ch=CH,
+        interpretation=(
+            f"Worst-case semiconductor dissipation is <b>{_f(wr['P_SEMI_total'])} W at "
+            f"{wr['Vac']:.0f} V<sub>AC</sub></b> (amber). Each component peaks at its own line "
+            f"voltage &#8212; the MOSFET at {max(rows, key=lambda r: r['P_FET_total'])['Vac']:.0f} V, "
+            f"the diode at {max(rows, key=lambda r: r['P_DIODE_total'])['Vac']:.0f} V, the bridge at "
+            f"{max(rows, key=lambda r: r['P_BRIDGE_total'])['Vac']:.0f} V &#8212; so the largest "
+            f"TOTAL is not the sum of the largest parts, and only a single row is a real operating "
+            f"condition."))
+    annotation(story, "NOTE",
+        f"<b>Junction-temperature margin at the worst point.</b> "
+        f"T<sub>j</sub> FET {_f(summ['Tj_FET_max'],0)}&#176;C against a {tj_limit['fet']}&#176;C limit, "
+        f"diode {_f(summ['Tj_DIODE_max'],0)}&#176;C against {tj_limit['diode']}&#176;C, "
+        f"bridge {_f(summ['Tj_BRIDGE_max'],0)}&#176;C against {tj_limit['bridge']}&#176;C. These are "
+        f"maxima over the whole sweep and each may occur at a different line voltage; the per-point "
+        f"values and their verdicts are Table 7.6.", CH)
     body(story,
         "Because the design efficiency is an input, the total system loss is known exactly: "
         "P<sub>system</sub> = P<sub>out</sub>&#183;(1&#8722;&#951;)/&#951;. We now account for it component by "
