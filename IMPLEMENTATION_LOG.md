@@ -10312,3 +10312,28 @@ column, and the no-curve path is asserted bit-identical to before the field exis
 Worst-case P_SEMI 65.5616 -> 65.6022 W (+0.06 %), max |dTj| 0.056 degC. No verdict changes and no
 selection changes - these remove three known approximations rather than fixing wrong answers, which
 is exactly how they were logged.
+
+# C254 - the bridge blocking loss is now stated on the page, not just counted
+
+Found by comparing the designer's two built reports (yesterday vs today) rather than by reading
+code: C253's B18 leakage was real, was inside the bridge total, and the report never mentioned it.
+The designer's own bridge datasheet supplies an I_R(Tj) table, so the term was live at 17 mW and
+invisible - a reader could not tell whether it had been modelled, omitted, or already counted.
+B18's "done when" had asked for exactly this and I closed the entry without it.
+
+`Bridge.loss()` now returns `leak` and the sweep carries `P_BRIDGE_leak`, so the figure exists per
+operating point instead of being folded away. Section 7.3 states BOTH states explicitly:
+
+  with a curve : "Blocking (leakage) loss is included in the totals above ... 2*mean(|v_line|)*
+                 I_R(Tj) = 9.8 mW at worst (264 VAC, Tj 83 C)"
+  without one  : "not modelled for this part: its datasheet supplies no I_R(Tj) curve, and a single
+                 published leakage point cannot become one"
+
+Both branches are asserted, because the silent state is the dangerous one: a page that says
+neither reads exactly like a page where the term was forgotten. That is the whole reason this
+follow-up exists.
+
+Note the report deliberately says the term is small AND prints it. "Negligible" is a conclusion the
+reader should be able to check, not one the report should ask them to take on trust - and leakage
+rises steeply with junction temperature, so it is precisely the kind of term that stops being
+negligible on a hotter design than this one.

@@ -280,6 +280,7 @@ class Bridge:
             bot_bd = mean(v*i_bd)           # bottom-diode share (nonzero only past the knee)
             gate_bot = self.qg_bottom*self.vg_bottom*2.0*fline*self.n_parallel_bottom
             return {"total": top+bot+bot_bd+gate_bot+rr+leak, "top": top+rr+leak, "bottom": bot+gate_bot,
+                    "leak": leak,
                     "bottom_bd": bot_bd,
                     "ndev_top": n_top, "ndev_bot": self.n_parallel_bottom,
                     # bridge PACKAGES carrying the diode losses (thermal is per package)
@@ -291,6 +292,7 @@ class Bridge:
         # 'diode' topology: n_parallel=1 is one package; n_parallel=2 is the split dual-bridge
         # arrangement (each package permanently carries ONE arm = total/2).
         return {"total": tot, "top": tot, "bottom": 0.0, "bottom_bd": 0.0,
+                "leak": leak,
                 "ndev_top": 2*n_par, "ndev_bot": 0,
                 "n_packages": n_par}
     def power_theta(self, i_in, Tj_top, Tj_bot):
@@ -490,6 +492,9 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
         "P_D_leak":Nch*P_leak_dio,
         "P_BRIDGE_total":P_bridge, "P_BRIDGE_top":bl["top"], "P_BRIDGE_bottom":bl["bottom"],
         "P_BRIDGE_bottom_bd":bl.get("bottom_bd",0.0),   # bottom-diode share past the FET knee
+        # blocking (leakage) loss, B18. Zero unless the part's datasheet supplies an I_R(Tj) curve,
+        # and reported separately so "small" can be read off the page rather than assumed.
+        "P_BRIDGE_leak":bl.get("leak",0.0),
         "P_gate_driver":P_gate_total,
         "P_SEMI_total":P_semi, "P_SYSTEM_total":P_system, "P_OTHER_implied":P_system-P_semi,
         "Tj_FET":Tj_fet, "Tj_DIODE":Tj_dio, "Tj_BRIDGE_top":Tj_brT, "Tj_BRIDGE_bottom":Tj_brB,

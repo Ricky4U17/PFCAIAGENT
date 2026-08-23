@@ -206,6 +206,46 @@ def test_a_bridge_datasheets_leakage_reaches_the_engine():
         "a single leakage point must NOT become a curve — the slope would be invented")
 
 
+@pytest.mark.parametrize("with_curve", [False, True])
+def test_the_report_states_the_bridge_blocking_loss_either_way(with_curve):
+    """C253b. The leakage was real and inside the bridge total, and the report never mentioned it —
+    so a reader could not tell whether it was modelled, omitted, or already counted. Section 7.3
+    now says which, WITH the number when there is one.
+
+    Both branches are asserted because the silent state is the dangerous one: "we did not model it"
+    and "we modelled it and it is 10 mW" are different claims, and a page that says neither reads
+    identically to a page where the term was forgotten.
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    from pypdf import PdfReader
+    from app.mode_b.semiconductor import adapter as AD
+    from app.mode_b.report_semiconductor import build_semiconductor_report
+
+    P = AD.REFERENCE_PARTS
+    design = dict(AD.REFERENCE_DESIGN)
+    design.update({"eta": 0.95, "pf": 0.99, "V_GS_drive": 18.0, "R_g_on": 4.7,
+                   "R_g_off": 10.0, "R_th_cs": 0.3, "nch": 2})
+    thermal = dict(P["thermal"]); thermal["t_ambient"] = 50.0
+    bridge = dict(P["bridge"])
+    if with_curve:
+        bridge["irev_curve"] = [[25.0, 125.0], [1e-6, 35e-6]]
+
+    pdf = build_semiconductor_report(design, P["mosfet"], P["diode"], bridge, thermal,
+                                     {"fet": 150, "diode": 150, "bridge": 130})
+    text = "".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(pdf)).pages)
+
+    assert "Blocking (leakage) loss" in text, "Section 7.3 says nothing about blocking loss"
+    if with_curve:
+        assert "is included in the totals above" in text, (
+            "a bridge WITH a leakage curve must say the term is counted, and give the number")
+        assert "mW at worst" in text, "the milliwatt figure is missing from the note"
+    else:
+        assert "is not modelled for this part" in text, (
+            "a bridge with no leakage curve must say so — silence reads as 'already counted'")
+
+
 def test_the_registry_agrees_that_a_bridge_can_carry_a_leakage_curve():
     """`I_rev_vs_Tj` was declared for the two diode classes only, so a bridge datasheet's I_R had
     nowhere to go. Declaration and dataclass field must land together or `audit_device_classes`

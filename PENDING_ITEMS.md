@@ -671,9 +671,16 @@ engine returns 23.75 mW at 125 °C / 50 µA — the hand figure. A single publis
 The correct figure is `2 · mean(|v_line|) · I_R = 2 · (2·Vpk/π) · I_R` — **4.75 mW** at 373 Vpk and
 10 µA, matched to 1e-9 by the test against a hand calculation.
 
-Still small, and still zero for every catalogue part, because the workbook has no leakage column —
-the default path is bit-identical to before the field existed, which is asserted. "Small" and
-"absent" are different claims though, and only one of them can be checked.
+Still zero for every catalogue part, because the workbook has no leakage column — the default path
+is bit-identical to before the field existed, which is asserted.
+
+**Reported on the page at C254.** C253 left the term counted but invisible, and the entry's own
+"done when" had asked for the report to say something where bridge loss is reported. Found by
+diffing the designer's two built reports: their bridge datasheet *does* supply an I<sub>R</sub>(T<sub>j</sub>)
+table, so the term was live at 17 mW and mentioned nowhere. Section 7.3 now states both states —
+the figure and its basis when a curve exists, and an explicit "not modelled for this part, and one
+published point cannot become a curve" when it does not. Both branches asserted, because a page
+that says neither is indistinguishable from one where the term was forgotten.
 
 ### B22. Table 7.2e states no temperature conditions  `CODE` — *designer review comment 3*
 The last of the designer's four report-review comments (2026-08-19). Table 7.2e lists every engine

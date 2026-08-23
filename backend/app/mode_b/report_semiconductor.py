@@ -1351,6 +1351,31 @@ def build_semiconductor_story(story, design, mosfet, diode, bridge, thermal, tj_
                 "&#8212; the sensitivity of the result to how evenly they share is Table 7.3.2.")
     data_table(story, "7.3", "Bridge Loss vs Line Voltage", _cap, _hdr, _rws,
                col_widths=_cw, ch=CH)
+    # B18. Blocking loss is inside the totals above; say so, with the number, rather than leaving
+    # the reader to assume it is either absent or already counted. Both states are stated
+    # explicitly, because "we did not model it" and "we modelled it and it is 17 mW" are different
+    # claims and only one of them can be checked against the page.
+    _leak_w = max((r.get("P_BRIDGE_leak", 0.0) or 0.0) for r in rows) if rows else 0.0
+    if _leak_w > 0:
+        _leak_at = max(rows, key=lambda r: r.get("P_BRIDGE_leak", 0.0) or 0.0)
+        annotation(story, "NOTE",
+            "<b>Blocking (leakage) loss is included in the totals above.</b> Two of the four legs "
+            "block at any instant, and they stand off the <i>line</i> voltage rather than the DC "
+            "bus, so the term is 2&#183;mean(|v<sub>line</sub>|)&#183;I<sub>R</sub>(T<sub>j</sub>) "
+            f"= <b>{_leak_w*1000:.1f} mW</b> at worst ({_leak_at['Vac']:.0f} V<sub>AC</sub>, "
+            f"T<sub>j</sub> {_f(_leak_at.get('Tj_BRIDGE_top', 0), 0)} &#176;C). It is small enough "
+            "to ignore in the budget and is reported only so that it is visibly accounted for "
+            "rather than silently omitted &#8212; it rises steeply with junction temperature, so "
+            "it is the kind of term that stops being negligible on a hotter design.", CH)
+    else:
+        annotation(story, "NOTE",
+            "<b>Blocking (leakage) loss is not modelled for this part:</b> its datasheet supplies "
+            "no I<sub>R</sub>(T<sub>j</sub>) curve, and a single published leakage point cannot "
+            "become one &#8212; leakage changes by roughly a decade over the junction-temperature "
+            "range, so interpolating a slope from one point would be inventing it. The omission is "
+            "worth a few milliwatts at these temperatures (two legs block the line voltage, so "
+            "roughly 2&#183;(2&#183;V<sub>pk</sub>/&#960;)&#183;I<sub>R</sub>), and it is stated "
+            "here rather than left as a silent gap in the totals.", CH)
     if _has_bd:
         annotation(story, "NOTE",
             "The total includes a bottom-diode crest share (the bypass-FET ohmic drop exceeds the "
