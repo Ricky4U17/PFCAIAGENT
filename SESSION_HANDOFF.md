@@ -1,6 +1,13 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-22**, head = **`a66aa3d` C251**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`f60a07f` C252**, on `master`.
+
+**PENDING_ITEMS.md was audited against the code at C252** — read its header block before working
+from it. The `DATA` section (A1–A7) is exact; four entries were stale and are fixed or closed; five
+more were labelled done and had never been moved. Two traps that keep recurring: **a written-down
+list of offending sites goes stale, a count does not** (C2 and C3 each grew a site nobody
+re-counted), and **a green built-artefact check only covers the branches one fixture takes** — the
+report read zero black squares for months while two page footers had one on every page.
 
 > This file was stale for a long time (it sat at 2026-06-14 / ~C50 while work ran to C173). It is now
 > the live resume point. **Keep it current at every commit wrap-up**, alongside `IMPLEMENTATION_LOG.md`.
