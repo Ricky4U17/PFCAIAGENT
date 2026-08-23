@@ -402,7 +402,8 @@ list. If an entry looks small and old, verify it is still open before writing an
 
 ## Gate drive: in the budget, out of the thermal path
 
-Settled at C249-C250 after the designer traced a 0.1 W discrepancy by hand. Gate-drive power is
+Settled at C249-C250 after the designer traced a 0.1 W discrepancy by hand, and **confirmed by the
+designer on a regenerated report (2026-08-22): "7.8a looks correct now."** Gate-drive power is
 dissipated in the driver IC and the external R_g, **not in the MOSFET die**, so:
 
 - **IN** the loss budget — `P_SEMI_total`, Table 7.4's MOSFET TOTAL, Table 7.8a's MOSFET column,
