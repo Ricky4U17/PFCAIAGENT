@@ -595,10 +595,10 @@ export const SemiconductorSelection: React.FC<Props> = ({
       const b = body()
       const blob = await semiconductorReport({ design: b.design, mosfet: b.mosfet, diode: b.diode,
         bridge: b.bridge, thermal: b.thermal, tj_limit: b.tj_limit } as any)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = 'PFC_Ch7_Semiconductor_Loss.pdf'; a.click()
-      URL.revokeObjectURL(url)
+      // Through download.ts, never a local anchor dance: this path revoked the object URL on
+      // the statement after click() and never put the anchor in the document — both halves of
+      // the silent-download bug (PENDING C2), on the largest single-chapter PDF the GUI emits.
+      downloadBlob(blob, 'PFC_Ch7_Semiconductor_Loss.pdf')
     } catch (e) { setErr((e as Error).message) } finally { setRptBusy(false) }
   }
 

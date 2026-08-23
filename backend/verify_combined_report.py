@@ -10,7 +10,7 @@ WHY THIS EXISTS — selected_cap is mandatory:
     §5.3 (ripple verification), §5.4 (Life Time Period) and §5.5 (bank summary) are
     gated on step15_result["selected_cap"] being present (doc_report_builder rule 8).
     So a headless build WITHOUT a selected_cap silently drops those ~7 pages and reads
-    171 pp instead of the real 178 pp. This harness therefore ALWAYS attaches a real
+    ~205 pp instead of the real ~212 pp. This harness therefore ALWAYS attaches a real
     catalog part as selected_cap so the page count matches the GUI-driven report.
 
 Usage:
@@ -177,11 +177,21 @@ def main():
         "§5.5 Bank Summary": "Capacitor Bank Summary" in text,
         "§4.8 cross-check": "Field engine agrees with Step-7" in text,
         "Ch6 Control Scheme": "Control Scheme" in text,
+        # A chapter can vanish under HTTP 200 (PENDING E2), so name the ones that have actually
+        # done it: Ch3/Ch4 shared a try-tolerant branch, and Ch7 was absent from this harness
+        # entirely until C245. The page bound below catches the rest.
+        "Ch3 Table 3.6.1": "Table 3.6.1" in text,
+        "Ch4 Table 4.2": "Table 4.2" in text,
+        "Ch7 Semiconductor Loss": "Semiconductor Loss" in text,
     }
     for name, ok in checks.items():
         print("  [%s] %s" % ("OK" if ok else "!!", name))
-    ok_pages = 178 <= pages <= 190   # 183 as of C109 partial-load bode figures; matches the regression bound
-    print("PAGE COUNT %s (expected 178-190, got %d)" % ("OK" if ok_pages else "OUT OF RANGE", pages))
+    # KEEP THIS IN STEP WITH tests/test_regression.py::test_page_count_is_full_report. It read
+    # 178-190 until C251 while the real document was ~212 pp (Ch7 arrived with C245), so running
+    # this script on a perfectly good report printed OUT OF RANGE and exited 1 — a stale check
+    # that cries wolf is worse than no check, because the next real regression gets waved through.
+    ok_pages = 205 <= pages <= 235
+    print("PAGE COUNT %s (expected 205-235, got %d)" % ("OK" if ok_pages else "OUT OF RANGE", pages))
     sys.exit(0 if (ok_pages and all(checks.values())) else 1)
 
 

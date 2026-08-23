@@ -10079,3 +10079,65 @@ VERIFIED `test_gate_drive_is_counted_once_and_consistently` pins four properties
 add to its total; and 7.6.1 still explains the exclusion in words. Dropping gate from 7.8a again
 fails it reproducing the designer's exact observation. Suite 662 → 663 passed / 3 skipped.
 
+
+# C251 - two log entries said "fixed"; one was not, and the other told you to run a broken check
+
+The designer asked a four-word question about PENDING C2 and E2 — "are they still open?" — and the
+answer was different for each, in a way that says more about the log than about the code.
+
+## C2 — the fix was right, but it was never exclusive
+
+The seven screens migrated onto `src/api/download.ts` are all still correct: the object URL and the
+anchor are both held for ten minutes, and no screen reads `project_id` without optional chaining.
+But there are **eight** download paths now. `downloadCh7` in `SemiconductorSelection.tsx`, written
+after that migration, open-coded the anchor dance again:
+
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'PFC_Ch7_Semiconductor_Loss.pdf'; a.click()
+    URL.revokeObjectURL(url)          // next statement, and `a` was never in the document
+
+That is a worse version of the original defect — the code C2 fixed at least waited 150 ms — and it
+is on the largest single-chapter PDF the GUI emits, so it is the likeliest of any to lose the race.
+It now calls `downloadBlob`, which was already imported in that file.
+
+The reason it survived is worth recording. C2 read "PARTIAL FIX APPLIED, needs designer
+confirmation" for three weeks, so the entry looked like it was waiting on a human, and nobody
+re-counted the call sites. A new download button is exactly where the knowledge of why the helper
+exists is missing.
+
+`tests/test_downloads_go_through_helper.py` fails on any `.tsx` pairing `createObjectURL` with
+`.download`/`click()` outside the helper (line-level `download-ok:` opt-out for genuine non-download
+uses — the datasheet-figure thumbnail at line 540 is one, and it is correctly ignored because it
+does neither). A second test asserts the helper itself still defers both the revoke and the anchor
+removal, since the first guard is worthless if `downloadBlob` quietly regresses. VERIFIED by
+dropping the offending pattern into a probe file: `1 failed`, naming the file and line; removed, `2
+passed`. Frontend `tsc --noEmit`: clean.
+
+**C2 does not close.** The entry holds a second mechanism — transient user activation expiring
+during the ~111 s generate — which none of this touches, and its fix (the visible fallback link) was
+deferred by the designer on 2026-08-01 and still is not built. The header now says
+"SAVE-PATH FIX NOW COVERS ALL 8 SITES; the fallback link is still deferred" so it cannot be misread
+as done again.
+
+## E2 — the failure mode is guarded; the instruction had rotted
+
+E2 said: after editing any chapter builder run `verify_combined_report.py`, "because only `main()`
+asserts the 178-190 page range". Both halves were stale. The bound had moved into
+`test_regression.py::test_page_count_is_full_report` at 205-235, and the document grew to ~212 pp
+when C245 added Chapter 7 — so **the script E2 told you to run printed OUT OF RANGE and exited 1 on
+a perfectly good report.** A check that cries wolf is worse than no check: the next real regression
+gets waved through by whoever learned to ignore it.
+
+Script bound raised to 205-235 to match the suite, with a comment tying the two together, and its
+checklist now names Ch3 (Table 3.6.1), Ch4 (Table 4.2) and Ch7 by content — the three chapters that
+have actually gone missing. Two stale claims in SESSION_HANDOFF fixed alongside: the same 178-190
+figure, and "verify_combined_report.py does NOT include the semiconductor block", which stopped
+being true at C245.
+
+The `_ch3`/`_ch4` scoping trap itself stays in SESSION_HANDOFF as standing advice. E2 is closed as
+an item: three independent suite guards now catch a chapter vanishing under HTTP 200 — the page
+floor, the Ch3-vs-Ch4 core-loss parity test (it parses a table from each, so either disappearing
+fails it), and `test_chapter7_is_present`.
+
+VERIFIED end to end: 212 pages, 14.07 MB, all nine checks OK, exit 0.

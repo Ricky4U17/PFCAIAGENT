@@ -235,8 +235,10 @@ state, and `07_api_and_engines.json` = 63 endpoints / 18 engines / 38 graph node
   see.** Always list the RENDERED table captions from a built PDF and check for repeats.
 - **`ast.parse` + the suite are not enough.** Three defects this stretch (the `_ch4` NameError that
   silently dropped ~90 pages, the `%`-format `TypeError`, the leftover "Ccm") were only visible in a
-  BUILT PDF. Run `verify_combined_report.py` (its 178-190 page assertion is the guard), and for
-  Ch7-10 build the standalone endpoints — the combined verify does NOT cover them.
+  BUILT PDF. Run `verify_combined_report.py` — its page assertion is the guard, and since C245 it
+  builds Chapter 7 too. **Keep that bound in step with `test_regression.py::test_page_count_is_full_report`**
+  (205-235 as of C251): it sat at 178-190 against a 212-page document, so the script it tells you to
+  run reported OUT OF RANGE on a good report. A check that cries wolf gets waved through next time.
 - **`dict.get(k, default)` does not fire on an empty string.** That was the blank "Supplier: .".
 - **Report and GUI drift when they compute the same thing twice.** Diff engine output against a
   pre-change baseline before/after any presentation-layer edit.
@@ -295,10 +297,9 @@ flow and fixed several real calculation defects found along the way.
   (85 min − 32 min ≈ 51 min). Code, memory, ordering and Defender were each eliminated by
   measurement, so it was external. **When a suite time looks wrong, re-run before believing it.**
 - Frontend `tsc`: clean.
-- Combined report: **190 pp** without the semiconductor block. With it, expect ~205 pp.
-  Remember `verify_combined_report.py` does NOT include the semiconductor block, so **Chapter 7 is
-  not in the harness report** — to check anything in Ch7, POST `/documentation/generate-report`
-  with `semiconductor` present.
+- Combined report: **~212 pp**. `verify_combined_report.py` DOES send the semiconductor block since
+  C245 (it did not before — that was B21, and it meant every `TestCombinedReport` assertion
+  described a document without Chapter 7), so the harness report is the one the designer receives.
 - Chapters 8+9 standalone: **27 pp** with an NTC selected (25 pp bare), sections in order
   8.1, 8.2, 8.3, 8.4, 8.4.1-8.4.6, 8.5, 8.6, 8.6.1, 8.7, 8.8, 8.9. Zero unrenderable glyphs and
   zero mid-word label wraps — both are swept for, not assumed.

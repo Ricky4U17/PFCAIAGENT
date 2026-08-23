@@ -563,7 +563,36 @@ asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.
 
-### C2. Report download fails intermittently — PARTIAL FIX APPLIED, needs designer confirmation
+### C2. Report download fails intermittently — SAVE-PATH FIX NOW COVERS ALL 8 SITES (C251); the fallback link is still deferred
+**Status 2026-08-22.** Re-audited on the designer's question "is this still open?", and it was —
+not because the fix had regressed, but because the fix was never exclusive. The seven screens
+migrated to `src/api/download.ts` are all still correct (10-minute hold on both the object URL and
+the anchor; no unguarded `project_id`). But `downloadCh7` in `SemiconductorSelection.tsx`, written
+*after* that migration, open-coded the anchor dance again and revoked the URL on the statement
+straight after `click()` — a worse version of the original 150 ms race, with the anchor never
+placed in the document, on the largest single-chapter PDF the GUI emits. Now routed through
+`downloadBlob` like the rest.
+
+**The lesson is about the log, not the code.** C2 read "fixed, awaiting designer confirmation" for
+three weeks, so nobody re-counted the call sites, and a new download button was exactly where the
+knowledge was missing. `tests/test_downloads_go_through_helper.py` now fails on any `.tsx` that
+pairs `createObjectURL` with `.download`/`click()` outside the helper, and separately asserts the
+helper still defers both the revoke and the anchor removal. Verified by reintroducing the exact
+pattern (it fails) and removing it (it passes).
+
+**This does NOT close C2, and the header should not be read as saying so.** The revoke race is one
+of two mechanisms in this entry. The second — transient user activation expiring during the ~111 s
+generate, in the ROOT-CAUSE ANALYSIS section below — is untouched by any of this, and the fix for
+it (**proposal 1, the visible fallback link**) was deferred by the designer on 2026-08-01 and has
+still not been built. If the failure is activation expiry, C251 changes nothing about it.
+
+**So the order is:** (a) designer re-runs the reports, especially the standalone Chapter 7 download,
+and reports whether any still finish with no file; (b) if they do, build the fallback link — it is
+robust whatever the root cause, `downloadBlob` already returns the URL for it, and it needs UI in
+the six screens plus the Ch7 button. The diagnosis below is retained in full because the symptom
+leaves no trace to re-derive.
+
+
 **Symptom (designer, 2026-08-01):** happens on *all* report screens, *intermittently* — sometimes the
 PDF downloads, sometimes nothing arrives. Spinner completes normally. **No red error banner.**
 **Console captured** (`specs/GUI Report downloading error.docx`, 2026-08-01) — and it is
@@ -582,7 +611,8 @@ after the PDF arrives, in the save path. That is exactly where the two mechanism
 - Not the EMI payload. A 500 on `KeyError: 'pout_lo'` came from a hand-built test payload; the
   InputFilter screen's own `design` object does include `pout_lo`/`pout_hi`.
 
-**Two silent-failure mechanisms found and fixed** (all 7 sites, now via `src/api/download.ts`):
+**Two silent-failure mechanisms found and fixed** (7 sites then, the 8th at C251 — all now via
+`src/api/download.ts`):
 1. `URL.revokeObjectURL(url)` fired **150 ms** after `a.click()`. Revoking a ~13 MB blob URL while
    the browser is still reading it aborts the download and throws nothing. Now held 10 minutes.
 2. `document.body.removeChild(a)` ran synchronously after `click()`; Firefox needs the anchor to
@@ -753,7 +783,7 @@ advisory-only split, ~6 phase-advisory tests can never reach `final`.
 **Not a production issue** — the production Step-16 path is stable at ~17 Hz. This is the LangGraph
 workflow path only. Found during C117.
 
-### E2. Chapter builders can vanish silently — always check the page count
+### E2. Chapter builders can vanish silently — CLOSED at C251, now guarded automatically
 `doc_report_builder._ch3` / `_ch4` are called under `if approved_design:` in one try-tolerant
 path, so an exception inside `_ch4` dropped BOTH chapters (~90 pages) while the endpoint still
 returned HTTP 200 and `ast.parse` stayed clean. The build looked fine; the content was gone.
@@ -762,9 +792,23 @@ Cause on 2026-08-01: `_ch4` referenced `Bmax_inner` / `sat_m_inner` / `sat_m`, w
 LOCALS, not module-level. `_ch3` and `_ch4` have separate scopes and each must re-derive what it
 needs from `d`.
 
-**Habit:** after editing any chapter builder, run `python verify_combined_report.py` (not just
-`build_combined()`), because only `main()` asserts the 178-190 page range. A partial-content PDF
-is otherwise indistinguishable from a good one.
+**CLOSED at C251 — the habit is now three automatic guards.** This entry used to end "run
+`python verify_combined_report.py`, because only `main()` asserts the 178-190 page range". Both
+halves had gone stale: the bound moved into the suite, and the document grew to ~212 pp when C245
+added Chapter 7, so the script this entry recommended printed OUT OF RANGE on a *correct* report.
+Fixed at C251 (script bound raised to 205-235, matching the suite). A chapter vanishing under
+HTTP 200 is now caught without anyone remembering to look:
+
+| Guard | Catches |
+|---|---|
+| `test_regression.py::test_page_count_is_full_report` | `205 <= pages <= 235` — the lower bound is sized so one missing chapter fails it |
+| `test_chapter3_and_chapter4_agree_on_core_loss` | parses **Table 3.6.1** *and* **Table 4.2** from the built PDF — either chapter going missing fails it, which is precisely the `_ch3`/`_ch4` case below |
+| `test_chapter7_is_present` (C245) | Ch7 by name, after it was absent from the harness for many commits |
+
+`verify_combined_report.py` also names Ch3/Ch4/Ch7 in its own checklist now. The scoping trap
+itself — `_ch3` and `_ch4` have separate scopes, each must re-derive from `d` — is kept in
+SESSION_HANDOFF under the built-PDF trap, where it belongs as standing advice rather than an open
+item.
 
 ---
 
