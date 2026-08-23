@@ -418,6 +418,22 @@ class TestCombinedReport:
         assert "Capacitor Life Time Period" in t, "§5.4 (Life Time Period) missing"
         assert "Capacitor Bank Summary" in t, "§5.5 (Bank Summary) missing"
 
+    def test_the_built_report_has_no_black_squares(self, combined):
+        """PENDING B12/B13. A character with no glyph in the base-14 fonts falls through to
+        ZapfDingbats 'n' — a filled black square on the page — and nothing anywhere reports it.
+        pypdf extracts exactly that fallback as U+25A0, so the shipping document can simply be
+        asked.
+
+        This covers only the branches this design takes; `test_no_black_squares.py` scans the
+        source for the conditional ones. It read zero throughout the period two page footers were
+        printing a square on every page, which is why both layers exist.
+        """
+        n = combined["text"].count("■")
+        assert n == 0, (
+            f"{n} black square(s) in the built report — a character with no glyph reached the "
+            "page. See test_no_black_squares.py for which characters do this and what to use "
+            f"instead. Context: {combined['text'][max(0, combined['text'].find('■') - 60):][:120]!r}")
+
     def test_inductor_loss_reconciliation_present_and_consistent(self, combined):
         """Table 4.2a must RENDER and its row 3 must be N_ch x row 2.
 

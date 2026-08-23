@@ -67,6 +67,25 @@ def test_no_screen_open_codes_a_download():
         "for ten minutes, and returns the URL for a manual fallback link.")
 
 
+def test_every_studio_iframe_allows_downloads():
+    """PENDING C3, same silent class. A sandboxed iframe without `allow-downloads` has its exports
+    blocked by the browser with no console error and no visible failure — the studio's CSV/PNG
+    button simply does nothing.
+
+    The entry named two offenders; there were three. `SimulationAgent.tsx` was written after C3 was
+    logged and nobody re-counted — the identical mistake as C2's 8th download site, which is why
+    this is a test and not a fixed list.
+    """
+    offenders = []
+    for path in _sources():
+        for m in re.finditer(r'sandbox="([^"]*)"', path.read_text(encoding="utf-8", errors="replace")):
+            if "allow-downloads" not in m.group(1):
+                offenders.append(f"{path.name}: sandbox={m.group(1)!r}")
+    assert not offenders, (
+        "these sandboxed iframes cannot download anything, silently: " + "; ".join(offenders)
+        + ". Add allow-downloads unless the frame genuinely must never save a file.")
+
+
 def test_the_helper_still_holds_the_url_and_the_anchor():
     """The guard above is only worth anything while downloadBlob itself is correct."""
     helper = _COMPONENTS.parent / "api" / "download.ts"

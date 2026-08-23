@@ -10141,3 +10141,86 @@ floor, the Ch3-vs-Ch4 core-loss parity test (it parses a table from each, so eit
 fails it), and `test_chapter7_is_present`.
 
 VERIFIED end to end: 212 pages, 14.07 MB, all nine checks OK, exit 0.
+
+# C252 - the pending list audited against the code, and four things it was wrong about
+
+The designer asked for the list to be audited before any more work was picked off it, then for the
+four self-contained fixes that audit identified. Both are in this commit.
+
+## Phase 1 - what the audit found
+
+Every mechanically-checkable claim re-run against the code, because the list had been wrong five
+times running (B5 and Group 2 closed at C178 but reading open; E2 guarded but reading open; C2
+reading "fixed" while hiding a live defect; C3 undercounting its own sites).
+
+**The DATA section is exact.** A1 997 parts with no energy column and R_hot blank on 112 of them,
+tolerance 6, diameter 3; A2 Vc@I absent, V1mA 2/1140, energy 9/1140, capacitance 26/1140; A3 no
+impulse sparkover and no follow current on 172/172; A4 melting I2t 25/115, breaking capacity 1/115;
+A5 max rating exactly 50.0 A and 115/115 Fast Blow; A7 the registry holds only a commented example.
+Every count still matches to the digit. Those entries are genuinely blocked on vendor data and
+nothing about them needs revisiting.
+
+**Two entries were describing work already done.** B1: `build_appendices` has taken the design
+since C238/C239 and Table B.1 reads live values - what is left is only that the literals survive as
+`.get(..., default)` fallbacks, which is a different and much smaller problem, so the entry was
+rescoped rather than closed. B2: Section 4.6.2 renders the per-Vin waveform families for all nine
+operating points, sourced from `build_view_contract` - the entry's worry about the one-engine rule
+was answered by calling the engine directly instead of routing the series through `approved_design`.
+
+**Where prose was stale but the claim held, the claim was kept.** B16's quoted formula predates the
+C-j grading term; the missing DCM mask is still real. B17's variable had been renamed; the
+mid-current evaluation is still real, at `pfc_loss_model.py:359`.
+
+## Phase 2 - the four fixes, and one that turned out to matter more than it looked
+
+**C3 - three iframes, not two.** `SimulationAgent.tsx` was written after C3 was logged and nobody
+re-counted. That is C2's 8th download site again, the same week, the same cause. All three now
+carry `allow-downloads`, and the guard COUNTS the sites rather than checking a list, because a
+written-down list of offenders is exactly what went stale.
+
+**A9a - a warning that was always wrong.** 66 of 92 materials logged "Missing required field:
+data_source" on every load with the field present all along. The count in the entry was 67, and the
+suggested fix (move the powder key up) would not have worked: 8 powder files legitimately carry it
+at top level. The schema now names both locations and the validator takes the first that resolves.
+66 errors -> 0, proven by reinstating the original single path, which reproduces all 66. Worth
+fixing despite being "cosmetic": a warning that is always wrong is how people learn to scroll past
+load warnings, and that is where a real one would appear.
+
+**B10 - two tables numbered 9.7.** Both render, so a review comment citing "Table 9.7" was
+ambiguous. Now 9.7a / 9.7b. The `eq_box(..., number="9.7")` in the same section is the equation
+series and was deliberately left alone.
+
+**B12/B13 - the entry's own scan predicate was wrong in both directions.** This was meant to be a
+half-hour job and was the most valuable thing in the commit.
+
+The proposed scan - codepoint >= 256, not cp1252-encodable, absent from `paraparser.greeks` - would
+have flagged `&#8486;` (renders fine), U+0394 (renders fine, the Adobe glyph list just maps Symbol's
+`Delta` to U+2206), and the check mark, ballot X and black star the reports already use. It would
+also never have looked at `U+2502`, because that is not an entity - and `U+2502` was printing a
+**black square on every page footer of two reports**.
+
+The real mechanism: no TTF is ever registered, so every character outside WinAnsi is substituted.
+ReportLab reaches a real glyph for a handful and falls through to **ZapfDingbats 'n', a filled black
+square**, for the rest. That is the designer's "black square", and pypdf extracts that fallback as
+U+25A0 - so the predicate needs no glyph tables at all. Render the character, read it back, look
+for a square.
+
+Four defects, none of which the shipping report showed, because each sits on a branch the reference
+design does not take:
+  1. the two page footers (drawn with `canvas.drawCentredString`, so no Paragraph-based check would
+     ever have found them)
+  2. `_sct()` built exponents from a Unicode-superscript table, so "9.014 x 10^12" printed as
+     `10<square><square>`; fires only outside 1e-3..1e4. Now `<sup>` markup, dead table deleted
+  3. nine warning signs across two builders, on branches that need Ku > 0.65 or an overfilled bore
+  4. one much-less-than in Ch6 prose
+
+**Two guards, because neither is enough.** The built-report check (in `TestCombinedReport`) asks the
+document that ships and has zero false positives - but it read ZERO throughout the period the
+footers were broken, because it only sees the branches one design takes. The source scan
+(`test_no_black_squares.py`) reaches the conditional branches, and self-validates its detector
+against both known-bad and known-good characters first, so it cannot rot into flagging working text
+the way the original predicate would have.
+
+VERIFIED combined report 212 pages, exit 0, `TestCombinedReport` 11 -> 12 passed with the new
+black-square assertion; the material DB validates clean (0 errors, was 66); every edited backend
+file compiles; frontend `tsc --noEmit` clean. Suite 663 -> 672.

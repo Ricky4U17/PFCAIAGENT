@@ -2908,7 +2908,7 @@ def _ch3(story, state, d):
     body(story,
         f"Insulated fill factor K<sub>u</sub> = F<sub>F</sub> × (1 + insulation overhead) "
         f"≈ {Ku:.3f}. Practical limit for hand-wound toroid is 0.55–0.65. "
-        + ("✓ Within limit." if Ku <= 0.65 else "⚠ Review winding approach."), 3)
+        + ("✓ Within limit." if Ku <= 0.65 else "✗ Review winding approach."), 3)
 
     # Item 7 — bore layer count, turns per layer, residual bore clearance (E34–E35).
     _nl = int(d.get("layers_needed", 0) or 0)
@@ -2921,7 +2921,7 @@ def _ch3(story, state, d):
             f"<b>{_brm:.2f} mm</b> after winding. "
             + ("The bore is not overfilled — the winding physically fits."
                if _brm >= 0 else
-               "⚠ Negative clearance — the bore is overfilled; reduce turns or choose a larger core."), 3)
+               "✗ Negative clearance — the bore is overfilled; reduce turns or choose a larger core."), 3)
 
     # Item 16 — current density: step-by-step before the winding decision.
     sub_h(story, "3.4.7", "Current density check", 3)
@@ -6029,7 +6029,7 @@ def _ch6_loop_derivation(story, res):
         "DC bus by setting the current-command amplitude I<sub>cmd</sub> — it must not react "
         "strongly at twice-line frequency (120 Hz for a 60 Hz line) or it would modulate the "
         f"command and distort the input current. Hence the crossover is placed low, f<sub>cv</sub> ≈ "
-        f"{fcv:.0f} Hz ≪ 120 Hz.", 6)
+        f"{fcv:.0f} Hz &lt;&lt; 120 Hz.", 6)
     body(story,
         "<b>Step 2 — output-capacitor energy balance.</b> The PFC outer loop is modelled from "
         "<i>power balance</i>, not simple capacitor-current injection, because the command sets "

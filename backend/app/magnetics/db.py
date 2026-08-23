@@ -649,9 +649,16 @@ class MagneticsDB:
                    POWDER_REQUIRED_FIELDS  if mat_type=="powder"  else [])
 
         for path, typ, req, valid_range, desc in required:
-            val = self._get_nested(d, path)
+            # A path may list ALTERNATIVE locations separated by '|', first match wins. The powder
+            # corpus is genuinely split — 66 files carry data_source under `basic`, 8 carry it at
+            # top level — so a single path made the loader log "Missing required field:
+            # data_source" for 66 materials whose data_source was present all along. A permanently
+            # false warning is worse than none: it teaches everyone to scroll past load warnings,
+            # which is where a real one would appear (PENDING A9a).
+            val = next((v for v in (self._get_nested(d, p) for p in path.split("|"))
+                        if v is not None), None)
             if val is None:
-                if req: errors.append(f"Missing required field: {path}")
+                if req: errors.append(f"Missing required field: {path.split('|')[0]}")
                 continue
             if valid_range and isinstance(val, (int, float)):
                 lo, hi = valid_range

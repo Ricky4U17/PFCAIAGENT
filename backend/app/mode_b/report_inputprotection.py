@@ -1273,7 +1273,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
             "class-level clamp in Section 9.4.2 used a snapped class V<sub>1mA</sub>, whereas the load line "
             "below is solved against the part's own varistor voltage.", CH)
         _cls_vc = (_gov or {}).get("vc")
-        data_table(story, "9.7", "Selected Part — Recalculated Design Values",
+        data_table(story, "9.7a", "Selected Part — Recalculated Design Values",
             "Part-specific results. The clamp supersedes the class-level figure of Section 9.4.2.",
             ["Quantity", "Value", "Check"],
             [["Part", f"{_sel.get('mfr','')} {_sel.get('part_number','')}", "designer-selected"],
@@ -1287,7 +1287,7 @@ def build_mov_story(story, design, mosfet=None, cap=None, opts=None):
              ["Clamp margin", f"{_f(_rc.get('clamp_margin_V'),0)} V",
               "positive = clamps below the gate"]],
             col_widths=[CW*0.32, CW*0.30, CW*0.38], ch=CH)
-        data_table(story, "9.7", "Selected Part — Gate-by-Gate Verdict",
+        data_table(story, "9.7b", "Selected Part — Gate-by-Gate Verdict",
             "Each Section 9.5 gate re-evaluated against this part's datasheet.",
             ["#", "Gate", "Requirement", "Result", "Status"],
             [[str(g["n"]), g["name"], _ge(g["requirement"]), _ge(g["result"]), g["status"]]

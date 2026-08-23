@@ -213,7 +213,7 @@ def _page_header_footer(canvas, doc):
     canvas.setFillColor(colors.HexColor('#777777'))
     canvas.setFont('Helvetica', 7.5)
     canvas.drawCentredString(PAGE_W / 2, 4*mm,
-        f'PFC Inductor Magnetic Design   —   Steps 13 & 14   │   Page {doc.page}')
+        f'PFC Inductor Magnetic Design   —   Steps 13 & 14   |   Page {doc.page}')
     canvas.restoreState()
 
 
@@ -1675,7 +1675,7 @@ def _sec_14_8_design_review(story, D, S):
         f'×{stacks} stack, N = {N} turns, '
         f'{D.get("wire_designation","—")} ({D.get("winding_style","—") if "winding_style" in D else "bifilar"}).',
 
-        f'<b>Inductance:</b> L₀ = {D["L0_nom_uH"]:.1f} µH (0 A), '
+        f'<b>Inductance:</b> L<sub>0</sub> = {D["L0_nom_uH"]:.1f} µH (0 A), '
         f'L_full nom = {L_full_nom:.1f} µH at 90 Vac full load, '
         f'DC-bias retention k = {k_actual:.3f}.',
 

@@ -1008,7 +1008,7 @@ console.log("[inject] N=" + PY.N + " stacks=" + PY.stacks + " Pcore=" + PY.pyPco
           width: '100%', minHeight: 680,
           border: 'none', borderRadius: 10, background: '#08101f', display: 'block',
         }}
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts allow-same-origin allow-downloads"
       />
 
       {/* ── Simulation-Agent cross-check (Phase 1 shadow; additive) ────────── */}

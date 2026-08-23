@@ -54,7 +54,9 @@ POWDER_REQUIRED_FIELDS = [
     ("material_line",          str,   True,  None,         "Product line e.g. Kool Mu"),
     ("mu_initial",             float, True,  (10, 600),    "Initial permeability"),
     ("type",                   str,   True,  None,         "Must be 'powder'"),
-    ("data_source",            str,   True,  None,         "Reference"),
+    # powder files split on where this lives: 66 under `basic`, 8 at top level. Both are accepted
+    # (see validate_material_dict) rather than migrating 66 files to satisfy the schema.
+    ("data_source|basic.data_source", str, True, None,      "Reference"),
     ("data_quality",           str,   True,  None,         "One of DataQuality literals"),
     ("basic.Bsat_T",           float, True,  (0.5, 2.0),   "Approximate saturation flux T"),
     ("basic.AL_tolerance_pct", float, True,  (1, 20),      "AL tolerance %"),

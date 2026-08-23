@@ -160,12 +160,12 @@ def _sec_16_1(story, D, S):
 
     rows = [
         ['Parameter', 'Value', 'Significance'],
-        [Paragraph('f₀ — LC double pole', S['tbl_cell_l']),
+        [Paragraph('f<sub>0</sub> — LC double pole', S['tbl_cell_l']),
          Paragraph(_fmt_hz(D['f_lc_Hz']), S['tbl_cell']),
          Paragraph('Natural resonance of output filter; sets open-loop roll-off slope', S['tbl_cell_l'])],
         [Paragraph('f_esr — capacitor ESR zero', S['tbl_cell_l']),
          Paragraph(_fmt_hz(D['f_esr_Hz']), S['tbl_cell']),
-         Paragraph('Adds +20 dB/dec above this; improves phase near f₀', S['tbl_cell_l'])],
+         Paragraph('Adds +20 dB/dec above this; improves phase near f<sub>0</sub>', S['tbl_cell_l'])],
         [Paragraph('f_RHPz — RHP zero @ 90 Vac (LL)', S['tbl_cell_l']),
          Paragraph(_fmt_hz(D['f_rhpz_ll_Hz']), S['tbl_cell']),
          Paragraph('Hard ceiling on voltage-loop bandwidth — must stay below f_RHPz / 5', S['tbl_cell_l'])],

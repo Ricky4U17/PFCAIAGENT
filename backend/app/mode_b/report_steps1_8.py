@@ -33,7 +33,8 @@ def _sci(x, sig=4):
     return f"{m:.{sig-1}f}\\times10^{{{e}}}"
 
 
-_SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+# (a Unicode-superscript translation table lived here until C252. Helvetica/WinAnsi has no glyph
+#  for U+2070..U+207B, so every exponent it produced was a black square. _sct() uses <sup> now.)
 def _sct(x, sig=4):
     """Scientific notation for BODY text (Unicode superscript): 9.014e12 -> '9.014 × 10¹²'."""
     if x == 0:
@@ -42,7 +43,11 @@ def _sct(x, sig=4):
     if -3 <= e < 4:
         return f"{x:.4g}"
     m = x / 10 ** e
-    return f"{m:.{sig-1}f} × 10{str(e).translate(_SUP)}"
+    # <sup> markup, NOT Unicode superscripts. Helvetica/WinAnsi has no glyph for U+2070..U+207B,
+    # so ReportLab falls through to ZapfDingbats 'n' — a filled black square. This is the
+    # designer's "black square" report (PENDING B12/B13); both call sites below are body()
+    # Paragraphs, which render <sup> natively.
+    return f"{m:.{sig-1}f} × 10<sup>{e}</sup>"
 
 
 def _wstep(story, label, eq):

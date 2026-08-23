@@ -507,7 +507,7 @@ def generate_full_report(state: dict) -> bytes:
         canvas.setFillColor(C_FTR)
         canvas.setFont("Helvetica", 7.5)
         foot = (f"{p['topology']}   —   PFC Design Report   —   "
-                f"Steps 1–12   │   Page {doc.page}")
+                f"Steps 1–12   |   Page {doc.page}")
         canvas.drawCentredString(PAGE_W / 2, 4*mm, foot)
         canvas.restoreState()
 

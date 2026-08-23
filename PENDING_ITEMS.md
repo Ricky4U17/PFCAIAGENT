@@ -14,7 +14,25 @@ passed.
 `OPEN`, `CONDITIONAL` or `DATA MISSING` — never as a silent PASS, and never as something that blocks
 the designer from selecting a part.
 
-Last updated 2026-08-01 (after C178).
+Last updated 2026-08-23 (after C252).
+
+**AUDITED 2026-08-23 (C252).** Every mechanically-checkable claim below was re-run against the
+code, because this list had been wrong five times running — B5 and Group 2 read open while closed
+since C178, E2 read open while guarded, C2 read "fixed" while hiding a live defect, and C3
+undercounted its own sites. Results:
+
+- **The `DATA` section is exact.** A1 (997 parts, no energy column, R_hot 112/997, tolerance 6/997,
+  diameter 3/997), A2 (V<sub>c</sub>@I absent, V1mA 2/1140, energy 9/1140, capacitance 26/1140),
+  A3 (no impulse sparkover, no follow current, 172/172), A4 (melting I²t 25/115, breaking capacity
+  1/115), A5 (max rating 50.0 A, 115/115 Fast Blow), A7 (registry holds only a commented example).
+  Every count still matches to the digit. These are genuinely blocked on vendor data.
+- **Four entries were stale and are now closed or rescoped:** B1 (the appendix builder DOES take
+  design data), B2 (Section 4.6.2 renders the per-V<sub>in</sub> families), A9a and B10 and C3
+  (fixed at C252), B12/B13 (the proposed scan predicate was wrong in both directions — see B12).
+- **Entries labelled done but never moved:** A11, B4, B5, B14, E2. Moved to Recently closed.
+- **Where an entry's prose was stale but its claim held**, the claim is kept and the prose
+  corrected: B16's quoted formula was out of date, the missing DCM mask is real; B17's variable had
+  been renamed, the mid-current evaluation is real (`pfc_loss_model.py:359`).
 
 ---
 
@@ -70,14 +88,20 @@ If the capacitor DB gains a `Z(−25 °C) / Z(+20 °C)` ratio column, `cap_esr_m
 Designer's HXK datasheet says **1.69 A** ripple; the DB says **2.09 A**. Which variant is correct is
 still unknown — resolve before trusting either for a release calculation.
 
-### A9. Powder material files: `data_source` at the wrong nesting level + 3 with no Bsat-vs-T
+### A9. Powder material files: 3 with no Bsat-vs-T  *(part (a) FIXED at C252)*
 Two separate, small data issues found while adding material provenance (item 27):
 
-**(a) Schema mismatch — cosmetic but noisy.** All 67 powder materials log
-`[DB] <key>: Missing required field: data_source` at every DB load. The information is NOT
-missing: powder files carry it at `basic.data_source`, ferrite files at top level, and the loader
-checks top level only. Either move the powder key up or teach the loader to accept both. Until
-then the warning is false and trains people to ignore load warnings.
+**(a) Schema mismatch — FIXED at C252.** The count was **66**, not 67, and the split is real: of
+92 material files, 66 powder files carry `data_source` under `basic` and **8 powder files carry it
+at top level** (all 18 ferrites are top-level). So migrating the 66 would not have made the schema
+correct either. `POWDER_REQUIRED_FIELDS` now names both locations
+(`"data_source|basic.data_source"`) and `validate_material_dict` takes the first that resolves.
+Measured 66 errors before, 0 after; proven by reinstating the original single path, which
+reproduces all 66. Guarded by `tests/test_report_hygiene.py`.
+
+*Why it was worth fixing a "cosmetic" warning:* it fired on every single load and was always
+wrong, which is how people learn to scroll past load warnings — and that is exactly where a real
+one appears.
 
 **(b) Real gap — 3 materials have no Bsat temperature data.** `xflux_hdc_26`, `xflux_hdc_40`,
 `xflux_hdc_60` carry only `Bsat_25C_T` (no 100 °C/150 °C points, no `Bsat_Tcoeff`), so
@@ -151,17 +175,30 @@ silently falls back to generic. Any further vendor template should be added only
 
 ## B. Report & calculation  `CODE`
 
-### B1. Chapter 6 appendix BOM values are hardcoded
-`appendices.py` — `build_appendices(story)` takes **no design data**, so the appendix component values
-(R_CS 15 mΩ, R_RI 11.5 kΩ, R_FB1 3.63 MΩ, the `0.015/5` equation in Appendix A) do not track the design.
-Needs the design threaded into `build_appendices`. Everything in the Ch6 body itself was de-hardcoded in
-C99/C100 — this is the leftover.
+### B1. Chapter 6 appendix BOM values are hardcoded  `MOSTLY CLOSED — verify what is left`
+**Corrected 2026-08-23.** The premise is out of date. `build_appendices` now takes the design:
+`build_appendices(story, prior=None, s10=None, s11=None, s12=None, s13=None, inp=None)`, and
+Table B.1 reads live values (`ctx['rri']`, `ctx['r1']`, `ctx['rcs']`) — done by C238/C239, which
+also put the six pole-derived capacitors in the table.
 
-### B2. Per-Vin time-domain waveform families
-`waveforms_by_vin` exists inside `build_view_contract` but is **not** in the `approved_design` payload,
-so the report cannot draw B(t)/L(t)/P(t) families over the cycle for all 9 input voltages without
-re-deriving them (which would break the one-engine rule). Needs the engine to export the per-Vin time
-series into the approved payload.
+**What is actually left:** the literals now only survive as `.get(..., default)` FALLBACKS
+(e.g. `float(p5.get("rfb1", 3.63e6))`). A fallback is not automatically wrong, but a silent one is:
+if the design data does not arrive, the appendix prints the reference design's numbers with nothing
+saying so.
+
+- **Done when:** each fallback either cannot be reached (the caller always supplies the value) or
+  prints a visible marker when it fires, so a stale appendix cannot look like a computed one.
+
+### B2. Per-Vin time-domain waveform families  `CLOSED — verified 2026-08-23`
+The report draws them. **Section 4.6.2 "Per-Cycle Waveform Families — All 9 Operating Points"**
+(`doc_report_builder.py:4524`) plots six quantities — H(t), i<sub>avg</sub>(t), B<sub>max</sub>(t)
+and the instantaneous core / copper / total losses — as low-line and high-line families.
+
+The entry's worry about the one-engine rule was answered a different way than it assumed: rather
+than exporting the series through `approved_design`, the builder calls
+`build_view_contract(d, state)` directly and reads `waveforms_by_vin` from it. That is the engine
+itself, not a re-derivation, so the report and the GUI Review panes plot identical series by
+construction.
 
 ### B3. Bridge temperature model — measured hot data vs an assumed scalar  `RESCOPED 2026-08-22`
 
@@ -385,13 +422,46 @@ have NO glyph in Helvetica's WinAnsi encoding AND are absent from ReportLab's sy
 table, so ReportLab draws a filled box: `&#8209;` (U+2011 non-breaking hyphen) and `&#9679;`
 (U+25CF black circle). Both replaced with renderable equivalents (`-` and `&#8226;`).
 
-**Worth automating:** the one-line scan below currently reports NONE and would catch a
-regression the moment someone adds another exotic entity. Consider adding it as a test.
+**DONE at C252 — but the proposed predicate was wrong, and the scan did NOT report NONE.**
 
-```
-for every &#NNNN; in app/mode_b/*.py:  cp >= 256, not cp1252-encodable,
-and chr(cp) not in reportlab.platypus.paraparser.greeks.values()  ->  will render as a box
-```
+The scan this entry specified — `cp >= 256`, not cp1252-encodable, absent from
+`paraparser.greeks.values()` — is wrong in *both* directions, so it could not have been wired as
+a test as written:
+
+| character | proposed scan | reality |
+|---|---|---|
+| `&#8486;` OHM SIGN | flags it | renders correctly (Symbol `Omega`) |
+| U+0394 DELTA | flags it (Adobe glyph list maps Symbol's `Delta` to U+2206) | renders correctly |
+| U+2713 ✓, U+2717 ✗, U+2605 ★ | flags them | render correctly (ZapfDingbats) |
+| **U+2502 │** box-drawing | never looked at — not an entity | **black square on every page footer of two reports** |
+
+**What the mechanism actually is.** No TTF is ever registered, so everything outside WinAnsi is
+substituted. ReportLab reaches a real glyph for a handful (Ω, ≤, ✓, ✗, ★, µ, Δ) and falls through
+to **ZapfDingbats `n` — a filled black square — for everything else.** That is the designer's
+"black square", and `pypdf` extracts exactly that fallback as U+25A0. So the predicate needs no
+glyph tables at all: render the character, read it back, and look for `■`.
+
+**Four defects found and fixed at C252,** none of which the shipping report showed, because each
+sits on a branch the reference design does not take:
+
+1. `│` in the page footer of `generate_report.py` and `generate_steps13_14.py` — a square on
+   **every page** of both standalone reports. Drawn with `canvas.drawCentredString`, not a
+   Paragraph, which is why no Paragraph-based check would have found it.
+2. `_sct()` in `report_steps1_8.py` built exponents from a Unicode-superscript translation table —
+   so "denominator base = 9.014 × 10¹²" printed as `10■■`. Fires only outside 1e-3…1e4. Now
+   `<sup>` markup; the dead table is deleted.
+3. `⚠` in `doc_report_builder.py` ×2 (fires only when K<sub>u</sub> > 0.65, or when the bore
+   overfills) and ×7 in `generate_full_report.py`. Replaced with `✗`, the ballot X those files
+   already use as the negative counterpart of `✓`.
+4. `≪` in the Ch6 prose. Replaced with `&lt;&lt;`.
+
+**Two guards, because neither is sufficient alone:**
+- `test_regression.py::test_the_built_report_has_no_black_squares` — asks the shipping document.
+  Zero false positives, but it read **zero for months while the two footers were broken**, because
+  it only sees the branches one design takes.
+- `tests/test_no_black_squares.py` — scans the source of every report builder, which reaches the
+  conditional branches. It self-validates the detector against both the known-bad and the
+  known-good characters first, so it cannot rot into flagging working text.
 
 ### B15. Ch5-Ch7 review — items the designer chose NOT to do (C189)
 From `PFC_Report_Ch5_to_Ch7_Review_Comments.pdf`. Recorded so they are not re-raised as new:
@@ -408,7 +478,15 @@ From `PFC_Report_Ch5_to_Ch7_Review_Comments.pdf`. Recorded so they are not re-ra
 DATA MISSING, so the 450 V capacitor class is currently justified against the regulated bus only —
 not against the worst voltage the part actually sees. Supplying both closes that table.
 
-### B13. Unrenderable sub/superscript characters beyond the two fixed in B12
+### B13. Unrenderable sub/superscript characters beyond the two fixed in B12  `CLOSED at C252`
+Folded into B12 — same subject, same fix, same two guards. Every character on the list below was
+re-tested by rendering at C252: the `₀` and the `⁰⁴⁵⁶⁷⁸⁹⁻` set are real black squares and are
+gone; `&#8486;` (OHM SIGN) is **not** — it renders correctly and was a false positive of the old
+predicate. The `●` matplotlib false positive this entry warned about is correctly ignored by the
+new detector, which tests the character rather than guessing from its codepoint.
+
+<details><summary>Original list (kept — every entry was verified, not assumed)</summary>
+
 The B12 scan was widened (raw characters, not only `&#NNNN;` entities) and found a PRE-EXISTING set
 that will render as wrong glyphs or boxes wherever it reaches report prose:
 
@@ -432,6 +510,8 @@ natively) or the entity ReportLab's `paraparser.greeks` knows.
 - **Done when:** the widened scan reports NONE for strings that reach a Paragraph, and it is wired
   as a test (see B12) so new prose cannot reintroduce one.
 
+</details>
+
 ### B14. C6 capacitance tolerance — GUI half  `DONE 2026-08-02 (C188)`
 Step-15 gained a ±20% panel (capacitance, margin vs requirement, Life Time Period) and the CapSim
 page gained a −20% / nominal / +20% selector that re-runs the simulation at the chosen corner.
@@ -452,7 +532,19 @@ without duplicating any physics. Scope reminder: DC bus only — the control loo
 
 </details>
 
-### B10. Pre-existing duplicate table numbers (13 remain)
+### B10. Duplicate table numbers  `THE GENUINE ONE FIXED at C252`
+The one case where both tables actually render is fixed: §9.7 was **both** "Selected Part —
+Recalculated Design Values" and "Selected Part — Gate-by-Gate Verdict", so the report contained two
+different Table 9.7 and a review comment citing "Table 9.7" was ambiguous. They are **9.7a / 9.7b**
+now. No prose referenced "Table 9.7", so nothing else had to move. The `eq_box(..., number="9.7")`
+in the same section is the EQUATION series — a separate sequence, deliberately left alone.
+
+`tests/test_report_hygiene.py` now fails on any new in-module duplicate, with the surviving if/else
+pairs listed explicitly — and a second test fails if one of those listed pairs stops existing, so
+the allowlist cannot quietly become a place to hide new duplicates.
+
+<details><summary>Original survey (the remaining kinds, all harmless)</summary>
+
 Found while doing the item-26 numbering sweep. Three kinds, none introduced by that sweep:
 - **if/else pairs** — 6.11.6, 6.11.7, 6.11.9, 8.6a, 9.6. Two `data_table` calls share a number but
   only one branch ever renders (Type-II vs Type-III, vendor-DB present vs absent). Harmless.
@@ -462,6 +554,8 @@ Found while doing the item-26 numbering sweep. Three kinds, none introduced by t
   Ch1–5-only build would show both.
 - **genuine** — **9.7** ("Selected Part — Recalculated Design Values" and "Selected Part —
   Gate-by-Gate Verdict" in `report_inputprotection.py`). Both render. Should become 9.7a / 9.7b.
+
+</details>
 
 ### B11. Dangling table cross-references in prose
 A scan for `Table X.Y` mentions with no matching `data_table` call found ~17, e.g. 3.2.4, 3.4.1,
@@ -473,9 +567,13 @@ checking individually before any renumbering work touches them.
 
 ### B16. SiC Q_c is not gated to CCM, the silicon recovery term is
 `pfc_loss_model.loss()` applies the silicon branch as `fsw*avg(rr_fet_frac*E_rec*rr_active)` — the
-`rr_active` mask is zero wherever the point is in DCM. The SiC branch is
-`P_rr_to_fet = fsw*0.5*Vo*qc*k_qc`, a scalar with no angle dimension and no mask, so the junction
-charge is charged at full V_OUT on every cycle including the DCM portion. In DCM the drain has
+`rr_active` mask is zero wherever the point is in DCM. The SiC branch is (re-read 2026-08-23; the
+formula this entry used to quote predates the C-j grading term)
+
+    P_rr_to_fet = fsw*Vo*dio.qc*dio.k_qc / (2.0 - min(dio.cj_grading, 0.95))
+
+— still a scalar with no angle dimension and **no mask**, so the junction charge is charged at full
+V_OUT on every cycle including the DCM portion. The claim holds; only the constant changed. In DCM the drain has
 already resonated below V_OUT before turn-on, so that share is overstated.
 
 Measured on the reference design: DCM appears **only at 264 Vac and only for ~10 % of the
@@ -489,7 +587,9 @@ describe what the code does rather than claim CCM-gating for both branches.
 
 ### B17. Diode V_F is evaluated at the mid-current, not across the ripple triangle
 `pfc_loss_model.loss()` computes diode conduction as `vf(i_d_repr)*i_d_density + rd*ms_dio`, where
-`i_d_repr` is the mid-value of the conducting current. The duty gating and the ripple's contribution
+`i_d_repr` is the mid-value of the conducting current. **Re-verified 2026-08-23** at
+`pfc_loss_model.py:359` — `P_cond_dio = avg(dio.vf(i_d_repr, Tj_dio)*i_d_density + dio.rd*ms_dio)`
+with `i_d_repr[ccm] = i_ch[ccm]`. Accurate as written. The duty gating and the ripple's contribution
 to the mean square are both correct (`ms_dio = (i_ch^2 + di^2/12)*(1-d)`), so what is missed is only
 the CURVATURE of V_F(i) across the ripple band — the linear part is already carried by `rd`.
 
@@ -653,14 +753,18 @@ blocked-download icon; "Always allow" there is an immediate workaround.
 2. **`allow-downloads` on two sandboxed iframes** — see C3 below.
 3. *(bigger, optional)* split generation from download so the save is always a direct user click.
 
-### C3. Two studio iframes are sandboxed without `allow-downloads`
-- `ReviewMagnetics.tsx:1002` — `sandbox="allow-scripts allow-same-origin"`
-- `CapacitorSimAgent.tsx:380` — `sandbox="allow-scripts allow-same-origin"`
-- `ControlDesign.tsx:263` — `sandbox="allow-scripts allow-downloads allow-forms allow-modals"` (correct)
+### C3. Studio iframes sandboxed without `allow-downloads`  `FIXED at C252`
+**There were three, not two.** The entry named `ReviewMagnetics` and `CapacitorSimAgent`;
+`SimulationAgent.tsx` was written after C3 was logged and nobody re-counted the sites — the
+identical failure to C2's 8th download path, on the same day, found by the same kind of scan.
 
-Any download initiated INSIDE the first two (a studio CSV/PNG export) is silently blocked by the
-browser. This is **not** the report button — that lives in the parent document — but it is the same
-class of silent failure. Found while analysing C2, 2026-08-01. One-line fix each.
+All three now carry `allow-downloads`. `ControlDesign.tsx` already did.
+
+Guarded by `tests/test_downloads_go_through_helper.py::test_every_studio_iframe_allows_downloads`,
+which counts the sites rather than trusting a list — because a written-down list of offenders is
+precisely what went stale here. Any download initiated inside a sandboxed frame without that flag
+is blocked by the browser with no console error and no visible failure: the export button simply
+does nothing.
 
 ---
 
@@ -813,6 +917,23 @@ item.
 ---
 
 ## Recently closed (kept briefly for context)
+
+**Closed at C252 (the audit).** Fixes: **A9a** loader accepts `data_source` at either nesting
+(66 false load warnings → 0); **B10** §9.7 split into 9.7a/9.7b; **B12/B13** four black-square
+defects, including one on every page footer of two reports; **C3** `allow-downloads` on all three
+studio iframes. Verified closed by measurement, no code needed: **B2** (Section 4.6.2 renders the
+per-V<sub>in</sub> families from `build_view_contract`).
+
+**Entries that were already done and had simply never been moved** — the reason the open count read
+37 when it was nearer 30:
+
+| Item | Closed by | Evidence re-checked 2026-08-23 |
+|---|---|---|
+| A11 — no real diode datasheet through the extractor | C222 | 22 tests in `test_diode_real_datasheets.py`; both vendor PDFs on file |
+| B4 — status vocabulary | C178 (3e) | `STATUS_WORDS` + `norm_status()` at the render boundary; only the deliberate internal-enum residual remains |
+| B5 — bare `onClick={fn}` handlers | C174 | `Btn.onClick` typed with its event parameter, so `strictFunctionTypes` rejects the bare form at compile time |
+| B14 — C6 capacitance tolerance, GUI half | C188 | Step-15 ±20 % panel + CapSim corner selector |
+| E2 — chapter builders can vanish silently | C251 | page floor 205-235, Ch3-vs-Ch4 parity test, `test_chapter7_is_present` |
 
 - **B21 — the combined-report fixture built no Chapter 7** (C245). `build_combined` sent no
   `semiconductor` payload and `main.py` gates the chapter on it, so every `TestCombinedReport`

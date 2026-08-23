@@ -414,7 +414,7 @@ export const CapacitorSimAgent: React.FC<Props> = ({
             width: '100%', minHeight: 680,
             border: 'none', borderRadius: 10, background: '#0a0f1e', display: 'block',
           }}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-same-origin allow-downloads"
         />
       )}
 

@@ -481,7 +481,7 @@ def _steps9_12(story, state, d, s):
         ("FFcu = N×Acu / Wa",   f"{ffcu*100:.2f}%"),
         ("Ku (physical fill)",  f"{ku*100:.2f}%"),
         ("FFcu limit",          "40% (designer setting)"),
-        ("Fill status",         "✓ Within limit" if ffcu <= 0.40 else "⚠ Exceeds limit"),
+        ("Fill status",         "✓ Within limit" if ffcu <= 0.40 else "✗ Exceeds limit"),
     ]
     story.append(_kv_table(rows11, s=s))
 
@@ -496,7 +496,7 @@ def _steps9_12(story, state, d, s):
         ("Thermal budget ΔT",   f"{dT_bgt:.0f} °C"),
         ("Computed ΔT rise",    f"{dT_act:.1f} °C"),
         ("T_core (converged)",  f"{d.get('T_core_C', 0):.1f} °C"),
-        ("Thermal status",      "✓ Within budget" if dT_act <= dT_bgt else "⚠ Exceeds budget"),
+        ("Thermal status",      "✓ Within budget" if dT_act <= dT_bgt else "✗ Exceeds budget"),
     ]
     story.append(_kv_table(rows12, s=s))
     story.append(Spacer(1, 4*mm))
@@ -527,9 +527,9 @@ def _step13(story, d, s):
     # 13.2 Inductance
     story.append(Paragraph("13.2  AL and Inductance vs DC Bias", s["h2"]))
     rows = [
-        ("L₀ min  (AL,min × N²)",  f"{d.get('L0_min_uH', 0):.1f} µH"),
-        ("L₀ nom  (AL,nom × N²)",  f"{d.get('L0_nom_uH', 0):.1f} µH"),
-        ("L₀ max  (AL,max × N²)",  f"{d.get('L0_max_uH', 0):.1f} µH"),
+        ("L<sub>0</sub> min  (AL,min × N²)",  f"{d.get('L0_min_uH', 0):.1f} µH"),
+        ("L<sub>0</sub> nom  (AL,nom × N²)",  f"{d.get('L0_nom_uH', 0):.1f} µH"),
+        ("L<sub>0</sub> max  (AL,max × N²)",  f"{d.get('L0_max_uH', 0):.1f} µH"),
         ("k,req min",               f"{d.get('kreq_min', 0):.4f}"),
         ("k,req nom",               f"{d.get('kreq_nom', 0):.4f}"),
         ("k,req max",               f"{d.get('kreq_max', 0):.4f}"),
@@ -565,7 +565,7 @@ def _step13(story, d, s):
         ("Bmax @ full-load",    f"{d.get('Bmax_FL_T', 0)*1000:.2f} mT"),
         ("Bsat @ T_core",       f"{d.get('Bsat_at_Tcore', 0)*1000:.0f} mT"),
         ("Saturation margin (mean path, gate basis)",
-         f"{d.get('sat_margin_pct', 0):.1f}%  {'✓' if d.get('sat_margin_pct',0)>=15 else '⚠'}"),
+         f"{d.get('sat_margin_pct', 0):.1f}%  {'✓' if d.get('sat_margin_pct',0)>=15 else '✗'}"),
     ]
     story.append(_kv_table(rows, s=s))
 
@@ -579,7 +579,7 @@ def _step13(story, d, s):
         ("Cu area per conductor",  f"{d.get('Cu_area_mm2', 0):.4f} mm²"),
         ("Acu total = N × Acu",    f"{d.get('N',0) * d.get('Cu_area_mm2',0):.3f} mm²"),
         ("Wa total",               f"{d.get('Wa_total_mm2', 0):.2f} mm²"),
-        ("FFcu = Acu,tot / Wa",    f"{ffcu*100:.2f}%  {'✓ ≤40%' if ffcu<=0.40 else '⚠ >40%'}"),
+        ("FFcu = Acu,tot / Wa",    f"{ffcu*100:.2f}%  {'✓ ≤40%' if ffcu<=0.40 else '✗ >40%'}"),
         ("Ku (physical bundle)",   f"{ku*100:.2f}%"),
         ("Rac/Rdc (Dowell)",       f"{d.get('Rac_Rdc', 1.0):.4f}×"),
     ]
@@ -626,7 +626,7 @@ def _step13(story, d, s):
         ("T_core (converged)",      f"{d.get('T_core_C', 0):.2f} °C"),
         ("ΔT rise",                 f"{d.get('dT_rise_C', 0):.2f} °C"),
         ("ΔT budget",               f"{d.get('dT_budget_C', 60):.0f} °C"),
-        ("Thermal status",          "✓ Pass" if d.get('dT_rise_C',0) <= d.get('dT_budget_C',60) else "⚠ Exceeds budget"),
+        ("Thermal status",          "✓ Pass" if d.get('dT_rise_C',0) <= d.get('dT_budget_C',60) else "✗ Exceeds budget"),
     ]
     story.append(_kv_table(rows, s=s))
 
@@ -642,7 +642,7 @@ def _step13(story, d, s):
     if fail_reasons:
         for fr in fail_reasons:
             status_data.append([
-                Paragraph("  ⚠ Constraint violation", s["body"]),
+                Paragraph("  ✗ Constraint violation", s["body"]),
                 Paragraph(fr, ParagraphStyle("fr", fontName="Helvetica", fontSize=8,
                     textColor=C_RED, leading=11)),
             ])
@@ -689,7 +689,7 @@ def _step14(story, step8, s):
     story.append(Spacer(1, 3*mm))
 
     if not step8:
-        story.append(Paragraph("⚠  Step 14 data not available — time-domain analysis was not run.", s["body"]))
+        story.append(Paragraph("✗  Step 14 data not available — time-domain analysis was not run.", s["body"]))
         return
 
     # Power-law fit
