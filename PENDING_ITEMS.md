@@ -520,6 +520,29 @@ or if the reverse-recovery placeholder in `Bridge.loss()` is ever made real.
   `bridge_rectifier` (both, or `audit_device_classes()` will flag it), or the decision to leave it
   out is recorded as final and the report says so where bridge loss is reported.
 
+### B22. Table 7.2e states no temperature conditions  `CODE` — *designer review comment 3*
+The last of the designer's four report-review comments (2026-08-19). Table 7.2e lists every engine
+input and where it came from, but **states no conditions at all**, so a reviewer cannot tell whether
+R_DS(on) came from a 25 °C table entry or from the Tj curve.
+
+**The data already exists** — profiles carry per-entry `conditions` (`{"T_c": 25.0}`,
+`{"V_DS": 400.0}`, `{"V_GS_swing": 18.0}`). Measured across the three real parts: 31 of 58
+parameters carry some condition, 14 carry a temperature. So this is surfacing a column, not new
+extraction, and it will be honestly patchy.
+
+On the substance: the engine already corrects the two terms that dominate (R_DS(on) via the vs-Tj
+curve, V_f integrated at the converged Tj). The charge terms (Q_g, Q_gd, C_iss) are used at their
+25 °C values, which is defensible — they are weakly temperature-dependent — but the report never
+says so, and that is the real gap.
+
+- **BLOCKED on a designer decision** (asked 2026-08-19, not yet answered): state each value's own
+  datasheet condition, normalise everything to one ambient, or both? The design runs at
+  Ta = 45–50 °C while the comment mentioned 25/50 °C. C247 settled that the operating ambient is one
+  number from the first page, which removes the ambiguity about what "the" ambient means, but not
+  the question of what the column should show.
+- **Done when:** every row of 7.2e states the condition its value was taken at, or says DATA MISSING,
+  and the four table-sourced values keep the "no plot exists" line C231 added.
+
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
 Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
@@ -695,6 +718,22 @@ effect on a marginal design is real and is exactly why this is a decision, not a
   deliberately with the above in mind, and a before/after candidate-count comparison is recorded.
 - **Verify with:** the baseline-diff method used in item 29 — snapshot candidate count, ordering and
   `passed` flags before and after, and report how many cores changed verdict.
+
+### D4. Inductor copper: SA single-node vs two-node winding temperature  `DECISION`
+Raised by C248 and deliberately not taken. Copper loss is priced at the **SA single-node**
+temperature (92.8 °C at a 50 °C ambient) — the same temperature the convergence loop and the
+`dT_rise` pass/fail criterion use. The finer **two-node** model puts the winding at **84.0 °C** at
+the same ambient, and the copper is physically in the winding.
+
+Pricing copper at the winding node would be ~3 % lower again, and arguably more correct. It would
+also mean the loss, the thermal convergence loop and the pass/fail criterion **no longer share a
+temperature** — three numbers in one chapter on two different thermal models.
+
+- **The decision:** keep one self-consistent model (today), or use the finer node for loss and
+  accept the split. Not a defect either way; C248 fixed the real one, which was core and copper
+  being on *different* temperatures within the same row.
+- **Done when:** the designer picks, and whichever is chosen is stated in Chapter 4 so a reviewer
+  knows which node the copper figure belongs to.
 
 ### D2. Max-stacks 3-stack sighting
 A designer once saw a 3-stack candidate when max_stacks should have excluded it. The chain was verified
