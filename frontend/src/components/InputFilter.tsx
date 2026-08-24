@@ -22,6 +22,9 @@ interface Props {
   approvedInputProtection?: Record<string, unknown> | null
   onBack:    () => void
   onRestart: () => void
+  /** Optional — advances to the Design Explorer. When absent this page behaves exactly as before,
+   *  so adding the explorer changed nothing here (ANIMATION_PLAN C-2). */
+  onNext?:   (design: Record<string, unknown> | null) => void
 }
 
 const inStyle: React.CSSProperties = { background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 6,
@@ -44,7 +47,7 @@ const Stat: React.FC<{ k: string; v: string; ok?: boolean }> = ({ k, v, ok }) =>
 
 export const InputFilter: React.FC<Props> = ({
   confirmedState, approvedInductorDesign, approvedCapacitorDesign,
-  approvedControlParams, approvedSemiconductor, approvedInputProtection, onBack, onRestart,
+  approvedControlParams, approvedSemiconductor, approvedInputProtection, onBack, onRestart, onNext,
 }) => {
   const app = (confirmedState as any)?.intake?.application ?? {}
   const tsi = (confirmedState as any)?.topology_specific_inputs ?? {}
@@ -293,6 +296,12 @@ export const InputFilter: React.FC<Props> = ({
           <Btn variant="success" disabled={rptBusy || !r} onClick={downloadReport}>
             {rptBusy ? '⏳ Generating…' : '📥 Download full report (Ch 1–10)'}
           </Btn>
+          {onNext && (
+            <Btn variant="primary" disabled={!r}
+              onClick={() => onNext(r ? ({ design: r, opts: buildOpts() } as Record<string, unknown>) : null)}>
+              Design Explorer →
+            </Btn>
+          )}
           <Btn variant="ghost" onClick={onRestart}>Restart</Btn>
         </div>
       </div>

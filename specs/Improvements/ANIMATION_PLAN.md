@@ -167,13 +167,37 @@ construction rather than by care.
 the transient alone is 40 000 points — decimation is a per-scene presentation decision. Each scene
 attaches the arrays it needs in its own phase, from the one engine that owns them.
 
-### Phase 1 — Page and scene framework
-- [ ] New page after Input Filter; gate until prior chapters complete (C-12)
-- [ ] Live fetch of the export (C-7)
-- [ ] Scene model with independent time bases
-- [ ] Operating-point picker across scenes
-- [ ] Playback + presentation mode (full-screen, play/pause, step, captions)
-- [ ] Our tokens (C-3); honour `prefers-reduced-motion`
+### Phase 1 — Page and scene framework  `DONE at C257`
+- [x] New page after Input Filter; gate until prior chapters complete (C-12)
+- [x] Live fetch of the export (C-7)
+- [x] Scene model with independent time bases
+- [x] Operating-point picker across scenes (one at a time, as settled)
+- [x] Playback: play/pause, scrub, guided prev/next scene with captions
+- [x] Our tokens (C-3); honour `prefers-reduced-motion`
+- [ ] Full-screen presentation mode — deferred to Phase 5 with the rest of the polish
+
+**Delivered:** `frontend/src/components/DesignExplorer.tsx` (new), `designState()` in `client.ts`,
+`backend/tests/test_design_explorer_is_read_only.py` (6 guards). Existing files: **+65 / −3**, and
+all three "deletions" are the same line re-emitted with one item appended.
+
+**A React page, not an iframed asset.** `control_design.html` lives in `public/` and cost two
+rounds of "fixed" that never reached the browser because a second copy existed (C244). A React page
+on our `ui.tsx` primitives has no duplicate-asset failure mode and satisfies C-3 by construction —
+there is no second palette to drift from. C-10 therefore does not apply to this page.
+
+**The gate is a first-class state.** `readiness.gate === 'blocked'` renders a panel naming each
+unapproved chapter and says on screen that it will not substitute nominals.
+
+**Six guards, each proven to bite** (`test_design_explorer_is_read_only.py`) — only `designState`
+may be called; no duty-from-voltage-ratio, no ripple-from-L-and-fsw, no `Math.sin/cos` synthesising
+a waveform; no raw fetch, mutating verb, approve/save callback or assignment into an approved
+object; tokens only, no hex, no CDN font; gate consulted before any scene draws; page registered
+directly after `inputfilter`. Verified by reintroducing all five violation shapes against a scratch
+copy — all caught, page restored byte-identical.
+
+*Note:* the first write-back guard fired on the words "live fetch" in a **comment**. The
+behavioural guards now strip comments before scanning; the token/CDN guard still reads raw source
+on purpose. A guard that cries wolf gets suppressed — see the stale page-bound in E2.
 
 ### Phase 2 — Power stage
 - [ ] Power-stage schematic with conduction highlighting from engine arrays

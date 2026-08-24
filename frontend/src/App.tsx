@@ -17,9 +17,10 @@ import { CapacitorSimAgent } from './components/CapacitorSimAgent'
 import { SemiconductorSelection } from './components/SemiconductorSelection'
 import { InputProtection } from './components/InputProtection'
 import { InputFilter } from './components/InputFilter'
+import { DesignExplorer } from './components/DesignExplorer'
 import type { CapacitorResult } from './components/Step15Capacitor'
 
-type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'capsim'|'step16'|'semiconductors'|'inputprotection'|'inputfilter'
+type Step = 'intake'|'topology'|'controller'|'channels'|'mini'|'done'|'step7'|'step15'|'capsim'|'step16'|'semiconductors'|'inputprotection'|'inputfilter'|'explorer'
 
 interface AppState {
   step: Step; loading: boolean; error: string|null; backendStatus: 'ok'|'error'|'checking'
@@ -46,6 +47,7 @@ interface AppState {
   // input-protection config (design/cap/mosfet/ntc_opts/mov_opts) persisted when the designer
   // moves past the Input-Protection page — the EMI page forwards it so its combined report keeps Ch 8/9.
   approvedInputProtection: Record<string,unknown>|null
+  approvedInputFilter: Record<string,unknown>|null
   // documentation agent
   docStatus: DocReportStatus|null; docStatusLoading: boolean
 }
@@ -57,7 +59,7 @@ const INIT: AppState = {
   isInterleaved:false,selectedChannels:1,miniDefaults:null,miniErrors:[],summary:null,
   reportLoading:false,reportReady:false,reportBytes:null,intakeData:null,
   approvedInductorDesign:null, approvedCapacitorDesign:null, approvedControlParams:null,
-  approvedSemiconductor:null, approvedInputProtection:null,
+  approvedSemiconductor:null, approvedInputProtection:null, approvedInputFilter:null,
   docStatus:null, docStatusLoading:false,
 }
 
@@ -99,6 +101,7 @@ const SS: Record<Step,string> = {
   semiconductors:'mode-b / chapter-7-semiconductor-selection',
   inputprotection:'mode-b / input-protection-mov-ntc',
   inputfilter:'mode-b / input-emi-filter',
+  explorer:'mode-b / design-explorer',
 }
 
 export default function App() {
@@ -345,6 +348,17 @@ export default function App() {
           approvedSemiconductor={s.approvedSemiconductor}
           approvedInputProtection={s.approvedInputProtection}
           onBack={() => setS(p=>({...p, step:'inputprotection'}))}
+          onNext={(ifil) => setS(p=>({...p, step:'explorer', approvedInputFilter: ifil ?? p.approvedInputFilter}))}
+          onRestart={restart} />}
+        {s.step==='explorer' && s.graphState && <DesignExplorer
+          confirmedState={s.graphState as Record<string,unknown>}
+          approvedInductorDesign={s.approvedInductorDesign}
+          approvedCapacitorDesign={s.approvedCapacitorDesign as Record<string,unknown>|null}
+          approvedControlParams={s.approvedControlParams}
+          approvedSemiconductor={s.approvedSemiconductor}
+          approvedInputProtection={s.approvedInputProtection}
+          approvedInputFilter={s.approvedInputFilter}
+          onBack={() => setS(p=>({...p, step:'inputfilter'}))}
           onRestart={restart} />}
 
         {s.loading && (

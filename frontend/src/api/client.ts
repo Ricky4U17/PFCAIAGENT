@@ -289,6 +289,44 @@ export const docGenerateReport = (req: {
     return res.blob()
   })
 
+// ── Design state export (PFC Design Explorer, Phase 0) ───────────────────────
+/** Chapter-scoped projection of the approved design. Read-only: the endpoint computes nothing and
+ *  the page must never write back — see specs/Improvements/ANIMATION_PLAN.md (C-2, C-11).
+ *  Takes the SAME request shape as the combined report, so the Input Filter page's payload works
+ *  unchanged and the export cannot drift from the document. */
+export interface DesignStateReq {
+  state:             Record<string, unknown>
+  approved_design?:  Record<string, unknown> | null
+  step15_result?:    Record<string, unknown> | null
+  step16_params?:    Record<string, unknown> | null
+  semiconductor?:    Record<string, unknown> | null
+  input_protection?: Record<string, unknown> | null
+  input_filter?:     Record<string, unknown> | null
+}
+export interface DesignStatePoint {
+  vac_V: number; vin_pk_V: number | null
+  L_full_nom_uH: number | null; L_req_uH: number | null; k_bias: number | null
+  dIL_pp_A: number | null; dIin_pp_A: number | null; ripple_pct: number | null
+  Ipk_line_A: number | null; Iavg_crest_A: number | null
+  AT: number | null; H_Oe: number | null; D_crest: number | null; Bac_pk_T: number | null
+  Irms_A: number | null; Ihf_rms_A: number | null
+  Pcore_avg_W: number | null; Pcu_avg_W: number | null; Ptotal_avg_W: number | null
+  [k: string]: unknown
+}
+export interface DesignState {
+  schema_version: string
+  meta:  Record<string, unknown>
+  spec:  Record<string, number | string | null>
+  readiness: {
+    chapters: Record<string, { source: string; approved: boolean }>
+    missing: string[]; complete: boolean; gate: 'open' | 'blocked'
+  }
+  points: DesignStatePoint[]
+  chapters: Record<string, Record<string, unknown> | null>
+}
+export const designState = (req: DesignStateReq) =>
+  post<DesignState>('/mode-b/design-state', req)
+
 // ── Control-loop design report (Steps 1–14 + Appendices A–E) ─────────────────
 // Generates the full FAN9672 control-loop design report from designer specs.
 // Any omitted input falls back to the verified calc-engine defaults.

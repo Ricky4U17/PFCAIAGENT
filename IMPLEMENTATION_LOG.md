@@ -10443,3 +10443,62 @@ file is deferred for the same reason: the shape should settle against a real con
 than be frozen against a guess.
 
 VERIFIED 11 new tests pass in 24 s; `main.py` diff is 20 insertions / 0 deletions.
+
+# C257 - Phase 1: the Design Explorer page, gate and scene framework
+
+Second slice of the PFC Design Explorer. Additive: one new page, one new API binding, one new test
+file. The four existing files touched gained 65 lines and lost 3 - and all three "deletions" are
+the same line re-emitted with one item appended (the Step union gains 'explorer', the state
+initialiser gains approvedInputFilter, InputFilter's destructure gains onNext). No behaviour was
+removed from anything that already worked.
+
+## A React page, not an iframed asset
+
+The one existing embedded tool, control_design.html, is served from public/ and cost two rounds of
+"fixed" that never reached the browser because a second copy existed in src/assets (C244). A React
+page built on our own ui.tsx primitives has no duplicate-asset failure mode at all, and it
+satisfies C-3 (our tokens) by construction rather than by discipline - there is no second palette
+to drift from.
+
+## What is on screen
+
+Three columns. Left: the operating-point picker, one at a time as settled, each card showing that
+point's own L and dI so the bias curve is visible before any scene draws. Centre: the scene stage
+with guided prev/next navigation, a live clock, a scrub bar and the caption for the scene. Right:
+the point summary, every field straight from the export.
+
+Four scenes, each owning its own clock because they span five orders of magnitude - switching
+period (1/fsw), line half-cycle (1/2f_line), load step (0.4 s) and a static steady-state summary.
+Phase 1 renders the framework and the real time bases; the waveforms arrive in Phases 2-5, and each
+scene says which phase fills it rather than showing an empty box.
+
+## The gate is a first-class state, not an error
+
+`readiness.gate === 'blocked'` renders a panel naming each unapproved chapter. It deliberately does
+not fill gaps with nominals - the text on screen says so. That is the C255 lesson made visible: a
+plausible default shown as if it were a result is worse than a page that refuses to open.
+
+## Guards, and proving they bite
+
+`test_design_explorer_is_read_only.py` enforces the constraints that are easy to hold today and
+easy to lose later - because the natural way to extend an animation is to derive one more quantity
+in the browser, and the natural way to make it interactive is to let it write something back. Both
+would be invisible: the page would still render and the numbers would still look right while it
+became a second source of truth beside the report.
+
+Six guards: only `designState` may be called; no duty-from-voltage-ratio, no ripple-from-L-and-fsw,
+no Math.sin/cos synthesising a waveform; no raw fetch, mutating verb, approve/save callback or
+assignment into an approved object; tokens from ui.tsx with no hard-coded hex and no CDN font; the
+gate consulted before any scene renders; and the page registered directly after inputfilter.
+
+VERIFIED by reintroducing each violation against a scratch copy and confirming it is caught -
+recompute duty, recompute ripple, synthesised waveform, raw fetch, mutating method, all five
+CAUGHT, page restored byte-identical afterwards.
+
+The first version of the write-back guard fired on the phrase "live fetch (C-7)" in a COMMENT. A
+scanner that cannot tell code from commentary cries wolf, and a guard that cries wolf gets
+suppressed - the same failure as the stale 178-190 page bound. The behavioural guards now strip
+comments first; the token/CDN guard still reads raw source, deliberately.
+
+VERIFIED tsc --noEmit clean; Vite serves all four modules; /mode-b/design-state registered on the
+restarted backend and the page fetches it live.

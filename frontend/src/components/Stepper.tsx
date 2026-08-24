@@ -49,6 +49,7 @@ export const STEPS = [
   {id:'semiconductors', icon:'🔌', label:'Semiconductors'},
   {id:'inputprotection', icon:'🛡️', label:'Input Protection'},
   {id:'inputfilter',     icon:'🎚️', label:'Input Filter'},
+  {id:'explorer',        icon:'🎬', label:'Design Explorer'},
 ]
 
 export const Stepper:React.FC<{current:string}> = ({current}) => {
