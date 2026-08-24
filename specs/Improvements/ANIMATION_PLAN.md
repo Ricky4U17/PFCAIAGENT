@@ -163,9 +163,45 @@ a second drawing would drift from the report the way every duplicated source has
 
 ### Phase 4 — Control (C-5, C-13)
 - [ ] FAN9672 application schematic, SVG with addressable IDs, live values
-- [ ] Interactive Bode, current and voltage loop, crossover/PM markers — **view-only**
+- [ ] Interactive Bode, current and voltage loop, crossover/PM markers — **view-only, static plot**
 - [ ] Loop block diagram with live compensation values
-- [ ] Step-load scene from the real `t`/`waves`
+- [ ] **Voltage-loop transient scene** — see "Transient scene" below
+- [ ] **Current-loop scene, separate**, at switching timescale (settled)
+
+#### Transient scene — settled design
+
+What we have is better than the reference package: `compute_step12_transient` builds the closed-loop
+output impedance `Z_cl` from the actual compensator and OTA gain and takes `signal.step()` of it, so
+`waves[i].ll/.hl` are genuine ΔV<sub>out</sub>(t) in volts for all six transitions at both line
+extremes, with per-row peak / % / `trec`. The reference uses a shaped `(t/τ)·e^(1−t/τ)` heuristic
+instead. Use ours.
+
+- [ ] All six transitions selectable (settled): 0→100, 0→50, 50→100, 100→0, 50→0, 100→50, LL and HL
+- [ ] Three stacked, time-aligned panels: **load-current step** / **bus voltage** / **loop signal chain**
+- [ ] Bus panel draws **three** things:
+  1. composite trace `V_bus + ripple(2·f_line) + Δv(t)` — the scope view (the look the designer wants)
+  2. **cycle-average overlay** `V_bus + Δv(t)` — free, it is exactly what Step 12 returns
+  3. ±band measured **against the average, not the instantaneous trace**
+- [ ] Loop signal chain: error and compensator output via `lsim` on the *same* `s11["comp"]` TF —
+      same transfer functions, same solver, no second model. Duty and inner-loop response are
+      deliberately excluded rather than approximated (C-9).
+- [ ] Caption states the **small-signal basis** — `signal.step` on `Z_cl` is linear; a 0→100 % step
+      is not. No slew limit, no error-amp clamp. Say so or the first reviewer question is "where is
+      the clamp?"
+- [ ] Narrative spine: **two-loop time-scale separation** — inner current loop f<sub>ci</sub> ≈ 8 kHz
+      settles inside a switching period; outer voltage loop f<sub>cv</sub> ≈ 17 Hz takes ~150 ms
+- [ ] Make explicit that **f<sub>cv</sub> ≪ 120 Hz is deliberate** — the loop is designed *not* to
+      correct bus ripple, because chasing it would modulate the current reference and distort input
+      current (Ch6 says this). Ripple sitting uncorrected is intended behaviour, labelled as such.
+
+#### Transient scene — traps
+
+| Trap | Why |
+|---|---|
+| **Band vs ripple** | `rec_band_pct = 1.0` → ±3.93 V, while bus ripple is 20 V pk-pk = **±10 V**. The reference draws an absolute ±band rectangle (`pfc-explorer.js:805-807`) *and* the composite trace (`:812`), so with its own numbers the bus sits outside tolerance 100 % of the time before any step. Resolved by measuring the band against the cycle-average (above). |
+| **Bode marker sliding with time** | A frequency response has no time coordinate. Never animate a dot along the Bode curve during a transient. Show the Bode statically beside it and connect the two by annotation: f<sub>cv</sub> → recovery timescale, PM → ringing or clean settle. |
+| **Ripple amplitude constant** | Ripple scales with load, so a 0→100 % step should show it growing. Supply `ripplePP_before` / `ripplePP_after` per transition from Ch5 so the change comes from the engine, not a browser formula. **OPEN — designer to confirm worth doing.** |
+| **Units** | `trec` is milliseconds while everything else is SI seconds. |
 
 ### Phase 5 — Summary and polish
 - [ ] Chapter block panels: fuse, MOV/GDT, NTC, EMI, bridge, L, Q, D, R_CS, C, controller
@@ -191,11 +227,17 @@ a second drawing would drift from the report the way every duplicated source has
 
 ---
 
+## Settled 2026-08-23 (second round)
+
+- **One operating point at a time** — no side-by-side comparison.
+- **Gate requires Ch8–Ch10 complete too** (NTC / MOV / GDT), not just the power-stage chain.
+- **Guided, scene-by-scene** presentation with captions — not free navigation.
+- **All six load transitions selectable**, LL and HL.
+- **Current loop gets its own scene** at switching timescale.
+- **Bus panel superimposes 2·f_line ripple with the transient**, as in the reference — with the
+  cycle-average overlay and band correction described under the transient scene.
+
 ## Open questions
 
-- [ ] Bode interactivity is view-only (settled) — but may the reviewer *compare* two approved
-      operating points side by side, or only view one at a time?
-- [ ] Does the gate (C-12) require Chapters 8–10 (NTC / MOV / GDT) complete as well, or only the
-      power-stage chain through the input filter?
-- [ ] Presentation mode: is a guided sequence wanted (scene-by-scene with captions), or free
-      navigation only?
+- [ ] Ripple amplitude vs load during a step — supply / from Ch5, or keep
+      constant amplitude for simplicity?
