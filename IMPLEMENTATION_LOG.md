@@ -10387,3 +10387,59 @@ and prints the flat-basis caption; WITH one it gives 134/146/150/154/130/137/142
 Chapter-3 caption. `tests/test_ch7_standalone_matches_combined.py` builds both documents and
 compares them - the check no existing test performed, because `test_ch7_three_way_parity` builds
 only the standalone one and so could never see a disagreement between two documents.
+
+# C256 - Phase 0: the design state export
+
+First code for the PFC Design Explorer (`specs/Improvements/ANIMATION_PLAN.md`). Purely additive:
+one new module, one new endpoint, one new test file. `main.py` gained 20 lines and lost none;
+nothing that already worked was touched, and deleting the new files would leave the system
+byte-identical.
+
+## What it is
+
+`build_design_state(...)` projects the approved design into one neutral chapter-scoped structure -
+meta, spec, readiness, points[], and per-chapter sections for magnetics, capacitor, control,
+semiconductors, protection and EMI. `POST /mode-b/design-state` exposes it.
+
+It takes the SAME request shape as the combined report (`_DocReportReq`). That was a deliberate
+choice with two payoffs: the GUI already assembles that payload on the Input Filter page, so the
+animation page can send the identical object; and export-vs-report can be compared from one
+fixture instead of two hand-built ones that could drift.
+
+## The three rules, and why each is a test rather than a comment
+
+1. NO RECOMPUTATION. Every value is projected from an object the design already approved. A
+   structural test reads the module's own source and fails if it ever imports an engine or a
+   report builder - because the next person will reasonably reach for one to "just derive" a
+   missing value, and the export stops being a projection the moment they do.
+2. NO SILENT DEFAULTS. A missing input gives `approved: false` and an absent section, never a
+   nominal standing in for a measurement. `{}` is explicitly not an approval, because `{}` is what
+   the GUI sends for a chapter the designer has not reached. This is the C255 lesson: a flat
+   nominal under a caption claiming a measured basis is how a wrong number reads as a right one.
+3. VALUES KEEP THEIR SOURCE NAMES AND UNITS. `L_full_nom_uH` stays microhenries and keeps its
+   name. Renaming 109 inductor fields into a new vocabulary would buy neutrality at the price of
+   one transcription bug per field with nothing to catch it. Neutrality here is STRUCTURAL -
+   chapter sections, explicit readiness, provenance naming the source field. The canonical mapping
+   belongs in the Ansys and SIMPLIS adapters, where the target tool defines the vocabulary.
+
+## The property the phase exists for
+
+points[] merges `L_vs_Vin_table` and `loss_table_100C` on Vin_rms, so any consumer reading it gets
+the as-built per-point inductance rather than a flat nominal - without having to know the
+difference. Exported: 133.5 145.5 150.1 154.3 130.3 137.4 142.5 144.9 150.4 uH, matching the
+rendered Table 7.1 cell for cell.
+
+That comparison is a test, and it runs on every suite rather than behind a `slow` marker. It
+renders the STANDALONE Chapter 7 rather than the full report: the same table, identical since C255
+(asserted separately), 24 s against 3.5 min. A guard this central being deselected by default
+would protect nothing.
+
+## Deliberately not in Phase 0
+
+Per-scene arrays. Including them means calling engines, which is rule 1, and the transient alone
+is 40 000 points - decimation is a presentation decision the scene owns, not the export. Each
+scene attaches what it needs in its own phase, from the one engine that owns it. The JSON Schema
+file is deferred for the same reason: the shape should settle against a real consumer first rather
+than be frozen against a guess.
+
+VERIFIED 11 new tests pass in 24 s; `main.py` diff is 20 insertions / 0 deletions.

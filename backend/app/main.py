@@ -2436,6 +2436,26 @@ class _DocReportReq(BaseModel):
     input_filter:     Optional[Dict[str, Any]] = None  # {design, cap, protection, ntc, opts} → Chapter 10 (EMI filter)
 
 
+@app.post("/mode-b/design-state", tags=["mode-b"])
+def design_state(req: _DocReportReq):
+    """The approved design as one neutral, chapter-scoped structure. ADDITIVE — reads only.
+
+    Phase 0 of the PFC Design Explorer (`specs/Improvements/ANIMATION_PLAN.md`). Takes the SAME
+    request shape as the combined report on purpose: the GUI already assembles that payload on the
+    Input Filter page, and it lets the export be tested for agreement against the report from one
+    fixture. Computes nothing and mutates nothing — see `design_state.py` for the three rules.
+    """
+    from app.mode_b.design_state import build_design_state
+    try:
+        return build_design_state(
+            state=req.state, approved_design=req.approved_design,
+            step15_result=req.step15_result, step16_params=req.step16_params,
+            semiconductor=req.semiconductor, input_protection=req.input_protection,
+            input_filter=req.input_filter)
+    except Exception as e:
+        log.exception("design state"); raise HTTPException(500, str(e))
+
+
 def _num(v):
     try:
         if v is None or v == "":

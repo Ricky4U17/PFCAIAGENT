@@ -131,12 +131,41 @@ a second drawing would drift from the report the way every duplicated source has
 
 ## To-do
 
-### Phase 0 — Design state export
-- [ ] Inventory every quantity the page needs, per chapter, against canonical names/units
-- [ ] Define export shape: chapter-scoped, SI, provenance + `approved` per section
-- [ ] Read-only assembler over approved objects — no recomputation, no silent defaults
-- [ ] Readiness model feeding the C-12 gate
-- [ ] Schema + a test asserting the export agrees with the report for the same design
+### Phase 0 — Design state export  `IN PROGRESS`
+- [x] Inventory every quantity the page needs, per chapter, against canonical names/units
+- [x] Define export shape: chapter-scoped, provenance + `approved` per section
+- [x] Read-only assembler over approved objects — no recomputation, no silent defaults
+- [x] Readiness model feeding the C-12 gate
+- [x] Test asserting the export agrees with the **rendered** report for the same design
+- [ ] JSON Schema file (deferred — the shape should settle against a real consumer first)
+- [ ] Per-scene arrays (waveforms, transient traces) — deliberately **not** Phase 0, see below
+
+**Delivered:** `backend/app/mode_b/design_state.py` (new), `POST /mode-b/design-state`
+(20 added lines in `main.py`, **0 deletions**), `backend/tests/test_design_state_export.py`
+(11 tests).
+
+**Input is the same shape the report takes** (`_DocReportReq`), deliberately: the GUI already
+assembles that payload on the Input Filter page, and it lets export-vs-report be compared from one
+fixture.
+
+**Verified:** L across the sweep exports as `133.5 145.5 150.1 154.3 130.3 137.4 142.5 144.9
+150.4 µH` and matches the rendered Table 7.1 cell for cell — the anti-C255 property holds by
+construction rather than by care.
+
+**Three rules, enforced by tests** — see the module docstring:
+1. *No recomputation.* A structural test fails the build if `design_state.py` ever imports an
+   engine or a report builder, because the next person would reasonably call one to "just derive"
+   a missing value.
+2. *No silent defaults.* A missing input yields `approved: false` and an absent section. `{}` is
+   not an approval — that is what the GUI sends for a chapter the designer has not reached.
+3. *Values keep their source names and units.* Renaming 109 inductor fields into a new vocabulary
+   would introduce one transcription bug per field with nothing to catch it. Neutrality here is
+   structural — chapter sections, readiness, provenance — not a second naming scheme. The
+   canonical mapping belongs in the Ansys/SIMPLIS adapters, where the target tool defines it.
+
+**Why arrays are not in Phase 0.** Including them would mean calling engines, which is rule 1, and
+the transient alone is 40 000 points — decimation is a per-scene presentation decision. Each scene
+attaches the arrays it needs in its own phase, from the one engine that owns them.
 
 ### Phase 1 — Page and scene framework
 - [ ] New page after Input Filter; gate until prior chapters complete (C-12)
