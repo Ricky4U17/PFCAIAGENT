@@ -239,5 +239,8 @@ instead. Use ours.
 
 ## Open questions
 
-- [ ] Ripple amplitude vs load during a step — supply / from Ch5, or keep
-      constant amplitude for simplicity?
+- [ ] Ripple amplitude vs load during a step — supply `ripplePP_before` / `ripplePP_after` per
+      transition from Ch5 so the amplitude change comes from the engine, or keep constant
+      amplitude for simplicity? (Ripple scales with load: a 0→100 % step should show it growing
+      from ~0 to the full ±10 V, which also makes the point that the ripple spec is a full-load
+      spec. The reference package draws it at constant amplitude.)
