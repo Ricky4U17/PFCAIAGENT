@@ -1,6 +1,11 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`5b64ed0` C255**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`00b8891` C256**, on `master`.
+
+**PFC Design Explorer (animation page) has started.** Scope and every settled constraint are in
+`specs/Improvements/ANIMATION_PLAN.md` — read it before touching that work. Phase 0 (the design
+state export) is in at C256: purely additive, `design_state.py` + `POST /mode-b/design-state`,
+with three rules enforced by tests — no recomputation, no silent defaults, source names kept.
 
 **PENDING_ITEMS.md was audited against the code at C252** — read its header block before working
 from it. The `DATA` section (A1–A7) is exact; four entries were stale and are fixed or closed; five
