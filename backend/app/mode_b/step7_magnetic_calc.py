@@ -463,6 +463,13 @@ def _half_cycle_averages(
     series_Ihf   = [] if return_series else None
     series_Pcu   = [] if return_series else None
     series_Ptot  = [] if return_series else None
+    # Per-angle DCM flag. `dcm_count` below already applies the criterion at every angle but only
+    # totals it, so `dcm_fraction` could say "6 % of the half cycle" without anyone being able to
+    # say WHICH 6 %. The Design Explorer needs to shade exactly those angles, and the only
+    # alternative was to restate `Iavg < dIpp/2` in a second module — a second definition of DCM
+    # that could silently drift from this one. Exported here instead, from the one place that owns
+    # the criterion (C259).
+    series_dcm   = [] if return_series else None
 
     for n in range(M):
         theta = (n + 0.5) * math.pi / M
@@ -493,7 +500,8 @@ def _half_cycle_averages(
 
         dIpp  = Vin * D / max(Lth * fsw_Hz, 1e-12)
         Ihf   = dIpp / (2.0 * math.sqrt(3.0))
-        if Iavg < dIpp / 2.0:          # inductor current rings to zero → DCM at this angle
+        _is_dcm = Iavg < dIpp / 2.0    # inductor current rings to zero → DCM at this angle
+        if _is_dcm:
             dcm_count += 1
 
         # HF copper loss: DC-resistance part + AC excess (Rac−Rdc) amplified by the
@@ -524,6 +532,7 @@ def _half_cycle_averages(
             series_Ihf.append(Ihf)
             series_Pcu.append(Pcu_i)
             series_Ptot.append(Ptot_i)
+            series_dcm.append(bool(_is_dcm))
 
     Pcore_avg = pCoreAcc / M
     Irms      = math.sqrt(i2 / M)
@@ -548,7 +557,8 @@ def _half_cycle_averages(
             "Pcore_W_series": series_Pcore,
             "t_ms": series_t_ms, "Vin": series_Vin, "D": series_D, "Iavg": series_Iavg,
             "H_Oe": series_H, "Bdc": series_Bdc, "Bac_pk": series_Bac, "Bmax": series_Bmax,
-            "Ihf": series_Ihf, "Pcore": series_Pcore, "Pcu": series_Pcu, "Ptot": series_Ptot}
+            "Ihf": series_Ihf, "Pcore": series_Pcore, "Pcu": series_Pcu, "Ptot": series_Ptot,
+            "dcm": series_dcm}
            if return_series else {}),
     }
 
@@ -1597,7 +1607,7 @@ def build_view_contract(result: dict, state: dict) -> dict:
                 T_core_C=T_core, f_line_Hz=f_line, M=180, return_series=True)
             waveforms_by_vin[str(int(round(vin)))] = {k: w[k] for k in
                 ("t_ms", "Vin", "D", "Iavg", "H_Oe", "Bdc", "Bac_pk", "Bmax",
-                 "Ihf", "Pcore", "Pcu", "Ptot") if k in w}
+                 "Ihf", "Pcore", "Pcu", "Ptot", "dcm") if k in w}
 
     scalar_keys = ("N", "stacks", "part_number", "material_key", "L0_nom_uH", "L_full_load_uH",
                    "Bmax_FL_T", "Bmax_inner_FL_T", "Bac_pk_T", "H_Oe_design", "DCR_100C_mOhm",

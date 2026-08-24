@@ -23,7 +23,9 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
-import { designState, type DesignState, type DesignStatePoint } from '../api/client'
+import { designState, designStateWaveforms,
+         type DesignState, type DesignStatePoint, type DesignWaveforms } from '../api/client'
+import { LineCycleScene, SwitchingScene, PowerStageSchematic } from './DesignExplorerScenes'
 
 // ── scenes ───────────────────────────────────────────────────────────────────
 // Four time bases spanning five orders of magnitude. No single timeline shows them honestly, so
@@ -135,6 +137,7 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   approvedSemiconductor, approvedInputProtection, approvedInputFilter, onBack, onRestart,
 }) => {
   const [ds, setDs] = useState<DesignState | null>(null)
+  const [wf, setWf] = useState<DesignWaveforms | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
 
@@ -151,16 +154,20 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   // ── live fetch (C-7): always the currently approved state, never a snapshot ──
   const load = useCallback(async () => {
     setBusy(true); setErr(null)
+    const req = {
+      state: confirmedState,
+      approved_design:  approvedInductorDesign ?? null,
+      step15_result:    approvedCapacitorDesign ?? null,
+      step16_params:    approvedControlParams ?? null,
+      semiconductor:    approvedSemiconductor ?? null,
+      input_protection: approvedInputProtection ?? null,
+      input_filter:     approvedInputFilter ?? null,
+    }
     try {
-      setDs(await designState({
-        state: confirmedState,
-        approved_design:  approvedInductorDesign ?? null,
-        step15_result:    approvedCapacitorDesign ?? null,
-        step16_params:    approvedControlParams ?? null,
-        semiconductor:    approvedSemiconductor ?? null,
-        input_protection: approvedInputProtection ?? null,
-        input_filter:     approvedInputFilter ?? null,
-      }))
+      // both reads in parallel; the waveform arrays are a separate endpoint because that one
+      // calls the engine and the projection deliberately cannot (ANIMATION_PLAN, Phase 0 rule 1)
+      const [state, waves] = await Promise.all([designState(req), designStateWaveforms(req)])
+      setDs(state); setWf(waves)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }, [confirmedState, approvedInductorDesign, approvedCapacitorDesign, approvedControlParams,
       approvedSemiconductor, approvedInputProtection, approvedInputFilter])
@@ -186,6 +193,14 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   useEffect(() => { setTNorm(0) }, [sceneIdx, pointIdx])
 
   const point: DesignStatePoint | null = ds?.points?.[pointIdx] ?? null
+  // the series for the selected point, if the engine produced one
+  const series = point && wf?.available
+    ? (wf.series[String(Math.round(point.vac_V))] ?? null) : null
+  // where we are inside the switching period at this line angle — the ONLY thing the page
+  // derives, and it is a phase position, not physics: the duty itself comes from the engine.
+  const idx = series ? Math.min(series.t_ms.length - 1,
+    Math.max(0, Math.round(tNorm * (series.t_ms.length - 1)))) : 0
+  const qOn = series ? (tNorm * 40) % 1 < series.D[idx] : false
   const tReal = ds && scene ? tNorm * scene.span(ds) : 0
 
   if (busy) return <Card><div style={{ color: C.muted, fontSize: 13 }}>Loading design state…</div></Card>
@@ -243,7 +258,17 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
             background: C.bg4, color: C.hint, border: `1px solid ${C.border}` }}>{scene.phase}</span>
         </div>
 
-        {/* stage — Phase 2-5 draw here; Phase 1 shows the live clock so the framework is visible */}
+        {/* stage */}
+        {series && (scene.id === 'line' || scene.id === 'switching') ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            {scene.id === 'line'
+              ? <LineCycleScene s={series} tNorm={tNorm} nch={Number(ds.spec.nch) || 1} />
+              : <SwitchingScene s={series} tNorm={tNorm} fsw={Number(ds.spec.fsw_Hz) || 70000} />}
+            <PowerStageSchematic qOn={qOn} nch={Number(ds.spec.nch) || 1}
+              vac={point?.vac_V ?? 0} />
+          </div>
+        ) : (
         <div style={{ marginTop: 12, height: 300, borderRadius: 8, background: C.bg,
           border: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 10 }}>
@@ -261,9 +286,11 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
             </div>
           )}
           <div style={{ fontSize: 11, color: C.hint, marginTop: 4 }}>
-            waveforms arrive in {scene.phase}
+            {wf && !wf.available && scene.id !== 'steady'
+              ? `no series: ${wf.reason}` : `waveforms arrive in ${scene.phase}`}
           </div>
         </div>
+        )}
 
         <div style={{ marginTop: 12, fontSize: 12.5, color: C.muted, lineHeight: 1.65 }}>{scene.caption}</div>
 

@@ -10502,3 +10502,119 @@ comments first; the token/CDN guard still reads raw source, deliberately.
 
 VERIFIED tsc --noEmit clean; Vite serves all four modules; /mode-b/design-state registered on the
 restarted backend and the page fetches it live.
+
+# C258 - Phase 2: the power-stage scenes on real engine arrays
+
+Additive. `main.py` +16/-0, `client.ts` +20/-0, and the only file with deletions is
+DesignExplorer.tsx (+39/-12), which is the Phase 1 page I wrote yesterday. Nothing that predates
+the explorer lost a line.
+
+## The arrays, and where they may be produced
+
+Phase 0 deliberately excluded arrays because producing them means calling an engine, and
+`design_state.py` has a test forbidding engine imports. So `design_state_waveforms.py` is a second
+module with a second endpoint, and the split is the point: the projection stays a projection, and
+the one module allowed to call the engine says so in its first paragraph.
+
+Calling `build_view_contract` is not recomputation - it is the same entry point report Section
+4.6.2 uses, so the explorer and the document plot identical series by construction. What would be
+recomputation is rebuilding the ripple as `Vin*D/(L*fsw)` from a scalar L, which is what the
+reference package does and is the C255 divergence.
+
+## One conversion, server-side, and why
+
+The engine stores `Ihf = dIpp / (2*sqrt(3))`. The explorer needs peak-to-peak, so the module
+returns `dIpp = 2*sqrt(3) * Ihf` - inverting the engine's own identity on the engine's own
+per-angle value, so `dIpp` inherits the per-angle inductance for free. Doing it in the browser
+instead would put a physics constant in the presentation layer where nothing tests it and a reader
+cannot tell an identity from an assumption. Asserted sample-by-sample.
+
+## THE FINDING: the crest ripple and the worst ripple are different numbers
+
+`points[].dIL_pp_A` is the ripple AT THE LINE CREST. It matches the series at the crest to within
+0.02 % at all nine points - which is the identity proving arrays and scalars come from one engine.
+But the ripple peaks where `Vin*D` peaks, and at high line that is nowhere near the crest:
+
+    264 Vac    crest ripple 1.77 A      worst-in-cycle 8.38 A at t = 1.55 ms      4.7x
+     90 Vac    crest ripple 9.21 A      worst-in-cycle 9.21 A at t = 4.14 ms      identical
+
+Both are correct and they answer different questions. A scene drawing the envelope beside a panel
+reading the crest value, with neither labelled, looks exactly like a defect - and would have been
+reported as one. The payload now publishes both with their indices, the line scene marks where the
+ripple actually peaks, and the test asserts the crest identity rather than a false equality between
+the two.
+
+## What is NOT drawn, and why it is blocked
+
+DCM. The engine detects it per angle (`Iavg < dIpp/2`, step7_magnetic_calc ~line 496) but only
+COUNTS it - no per-angle mask reaches the series. Marking DCM would need either an engine change
+(export the mask) or restating the criterion in a second place, and the second is the thing this
+whole architecture exists to prevent. So no region is shaded, the payload's `notes.dcm` says why,
+and a test fails if a DCM key ever appears without someone coming to use it deliberately. Raised
+with the designer as a decision, not resolved unilaterally, because it needs a change to a working
+engine file.
+
+Interleaving cancellation and bus ripple are likewise not drawn yet - both are input-side and bus-
+side quantities that belong with their own data, not a second trace invented on this canvas.
+
+## Guards
+
+Extended to scan BOTH explorer files: the scene renderers are where a stray `Math.sin` or a
+scalar-L ripple would actually land, so guarding only the shell would have protected nothing.
+
+The allowlist guard then caught my own change - adding `designStateWaveforms` failed
+`test_the_page_reads_the_export_and_calls_nothing_else` until I widened the list deliberately with
+the reason written next to it. That is the guard working: a second endpoint is fine, but it had to
+be an explicit decision rather than something that slipped in.
+
+VERIFIED 24 explorer tests pass; tsc --noEmit clean; both endpoints registered on the restarted
+backend; Vite serves both new modules.
+
+# C259 - the per-angle DCM mask, and a cross-engine disagreement it exposed
+
+Designer chose option (a): export the mask from the engine that owns the criterion, rather than
+restate `Iavg < dIpp/2` in a second module where it could drift.
+
+## The engine change
+
+`step7_magnetic_calc._half_cycle_averages` gains `series_dcm`, collected under the existing
+`return_series` flag and carried into `waveforms_by_vin`. 13 insertions, 3 deletions - and all
+three deletions are the same line re-emitted: the criterion expression is byte-identical, hoisted
+into `_is_dcm` so it can be both counted and recorded. `dcm_fraction` already applied it at every
+angle; it just could not say WHICH angles.
+
+## The disagreement
+
+Exporting the mask made a cross-engine inconsistency visible that a scalar percentage had hidden.
+Both engines compute a DCM fraction for the same design and they do not agree:
+
+    Vac      magnetics      Chapter 7
+    220         3.3 %         18.3 %
+    230        10.0 %         22.0 %
+    264        22.2 %         29.0 %
+
+Same physical story - DCM near the zero crossings at high line, growing with line voltage - but far
+apart, and more than 5x at 220 Vac. Same criterion (`i < di/2`) applied to different quantities:
+magnetics uses the per-phase AVERAGE current with the as-built per-angle inductance, while the loss
+model uses a per-channel INSTANTANEOUS current with an `L_eff` backed out of the requested peak
+ripple rather than the bias curve. Each is self-consistent; neither is obviously wrong.
+
+Logged as PENDING B23 rather than fixed. Reconciling them means changing which inductance the loss
+model uses, which moves Chapter 7 loss numbers and needs its own verification pass - not something
+to do inside an animation commit.
+
+A CORRECTION TO MY OWN EARLIER FIGURE. I had been quoting "6 % DCM at 264 Vac" from C253, including
+in the ANIMATION_PLAN rationale. That measurement came from the reference parts WITHOUT an approved
+inductor, so it ran on a flat 235 uH. With the as-built L applied the same engine reports 29 %. The
+flat-L configuration is exactly what C255 fixed; I had carried a number from it for two days.
+
+## What the page draws
+
+The line scene shades exactly the flagged angles and labels the shading
+"DCM N % of the half cycle - magnetics-engine basis". The basis label is not decoration: a later
+scene quoting Chapter 7's DCM_% beside this shading would present two engines as one number, which
+is the C255 class of defect. `notes.dcm_basis` in the payload carries the same warning, and a test
+asserts the declaration exists.
+
+VERIFIED mask length equals series length at all nine points; DCM is zero at every point <= 180 Vac
+and grows monotonically above it; explorer tests 24 -> 26.

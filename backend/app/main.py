@@ -2456,6 +2456,22 @@ def design_state(req: _DocReportReq):
         log.exception("design state"); raise HTTPException(500, str(e))
 
 
+@app.post("/mode-b/design-state/waveforms", tags=["mode-b"])
+def design_state_waveforms(req: _DocReportReq):
+    """Per-Vin half-line-cycle series for the Design Explorer. ADDITIVE — reads only.
+
+    Separate from `/mode-b/design-state` because this one calls the engine and that one must not:
+    `design_state.py` is a pure projection with a test forbidding engine imports. The engine entry
+    point here is the SAME one report Section 4.6.2 uses, so the explorer and the document plot
+    identical series by construction.
+    """
+    from app.mode_b.design_state_waveforms import build_waveforms
+    try:
+        return build_waveforms(req.state, req.approved_design)
+    except Exception as e:
+        log.exception("design state waveforms"); raise HTTPException(500, str(e))
+
+
 def _num(v):
     try:
         if v is None or v == "":

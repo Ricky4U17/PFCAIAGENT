@@ -327,6 +327,29 @@ export interface DesignState {
 export const designState = (req: DesignStateReq) =>
   post<DesignState>('/mode-b/design-state', req)
 
+/** Per-Vin half-line-cycle series — the arrays the explorer draws. Same engine entry point the
+ *  report's Section 4.6.2 uses, so the page and the document plot identical curves. */
+export interface WaveSeries {
+  t_ms: number[]; Vin: number[]; D: number[]; Iavg: number[]; Ihf: number[]; dIpp: number[]
+  H_Oe: number[]; Bdc: number[]; Bac_pk: number[]; Bmax: number[]
+  /** per-angle DCM flag from the MAGNETICS engine (C259). Not Chapter 7's DCM_% — the two
+   *  engines disagree (22.2 % vs 29.0 % at 264 Vac); label the basis wherever this is drawn. */
+  dcm: boolean[]
+  Pcore: number[]; Pcu: number[]; Ptot: number[]
+  summary: {
+    i_crest: number; i_dIpp_max: number
+    dIpp_at_crest_A: number; dIpp_cycle_max_A: number
+    t_ms_at_dIpp_max: number | null; t_ms_at_crest: number | null
+  }
+}
+export interface DesignWaveforms {
+  available: boolean; reason: string | null
+  vins: string[]; series: Record<string, WaveSeries>
+  n_points: number; notes?: Record<string, string>
+}
+export const designStateWaveforms = (req: DesignStateReq) =>
+  post<DesignWaveforms>('/mode-b/design-state/waveforms', req)
+
 // ── Control-loop design report (Steps 1–14 + Appendices A–E) ─────────────────
 // Generates the full FAN9672 control-loop design report from designer specs.
 // Any omitted input falls back to the verified calc-engine defaults.

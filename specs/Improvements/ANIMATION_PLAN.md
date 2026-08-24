@@ -56,8 +56,15 @@ Against our design that produces two visible contradictions with our own report:
 - **Scalar `L`.** Our Table 7.1 L<sub>φ</sub> runs **134 → 154 µH across the line cycle**. A single
   L is precisely the flat-inductance divergence eliminated at C255 — reappearing inside the tool
   built to persuade a reviewer.
-- **No DCM.** Chapter 7 reports **DCM_% = 6 % at 264 V<sub>AC</sub>**. The formula above draws
-  clean CCM everywhere.
+- **No DCM.** The formula above draws clean CCM everywhere, while this design genuinely runs
+  discontinuous near the zero crossings at high line — **22.2 %** of the half cycle at 264 V<sub>AC</sub>
+  on the magnetics engine's basis (Chapter 7's loss engine says 29.0 %; they disagree, which is
+  PENDING B23, scheduled straight after this work).
+
+  *Correction (C259):* this paragraph previously cited "6 % at 264 Vac". That figure came from a
+  measurement taken with the reference parts and **no approved inductor**, so it ran on a flat
+  235 µH — the very configuration C255 exists to prevent. With the as-built inductance the same
+  engine reports 29 %. The argument was right; the number was from the wrong run.
 
 C-9 exists because an animation invites drawing what looks right. C253/B16 established that the
 engine deliberately does **not** track the DCM ringing phase (it takes the settled node voltage as
@@ -199,13 +206,55 @@ copy — all caught, page restored byte-identical.
 behavioural guards now strip comments before scanning; the token/CDN guard still reads raw source
 on purpose. A guard that cries wolf gets suppressed — see the stale page-bound in E2.
 
-### Phase 2 — Power stage
-- [ ] Power-stage schematic with conduction highlighting from engine arrays
-- [ ] Line-cycle scope from `waveforms_by_vin` — real arrays, not shaped curves
-- [ ] Switching-period inset reconstructed from `i_on`/`i_off`/`duty`
-- [ ] DCM shown only where the engine says it occurs; labelled; no invented ringing (C-9)
+### Phase 2 — Power stage  `MOSTLY DONE at C258`
+- [x] Power-stage schematic with conduction highlighting from engine arrays
+- [x] Line-cycle scope from `waveforms_by_vin` — real arrays, not shaped curves
+- [x] Switching-period inset built from the engine's `Iavg`, `dIpp` and `D`
+- [x] **DCM shading — DONE at C259 via option (a).** The engine now exports the per-angle mask.
 - [ ] Input-current ripple and interleaving cancellation
 - [ ] Bus ripple at twice line frequency
+
+**Delivered:** `design_state_waveforms.py` + `POST /mode-b/design-state/waveforms` (a *second*
+module and endpoint, because `design_state.py` may not import an engine and this one must);
+`DesignExplorerScenes.tsx`; `test_design_state_waveforms.py` (7 tests). Footprint on pre-existing
+files: `main.py` +16/−0, `client.ts` +20/−0.
+
+**One conversion, server-side.** The engine stores `Ihf = dIpp/(2√3)`; the module returns
+`dIpp = 2√3·Ihf`, inverting the engine's own identity on its own per-angle value so `dIpp` inherits
+the bias curve for free. Doing it in the browser would put a physics constant in the presentation
+layer where nothing tests it.
+
+#### The crest ripple and the worst ripple are different numbers
+
+`points[].dIL_pp_A` is the ripple **at the line crest** — it matches the series at the crest to
+0.02 % at all nine points, which is the identity proving arrays and scalars are one engine. But the
+ripple peaks where `Vin·D` peaks, which at high line is nowhere near the crest:
+
+| | crest ripple | worst in cycle | |
+|---|---|---|---|
+| 264 Vac | 1.77 A | **8.38 A at t = 1.55 ms** | 4.7× |
+| 90 Vac | 9.21 A | 9.21 A at t = 4.14 ms | identical |
+
+Both correct, different questions. An envelope drawn beside an unlabelled crest figure looks
+exactly like a defect. The payload publishes both with their indices, the line scene marks where
+the ripple actually peaks, and the test asserts the crest **identity** rather than a false equality.
+
+#### DCM shading — the open decision
+
+The engine detects DCM per angle (`Iavg < dIpp/2`, `step7_magnetic_calc` ~line 496) but only
+**counts** it; no per-angle mask reaches the series. Two ways forward:
+
+- **(a) Export the mask** — add `series_dcm` (and optionally `series_dIpp`) to
+  `_half_cycle_averages` under the existing `return_series` flag. Additive, but it touches a
+  working engine file, which the designer has ruled out for this work so far.
+- **(b) Restate the criterion in the waveforms module** — one line, no engine change, but it
+  creates a second place where "what counts as DCM" is defined. If the engine's criterion ever
+  changed, the animation would silently disagree. This is precisely what the architecture exists
+  to prevent.
+
+Until it is decided, **no region is shaded**, `notes.dcm` in the payload says why, and
+`test_no_per_angle_dcm_mask_is_published_yet` fails if a DCM key appears — forcing whoever adds it
+to come and use it.
 
 ### Phase 3 — Magnetics and capacitor (C-4)
 - [ ] B(t) against `Bsat_at_Tcore`, live saturation margin

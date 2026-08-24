@@ -21,13 +21,21 @@ import re
 import pytest
 
 _FE = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src"
-_PAGE = _FE / "components" / "DesignExplorer.tsx"
+# EVERY explorer file, not just the page. The scene renderers are where a stray Math.sin or a
+# ripple rebuilt from a scalar L would actually land — guarding only the shell while the drawing
+# code sits in another file would protect nothing.
+_FILES = ("DesignExplorer.tsx", "DesignExplorerScenes.tsx")
+
+
+def _paths():
+    found = [_FE / "components" / f for f in _FILES if (_FE / "components" / f).is_file()]
+    if not found:
+        pytest.skip("no DesignExplorer files present")
+    return found
 
 
 def _src():
-    if not _PAGE.is_file():
-        pytest.skip("DesignExplorer.tsx not present")
-    return _PAGE.read_text(encoding="utf-8")
+    return chr(10).join(p.read_text(encoding="utf-8") for p in _paths())
 
 
 def _code():
@@ -58,10 +66,17 @@ def test_the_page_reads_the_export_and_calls_nothing_else():
         api_imports |= {s.strip().replace("type ", "") for s in m.group(1).split(",") if s.strip()}
     # only the names that are actually API functions, not the types
     fns = {n for n in api_imports if n and n[0].islower()}
-    assert fns <= {"designState"}, (
-        f"DesignExplorer imports API functions beyond designState: {sorted(fns - {'designState'})}. "
-        "The page must read the design-state export and nothing else (C-8).")
+    # The allowlist is the READ-ONLY design-state family, and it is short on purpose. Adding to it
+    # must be a deliberate edit here with a reason — which is how `designStateWaveforms` arrived at
+    # C258: a second endpoint, but still a pure read, and separate only because it calls the engine
+    # while the projection may not. Anything that triggers work, selects a part, or persists
+    # something does not belong on this page at all.
+    allowed = {"designState", "designStateWaveforms"}
+    assert fns <= allowed, (
+        f"DesignExplorer imports API functions outside the read-only family: {sorted(fns - allowed)}. "
+        "The page may only read design state (C-8, C-11).")
     assert "designState" in called or "designState(" in src, "the page never fetches the export"
+    assert fns >= {"designState"}, "the page must fetch the design-state export"
 
 
 def test_the_page_does_not_recompute_physics():

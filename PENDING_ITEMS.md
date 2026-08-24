@@ -705,6 +705,47 @@ says so, and that is the real gap.
 - **Done when:** every row of 7.2e states the condition its value was taken at, or says DATA MISSING,
   and the four table-sourced values keep the "no plot exists" line C231 added.
 
+### B23. Two engines report different DCM fractions for the same design  `CODE` — **scheduled: immediately after the Design Explorer**
+**Designer decision 2026-08-23:** fix this once the animation work is complete, not before. The
+explorer is unblocked in the meantime because it declares which engine's basis it shades
+(`notes.dcm_basis`, asserted by a test), so nothing on the page is ambiguous while this waits.
+
+**Found at C259** while exporting a per-angle DCM mask for the Design Explorer. The magnetics
+engine and the Chapter-7 loss engine both compute how much of the half cycle runs discontinuous,
+and they disagree — measured on the reference design with the as-built inductance applied:
+
+| V_AC | magnetics (`step7_magnetic_calc`) | Chapter 7 (`pfc_loss_model`) |
+|---|---|---|
+| 220 | 3.3 % | 18.3 % |
+| 230 | 10.0 % | 22.0 % |
+| 264 | 22.2 % | 29.0 % |
+
+Same ordering, same physical story — DCM near the zero crossings at high line, growing with line
+voltage — but the numbers are far apart, and at 220 Vac they differ by more than 5x.
+
+**Why, as far as it is currently understood.** The two apply the same *criterion* (`i < Δi/2`) to
+different *quantities*:
+
+- magnetics uses the per-phase **average** current and the as-built per-angle inductance;
+- the loss model uses a per-channel **instantaneous** current and an `L_eff` **backed out of the
+  requested peak ripple** (`L_eff = Vpk*d_pk/(di_peak_req*fsw)`), not the bias curve directly.
+
+Each is self-consistent, so neither is obviously wrong, and no report figure is currently known to
+be affected — DCM enters the loss model only through `rr_active` (silicon recovery, masked in DCM)
+and, since C253, the SiC Q_c term.
+
+**Why it matters now.** The Design Explorer shades the angles the *magnetics* engine flags. If a
+later scene quotes Chapter 7's `DCM_%` beside that shading, the page would present two engines as
+one number — the exact class of defect C255 was. The waveform payload therefore declares its basis
+in `notes.dcm_basis`, and a test asserts that declaration exists.
+
+- **Done when:** either the two are reconciled onto one definition of the operating current and
+  inductance, or the difference is explained and both figures are labelled with their basis
+  wherever they appear.
+- **Do NOT** simply make one call the other. The loss model's `L_eff` back-out exists so a designer
+  can specify a ripple target; removing it to share the magnetics inductance would change Chapter 7
+  loss numbers, which needs its own verification pass.
+
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
 Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
