@@ -150,6 +150,71 @@ def test_the_dcm_basis_is_declared_because_chapter_7_disagrees(built):
     assert "Chapter 7" in notes["dcm_basis"], "the basis note does not warn about the disagreement"
 
 
+# ── capacitor view (C260) ───────────────────────────────────────────────────
+@pytest.fixture(scope="module")
+def cap_view(built):
+    import logging
+    from app.mode_b.step15_capacitor import run_capacitor_design
+    from app.mode_b.design_state_waveforms import build_capacitor_view
+    import verify_combined_report as VCR
+    logging.disable(logging.WARNING)
+    try:
+        cap = run_capacitor_design(built["state"])
+        cap["selected_cap"] = VCR.pick_selected_cap(cap)
+    finally:
+        logging.disable(logging.NOTSET)
+    return build_capacitor_view(built["state"], cap), cap
+
+
+def test_the_capacitor_view_needs_a_selected_part_and_says_so(built):
+    """`bank_loss_table` is gated on `selected_cap`, and its absence is what silently dropped seven
+    pages of Chapter 5 from a headless report before the harness started attaching one. An empty
+    panel reads as "no ripple"; the reason has to be reported instead."""
+    from app.mode_b.step15_capacitor import run_capacitor_design
+    from app.mode_b.design_state_waveforms import build_capacitor_view
+    import logging
+    logging.disable(logging.WARNING)
+    try:
+        cap = run_capacitor_design(built["state"])          # no selected_cap
+    finally:
+        logging.disable(logging.NOTSET)
+    out = build_capacitor_view(built["state"], cap)
+    assert out["available"] is False and "select" in out["reason"].lower(), out
+    assert out["rows"] == []
+    for empty in (None, {}):
+        assert build_capacitor_view(built["state"], empty)["available"] is False
+
+
+def test_the_capacitor_rows_cover_every_operating_point(built, cap_view):
+    view, _ = cap_view
+    assert view["available"] is True, view["reason"]
+    vacs = {round(float(r["Vin_rms"])) for r in view["rows"]}
+    exported = {int(p["vac_V"]) for p in built["d"]["points"]}
+    assert vacs == exported, f"capacitor rows {sorted(vacs)} vs points {sorted(exported)}"
+
+
+def test_the_case_sits_above_ambient_and_esr_falls_as_it_warms(built, cap_view):
+    """The ESR(T) feedback, which has been mistaken for a defect before: ESR drops as the part
+    warms, so the self-heating that sets the temperature is self-limiting."""
+    view, _ = cap_view
+    amb = float(built["state"]["intake"]["thermal"]["ambient_temp_c_max"])
+    for r in view["rows"]:
+        assert r["T_cap_C"] > amb, f"{r['Vin_rms']} Vac: case {r['T_cap_C']} below ambient {amb}"
+    hot = max(view["rows"], key=lambda r: r["T_cap_C"])
+    cold = min(view["rows"], key=lambda r: r["T_cap_C"])
+    assert hot["ESR_per_cap_mohm"] < cold["ESR_per_cap_mohm"], (
+        f"ESR should fall as the case warms: {cold['T_cap_C']} °C -> "
+        f"{cold['ESR_per_cap_mohm']:.1f} mΩ vs {hot['T_cap_C']} °C -> "
+        f"{hot['ESR_per_cap_mohm']:.1f} mΩ")
+
+
+def test_the_capacitor_view_declares_its_basis(cap_view):
+    view, _ = cap_view
+    notes = view.get("notes") or {}
+    assert "basis" in notes and "bank_loss_table" in notes["basis"], (
+        "the capacitor view does not say which model produced it")
+
+
 def test_missing_inputs_explain_themselves_rather_than_raising(built):
     """A scene must be able to say why it has nothing to draw."""
     from app.mode_b.design_state_waveforms import build_waveforms

@@ -342,10 +342,19 @@ export interface WaveSeries {
     t_ms_at_dIpp_max: number | null; t_ms_at_crest: number | null
   }
 }
+export interface CapacitorView {
+  available: boolean; reason: string | null
+  n_caps?: number
+  rows: Array<Record<string, number>>
+  worst?: Record<string, number> | null
+  notes?: Record<string, string>
+}
 export interface DesignWaveforms {
   available: boolean; reason: string | null
   vins: string[]; series: Record<string, WaveSeries>
   n_points: number; notes?: Record<string, string>
+  /** Chapter 5's own bank model, per operating point (C260). */
+  capacitor?: CapacitorView
 }
 export const designStateWaveforms = (req: DesignStateReq) =>
   post<DesignWaveforms>('/mode-b/design-state/waveforms', req)

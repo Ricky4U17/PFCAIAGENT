@@ -36,6 +36,49 @@ SERIES_KEYS = ("t_ms", "Vin", "D", "Iavg", "Ihf", "H_Oe", "Bdc", "Bac_pk", "Bmax
                "Pcore", "Pcu", "Ptot", "dcm")
 
 
+def build_capacitor_view(state: Optional[dict],
+                         step15_result: Optional[dict]) -> Dict[str, Any]:
+    """Per-line-voltage capacitor loading, from Chapter 5's own bank model.
+
+    `bank_loss_table` is the same function report Chapter 5 uses for its ripple/ESR/temperature
+    table, so the explorer's capacitor scene and the document cannot disagree.
+
+    THE SELECTED PART IS THE GATE. `bank_loss_table` needs `selected_cap`, and without it Chapter 5
+    silently drops its later sections — the defect that made a headless report read 171 pages
+    instead of 178 until `verify_combined_report` started attaching one. Here the same absence has
+    to be reported, not worked around, or the scene would show an empty panel that reads as "no
+    ripple" rather than "no part chosen yet".
+    """
+    if not isinstance(step15_result, dict) or not step15_result:
+        return {"available": False, "reason": "no approved capacitor design", "rows": []}
+    if not step15_result.get("selected_cap"):
+        return {"available": False,
+                "reason": "no capacitor part selected yet — Chapter 5's bank model needs one",
+                "rows": []}
+    try:
+        from app.mode_b.step15_capacitor import bank_loss_table
+        tbl = bank_loss_table(step15_result, state or {}) or {}
+    except Exception as exc:                      # pragma: no cover - defensive
+        return {"available": False, "reason": f"engine error: {exc}", "rows": []}
+
+    rows = tbl.get("rows") or []
+    if not rows:
+        return {"available": False, "reason": "the bank model produced no rows", "rows": []}
+    return {
+        "available": True,
+        "reason": None,
+        "n_caps": tbl.get("n_cap"),
+        "rows": [dict(r) for r in rows],
+        "worst": dict(tbl["worst"]) if tbl.get("worst") else None,
+        "notes": {
+            "basis": "Chapter 5's bank_loss_table — the same model the report's capacitor tables "
+                     "use. T_cap is the case temperature at the entered ambient, not a rise.",
+            "esr": "ESR falls as the part warms, so self-heating is self-limiting; a case rise "
+                   "below 1:1 with ambient is the model working, not a bug.",
+        },
+    }
+
+
 def _summary(s: Dict[str, Any]) -> Dict[str, Any]:
     """Where the crest is, and where the ripple actually peaks — which are NOT the same point.
 

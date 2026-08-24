@@ -10618,3 +10618,52 @@ asserts the declaration exists.
 
 VERIFIED mask length equals series length at all nine points; DCM is zero at every point <= 180 Vac
 and grows monotonically above it; explorer tests 24 -> 26.
+
+# C260 - Phase 3: magnetics and capacitor scenes
+
+Additive. New `MagneticsScene` and `CapacitorScene`, `build_capacitor_view()` alongside
+`build_waveforms()` in the module that is allowed to call engines, and the capacitor block returned
+under `capacitor` on the existing waveforms endpoint. `main.py` gained 5 lines.
+
+## Magnetics: what is drawn, and the one thing deliberately not computed
+
+B(t) against `Bsat_at_Tcore` - the saturation limit AT THE CORE TEMPERATURE, not the 25 C
+datasheet value, because powder Bsat falls as the core warms and the cold figure would flatter the
+margin. Below it, H(t) and the core/copper loss split over the same cycle.
+
+NO PER-ANGLE SATURATION MARGIN IS COMPUTED IN THE BROWSER. `sat_margin_pct` has a specific engine
+definition, and the report quotes it on the INNER-BORE flux while the engine's accept/reject gate
+still runs on the MEAN PATH - PENDING D3, still undecided. A margin derived per angle in the page
+would be a third definition of the same quantity. So the scene draws the B_sat line, marks both
+flux bases with their labels, and lets the visible gap carry the headroom; every number comes from
+the export.
+
+Measured live: B_sat 1.434 T, mean-path 0.410 T, inner-bore 0.560 T. The D3 gap is now visible on
+one plot instead of being two numbers in two different tables.
+
+## Capacitor: Chapter 5's own model, and the gate that has bitten before
+
+`build_capacitor_view` calls `bank_loss_table` - the same function the report's Chapter 5 tables
+use - so the scene and the document cannot disagree. Per operating point: bank ripple current, case
+temperature and ESR.
+
+It is gated on `selected_cap` and REPORTS its absence rather than returning an empty table. That
+gate is what silently dropped ~7 pages of Chapter 5 from a headless report until
+`verify_combined_report` started attaching a real part, and an empty panel on this page would read
+as "no ripple" rather than "no part chosen yet".
+
+The scene deliberately shows ESR beside temperature, because the relationship has been mistaken for
+a defect before: ESR falls as the part warms, so the self-heating that sets the temperature is
+self-limiting, and a case rise below one-for-one with ambient is the model working. Asserted as a
+test rather than left as a comment.
+
+Measured live: worst case 61.6 C against a 105 C part, ESR 45.7 mOhm at the hottest point against
+55.9 mOhm at the coolest - falling as the case warms, exactly as the model says.
+
+## Still open in Phase 3
+
+Lifetime headroom. Chapter 5 computes it, but not inside `bank_loss_table`, so it needs its own
+read rather than being bolted onto this one.
+
+VERIFIED 13 waveform/capacitor tests + 6 read-only guards pass; tsc --noEmit clean; the live
+backend serves both blocks end to end.

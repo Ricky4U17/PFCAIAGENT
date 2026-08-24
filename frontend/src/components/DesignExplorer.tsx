@@ -25,7 +25,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
 import { designState, designStateWaveforms,
          type DesignState, type DesignStatePoint, type DesignWaveforms } from '../api/client'
-import { LineCycleScene, SwitchingScene, PowerStageSchematic } from './DesignExplorerScenes'
+import { LineCycleScene, SwitchingScene, PowerStageSchematic,
+         MagneticsScene, CapacitorScene } from './DesignExplorerScenes'
 
 // ── scenes ───────────────────────────────────────────────────────────────────
 // Four time bases spanning five orders of magnitude. No single timeline shows them honestly, so
@@ -60,6 +61,23 @@ export const SCENES: Scene[] = [
     caption: 'Both channels 180° apart over a half line cycle. Duty sweeps as the input rises and '
       + 'falls, the ripple envelope follows the per-point inductance, the two phases cancel at the '
       + 'input, and DCM appears only where the engine says it does.',
+  },
+  {
+    id: 'magnetics', title: 'Magnetics', eyebrow: 'flux, field and loss over the cycle',
+    span: d => 1 / (2 * FLINE(d)), slowmo: 300, phase: 'Phase 3',
+    caption: 'Flux density against the saturation limit AT THE CORE TEMPERATURE — not the 25 °C '
+      + 'datasheet value, because powder saturation falls as the core warms and the cold figure '
+      + 'would flatter the margin. Both flux bases are marked: the report quotes the inner-bore '
+      + 'peak, while the engine’s accept/reject gate still runs on the mean path. Below, the '
+      + 'magnetising field and the core/copper split over the same cycle.',
+  },
+  {
+    id: 'capacitor', title: 'DC bus capacitor', eyebrow: 'ripple, ESR and case temperature',
+    span: () => 0, slowmo: 1, phase: 'Phase 3',
+    caption: 'Bank ripple current, case temperature and ESR at every operating point, from '
+      + 'Chapter 5’s own bank model. ESR falls as the part warms, so the self-heating that sets '
+      + 'the temperature is self-limiting — a case rise below one-for-one with ambient is the '
+      + 'model working, not a defect.',
   },
   {
     id: 'transient', title: 'Load step', eyebrow: 'closed-loop response',
@@ -201,6 +219,8 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   const idx = series ? Math.min(series.t_ms.length - 1,
     Math.max(0, Math.round(tNorm * (series.t_ms.length - 1)))) : 0
   const qOn = series ? (tNorm * 40) % 1 < series.D[idx] : false
+  const flux = (ds?.chapters?.magnetics as Record<string, any> | null)?.flux ?? null
+  const capView = wf?.capacitor ?? null
   const tReal = ds && scene ? tNorm * scene.span(ds) : 0
 
   if (busy) return <Card><div style={{ color: C.muted, fontSize: 13 }}>Loading design state…</div></Card>
@@ -259,14 +279,33 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
         </div>
 
         {/* stage */}
-        {series && (scene.id === 'line' || scene.id === 'switching') ? (
+        {series && (scene.id === 'line' || scene.id === 'switching' || scene.id === 'magnetics') ? (
           <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
             border: `1px solid ${C.border}`, padding: 8 }}>
-            {scene.id === 'line'
-              ? <LineCycleScene s={series} tNorm={tNorm} nch={Number(ds.spec.nch) || 1} />
-              : <SwitchingScene s={series} tNorm={tNorm} fsw={Number(ds.spec.fsw_Hz) || 70000} />}
-            <PowerStageSchematic qOn={qOn} nch={Number(ds.spec.nch) || 1}
-              vac={point?.vac_V ?? 0} />
+            {scene.id === 'line' ? (
+              <>
+                <LineCycleScene s={series} tNorm={tNorm} nch={Number(ds.spec.nch) || 1} />
+                <PowerStageSchematic qOn={qOn} nch={Number(ds.spec.nch) || 1}
+                  vac={point?.vac_V ?? 0} />
+              </>
+            ) : scene.id === 'switching' ? (
+              <>
+                <SwitchingScene s={series} tNorm={tNorm} fsw={Number(ds.spec.fsw_Hz) || 70000} />
+                <PowerStageSchematic qOn={qOn} nch={Number(ds.spec.nch) || 1}
+                  vac={point?.vac_V ?? 0} />
+              </>
+            ) : (
+              <MagneticsScene s={series} tNorm={tNorm}
+                bsat={flux ? (flux.Bsat_at_Tcore_T as number ?? null) : null}
+                bmaxFL={flux ? (flux.Bmax_FL_T as number ?? null) : null}
+                bInnerFL={flux ? (flux.Bmax_inner_FL_T as number ?? null) : null} />
+            )}
+          </div>
+        ) : scene.id === 'capacitor' && capView?.available ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            <CapacitorScene rows={capView.rows} selectedVac={point?.vac_V ?? 0}
+              tLimit={Number((ds.chapters.capacitor as any)?.selected?.temp_rating_C) || null} />
           </div>
         ) : (
         <div style={{ marginTop: 12, height: 300, borderRadius: 8, background: C.bg,

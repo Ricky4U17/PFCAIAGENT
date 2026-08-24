@@ -256,12 +256,29 @@ Until it is decided, **no region is shaded**, `notes.dcm` in the payload says wh
 `test_no_per_angle_dcm_mask_is_published_yet` fails if a DCM key appears — forcing whoever adds it
 to come and use it.
 
-### Phase 3 — Magnetics and capacitor (C-4)
-- [ ] B(t) against `Bsat_at_Tcore`, live saturation margin
-- [ ] Inner-bore vs mean-path both shown and labelled — **D3 is still an open decision**
-- [ ] H(Oe) trace; core/copper loss split across the cycle
-- [ ] Thermal: `T_core_C`, `dT_rise_C` against budget
-- [ ] Capacitor: ripple current, ESR(T), `T_cap_C`, lifetime headroom
+### Phase 3 — Magnetics and capacitor (C-4)  `DONE at C260`
+- [x] B(t) against `Bsat_at_Tcore` with the saturation limit drawn
+- [x] Inner-bore vs mean-path both marked and labelled — **D3 is still an open decision**
+- [x] H(Oe) trace; core/copper loss split across the cycle
+- [x] Capacitor: ripple current, ESR(T), `T_cap_C` against the part rating
+- [ ] Lifetime headroom — Ch5 computes it, but not in `bank_loss_table`; needs its own read
+
+**Delivered:** `MagneticsScene` + `CapacitorScene`; `build_capacitor_view()` calling Chapter 5s own
+`bank_loss_table`, returned under `capacitor` on the waveforms endpoint; 6 new tests.
+
+**No per-angle saturation margin is computed in the browser.** `sat_margin_pct` has a specific
+engine definition, and the report quotes it on the inner-bore flux while the accept/reject gate
+still runs on the mean path (**D3, undecided**). A margin derived per angle in the page would be a
+third definition. The scene draws the B_sat line and marks BOTH flux bases; the gap shows the
+headroom and the numbers come from the export, labelled.
+
+**Measured live:** B_sat 1.434 T at the core temperature, mean-path 0.410 T, inner-bore 0.560 T —
+the D3 gap visible on one plot. Capacitor worst case 61.6 °C against a 105 °C part.
+
+**The capacitor view is gated on `selected_cap`,** and reports its absence rather than returning an
+empty table: that gate is what silently dropped seven pages of Chapter 5 from a headless report
+until the harness started attaching a part, and an empty panel reads as "no ripple" rather than
+"no part chosen".
 
 ### Phase 4 — Control (C-5, C-13)
 - [ ] FAN9672 application schematic, SVG with addressable IDs, live values

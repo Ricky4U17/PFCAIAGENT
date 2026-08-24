@@ -184,6 +184,151 @@ export const SwitchingScene: React.FC<{ s: WaveSeries; tNorm: number; fsw: numbe
   )
 }
 
+// ── magnetics scene: flux against saturation, field, and the loss split ──────
+/**
+ * B(t) is drawn against the engine's B_sat AT THE CORE TEMPERATURE — not the 25 °C datasheet
+ * value, because powder saturation falls with temperature and the 25 °C figure would flatter the
+ * margin.
+ *
+ * NO PER-ANGLE MARGIN NUMBER IS COMPUTED HERE. `sat_margin_pct` has a specific definition in the
+ * engine, and the report quotes it on the inner-bore flux while the accept/reject gate still runs
+ * on the mean path — PENDING D3, undecided. Deriving a margin per angle in the browser would be
+ * inventing a third definition. The gap between the trace and the B_sat line shows the headroom;
+ * the numbers come from the export, labelled with their basis.
+ */
+export const MagneticsScene: React.FC<{
+  s: WaveSeries; tNorm: number
+  bsat: number | null; bmaxFL: number | null; bInnerFL: number | null
+}> = ({ s, tNorm, bsat, bmaxFL, bInnerFL }) => {
+  const n = s.t_ms.length
+  const i = Math.min(n - 1, Math.max(0, Math.round(tNorm * (n - 1))))
+  const W = 700, H = 300
+  const bB: Box = { x: 52, y: 8,   w: W - 66, h: 128 }
+  const bH: Box = { x: 52, y: 150, w: W - 66, h: 60 }
+  const bP: Box = { x: 52, y: 222, w: W - 66, h: 62 }
+
+  const bHi = Math.max(bsat ?? 0, ...(s.Bmax || [0])) * 1.06 || 1
+  const pAll = [...(s.Pcore || []), ...(s.Pcu || [])]
+  const pHi = Math.max(...pAll, 0.001) * 1.08
+  const hHi = Math.max(...(s.H_Oe || [0])) * 1.08 || 1
+  const Yb = (v: number) => bB.y + bB.h - (v / bHi) * bB.h
+  const cx = (b: Box) => b.x + (i / Math.max(n - 1, 1)) * b.w
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      aria-label="Flux density against saturation, magnetising field, and the core/copper loss split over one half line cycle">
+      <Axis box={bB} label="B(t) vs B_sat" lo={0} hi={bHi} unit="T" />
+      {bsat != null && (
+        <>
+          <rect x={bB.x} y={bB.y} width={bB.w} height={Math.max(0, Yb(bsat) - bB.y)}
+            fill={`${C.red}12`} />
+          <line x1={bB.x} y1={Yb(bsat)} x2={bB.x + bB.w} y2={Yb(bsat)}
+            stroke={C.red} strokeWidth={1.4} strokeDasharray="5 3" />
+          <text x={bB.x + bB.w - 4} y={Yb(bsat) - 5} fill={C.red} fontSize={9.5}
+            fontFamily={mono} textAnchor="end">B_sat {bsat.toFixed(3)} T (at T_core)</text>
+        </>
+      )}
+      {bInnerFL != null && (
+        <>
+          <line x1={bB.x} y1={Yb(bInnerFL)} x2={bB.x + bB.w} y2={Yb(bInnerFL)}
+            stroke={C.amber} strokeWidth={1} strokeDasharray="2 4" opacity={0.9} />
+          <text x={bB.x + 4} y={Yb(bInnerFL) - 4} fill={C.amber} fontSize={9} fontFamily={mono}>
+            B inner-bore {bInnerFL.toFixed(3)} T
+          </text>
+        </>
+      )}
+      {bmaxFL != null && (
+        <text x={bB.x + 4} y={Yb(bmaxFL) - 4} fill={C.muted} fontSize={9} fontFamily={mono}>
+          B mean-path {bmaxFL.toFixed(3)} T
+        </text>
+      )}
+      <path d={path(s.Bmax, bB, 0, bHi, n)} fill="none" stroke={C.teal} strokeWidth={1.6} />
+
+      <Axis box={bH} label="H(t)" lo={0} hi={hHi} unit="Oe" />
+      <path d={path(s.H_Oe, bH, 0, hHi, n)} fill="none" stroke={C.accent} strokeWidth={1.3} />
+
+      <Axis box={bP} label="core vs copper loss" lo={0} hi={pHi} unit="W" />
+      <path d={path(s.Pcore, bP, 0, pHi, n)} fill="none" stroke={C.amber} strokeWidth={1.3} />
+      <path d={path(s.Pcu, bP, 0, pHi, n)} fill="none" stroke={C.green} strokeWidth={1.3} />
+      <text x={bP.x + bP.w - 4} y={bP.y + bP.h - 5} fill={C.hint} fontSize={9} fontFamily={mono}
+        textAnchor="end">
+        <tspan fill={C.amber}>core</tspan> · <tspan fill={C.green}>copper</tspan>
+      </text>
+
+      {[bB, bH, bP].map((b, k) => (
+        <line key={k} x1={cx(b)} y1={b.y} x2={cx(b)} y2={b.y + b.h}
+          stroke={C.text} strokeWidth={1} opacity={0.5} />
+      ))}
+    </svg>
+  )
+}
+
+// ── capacitor scene: ripple loading, ESR(T) and case temperature per line point ──
+/**
+ * Not a timeline — one bar per operating point, from Chapter 5's own bank model.
+ *
+ * The ESR trace is worth reading beside the temperature: ESR FALLS as the part warms, so the
+ * self-heating that drives the temperature is self-limiting. A case rise below 1:1 with ambient is
+ * the model working; it has been mistaken for a defect before.
+ */
+export const CapacitorScene: React.FC<{
+  rows: Array<Record<string, number>>; selectedVac: number; tLimit: number | null
+}> = ({ rows, selectedVac, tLimit }) => {
+  const W = 700, H = 300
+  const b: Box = { x: 52, y: 20, w: W - 76, h: 190 }
+  const tHi = Math.max(...rows.map(r => r.T_cap_C), tLimit ?? 0) * 1.1 || 1
+  const iHi = Math.max(...rows.map(r => r.I_cap_total_A)) * 1.25 || 1
+  const bw = b.w / Math.max(rows.length, 1)
+  const Yt = (v: number) => b.y + b.h - (v / tHi) * b.h
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      aria-label="Capacitor ripple current, case temperature and ESR at each operating point">
+      <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="none" stroke={C.border} />
+      <text x={b.x + 4} y={b.y - 6} fill={C.muted} fontSize={9.5} fontFamily={mono}>
+        bank ripple current (bars) · case temperature (line) · ESR (dashed)
+      </text>
+      {tLimit != null && (
+        <>
+          <line x1={b.x} y1={Yt(tLimit)} x2={b.x + b.w} y2={Yt(tLimit)}
+            stroke={C.red} strokeWidth={1.3} strokeDasharray="5 3" />
+          <text x={b.x + b.w - 4} y={Yt(tLimit) - 5} fill={C.red} fontSize={9.5}
+            fontFamily={mono} textAnchor="end">rated {tLimit.toFixed(0)} °C</text>
+        </>
+      )}
+      {rows.map((r, k) => {
+        const sel = Math.round(r.Vin_rms) === Math.round(selectedVac)
+        const h = (r.I_cap_total_A / iHi) * b.h
+        return (
+          <g key={k}>
+            <rect x={b.x + k * bw + bw * 0.22} y={b.y + b.h - h}
+              width={bw * 0.56} height={h}
+              fill={sel ? C.accent : `${C.accent}44`} />
+            <text x={b.x + k * bw + bw / 2} y={b.y + b.h + 13} fill={sel ? C.text : C.hint}
+              fontSize={9} fontFamily={mono} textAnchor="middle">{r.Vin_rms.toFixed(0)}</text>
+            <text x={b.x + k * bw + bw / 2} y={b.y + b.h - h - 4} fill={sel ? C.accent : C.hint}
+              fontSize={8.5} fontFamily={mono} textAnchor="middle">{r.I_cap_total_A.toFixed(1)}</text>
+          </g>
+        )
+      })}
+      <path d={rows.map((r, k) =>
+        `${k ? 'L' : 'M'}${(b.x + k * bw + bw / 2).toFixed(1)},${Yt(r.T_cap_C).toFixed(1)}`).join('')}
+        fill="none" stroke={C.amber} strokeWidth={1.8} />
+      {rows.map((r, k) => (
+        <circle key={k} cx={b.x + k * bw + bw / 2} cy={Yt(r.T_cap_C)} r={2.6} fill={C.amber} />
+      ))}
+      <path d={rows.map((r, k) => {
+        const y = b.y + b.h - (r.ESR_per_cap_mohm / (Math.max(...rows.map(q => q.ESR_per_cap_mohm)) * 1.6)) * b.h
+        return `${k ? 'L' : 'M'}${(b.x + k * bw + bw / 2).toFixed(1)},${y.toFixed(1)}`
+      }).join('')} fill="none" stroke={C.teal} strokeWidth={1.2} strokeDasharray="4 3" />
+      <text x={b.x} y={b.y + b.h + 30} fill={C.hint} fontSize={9.5} fontFamily={mono}>
+        V_AC · ESR falls as the part warms, so the self-heating that sets the temperature is
+        self-limiting — a sub-unity case rise is the model working
+      </text>
+    </svg>
+  )
+}
+
 // ── power-stage schematic with conduction highlighting ───────────────────────
 /** Which device carries the current depends only on where we are inside the switching period,
  *  which the caller derives from the engine's duty at this line angle. */

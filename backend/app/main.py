@@ -2465,9 +2465,13 @@ def design_state_waveforms(req: _DocReportReq):
     point here is the SAME one report Section 4.6.2 uses, so the explorer and the document plot
     identical series by construction.
     """
-    from app.mode_b.design_state_waveforms import build_waveforms
+    from app.mode_b.design_state_waveforms import build_waveforms, build_capacitor_view
     try:
-        return build_waveforms(req.state, req.approved_design)
+        out = build_waveforms(req.state, req.approved_design)
+        # Chapter 5's own bank model, for the capacitor scene (C260). Same shape of contract: it
+        # reports why it has nothing rather than returning an empty table that reads as "no ripple".
+        out["capacitor"] = build_capacitor_view(req.state, req.step15_result)
+        return out
     except Exception as e:
         log.exception("design state waveforms"); raise HTTPException(500, str(e))
 
