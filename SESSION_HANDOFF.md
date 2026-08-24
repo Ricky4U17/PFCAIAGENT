@@ -1,12 +1,13 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`4264a15` C259**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`aa8f93d` C260**, on `master`.
 
 **PFC Design Explorer (animation page) has started.** Scope and every settled constraint are in
 `specs/Improvements/ANIMATION_PLAN.md` — read it before touching that work. Phase 0 (the design
 state export) is in at C256: purely additive, `design_state.py` + `POST /mode-b/design-state`,
 with three rules enforced by tests — no recomputation, no silent defaults, source names kept.
-Phase 2 is in at C258/C259: real engine arrays on the line-cycle and switching scenes, the
+Phase 3 is in at C260: magnetics (B(t) vs Bsat at core temperature, H(t), loss split) and the DC-bus
+capacitor (ripple, ESR, case temperature from Ch5 own bank model). Phase 2 is in at C258/C259: real engine arrays on the line-cycle and switching scenes, the
 power-stage schematic, and the per-angle DCM mask exported from the magnetics engine. That mask
 exposed **PENDING B23** — magnetics and Chapter 7 disagree on the DCM fraction (22.2 % vs 29.0 % at
 264 Vac); the designer scheduled the fix for straight after the explorer. Phase 1 is in at C257: the page itself — `DesignExplorer.tsx`, the C-12 gate, four scenes on
