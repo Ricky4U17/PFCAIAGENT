@@ -200,8 +200,36 @@ instead. Use ours.
 |---|---|
 | **Band vs ripple** | `rec_band_pct = 1.0` → ±3.93 V, while bus ripple is 20 V pk-pk = **±10 V**. The reference draws an absolute ±band rectangle (`pfc-explorer.js:805-807`) *and* the composite trace (`:812`), so with its own numbers the bus sits outside tolerance 100 % of the time before any step. Resolved by measuring the band against the cycle-average (above). |
 | **Bode marker sliding with time** | A frequency response has no time coordinate. Never animate a dot along the Bode curve during a transient. Show the Bode statically beside it and connect the two by annotation: f<sub>cv</sub> → recovery timescale, PM → ringing or clean settle. |
-| **Ripple amplitude constant** | Ripple scales with load, so a 0→100 % step should show it growing. Supply `ripplePP_before` / `ripplePP_after` per transition from Ch5 so the change comes from the engine, not a browser formula. **OPEN — designer to confirm worth doing.** |
+| **Ripple amplitude constant** | Ripple scales with load, so a 0→100 % step must show it growing — **settled, do it**. See "Ripple during a step" below. |
+| **Cross-fading ripple over t_rec** | Would imply the voltage loop regulates ripple. It does not — see below. |
 | **Units** | `trec` is milliseconds while everything else is SI seconds. |
+
+#### Ripple during a step — settled 2026-08-23
+
+**The ripple amplitude follows the LOAD, not the loop.** It is set by
+`I_load / (2π·2f_line·C)` — a passive consequence of bulk capacitance — so when the load steps at
+t = 0 the amplitude changes almost immediately, settling within roughly one line half-cycle
+(~8.3 ms). The bus *average* is the slow part, recovering over ~150 ms under the voltage loop.
+
+Two mechanisms on one trace, on deliberately different timescales:
+
+| Quantity | Behaviour at t = 0 |
+|---|---|
+| ripple envelope | steps with the load, settled in ~1 line half-cycle |
+| cycle-average | dips to Δv<sub>pk</sub>, recovers over t_rec |
+
+- [ ] Export supplies `ripple_pp_before` and `ripple_pp_after` per transition per line condition
+      (6 × 2 = 12 pairs), each computed by **Ch5's own model** at that load fraction — never a
+      browser formula (C-8)
+- [ ] Envelope transitions over ~one line half-cycle, **not** over t_rec
+- [ ] **Ripple phase stays continuous** across the step — it is locked to the line, only the
+      amplitude changes; a phase jump at t = 0 reads as an artefact
+- [ ] At 0 % load the ripple is near zero but not exactly zero — take the value Ch5 gives, do not
+      special-case it to zero
+
+Rendered correctly this is one of the stronger moments in the scene: the ripple jumps at once while
+the average crawls back, which shows *without narration* that the loop is not regulating ripple —
+the same point the f<sub>cv</sub> ≪ 120 Hz annotation makes in words.
 
 ### Phase 5 — Summary and polish
 - [ ] Chapter block panels: fuse, MOV/GDT, NTC, EMI, bridge, L, Q, D, R_CS, C, controller
@@ -237,10 +265,10 @@ instead. Use ours.
 - **Bus panel superimposes 2·f_line ripple with the transient**, as in the reference — with the
   cycle-average overlay and band correction described under the transient scene.
 
+- **Ripple grows with load during a step** — engine-supplied endpoints from Ch5, envelope moving on
+  the line half-cycle timescale while the average recovers on t_rec. See "Ripple during a step".
+
 ## Open questions
 
-- [ ] Ripple amplitude vs load during a step — supply `ripplePP_before` / `ripplePP_after` per
-      transition from Ch5 so the amplitude change comes from the engine, or keep constant
-      amplitude for simplicity? (Ripple scales with load: a 0→100 % step should show it growing
-      from ~0 to the full ±10 V, which also makes the point that the ripple spec is a full-load
-      spec. The reference package draws it at constant amplitude.)
+*None outstanding. Scope is settled; Phase 0 can be scoped for implementation when the designer is
+ready.*
