@@ -79,6 +79,140 @@ def build_capacitor_view(state: Optional[dict],
     }
 
 
+def _composite(avg, t_s, vout, ripple_half, f_ripple):
+    """Cycle-average bus plus the steady-state 2*f_line ripple — the scope view.
+
+    Built server-side ON PURPOSE. A page that synthesises a waveform has started deciding what the
+    design does, and the explorer's guard rejects Math.sin in the browser for exactly that reason.
+
+    THE RIPPLE PHASE IS CONTINUOUS because it is line-locked: a load step changes its AMPLITUDE,
+    not its phase, and a phase jump at t=0 would read as an artefact. The amplitude here is the
+    full-load spec value and does NOT yet scale with the step — that needs Chapter 5's ripple at
+    each transition's before/after load, which is settled in ANIMATION_PLAN but not wired.
+    """
+    if not avg or ripple_half <= 0 or not t_s:
+        return []
+    n = min(len(avg), len(t_s))
+    return [round(vout + float(avg[k]) + ripple_half * math.sin(2.0 * math.pi * f_ripple * t_s[k]), 4)
+            for k in range(n)]
+
+
+def build_control_view(control_inputs: Optional[dict],
+                       fline_Hz: Optional[float] = None,
+                       bus_ripple_pp_V: Optional[float] = None) -> Dict[str, Any]:
+    """Both loop Bodes, the compensation values and the step-load transient. Phase 4.
+
+    TAKES ALREADY-MAPPED INPUTS ON PURPOSE. `main._control_inputs_from_step16` turns the GUI's
+    `step16_params` into the engine's input dict, and the combined report calls it before building
+    Chapter 6. This function accepts that same dict rather than re-deriving it, so there is exactly
+    one mapper and the Bode this page draws is the Bode the document draws. Re-mapping here would
+    be a second interpretation of the designer's control specs — the C255 shape.
+
+    THE BODE IS A STATIC PLOT, and the page must keep it that way. A frequency response has no time
+    coordinate, so a marker sliding along it while a transient plays would be meaningless; the
+    scenes connect the two by annotation instead (ANIMATION_PLAN, transient-scene traps).
+
+    THE TRANSIENT IS A SMALL-SIGNAL RESULT. `compute_step12_transient` takes the step response of
+    the closed-loop output impedance built from this design's compensator — a genuine closed-loop
+    response, not the shaped exponential the reference package uses. But it is linear: a 0→100 %
+    load step is not small-signal, and there is no slew limit or error-amp clamp in it. The caller
+    must say so on the page.
+    """
+    if not isinstance(control_inputs, dict) or not control_inputs:
+        return {"available": False, "reason": "no approved control design", "loops": {}}
+
+    out: Dict[str, Any] = {"available": False, "reason": None, "loops": {}}
+    try:
+        from app.mode_b.step16_step10_iloop import compute_step10_iloop
+        from app.mode_b.step16_step11_vloop import compute_step11_vloop
+        from app.mode_b.step16_step12_transient import compute_step12_transient
+    except Exception as exc:                      # pragma: no cover - defensive
+        return {"available": False, "reason": f"control engine unavailable: {exc}", "loops": {}}
+
+    def _loop(fn, name):
+        d = fn(control_inputs) or {}
+        bode = d.get("bode") or []
+        rows = d.get("rows") or []
+        return {
+            "bode": [{"vac": b.get("vac"), "pout": b.get("pout"), "f": list(b.get("f") or []),
+                      "ogain": list(b.get("ogain") or []), "ophase": list(b.get("ophase") or [])}
+                     for b in bode],
+            # crossover and phase margin per operating point — the two numbers a reviewer looks for
+            "points": [{"vac": r.get("vac"), "pout": r.get("pout"),
+                        "fco": r.get("fco"), "pm": r.get("pm")} for r in rows],
+            "name": name,
+        }, d
+
+    try:
+        iloop, d10 = _loop(compute_step10_iloop, "current loop")
+        vloop, d11 = _loop(compute_step11_vloop, "voltage loop")
+    except Exception as exc:
+        return {"available": False, "reason": f"loop engine error: {exc}", "loops": {}}
+
+    # compensation values for the loop block diagram — scalars the engine already resolved
+    iloop["comp"] = {k: d10.get(k) for k in ("ric", "cic1", "cic2", "fz", "fp", "fco_nom", "pm_nom")
+                     if d10.get(k) is not None}
+    src11 = d11.get("src") or {}
+    vloop["comp"] = {k: src11.get(k) for k in ("fcv", "gmv", "hv", "r1", "r4", "r_c", "vramp")
+                     if src11.get(k) is not None}
+    out["loops"] = {"current": iloop, "voltage": vloop}
+
+    try:
+        d12 = compute_step12_transient(control_inputs) or {}
+        # `t` and the traces are numpy arrays. `arr or []` asks an array for its truth value and
+        # raises "ambiguous" — never use `or` as a None-guard on engine output.
+        def _seq(v):
+            return list(v) if v is not None else []
+        t = _seq(d12.get("t"))
+        vout_v = float(d12.get("vout") or 0.0)
+        f_ripple = 2.0 * float(fline_Hz or 60.0)          # bus ripple is at TWICE line frequency
+        ripple_half = float(bus_ripple_pp_V or 0.0) / 2.0
+        # 40 000 samples per trace is a simulation horizon, not a plot. Decimate for transport;
+        # the peak and the recovery time come from the ENGINE's own metrics below, never from the
+        # decimated trace, so thinning cannot move a reported number.
+        step = max(1, len(t) // 1200)
+        t_dec = [round(v, 6) for v in t[::step]]
+        out["transient"] = {
+            "available": bool(t),
+            "vout": d12.get("vout"), "band": d12.get("band"),
+            "t": t_dec,
+            "transitions": [{
+                "label": w.get("label"),
+                "ll": [round(float(v), 4) for v in _seq(w.get("ll"))[::step]],
+                "hl": [round(float(v), 4) for v in _seq(w.get("hl"))[::step]],
+                # The scope view the designer asked for: cycle-average PLUS the steady-state
+                # twice-line-frequency ripple. Built here, not in the browser — a page that
+                # synthesises a waveform has started deciding what the design does, and the guard
+                # on the explorer files rejects Math.sin for exactly that reason.
+                "ll_composite": _composite(_seq(w.get("ll"))[::step], t_dec, vout_v, ripple_half,
+                                           f_ripple),
+                "hl_composite": _composite(_seq(w.get("hl"))[::step], t_dec, vout_v, ripple_half,
+                                           f_ripple),
+            } for w in (d12.get("waves") or [])],
+            "rows": [dict(r) for r in (d12.get("rows") or [])],
+            "worst_ll": dict(d12["worst_ll"]) if d12.get("worst_ll") else None,
+            "worst_hl": dict(d12["worst_hl"]) if d12.get("worst_hl") else None,
+            "notes": {
+                "basis": "step response of the closed-loop output impedance built from this "
+                         "design's compensator — a real closed-loop result, not a shaped curve.",
+                "small_signal": "LINEAR small-signal model. A 0-100 % load step is not "
+                                "small-signal: no slew limit, no error-amp clamp. Say so on the "
+                                "page.",
+                "band_vs_ripple": "the recovery band is measured on the CYCLE-AVERAGE bus, not on "
+                                  "the instantaneous trace — steady-state 2*f_line ripple is "
+                                  "larger than the band and would otherwise read as a permanent "
+                                  "violation.",
+                "decimation": f"traces thinned by {step}x for transport; peak and t_rec come from "
+                              "the engine's own metrics, not from these samples.",
+            },
+        }
+    except Exception as exc:
+        out["transient"] = {"available": False, "reason": f"transient engine error: {exc}"}
+
+    out["available"] = bool(out["loops"])
+    return out
+
+
 def _summary(s: Dict[str, Any]) -> Dict[str, Any]:
     """Where the crest is, and where the ripple actually peaks — which are NOT the same point.
 

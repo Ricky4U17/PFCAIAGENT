@@ -329,6 +329,141 @@ export const CapacitorScene: React.FC<{
   )
 }
 
+// ── Bode scene: both loops, STATIC (C-5) ────────────────────────────────────
+/**
+ * NO MARKER SLIDES ALONG THIS PLOT WHILE ANYTHING PLAYS. A frequency response has no time
+ * coordinate; animating a dot along it would be meaningless and the first control engineer in the
+ * room would say so. The link to the transient is made by annotation — crossover sets the recovery
+ * timescale, phase margin decides whether it rings — not by fake motion.
+ */
+export const BodeScene: React.FC<{
+  loop: { name: string; bode: Array<{ vac: number; f: number[]; ogain: number[]; ophase: number[] }>
+          points: Array<{ vac: number; fco: number | null; pm: number | null }>
+          comp?: Record<string, number> }
+  selectedVac: number
+}> = ({ loop, selectedVac }) => {
+  const W = 700, H = 300
+  const b = loop.bode.find(x => Math.round(x.vac) === Math.round(selectedVac)) ?? loop.bode[0]
+  const pt = loop.points.find(x => Math.round(x.vac) === Math.round(selectedVac)) ?? loop.points[0]
+  if (!b || !b.f.length) return <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} />
+  const bG: Box = { x: 54, y: 14, w: W - 70, h: 130 }
+  const bP: Box = { x: 54, y: 166, w: W - 70, h: 110 }
+  const lf = b.f.map(v => Math.log10(Math.max(v, 1e-3)))
+  const f0 = lf[0], f1 = lf[lf.length - 1]
+  const X = (k: number) => bG.x + ((lf[k] - f0) / (f1 - f0 || 1)) * bG.w
+  const gLo = Math.min(...b.ogain), gHi = Math.max(...b.ogain)
+  const pLo = Math.min(...b.ophase), pHi = Math.max(...b.ophase)
+  const Yg = (v: number) => bG.y + bG.h - ((v - gLo) / (gHi - gLo || 1)) * bG.h
+  const Yp = (v: number) => bP.y + bP.h - ((v - pLo) / (pHi - pLo || 1)) * bP.h
+  const line = (vals: number[], Y: (v: number) => number) =>
+    vals.map((v, k) => `${k ? 'L' : 'M'}${X(k).toFixed(1)},${Y(v).toFixed(1)}`).join('')
+  const xco = pt?.fco ? bG.x + ((Math.log10(pt.fco) - f0) / (f1 - f0 || 1)) * bG.w : null
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      aria-label={`${loop.name} open-loop gain and phase at ${selectedVac} volts AC`}>
+      <rect x={bG.x} y={bG.y} width={bG.w} height={bG.h} fill="none" stroke={C.border} />
+      <rect x={bP.x} y={bP.y} width={bP.w} height={bP.h} fill="none" stroke={C.border} />
+      <text x={bG.x + 4} y={bG.y + 12} fill={C.muted} fontSize={9.5} fontFamily={mono}>
+        {loop.name} — open-loop gain (dB)
+      </text>
+      <text x={bP.x + 4} y={bP.y + 12} fill={C.muted} fontSize={9.5} fontFamily={mono}>phase (°)</text>
+      {gLo < 0 && gHi > 0 && (
+        <line x1={bG.x} y1={Yg(0)} x2={bG.x + bG.w} y2={Yg(0)} stroke={C.border2} strokeDasharray="3 3" />
+      )}
+      {pLo < -180 && pHi > -180 && (
+        <line x1={bP.x} y1={Yp(-180)} x2={bP.x + bP.w} y2={Yp(-180)} stroke={C.red}
+          strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+      )}
+      <path d={line(b.ogain, Yg)} fill="none" stroke={C.accent} strokeWidth={1.6} />
+      <path d={line(b.ophase, Yp)} fill="none" stroke={C.teal} strokeWidth={1.4} />
+      {xco != null && (
+        <>
+          <line x1={xco} y1={bG.y} x2={xco} y2={bP.y + bP.h} stroke={C.green}
+            strokeWidth={1.2} strokeDasharray="4 3" />
+          <text x={xco + 5} y={bG.y + 26} fill={C.green} fontSize={9.5} fontFamily={mono}>
+            f_co {pt!.fco!.toFixed(pt!.fco! < 100 ? 1 : 0)} Hz
+          </text>
+          {pt?.pm != null && (
+            <text x={xco + 5} y={bP.y + 26} fill={C.green} fontSize={9.5} fontFamily={mono}>
+              PM {pt.pm.toFixed(1)}°
+            </text>
+          )}
+        </>
+      )}
+      <text x={bG.x} y={H - 3} fill={C.hint} fontSize={9} fontFamily={mono}>
+        {b.f[0].toFixed(b.f[0] < 10 ? 1 : 0)} Hz
+      </text>
+      <text x={bG.x + bG.w} y={H - 3} fill={C.hint} fontSize={9} fontFamily={mono} textAnchor="end">
+        {(b.f[b.f.length - 1] / 1000).toFixed(1)} kHz
+      </text>
+    </svg>
+  )
+}
+
+// ── transient scene: the settled three-layer bus panel ───────────────────────
+/**
+ * THE BAND IS MEASURED ON THE CYCLE-AVERAGE, NOT THE INSTANTANEOUS TRACE. Steady-state 2·f_line
+ * ripple (±10 V here) is larger than the ±1 % recovery band (±3.93 V), so drawing an absolute band
+ * against the composite trace would show the design permanently out of regulation before any step
+ * fires — which is exactly what the reference package does with its own numbers.
+ *
+ * Three layers: the composite scope view, the cycle-average over it, and the band about the
+ * average. t_rec is read on the average, which is also how it is read on a bench.
+ */
+export const TransientScene: React.FC<{
+  t: number[]; trace: number[]; composite: number[]; vout: number; band: number
+  tNorm: number; label: string; dv: number | null; trec: number | null
+}> = ({ t, trace, composite, vout, band, tNorm, label, dv, trec }) => {
+  const W = 700, H = 300
+  const b: Box = { x: 58, y: 26, w: W - 76, h: 200 }
+  const n = t.length
+  if (!n) return <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} />
+  // the composite comes from the export; the browser never synthesises a waveform (C-8)
+  const pad = composite.length
+    ? Math.max(0, Math.max(...composite) - Math.min(...composite)) * 0.12
+    : Math.abs(Math.max(...trace) - Math.min(...trace)) * 0.2
+  const lo = Math.min(vout + Math.min(...trace), ...(composite.length ? composite : [vout])) - pad
+  const hi = Math.max(vout + Math.max(...trace), ...(composite.length ? composite : [vout])) + pad
+  const Y = (v: number) => b.y + b.h - ((v - lo) / (hi - lo || 1)) * b.h
+  const X = (k: number) => b.x + (k / Math.max(n - 1, 1)) * b.w
+  const cur = Math.min(n - 1, Math.round(tNorm * (n - 1)))
+  const comp = composite
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      aria-label={`Bus voltage during a ${label} load step`}>
+      <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="none" stroke={C.border} />
+      <rect x={b.x} y={Y(vout + band)} width={b.w} height={Math.max(1, Y(vout - band) - Y(vout + band))}
+        fill={`${C.green}18`} />
+      <line x1={b.x} y1={Y(vout)} x2={b.x + b.w} y2={Y(vout)} stroke={C.border2} strokeDasharray="2 4" />
+      <path d={comp.map((v, k) => `${k ? 'L' : 'M'}${X(k).toFixed(1)},${Y(v).toFixed(1)}`).join('')}
+        fill="none" stroke={`${C.teal}88`} strokeWidth={1} />
+      <path d={trace.map((v, k) => `${k ? 'L' : 'M'}${X(k).toFixed(1)},${Y(vout + v).toFixed(1)}`).join('')}
+        fill="none" stroke={C.amber} strokeWidth={2} />
+      {trec != null && trec > 0 && (
+        <line x1={X(Math.round((trec / (t[n - 1] || 1)) * (n - 1)))} y1={b.y}
+          x2={X(Math.round((trec / (t[n - 1] || 1)) * (n - 1)))} y2={b.y + b.h}
+          stroke={C.green} strokeWidth={1.2} strokeDasharray="4 3" />
+      )}
+      <line x1={X(cur)} y1={b.y} x2={X(cur)} y2={b.y + b.h} stroke={C.text} strokeWidth={1} opacity={0.5} />
+      <text x={b.x + 4} y={b.y - 8} fill={C.amber} fontSize={10} fontFamily={mono}>
+        {label} · Δv {dv != null ? dv.toFixed(1) : '—'} V · t_rec {trec != null ? (trec * 1e3).toFixed(0) : '—'} ms
+      </text>
+      <text x={b.x + b.w} y={b.y - 8} fill={C.hint} fontSize={9} fontFamily={mono} textAnchor="end">
+        band ±{band.toFixed(2)} V on the cycle-average
+      </text>
+      <text x={b.x} y={b.y + b.h + 14} fill={C.hint} fontSize={9} fontFamily={mono}>
+        <tspan fill={C.amber}>cycle-average</tspan> · <tspan fill={C.teal}>composite (avg + 2·f_line ripple)</tspan>
+        {' '}· ripple drawn at the full-load spec amplitude — it does not yet scale with the step
+      </text>
+      <text x={b.x} y={b.y + b.h + 28} fill={C.hint} fontSize={9} fontFamily={mono}>
+        small-signal model: no slew limit, no error-amp clamp
+      </text>
+    </svg>
+  )
+}
+
 // ── power-stage schematic with conduction highlighting ───────────────────────
 /** Which device carries the current depends only on where we are inside the switching period,
  *  which the caller derives from the engine's duty at this line angle. */

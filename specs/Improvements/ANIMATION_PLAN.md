@@ -281,11 +281,16 @@ until the harness started attaching a part, and an empty panel reads as "no ripp
 "no part chosen".
 
 ### Phase 4 — Control (C-5, C-13)
-- [ ] FAN9672 application schematic, SVG with addressable IDs, live values
-- [ ] Interactive Bode, current and voltage loop, crossover/PM markers — **view-only, static plot**
-- [ ] Loop block diagram with live compensation values
-- [ ] **Voltage-loop transient scene** — see "Transient scene" below
-- [ ] **Current-loop scene, separate**, at switching timescale (settled)
+- [ ] **FAN9672 application schematic — STILL OPEN (C-13).** `schematics.fan9672_application_schematic`
+      renders to a raster for the report; emitting SVG with addressable element IDs from that same
+      generator, so pins and nets can highlight, is its own piece of work.
+- [x] Interactive Bode, current and voltage loop, crossover/PM markers — view-only, static (C261)
+- [~] Loop block diagram — the compensation values are exported (`loops.*.comp`: R_IC, C_IC1/2,
+      f_z, f_p for the current loop; f_cv, g_mv, H_v, R1, R4, V_ramp for the voltage loop) but not
+      yet drawn as a diagram
+- [x] **Voltage-loop transient scene** — done at C261, composite built server-side
+- [~] **Current-loop scene** — its Bode is in the control scene; a TIME-DOMAIN current-loop scene
+      at switching timescale is still open (the engine returns no current-loop step response)
 
 #### Transient scene — settled design
 

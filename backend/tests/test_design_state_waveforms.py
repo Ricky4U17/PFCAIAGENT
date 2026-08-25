@@ -215,6 +215,98 @@ def test_the_capacitor_view_declares_its_basis(cap_view):
         "the capacitor view does not say which model produced it")
 
 
+# ── control view (C261) ─────────────────────────────────────────────────────
+@pytest.fixture(scope="module")
+def control_view():
+    """Driven through the endpoint, so the SAME `_control_inputs_from_step16` mapping the combined
+    report uses is exercised — the point of the design being that there is one mapper."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import logging
+    from fastapi.testclient import TestClient
+    import app.main as main
+    import verify_combined_report as VCR
+    logging.disable(logging.WARNING)
+    try:
+        r = TestClient(main.app).post("/mode-b/design-state/waveforms", json={
+            "state": VCR._std_state(),
+            "step16_params": {"L_uH": 235.0, "DCR_mOhm": 95.0, "C_uF": 2400.0, "ESR_mOhm": 12.7,
+                              "Vout_V": 393.0, "fsw_Hz": 70000.0, "Pout_lo_W": 1700.0,
+                              "Pout_hi_W": 3600.0, "eta_lo": 0.945, "eta_hi": 0.965,
+                              "nch": 2, "fci_Hz": 8000.0, "fcv_Hz": 17.0}})
+    finally:
+        logging.disable(logging.NOTSET)
+    assert r.status_code == 200, r.text
+    return r.json()["control"]
+
+
+def test_both_loops_publish_bode_arrays_and_their_margins(control_view):
+    assert control_view["available"] is True, control_view.get("reason")
+    for key in ("current", "voltage"):
+        loop = control_view["loops"][key]
+        assert loop["bode"] and loop["bode"][0]["f"], f"{key} loop has no Bode arrays"
+        assert len(loop["bode"][0]["ogain"]) == len(loop["bode"][0]["f"])
+        assert loop["points"] and loop["points"][0]["fco"] is not None, f"{key}: no crossover"
+        assert loop["points"][0]["pm"] is not None, f"{key}: no phase margin"
+
+
+def test_the_two_loops_are_decades_apart(control_view):
+    """The design's central idea, and the thing the scene exists to show: the inner current loop
+    closes inside a switching period while the outer voltage loop is deliberately far below the
+    120 Hz bus ripple so it does NOT chase it and distort the input current."""
+    fi = control_view["loops"]["current"]["points"][0]["fco"]
+    fv = control_view["loops"]["voltage"]["points"][0]["fco"]
+    assert fi > 100 * fv, f"expected wide loop separation; got fci {fi:.1f} Hz, fcv {fv:.1f} Hz"
+    assert fv < 120, (
+        f"the voltage loop crosses at {fv:.1f} Hz, at or above the 120 Hz bus ripple — it would "
+        "modulate the current reference and distort the input current")
+
+
+def test_the_recovery_band_is_narrower_than_the_bus_ripple(control_view):
+    """THE TRAP THIS SCENE IS BUILT AROUND.
+
+    The ±1 % recovery band is smaller than the steady-state 2·f_line ripple, so an absolute band
+    drawn against the instantaneous trace shows the design permanently out of regulation before any
+    step fires — which is what the reference package does with its own numbers. The band belongs on
+    the cycle-average, and this asserts the inequality that makes that necessary.
+    """
+    t = control_view["transient"]
+    assert t["available"] is True, t.get("reason")
+    w = t["transitions"][0]
+    avg_span = max(w["ll"]) - min(w["ll"])
+    comp_span = max(w["ll_composite"]) - min(w["ll_composite"])
+    assert comp_span > avg_span, "the composite should be wider than the average — no ripple added"
+    assert t["band"] * 2 < comp_span, (
+        f"band ±{t['band']:.2f} V is not narrower than the composite swing {comp_span:.1f} V; "
+        "the whole reason the band is measured on the average is that ripple exceeds it")
+
+
+def test_the_composite_is_built_server_side_and_aligns_with_the_time_axis(control_view):
+    t = control_view["transient"]
+    for w in t["transitions"]:
+        for k in ("ll_composite", "hl_composite"):
+            assert len(w[k]) == len(t["t"]), f"{w['label']}: {k} length != time axis"
+
+
+def test_the_transient_declares_its_small_signal_basis(control_view):
+    """A 0-100 % load step is not small-signal. The model has no slew limit and no error-amp clamp,
+    and a page that does not say so invites "where is the clamp?" as the first question."""
+    notes = control_view["transient"]["notes"]
+    assert "small_signal" in notes and "clamp" in notes["small_signal"].lower()
+    assert "band_vs_ripple" in notes, "the band/ripple distinction is not declared"
+
+
+def test_decimation_cannot_move_a_reported_number(control_view):
+    """Traces are thinned for transport; the peak and recovery time come from the engine's own
+    metrics, so thinning is a display concern and can never change what is reported."""
+    t = control_view["transient"]
+    assert t["rows"], "no per-transition metrics"
+    row = t["rows"][0]
+    assert "dv_lo" in row and "trec_lo" in row
+    # the reported peak must be at least as deep as anything the decimated trace shows
+    assert abs(row["dv_lo"]) >= abs(min(t["transitions"][0]["ll"])) - 1e-6
+
+
 def test_missing_inputs_explain_themselves_rather_than_raising(built):
     """A scene must be able to say why it has nothing to draw."""
     from app.mode_b.design_state_waveforms import build_waveforms

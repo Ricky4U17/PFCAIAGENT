@@ -349,12 +349,33 @@ export interface CapacitorView {
   worst?: Record<string, number> | null
   notes?: Record<string, string>
 }
+export interface LoopView {
+  name: string
+  bode: Array<{ vac: number; pout: number; f: number[]; ogain: number[]; ophase: number[] }>
+  points: Array<{ vac: number; pout: number; fco: number | null; pm: number | null }>
+  comp?: Record<string, number>
+}
+export interface ControlView {
+  available: boolean; reason?: string | null
+  loops: Record<string, LoopView>
+  transient?: {
+    available: boolean; reason?: string
+    vout?: number; band?: number; t?: number[]
+    transitions?: Array<{ label: string; ll: number[]; hl: number[] }>
+    rows?: Array<Record<string, unknown>>
+    worst_ll?: Record<string, number> | null
+    worst_hl?: Record<string, number> | null
+    notes?: Record<string, string>
+  }
+}
 export interface DesignWaveforms {
   available: boolean; reason: string | null
   vins: string[]; series: Record<string, WaveSeries>
   n_points: number; notes?: Record<string, string>
   /** Chapter 5's own bank model, per operating point (C260). */
   capacitor?: CapacitorView
+  /** Chapter 6's loops and step-load transient (C261). */
+  control?: ControlView
 }
 export const designStateWaveforms = (req: DesignStateReq) =>
   post<DesignWaveforms>('/mode-b/design-state/waveforms', req)

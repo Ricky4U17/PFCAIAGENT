@@ -26,7 +26,7 @@ import { C, Btn, Card, SecHead } from './ui'
 import { designState, designStateWaveforms,
          type DesignState, type DesignStatePoint, type DesignWaveforms } from '../api/client'
 import { LineCycleScene, SwitchingScene, PowerStageSchematic,
-         MagneticsScene, CapacitorScene } from './DesignExplorerScenes'
+         MagneticsScene, CapacitorScene, BodeScene, TransientScene } from './DesignExplorerScenes'
 
 // ── scenes ───────────────────────────────────────────────────────────────────
 // Four time bases spanning five orders of magnitude. No single timeline shows them honestly, so
@@ -78,6 +78,17 @@ export const SCENES: Scene[] = [
       + 'Chapter 5’s own bank model. ESR falls as the part warms, so the self-heating that sets '
       + 'the temperature is self-limiting — a case rise below one-for-one with ambient is the '
       + 'model working, not a defect.',
+  },
+  {
+    id: 'control', title: 'Control loops', eyebrow: 'open-loop gain and phase — static',
+    span: () => 0, slowmo: 1, phase: 'Phase 4',
+    caption: 'Both loops, at the selected operating point, with crossover and phase margin marked. '
+      + 'This plot is deliberately static: a frequency response has no time coordinate, so nothing '
+      + 'slides along it while a transient plays. The link to the next scene is by annotation — '
+      + 'crossover sets the recovery timescale and phase margin decides whether it rings. Note the '
+      + 'separation: the current loop closes near 8 kHz and settles inside a switching period, '
+      + 'while the voltage loop is deliberately far below 120 Hz so it does NOT chase bus ripple '
+      + 'and distort the input current.',
   },
   {
     id: 'transient', title: 'Load step', eyebrow: 'closed-loop response',
@@ -221,6 +232,10 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   const qOn = series ? (tNorm * 40) % 1 < series.D[idx] : false
   const flux = (ds?.chapters?.magnetics as Record<string, any> | null)?.flux ?? null
   const capView = wf?.capacitor ?? null
+  const ctrl = wf?.control ?? null
+  const tr = ctrl?.transient
+  const [loopKey, setLoopKey] = useState<'voltage' | 'current'>('voltage')
+  const [transIdx, setTransIdx] = useState(0)
   const tReal = ds && scene ? tNorm * scene.span(ds) : 0
 
   if (busy) return <Card><div style={{ color: C.muted, fontSize: 13 }}>Loading design state…</div></Card>
@@ -300,6 +315,37 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
                 bmaxFL={flux ? (flux.Bmax_FL_T as number ?? null) : null}
                 bInnerFL={flux ? (flux.Bmax_inner_FL_T as number ?? null) : null} />
             )}
+          </div>
+        ) : scene.id === 'control' && ctrl?.available && ctrl.loops[loopKey] ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              {(['voltage', 'current'] as const).map(k => (
+                <Btn key={k} variant={loopKey === k ? 'primary' : 'ghost'}
+                  onClick={() => setLoopKey(k)}>{ctrl.loops[k]?.name ?? k}</Btn>
+              ))}
+            </div>
+            <BodeScene loop={ctrl.loops[loopKey] as any} selectedVac={point?.vac_V ?? 0} />
+          </div>
+        ) : scene.id === 'transient' && tr?.available && tr.transitions?.length ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+              {tr.transitions.map((w, k) => (
+                <Btn key={w.label} variant={transIdx === k ? 'primary' : 'ghost'}
+                  onClick={() => setTransIdx(k)}>{w.label}</Btn>
+              ))}
+            </div>
+            <TransientScene t={tr.t ?? []}
+              trace={(point && point.vac_V >= 180 ? tr.transitions[transIdx].hl
+                                                  : tr.transitions[transIdx].ll) ?? []}
+              composite={((point && point.vac_V >= 180
+                ? (tr.transitions[transIdx] as any).hl_composite
+                : (tr.transitions[transIdx] as any).ll_composite) ?? []) as number[]}
+              vout={tr.vout ?? 0} band={tr.band ?? 0}
+              tNorm={tNorm} label={tr.transitions[transIdx].label}
+              dv={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'dv_hi' : 'dv_lo'] ?? null}
+              trec={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'trec_hi' : 'trec_lo'] ?? null} />
           </div>
         ) : scene.id === 'capacitor' && capView?.available ? (
           <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,

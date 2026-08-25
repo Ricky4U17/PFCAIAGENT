@@ -2465,12 +2465,33 @@ def design_state_waveforms(req: _DocReportReq):
     point here is the SAME one report Section 4.6.2 uses, so the explorer and the document plot
     identical series by construction.
     """
-    from app.mode_b.design_state_waveforms import build_waveforms, build_capacitor_view
+    from app.mode_b.design_state_waveforms import (build_waveforms, build_capacitor_view,
+                                                   build_control_view)
     try:
         out = build_waveforms(req.state, req.approved_design)
         # Chapter 5's own bank model, for the capacitor scene (C260). Same shape of contract: it
         # reports why it has nothing rather than returning an empty table that reads as "no ripple".
         out["capacitor"] = build_capacitor_view(req.state, req.step15_result)
+        # Chapter 6's loops and transient (C261). The control inputs are mapped HERE, by the same
+        # `_control_inputs_from_step16` the combined report uses a few hundred lines below, so the
+        # explorer and the document read one interpretation of the designer's control specs.
+        if req.step16_params:
+            _app6 = (req.state.get("intake", {}) or {}).get("application", {}) or {}
+            _ci6 = _control_inputs_from_step16(req.step16_params)
+            _ci6.setdefault("vin_min", _num(_app6.get("vin_rms_min")) or 90.0)
+            _ci6.setdefault("vin_max", _num(_app6.get("vin_rms_max")) or 264.0)
+            _ci6.setdefault("r_input", _num((req.state.get("topology_specific_inputs", {}) or {})
+                                            .get("default_crest_ripple_ratio")) or 0.20)
+            if _num(_app6.get("output_power_w_low_line")):
+                _ci6["pout_lo"] = _num(_app6["output_power_w_low_line"])
+            if _num(_app6.get("output_power_w_high_line")):
+                _ci6["pout_hi"] = _num(_app6["output_power_w_high_line"])
+            out["control"] = build_control_view(
+                _ci6, fline_Hz=_num(_app6.get("nominal_line_frequency_hz")),
+                bus_ripple_pp_V=_num(_app6.get("dc_bus_voltage_ripple_pk_pk_v")))
+        else:
+            out["control"] = {"available": False, "reason": "no approved control design",
+                              "loops": {}}
         return out
     except Exception as e:
         log.exception("design state waveforms"); raise HTTPException(500, str(e))

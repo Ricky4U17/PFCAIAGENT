@@ -10667,3 +10667,62 @@ read rather than being bolted onto this one.
 
 VERIFIED 13 waveform/capacitor tests + 6 read-only guards pass; tsc --noEmit clean; the live
 backend serves both blocks end to end.
+
+# C261 - Phase 4: control loops and the load-step scene
+
+Additive: `build_control_view()` in the waveforms module, a `control` block on the existing
+endpoint, two new scenes. main.py +22/-1, and the single deletion is the import line extended.
+
+## One mapper, deliberately
+
+`build_control_view` takes ALREADY-MAPPED control inputs rather than deriving them from
+step16_params. `main._control_inputs_from_step16` is what the combined report calls before building
+Chapter 6, and the endpoint calls the same function with the same intake defaults applied, so the
+Bode this page draws is the Bode the document draws. Re-mapping in the module would have been a
+second interpretation of the designer's control specs - the C255 shape in a new place.
+
+## What the scenes show
+
+Control loops: both loops' open-loop gain and phase at the selected operating point, crossover and
+phase margin marked, switchable. STATIC on purpose - a frequency response has no time coordinate,
+so nothing slides along it while a transient plays; the link to the next scene is by annotation.
+Measured: current loop 8105.7 Hz / 63.2 deg, voltage loop 7.9 Hz / 78.4 deg. The separation is the
+design's central idea and now visible in one place.
+
+Load step: all six transitions, LL or HL by operating point, with the three-layer bus panel settled
+with the designer - composite scope trace, cycle-average over it, band measured ON THE AVERAGE.
+Measured: the average dips to 369.3 V while the composite swings 359.5-403.0 V, so the +/-3.93 V
+band would read as a permanent violation if drawn against the instantaneous trace. That inequality
+is now a test rather than a note.
+
+## THE GUARD CAUGHT ME MID-BUILD
+
+My first transient scene built the composite in the browser with `Math.sin(2*pi*f*t)`. That is
+exactly the C-8 violation `test_the_page_does_not_recompute_physics` exists for, and it fired.
+
+I moved the synthesis server-side into `_composite()` rather than weakening the guard. The browser
+is a pure plotter again, the ripple construction is testable, and the phase-continuity requirement
+(a load step changes the ripple's AMPLITUDE, not its phase) is documented where the code is instead
+of in a comment on a canvas.
+
+Worth recording that the guard was written two days ago against a hypothetical, and caught a real
+violation by its author.
+
+## Also fixed: `arr or []` on numpy output
+
+`compute_step12_transient` returns numpy arrays. `d12.get("t") or []` asks an array for its truth
+value and raises "ambiguous". Never use `or` as a None-guard on engine output; `_seq()` does it
+properly.
+
+## NOT done in Phase 4, and named rather than implied
+
+- FAN9672 application schematic (C-13, explicitly requested). `fan9672_application_schematic`
+  renders to a raster for the report; emitting SVG with addressable element IDs from that same
+  generator is its own piece of work.
+- Loop block diagram - values exported (`loops.*.comp`), diagram not drawn.
+- Current-loop TIME-DOMAIN scene - its Bode is in, but the engine returns no current-loop step
+  response, so this needs new computation rather than new rendering.
+- Ripple growing with load - still the full-load spec amplitude, labelled on the page. Needs
+  Chapter 5's ripple at each transition's before/after load.
+
+VERIFIED 19 waveform/capacitor/control tests + 6 read-only guards; tsc --noEmit clean.
