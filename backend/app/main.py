@@ -2526,12 +2526,15 @@ def design_state_waveforms(req: _DocReportReq):
     identical series by construction.
     """
     from app.mode_b.design_state_waveforms import (build_waveforms, build_capacitor_view,
-                                                   build_control_view)
+                                                   build_control_view, build_thermal_view)
     try:
         out = build_waveforms(req.state, req.approved_design)
         # Chapter 5's own bank model, for the capacitor scene (C260). Same shape of contract: it
         # reports why it has nothing rather than returning an empty table that reads as "no ripple".
         out["capacitor"] = build_capacitor_view(req.state, req.step15_result)
+        # Chapter 7's sweep for the steady-state dashboard (C264): junction temperatures, the loss
+        # budget and the margins, from the same engine call the Results tab makes.
+        out["thermal"] = build_thermal_view(req.semiconductor, req.approved_design)
         # Chapter 6's loops and transient (C261). The control inputs are mapped HERE, by the same
         # `_control_inputs_from_step16` the combined report uses a few hundred lines below, so the
         # explorer and the document read one interpretation of the designer's control specs.

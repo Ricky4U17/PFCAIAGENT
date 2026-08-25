@@ -368,6 +368,13 @@ export interface ControlView {
     notes?: Record<string, string>
   }
 }
+export interface ThermalView {
+  available: boolean; reason?: string | null
+  rows: Array<Record<string, number>>
+  worst?: Record<string, number> | null
+  limits: { fet: number | null; diode: number | null; bridge: number | null }
+  notes?: Record<string, string>
+}
 export interface DesignWaveforms {
   available: boolean; reason: string | null
   vins: string[]; series: Record<string, WaveSeries>
@@ -376,6 +383,8 @@ export interface DesignWaveforms {
   capacitor?: CapacitorView
   /** Chapter 6's loops and step-load transient (C261). */
   control?: ControlView
+  /** Chapter 7's sweep for the steady-state dashboard (C264). */
+  thermal?: ThermalView
 }
 export interface SchematicSheet {
   label: string; svg: string; defaulted: string[]; n_values: number

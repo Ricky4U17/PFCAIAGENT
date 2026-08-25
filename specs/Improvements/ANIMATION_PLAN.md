@@ -281,10 +281,9 @@ until the harness started attaching a part, and an empty panel reads as "no ripp
 "no part chosen".
 
 ### Phase 4 — Control (C-5, C-13)
-- [ ] **FAN9672 application schematic — STILL OPEN (C-13).** `schematics.fan9672_application_schematic`
-      renders to a raster for the report; emitting SVG with addressable element IDs from that same
-      generator, so pins and nets can highlight, is its own piece of work.
-- [x] Interactive Bode, current and voltage loop, crossover/PM markers — view-only, static (C261)
+- [x] **FAN9672 application schematic — DONE at C262 (C-13).** Same generator as the report,
+      `as_svg=True`, plus `build_fan9672_context()` as a single value builder pinned against
+      the report's own copy by test.
 - [~] Loop block diagram — the compensation values are exported (`loops.*.comp`: R_IC, C_IC1/2,
       f_z, f_p for the current loop; f_cv, g_mv, H_v, R1, R4, V_ramp for the voltage loop) but not
       yet drawn as a diagram
@@ -300,21 +299,21 @@ output impedance `Z_cl` from the actual compensator and OTA gain and takes `sign
 extremes, with per-row peak / % / `trec`. The reference uses a shaped `(t/τ)·e^(1−t/τ)` heuristic
 instead. Use ours.
 
-- [ ] All six transitions selectable (settled): 0→100, 0→50, 50→100, 100→0, 50→0, 100→50, LL and HL
-- [ ] Three stacked, time-aligned panels: **load-current step** / **bus voltage** / **loop signal chain**
-- [ ] Bus panel draws **three** things:
+- [x] All six transitions selectable (settled): 0→100, 0→50, 50→100, 100→0, 50→0, 100→50, LL and HL
+- [x] Three stacked, time-aligned panels: **load-current step** / **bus voltage** / **loop signal chain**
+- [x] Bus panel draws **three** things:
   1. composite trace `V_bus + ripple(2·f_line) + Δv(t)` — the scope view (the look the designer wants)
   2. **cycle-average overlay** `V_bus + Δv(t)` — free, it is exactly what Step 12 returns
   3. ±band measured **against the average, not the instantaneous trace**
-- [ ] Loop signal chain: error and compensator output via `lsim` on the *same* `s11["comp"]` TF —
+- [x] Loop signal chain: error and compensator output via `lsim` on the *same* `s11["comp"]` TF —
       same transfer functions, same solver, no second model. Duty and inner-loop response are
       deliberately excluded rather than approximated (C-9).
-- [ ] Caption states the **small-signal basis** — `signal.step` on `Z_cl` is linear; a 0→100 % step
+- [x] Caption states the **small-signal basis** — `signal.step` on `Z_cl` is linear; a 0→100 % step
       is not. No slew limit, no error-amp clamp. Say so or the first reviewer question is "where is
       the clamp?"
-- [ ] Narrative spine: **two-loop time-scale separation** — inner current loop f<sub>ci</sub> ≈ 8 kHz
+- [x] Narrative spine: **two-loop time-scale separation** — inner current loop f<sub>ci</sub> ≈ 8 kHz
       settles inside a switching period; outer voltage loop f<sub>cv</sub> ≈ 17 Hz takes ~150 ms
-- [ ] Make explicit that **f<sub>cv</sub> ≪ 120 Hz is deliberate** — the loop is designed *not* to
+- [x] Make explicit that **f<sub>cv</sub> ≪ 120 Hz is deliberate** — the loop is designed *not* to
       correct bus ripple, because chasing it would modulate the current reference and distort input
       current (Ch6 says this). Ripple sitting uncorrected is intended behaviour, labelled as such.
 
@@ -355,7 +354,12 @@ Rendered correctly this is one of the stronger moments in the scene: the ripple 
 the average crawls back, which shows *without narration* that the loop is not regulating ripple —
 the same point the f<sub>cv</sub> ≪ 120 Hz annotation makes in words.
 
-### Phase 5 — Summary and polish
+### Phase 5 — Summary and polish  `PARTLY DONE at C264`
+- [x] **Steady-state dashboard** — loss budget and junction temperatures against their limits,
+      from the same sweep the Results tab runs (`build_thermal_view`). Gate drive shown separately
+      because it belongs in the budget but NOT in the thermal path.
+- [x] **Ch1-10 summary blocks** — rendered from the export's own chapter sections; a chapter that
+      is not approved says so rather than showing an empty card.
 - [ ] Chapter block panels: fuse, MOV/GDT, NTC, EMI, bridge, L, Q, D, R_CS, C, controller
 - [ ] DC-DC / load block as a labelled **placeholder** (settled: placeholder for now)
 - [ ] Vendor IBM Plex woff2 locally — offline safety

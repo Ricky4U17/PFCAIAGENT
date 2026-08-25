@@ -79,6 +79,61 @@ def build_capacitor_view(state: Optional[dict],
     }
 
 
+def build_thermal_view(semiconductor: Optional[dict],
+                       approved_design: Optional[dict] = None) -> Dict[str, Any]:
+    """Per-operating-point junction temperatures and the loss budget — the steady-state dashboard.
+
+    Runs the SAME sweep `/mode-b/semiconductor/calculate` runs, through the same adapter, so the
+    dashboard cannot show a different loss or a different Tj from the Results tab or Chapter 7.
+
+    THE AS-BUILT INDUCTANCE IS APPLIED HERE TOO. Without it the sweep runs on a flat nominal and
+    reports different ripple, different DCM and different losses from every other surface — which
+    is C255 in one direction and B23 in the other. Both were fixed by making sure every consumer
+    of this engine feeds it the same inductance, and this is a consumer.
+    """
+    if not isinstance(semiconductor, dict) or not semiconductor:
+        return {"available": False, "reason": "no approved semiconductor selection", "rows": []}
+    try:
+        from app.mode_b.semiconductor import adapter as AD
+        from app.mode_b.semiconductor import pfc_loss_model as engine
+        from app.main import _apply_asbuilt_L
+
+        design = dict(semiconductor.get("design") or {})
+        if not design:
+            return {"available": False, "reason": "the semiconductor block carries no design",
+                    "rows": []}
+        _apply_asbuilt_L(design, approved_design)
+        cfg, _ref = AD.build_semi_cfg(design, semiconductor.get("mosfet") or {},
+                                      semiconductor.get("diode") or {},
+                                      semiconductor.get("bridge") or {},
+                                      semiconductor.get("thermal") or {})
+        rows = engine.simulate_vac_sweep(cfg)
+    except Exception as exc:
+        return {"available": False, "reason": f"loss engine error: {exc}", "rows": []}
+
+    lim = semiconductor.get("tj_limit") or {}
+    keep = ("Vac", "P_FET_total", "P_DIODE_total", "P_BRIDGE_total", "P_SEMI_total",
+            "P_gate_driver", "Tj_FET", "Tj_DIODE", "Tj_BRIDGE_top", "T_sink_main", "DCM_%")
+    out = [{k: (float(r[k]) if isinstance(r.get(k), (int, float)) else r.get(k))
+            for k in keep if k in r} for r in rows]
+    worst = max(out, key=lambda r: r.get("P_SEMI_total", 0.0)) if out else None
+    return {
+        "available": bool(out),
+        "reason": None if out else "the engine produced no rows",
+        "rows": out,
+        "worst": worst,
+        "limits": {"fet": lim.get("fet"), "diode": lim.get("diode"), "bridge": lim.get("bridge")},
+        "notes": {
+            "basis": "the same sweep /mode-b/semiconductor/calculate runs, with the as-built "
+                     "per-point and per-angle inductance applied — so this dashboard, the Results "
+                     "tab and Chapter 7 are one number.",
+            "gate_drive": "P_FET_total excludes gate drive; P_gate_driver is separate because the "
+                          "gate charge is dissipated in the driver and the gate resistors, not in "
+                          "the channel, so it belongs in the budget but not the thermal path.",
+        },
+    }
+
+
 def _composite(avg, t_s, vout, ripple_half, f_ripple):
     """Cycle-average bus plus the steady-state 2*f_line ripple — the scope view.
 
@@ -294,14 +349,13 @@ def build_waveforms(state: Optional[dict],
             "dcm": "Per-angle DCM flag from the MAGNETICS engine (`Iavg < dIpp/2`, "
                    "step7_magnetic_calc), exported at C259 so a scene can shade exactly the "
                    "angles the engine flagged instead of restating the criterion here.",
-            "dcm_basis": "THIS IS THE MAGNETICS ENGINE'S DCM, and it does not equal Chapter 7's "
-                   "`DCM_%`. Measured on the reference design with the as-built L applied: "
-                   "22.2 % here against 29.0 % in Chapter 7 at 264 Vac (10.0 vs 22.0 at 230, "
-                   "3.3 vs 18.3 at 220). The two engines define the current and the ripple "
-                   "differently — the loss model works from a per-channel instantaneous current "
-                   "and an L backed out of the requested peak ripple, this one from the "
-                   "per-phase average and the as-built per-angle L. Both are self-consistent. "
-                   "Any scene that shades DCM must say which basis it is on, and a scene showing "
-                   "Chapter 7 numbers must not reuse this mask. Logged for the designer.",
+            "dcm_basis": "This is the MAGNETICS engine's DCM. Until C263 it disagreed sharply "
+                   "with Chapter 7's `DCM_%` (22.2 % here against 29.0 % at 264 Vac, 3.3 vs 18.3 "
+                   "at 220) because the loss engine used one full-load inductance across the whole "
+                   "cycle while this one uses the per-angle L. That is fixed: the two now agree "
+                   "within 3 percentage points and never disagree about WHETHER a point runs "
+                   "discontinuous. A small residual remains — this engine evaluates k_bias(H) "
+                   "continuously, the loss engine interpolates L from ten samples — so a scene "
+                   "showing both should still name which basis it is on.",
         },
     }

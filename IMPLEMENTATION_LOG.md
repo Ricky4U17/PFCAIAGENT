@@ -10824,3 +10824,45 @@ VERIFIED 6 acceptance tests in tests/test_dcm_cross_engine.py: the engines stay 
 point disagrees about WHETHER it runs discontinuous, the curve falls with current and is anchored
 at zero, the fix moves numbers in the right direction, the loss impact stays inside its band, and a
 stated ripple target makes the bias curve stand down entirely.
+
+# C264 - the steady-state dashboard and the Ch1-10 summary
+
+Two gaps closed. The steady-state scene had been a placeholder since Phase 1 - it was a listed
+scene showing "waveforms arrive in Phase 5" - and the chapter summary was the designer's original
+"summary of all the work from chapter 1 to 10", never built.
+
+## Steady state
+
+`build_thermal_view` runs the SAME sweep `/mode-b/semiconductor/calculate` runs, through the same
+adapter, with `_apply_asbuilt_L` applied - so the dashboard, the Results tab and Chapter 7 are one
+number. That is asserted directly rather than assumed: the test rebuilds the sweep independently
+and compares P_SEMI, both junction temperatures and DCM to 1e-6.
+
+Two panels: where the watts go, and how much thermal headroom each device has against its limit.
+
+GATE DRIVE IS SHOWN SEPARATELY AND SAID SO. It belongs in the loss budget but NOT in the thermal
+path - the gate charge is dissipated in the driver and the gate resistors, not in the channel.
+Folding it into the FET bar would overstate the junction's heat; separating it silently is what
+cost a 0.1 W reconciliation hunt at C250. The panel prints the distinction.
+
+Measured live: worst point 180 Vac, 66.11 W, Tj 80.0 / 80.7 / 99.7 degC against 150 / 150 / 130.
+
+## Chapter summary
+
+Rendered from the export's own chapter sections, so it formats and does not compute. A chapter that
+is not approved is absent rather than an empty card - the same rule the gate uses, for the same
+reason: an empty card reads as "designed, and zero".
+
+## A stale note caught on the way
+
+`notes.dcm_basis` still said the two engines disagree at 29.0 % - true when it was written at C259,
+false since C263 fixed it that same day. It is a payload field the page can display, so it was a
+stale claim one layer from a reviewer's eyes. Rewritten to say they now agree within 3 points and
+why a small residual remains. The test docstring asserting it carried the same stale figure and was
+corrected too.
+
+Worth noting the shape: the fix and the note lived in different files, the test still passed
+because it only checked the note EXISTS, and nothing would have caught it. Assertions about
+presence do not protect content.
+
+VERIFIED 24 waveform/capacitor/control/thermal tests, 6 read-only guards; tsc --noEmit clean.

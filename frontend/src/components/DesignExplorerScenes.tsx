@@ -464,6 +464,103 @@ export const TransientScene: React.FC<{
   )
 }
 
+// ── steady state: loss budget and junction temperatures against their limits ──
+/**
+ * Not a timeline. Two panels per operating point: where the semiconductor watts go, and how much
+ * thermal headroom each device has.
+ *
+ * GATE DRIVE IS SHOWN SEPARATELY AND ON PURPOSE. It belongs in the loss budget but NOT in the
+ * thermal path — the gate charge is dissipated in the driver and the gate resistors, not in the
+ * channel. Folding it into the FET bar would overstate the junction's heat, and separating it
+ * without saying so has caused a 0.1 W reconciliation hunt before.
+ */
+export const SteadyStateScene: React.FC<{
+  rows: Array<Record<string, number>>
+  limits: { fet: number | null; diode: number | null; bridge: number | null }
+  selectedVac: number
+}> = ({ rows, limits, selectedVac }) => {
+  const W = 700, H = 300
+  const r = rows.find(x => Math.round(x.Vac) === Math.round(selectedVac)) ?? rows[0]
+  if (!r) return <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} />
+
+  const bL: Box = { x: 52, y: 26, w: 300, h: 120 }
+  const parts: Array<[string, number, string]> = [
+    ['MOSFET', r.P_FET_total ?? 0, C.accent],
+    ['Diode', r.P_DIODE_total ?? 0, C.green],
+    ['Bridge', r.P_BRIDGE_total ?? 0, C.amber],
+    ['Gate drive', r.P_gate_driver ?? 0, C.teal],
+  ]
+  const tot = parts.reduce((a, [, v]) => a + v, 0) || 1
+  let acc = 0
+
+  const devs: Array<[string, number, number | null]> = [
+    ['Tj FET', r.Tj_FET ?? 0, limits.fet],
+    ['Tj diode', r.Tj_DIODE ?? 0, limits.diode],
+    ['Tj bridge', r.Tj_BRIDGE_top ?? 0, limits.bridge],
+    ['T sink', r.T_sink_main ?? 0, null],
+  ]
+  const tMax = Math.max(...devs.map(([, v, l]) => Math.max(v, l ?? 0))) * 1.08 || 1
+  const bT: Box = { x: 400, y: 26, w: 270, h: 120 }
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      aria-label={`Loss budget and junction temperatures at ${selectedVac} volts AC`}>
+      <text x={bL.x} y={bL.y - 8} fill={C.muted} fontSize={10} fontFamily={mono}>
+        semiconductor loss — {tot.toFixed(2)} W total
+      </text>
+      {parts.map(([lab, v, col], k) => {
+        const w = (v / tot) * bL.w
+        const x = bL.x + acc
+        acc += w
+        return (
+          <g key={lab}>
+            <rect x={x} y={bL.y} width={Math.max(0, w - 1)} height={34} fill={col} />
+            <text x={bL.x} y={bL.y + 56 + k * 15} fill={C.muted} fontSize={10} fontFamily={mono}>
+              <tspan fill={col}>■</tspan> {lab}
+            </text>
+            <text x={bL.x + bL.w} y={bL.y + 56 + k * 15} fill={C.text} fontSize={10}
+              fontFamily={mono} textAnchor="end">
+              {v.toFixed(2)} W · {((v / tot) * 100).toFixed(0)} %
+            </text>
+          </g>
+        )
+      })}
+
+      <text x={bT.x} y={bT.y - 8} fill={C.muted} fontSize={10} fontFamily={mono}>
+        junction temperature vs limit
+      </text>
+      {devs.map(([lab, v, lim], k) => {
+        const y = bT.y + k * 30
+        const wv = (v / tMax) * bT.w
+        const over = lim != null && v > lim
+        return (
+          <g key={lab}>
+            <rect x={bT.x} y={y} width={bT.w} height={16} fill={C.bg3} />
+            <rect x={bT.x} y={y} width={wv} height={16} fill={over ? C.red : C.green} />
+            {lim != null && (
+              <line x1={bT.x + (lim / tMax) * bT.w} y1={y - 2}
+                x2={bT.x + (lim / tMax) * bT.w} y2={y + 18} stroke={C.red} strokeWidth={1.4} />
+            )}
+            <text x={bT.x - 6} y={y + 12} fill={C.muted} fontSize={9.5} fontFamily={mono}
+              textAnchor="end">{lab}</text>
+            <text x={bT.x + bT.w + 4} y={y + 12} fill={over ? C.red : C.text} fontSize={9.5}
+              fontFamily={mono}>
+              {v.toFixed(0)}{lim != null ? ` / ${lim.toFixed(0)} °C` : ' °C'}
+            </text>
+          </g>
+        )
+      })}
+
+      <text x={bL.x} y={H - 26} fill={C.hint} fontSize={9.5} fontFamily={mono}>
+        Gate drive is in the budget but NOT in the thermal path — that charge is dissipated in the
+      </text>
+      <text x={bL.x} y={H - 13} fill={C.hint} fontSize={9.5} fontFamily={mono}>
+        driver and the gate resistors, not in the channel. DCM here: {(r['DCM_%'] ?? 0).toFixed(1)} %
+      </text>
+    </svg>
+  )
+}
+
 // ── power-stage schematic with conduction highlighting ───────────────────────
 /** Which device carries the current depends only on where we are inside the switching period,
  *  which the caller derives from the engine's duty at this line angle. */

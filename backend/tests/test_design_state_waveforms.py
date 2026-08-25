@@ -139,11 +139,12 @@ def test_dcm_appears_only_at_high_line_and_grows_with_it(built):
 def test_the_dcm_basis_is_declared_because_chapter_7_disagrees(built):
     """C259, and the reason this is not a bug.
 
-    The magnetics engine and the Chapter-7 loss engine both compute a DCM fraction and they do not
-    agree: 22.2 % here against 29.0 % in Chapter 7 at 264 Vac on the reference design. They define
-    the current and the ripple differently and each is self-consistent. A scene that shades using
-    this mask while quoting Chapter 7's percentage would be presenting two engines as one, so the
-    payload has to say which basis it is publishing.
+    Both engines compute a DCM fraction. Until C263 they disagreed sharply (22.2 % here against
+    29.0 % in Chapter 7 at 264 Vac) because the loss engine used one full-load inductance across the
+    whole cycle. C263 fixed that and they now agree within 3 points — but a small residual remains,
+    because this engine evaluates k_bias(H) continuously while the loss engine interpolates L from
+    ten samples. A scene showing both must still name which basis it is on, so the payload keeps
+    declaring it.
     """
     notes = built["w"].get("notes") or {}
     assert "dcm_basis" in notes, "the payload does not declare which engine's DCM this is"
@@ -314,3 +315,81 @@ def test_missing_inputs_explain_themselves_rather_than_raising(built):
         out = build_waveforms(built["state"], bad)
         assert out["available"] is False and out["reason"], out
         assert out["series"] == {} and out["vins"] == []
+
+
+# ── thermal / steady-state view (C264) ──────────────────────────────────────
+@pytest.fixture(scope="module")
+def thermal_view(built):
+    from app.mode_b.semiconductor import adapter as AD
+    from app.mode_b.design_state_waveforms import build_thermal_view
+    import logging
+    logging.disable(logging.WARNING)
+    try:
+        design = dict(AD.REFERENCE_DESIGN)
+        design.update({"eta": 0.95, "pf": 0.99, "R_th_cs": 0.3, "nch": 2})
+        thermal = dict(AD.REFERENCE_PARTS["thermal"]); thermal["t_ambient"] = 50.0
+        sc = {"design": design, "mosfet": AD.REFERENCE_PARTS["mosfet"],
+              "diode": AD.REFERENCE_PARTS["diode"], "bridge": AD.REFERENCE_PARTS["bridge"],
+              "thermal": thermal, "tj_limit": {"fet": 150, "diode": 150, "bridge": 130}}
+        view = build_thermal_view(sc, built["approved"])
+    finally:
+        logging.disable(logging.NOTSET)
+    return view, sc
+
+
+def test_the_dashboard_covers_every_operating_point(built, thermal_view):
+    view, _ = thermal_view
+    assert view["available"] is True, view["reason"]
+    vacs = {int(round(r["Vac"])) for r in view["rows"]}
+    assert vacs == {int(p["vac_V"]) for p in built["d"]["points"]}
+
+
+def test_the_dashboard_and_the_results_tab_are_one_number(thermal_view, built):
+    """THE PARITY THAT MATTERS. The dashboard runs the same sweep `/semiconductor/calculate` runs.
+    If it fed the engine a different inductance it would report different losses and a different
+    DCM from the Results tab and Chapter 7 — C255 in one direction and B23 in the other, both of
+    which happened because a consumer of this engine was fed something else."""
+    import app.main as main
+    from app.mode_b.semiconductor import adapter as AD
+    from app.mode_b.semiconductor import pfc_loss_model as engine
+
+    view, sc = thermal_view
+    design = dict(sc["design"])
+    main._apply_asbuilt_L(design, built["approved"])
+    cfg, _ = AD.build_semi_cfg(design, sc["mosfet"], sc["diode"], sc["bridge"], sc["thermal"])
+    direct = {int(round(float(r["Vac"]))): r for r in engine.simulate_vac_sweep(cfg)}
+
+    for row in view["rows"]:
+        d = direct[int(round(row["Vac"]))]
+        for k in ("P_SEMI_total", "Tj_FET", "Tj_DIODE", "DCM_%"):
+            assert abs(row[k] - float(d[k])) < 1e-6, (
+                f"{row['Vac']:.0f} Vac: dashboard {k}={row[k]} but the engine says {d[k]}")
+
+
+def test_gate_drive_is_carried_separately_from_the_fet_total(thermal_view):
+    """It belongs in the loss budget but NOT in the thermal path — the gate charge is dissipated in
+    the driver and the gate resistors, not in the channel. Folding it into P_FET_total would
+    overstate the junction's heat, and separating it silently cost a 0.1 W reconciliation hunt."""
+    view, _ = thermal_view
+    for r in view["rows"]:
+        assert "P_gate_driver" in r, f"{r['Vac']} Vac: gate drive is not reported separately"
+    assert "gate_drive" in (view.get("notes") or {}), "the basis note no longer explains it"
+
+
+def test_every_junction_is_inside_its_limit_on_the_reference_design(thermal_view):
+    """Not a physics assertion — a fixture sanity check. If the reference design started running a
+    junction over its limit, every screenshot and every demo would be showing a failing design."""
+    view, _ = thermal_view
+    lim = view["limits"]
+    for r in view["rows"]:
+        for key, lk in (("Tj_FET", "fet"), ("Tj_DIODE", "diode"), ("Tj_BRIDGE_top", "bridge")):
+            if lim.get(lk):
+                assert r[key] < lim[lk], f"{r['Vac']:.0f} Vac: {key} {r[key]:.1f} >= limit {lim[lk]}"
+
+
+def test_a_missing_semiconductor_selection_explains_itself(built):
+    from app.mode_b.design_state_waveforms import build_thermal_view
+    for bad in (None, {}, {"design": {}}):
+        out = build_thermal_view(bad, built["approved"])
+        assert out["available"] is False and out["reason"], out
+        assert out["rows"] == []

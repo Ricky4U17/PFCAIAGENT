@@ -27,7 +27,8 @@ import { designState, designStateWaveforms, designStateSchematic,
          type DesignState, type DesignStatePoint, type DesignWaveforms,
          type DesignSchematic } from '../api/client'
 import { LineCycleScene, SwitchingScene, PowerStageSchematic,
-         MagneticsScene, CapacitorScene, BodeScene, TransientScene } from './DesignExplorerScenes'
+         MagneticsScene, CapacitorScene, BodeScene, TransientScene,
+         SteadyStateScene } from './DesignExplorerScenes'
 
 // ── scenes ───────────────────────────────────────────────────────────────────
 // Four time bases spanning five orders of magnitude. No single timeline shows them honestly, so
@@ -159,6 +160,64 @@ const Blocked: React.FC<{ missing: string[]; onBack: () => void }> = ({ missing,
   </Card>
 )
 
+
+/** Ch1-10 at a glance, from the export's own chapter sections (C264).
+ *
+ *  Every row is a value the design already approved — this panel formats, it does not compute.
+ *  A chapter that is not approved says so rather than rendering an empty card, because an empty
+ *  card reads as "designed, and zero". */
+const ChapterSummary: React.FC<{ ds: DesignState }> = ({ ds }) => {
+  const rows: Array<[string, string, Array<[string, unknown]>]> = []
+  const ch = ds.chapters as Record<string, any>
+  const f = (v: unknown, dp = 2, unit = '') =>
+    typeof v === 'number' && isFinite(v) ? `${v.toFixed(dp)}${unit ? ' ' + unit : ''}`
+      : (v == null || v === '' ? '—' : String(v))
+
+  if (ch.magnetics) rows.push(['Ch 3-4', 'Inductor', [
+    ['Core', `${ch.magnetics.core?.name ?? '—'} (${ch.magnetics.core?.material ?? '—'})`],
+    ['Turns', f(ch.magnetics.winding?.turns, 0)],
+    ['DCR @100 °C', f(ch.magnetics.winding?.DCR_100C_mOhm, 1, 'mΩ')],
+    ['B_sat @T_core', f(ch.magnetics.flux?.Bsat_at_Tcore_T, 3, 'T')],
+    ['T_core / ΔT', `${f(ch.magnetics.thermal?.T_core_C, 1)} / ${f(ch.magnetics.thermal?.dT_rise_C, 1)} °C`],
+  ]])
+  if (ch.capacitor) rows.push(['Ch 5', 'DC bus capacitor', [
+    ['Part', ch.capacitor.selected?.part_number ?? '—'],
+    ['Bank', `${f(ch.capacitor.selected?.value_uF, 0)} µF × ${f(ch.capacitor.selected?.qty, 0)}`],
+    ['Rating', f(ch.capacitor.selected?.voltage_rating_V, 0, 'V')],
+    ['C required', f(ch.capacitor.C_required_uF, 0, 'µF')],
+  ]])
+  if (ch.control) rows.push(['Ch 6', 'Control', [
+    ['f_ci / f_cv', `${f(ch.control.fci_Hz, 0, 'Hz')} / ${f(ch.control.fcv_Hz, 1, 'Hz')}`],
+    ['L / C', `${f(ch.control.L_uH, 1, 'µH')} / ${f(ch.control.C_uF, 0, 'µF')}`],
+    ['ESR', f(ch.control.ESR_mOhm, 1, 'mΩ')],
+  ]])
+  if (ch.semiconductors) rows.push(['Ch 7', 'Semiconductors', [
+    ['MOSFET', ch.semiconductors.mosfet?.part_number ?? '—'],
+    ['Diode', ch.semiconductors.diode?.part_number ?? '—'],
+    ['Bridge', ch.semiconductors.bridge?.part_number ?? '—'],
+  ]])
+  if (ch.protection) rows.push(['Ch 8-9', 'Input protection', [['Approved', 'yes']]])
+  if (ch.emi) rows.push(['Ch 10', 'EMI filter', [['Approved', 'yes']]])
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
+      {rows.map(([tag, title, items]) => (
+        <div key={tag} style={{ background: C.bg3, border: `1px solid ${C.border}`,
+          borderRadius: 7, padding: '10px 12px' }}>
+          <div style={{ ...mono, fontSize: 10, color: C.teal, letterSpacing: 1 }}>{tag}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text, margin: '2px 0 6px' }}>{title}</div>
+          {items.map(([k, v]) => (
+            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+              <span style={{ fontSize: 11, color: C.muted }}>{k}</span>
+              <span style={{ ...mono, fontSize: 11, color: C.text, textAlign: 'right' }}>{String(v)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 export interface DesignExplorerProps {
   confirmedState:           Record<string, unknown>
@@ -245,6 +304,7 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   const qOn = series ? (tNorm * 40) % 1 < series.D[idx] : false
   const flux = (ds?.chapters?.magnetics as Record<string, any> | null)?.flux ?? null
   const capView = wf?.capacitor ?? null
+  const thermal = wf?.thermal ?? null
   const ctrl = wf?.control ?? null
   const tr = ctrl?.transient
   const [loopKey, setLoopKey] = useState<'voltage' | 'current'>('voltage')
@@ -360,6 +420,13 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
               tNorm={tNorm} label={tr.transitions[transIdx].label}
               dv={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'dv_hi' : 'dv_lo'] ?? null}
               trec={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'trec_hi' : 'trec_lo'] ?? null} />
+          </div>
+        ) : scene.id === 'steady' && thermal?.available ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            <SteadyStateScene rows={thermal.rows} limits={thermal.limits}
+              selectedVac={point?.vac_V ?? 0} />
+            <div style={{ marginTop: 10 }}><ChapterSummary ds={ds} /></div>
           </div>
         ) : scene.id === 'schematic' && sch?.available && sch.sheets[sheetKey] ? (
           <div style={{ marginTop: 12, borderRadius: 8, background: C.bg2,
