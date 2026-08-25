@@ -377,6 +377,18 @@ export interface DesignWaveforms {
   /** Chapter 6's loops and step-load transient (C261). */
   control?: ControlView
 }
+export interface SchematicSheet {
+  label: string; svg: string; defaulted: string[]; n_values: number
+}
+export interface DesignSchematic {
+  available: boolean; reason: string | null
+  sheets: Record<string, SchematicSheet>
+}
+/** FAN9672 application schematic, both line ranges, from the SAME generator and value context the
+ *  report uses — SVG rather than raster so the page can scale it (C-13). */
+export const designStateSchematic = (req: DesignStateReq) =>
+  post<DesignSchematic>('/mode-b/design-state/schematic', req)
+
 export const designStateWaveforms = (req: DesignStateReq) =>
   post<DesignWaveforms>('/mode-b/design-state/waveforms', req)
 

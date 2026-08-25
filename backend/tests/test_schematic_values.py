@@ -138,3 +138,47 @@ def test_a_none_in_the_context_does_not_reach_the_drawing(ctx):
     fan9672_application_schematic(v, is_high=False, _resolved=resolved)
     assert resolved["rrlpk"]["value"] is not None, "None reached the drawing"
     assert resolved["rrlpk"]["defaulted"] is True
+
+
+# ── one definition of the schematic context (C262) ──────────────────────────
+def test_the_schematic_context_has_one_definition(ctx):
+    """`schematics.build_fan9672_context` must produce what the report's own copy produces.
+
+    This mapping existed TWICE before C262 — inside `report_steps1_8._build_app_schematic_section`
+    and again in this file's `ctx()` fixture, under a comment saying "assembled exactly as
+    `_build_app_schematic_section` does". Two copies of a 25-key mapping agree until one is edited,
+    and the drawn values are rasterised in the report so nothing downstream can read them back —
+    which is precisely how R_RLPK sat at a defaulted 15 kΩ while the BOM said 12.1 (C235).
+
+    C262 added a single builder for the Design Explorer and left the report's copy alone, because
+    editing a working chapter builder was not in scope. This test is what makes that safe: if the
+    two ever diverge, the build fails here instead of a wrong value appearing on a schematic a
+    designer might build from.
+    """
+    from app.mode_b.schematics import build_fan9672_context
+
+    theirs = ctx["base"]
+    mine = build_fan9672_context()["base"]
+
+    assert set(mine) == set(theirs), (
+        f"key sets differ — only in builder: {sorted(set(mine) - set(theirs))}; "
+        f"only in the report's copy: {sorted(set(theirs) - set(mine))}")
+    bad = [k for k in theirs if mine[k] != theirs[k]]
+    assert not bad, "; ".join(f"{k}: builder {mine[k]!r} vs report {theirs[k]!r}" for k in bad)
+
+
+def test_the_svg_path_draws_the_same_values_as_the_raster():
+    """The explorer renders SVG and the report renders raster from the same generator. If the two
+    formats ever resolved different values the page and the document would disagree about the
+    circuit, which is the one thing sharing a generator is supposed to prevent."""
+    from app.mode_b.schematics import build_fan9672_context, fan9672_application_schematic
+
+    sheet = build_fan9672_context()["sheets"]["low"]
+    raster, svg = {}, {}
+    fan9672_application_schematic(sheet, is_high=False, _resolved=raster)
+    out = fan9672_application_schematic(sheet, is_high=False, as_svg=True, _resolved=svg)
+
+    assert isinstance(out, str) and "<svg" in out[:2000], "as_svg did not return SVG text"
+    assert raster.keys() == svg.keys()
+    diff = [k for k in raster if raster[k]["value"] != svg[k]["value"]]
+    assert not diff, f"raster and SVG resolved different values for: {diff}"

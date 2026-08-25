@@ -192,7 +192,60 @@ def _fmt_cap(x):
     return f"{x*1e12:g} pF"
 
 
-def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None):
+def build_fan9672_context(inp=None):
+    """The value dict the FAN9672 schematic is drawn from — assembled in ONE place.
+
+    This mapping already existed twice: inside `report_steps1_8._build_app_schematic_section`, and
+    again in `tests/test_schematic_values.py` under a comment saying "assembled exactly as
+    `_build_app_schematic_section` does". Two copies of a 25-key mapping agree until the day one of
+    them is edited, and the drawn values are rasterised so nothing downstream can read them back —
+    which is exactly how R_RLPK sat at a defaulted 15 kΩ while the BOM said 12.1 (C235).
+
+    Added at C262 for the Design Explorer rather than as a refactor: the report keeps its own copy
+    for now (changing a working chapter builder is not in scope), and
+    `test_schematic_context_has_one_definition` pins this against the report's so a divergence
+    fails the build instead of appearing on a schematic a designer might build from.
+    """
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+    from app.mode_b.step16_step9_bibo import compute_step9_bibo
+    from app.mode_b.step16_step10_iloop import compute_step10_iloop
+    from app.mode_b.step16_step11_vloop import compute_step11_vloop
+
+    prior = compute_steps_1_8(inp or {})
+    pin = prior.get("inputs", {})
+    c, s5, s8 = prior["const"], prior["step5"], prior["step8"]
+    b = compute_step9_bibo(pin)
+    d10 = compute_step10_iloop(pin, prior)
+    cm = (compute_step11_vloop(pin, prior) or {}).get("comp", {}) or {}
+    base = dict(
+        rb1=b.get("rb1"), rb2=b.get("rb2"), rb3=b.get("rb3"), rb4=b.get("rb4"),
+        cb1=b.get("cb1"), cb2=b.get("cb2"),
+        r_gc_sel=s8.get("r_gc_sel"), c_gc=s8.get("c_gc"),
+        r_ilimit_sel=s8.get("r_ilimit_sel"), r_ilimit2_sel=s8.get("r_ilimit2_sel"),
+        r_ls_sel=s8.get("r_ls_sel"), c_ls=s8.get("c_ls"), css=s8.get("css_sel"),
+        rri=s8.get("rri"), rcs_mohm=(s8.get("rcs_sel") or 0.015) * 1e3,
+        r_ic=d10.get("ric"), c_ic1=d10.get("cic1"), c_ic2=d10.get("cic2"),
+        r_vc=cm.get("r2s"), c_vc1=cm.get("c1s"), c_vc2=cm.get("c3s"),
+        r3=cm.get("r3s"), c_v3=cm.get("c2s"), vType=cm.get("type", "type3"),
+        i_ilimit_uA=(s8.get("i_ilimit") or 0) * 1e6,
+        vcs_pk_mV=(s8.get("vcs_pk") or 0) * 1e3,
+        rrlpk=c.get("r_rlpk"), rfb_each=s5.get("rfb1_unit"), rfb2=s5.get("rfb2"),
+        cil=s8.get("c_ilimit"), cil2=s8.get("c_ilimit2"), crlpk=s8.get("c_rlpk"),
+        cvir=s8.get("c_vir"), clpk=s8.get("c_lpk"),
+    )
+    # per-sheet items: the two components that legitimately differ between line ranges
+    sheets = {}
+    for hi, key in ((False, "low"), (True, "high")):
+        v = dict(base)
+        v["crest_A"] = s8.get("crest_hl" if hi else "crest_ll") or 0
+        v["iphi_pk_A"] = s8.get("ilpk_hl" if hi else "ilpk_ll") or 0
+        v["riac"] = c.get("riac_hv") if hi else c.get("riac_fr")
+        v["rvir"] = c.get("r_vir_hv") if hi else c.get("r_vir_fr")
+        sheets[key] = v
+    return {"base": base, "sheets": sheets, "prior": prior}
+
+
+def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None, as_svg=False):
     """Full FAN9672 (LQFP-32) application schematic — IC body + every external pin network —
     rendered with matplotlib for the report (white-page theme). Component values are identical at
     both line ranges; only the mode-dependent items differ with `is_high`: the R_IAC series count
@@ -369,6 +422,15 @@ def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None
     Tt(1102, 959, f"V-comp {'Type 3 OTA' if g('vType','type3')=='type3' else 'Type 2 OTA'}   ·   I-comp Type 2 OTA")
 
     fig.tight_layout(pad=0.2)
+    if as_svg:
+        # SAME FIGURE, SECOND FORMAT (C262). The Design Explorer needs a crisp, scalable schematic
+        # in the browser; re-drawing it in SVG by hand would be a second definition of a drawing
+        # whose values are already hard to verify because they are rasterised. matplotlib emits SVG
+        # from the identical artists, so the report and the page cannot show different components.
+        sbuf = io.StringIO()
+        fig.savefig(sbuf, format="svg", bbox_inches="tight", pad_inches=0.05)
+        plt.close(fig)
+        return sbuf.getvalue()
     buf = io.BytesIO(); fig.savefig(buf, format="png", dpi=210, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig); buf.seek(0)
     iw, ih = ImageReader(buf).getSize(); buf.seek(0)

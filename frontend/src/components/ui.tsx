@@ -8,6 +8,9 @@ export const C = {
   green:'#2dd4a0', greenL:'#0a2a20', greenD:'#166534',
   amber:'#f5a623', amberL:'#2a1e08',
   red:'#f05252', redL:'#2a0e0e',
+  // the report page colour. The FAN9672 schematic is drawn white-page by its generator, so a
+  // surface that hosts it needs real white rather than a dark token that would make it unreadable.
+  paper:'#ffffff',
   teal:'#22d3ee', tealL:'#062830',
 } as const
 

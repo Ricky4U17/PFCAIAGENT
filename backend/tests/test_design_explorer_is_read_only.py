@@ -71,7 +71,7 @@ def test_the_page_reads_the_export_and_calls_nothing_else():
     # C258: a second endpoint, but still a pure read, and separate only because it calls the engine
     # while the projection may not. Anything that triggers work, selects a part, or persists
     # something does not belong on this page at all.
-    allowed = {"designState", "designStateWaveforms"}
+    allowed = {"designState", "designStateWaveforms", "designStateSchematic"}
     assert fns <= allowed, (
         f"DesignExplorer imports API functions outside the read-only family: {sorted(fns - allowed)}. "
         "The page may only read design state (C-8, C-11).")

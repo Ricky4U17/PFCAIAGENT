@@ -23,8 +23,9 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C, Btn, Card, SecHead } from './ui'
-import { designState, designStateWaveforms,
-         type DesignState, type DesignStatePoint, type DesignWaveforms } from '../api/client'
+import { designState, designStateWaveforms, designStateSchematic,
+         type DesignState, type DesignStatePoint, type DesignWaveforms,
+         type DesignSchematic } from '../api/client'
 import { LineCycleScene, SwitchingScene, PowerStageSchematic,
          MagneticsScene, CapacitorScene, BodeScene, TransientScene } from './DesignExplorerScenes'
 
@@ -89,6 +90,16 @@ export const SCENES: Scene[] = [
       + 'separation: the current loop closes near 8 kHz and settles inside a switching period, '
       + 'while the voltage loop is deliberately far below 120 Hz so it does NOT chase bus ripple '
       + 'and distort the input current.',
+  },
+  {
+    id: 'schematic', title: 'Controller schematic', eyebrow: 'FAN9672 application circuit',
+    span: () => 0, slowmo: 1, phase: 'Phase 4',
+    caption: 'The complete FAN9672 front end with every external component annotated from the '
+      + 'sized bill of materials. This is the SAME drawing and the SAME value context the report '
+      + 'prints — rendered as SVG here rather than as a raster, so the page can scale it and the '
+      + 'two can never show different components. Amber values are live design selections; any '
+      + 'component that fell back to fixed practice is counted below the sheet rather than passing '
+      + 'as a designed value.',
   },
   {
     id: 'transient', title: 'Load step', eyebrow: 'closed-loop response',
@@ -167,6 +178,7 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
 }) => {
   const [ds, setDs] = useState<DesignState | null>(null)
   const [wf, setWf] = useState<DesignWaveforms | null>(null)
+  const [sch, setSch] = useState<DesignSchematic | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
 
@@ -195,8 +207,9 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
     try {
       // both reads in parallel; the waveform arrays are a separate endpoint because that one
       // calls the engine and the projection deliberately cannot (ANIMATION_PLAN, Phase 0 rule 1)
-      const [state, waves] = await Promise.all([designState(req), designStateWaveforms(req)])
-      setDs(state); setWf(waves)
+      const [state, waves, schem] = await Promise.all([
+        designState(req), designStateWaveforms(req), designStateSchematic(req)])
+      setDs(state); setWf(waves); setSch(schem)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }, [confirmedState, approvedInductorDesign, approvedCapacitorDesign, approvedControlParams,
       approvedSemiconductor, approvedInputProtection, approvedInputFilter])
@@ -236,6 +249,7 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
   const tr = ctrl?.transient
   const [loopKey, setLoopKey] = useState<'voltage' | 'current'>('voltage')
   const [transIdx, setTransIdx] = useState(0)
+  const [sheetKey, setSheetKey] = useState<'low' | 'high'>('low')
   const tReal = ds && scene ? tNorm * scene.span(ds) : 0
 
   if (busy) return <Card><div style={{ color: C.muted, fontSize: 13 }}>Loading design state…</div></Card>
@@ -346,6 +360,25 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
               tNorm={tNorm} label={tr.transitions[transIdx].label}
               dv={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'dv_hi' : 'dv_lo'] ?? null}
               trec={(tr.rows?.[transIdx] as any)?.[point && point.vac_V >= 180 ? 'trec_hi' : 'trec_lo'] ?? null} />
+          </div>
+        ) : scene.id === 'schematic' && sch?.available && sch.sheets[sheetKey] ? (
+          <div style={{ marginTop: 12, borderRadius: 8, background: C.bg2,
+            border: `1px solid ${C.border}`, padding: 8 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              {(['low', 'high'] as const).map(k => (
+                <Btn key={k} variant={sheetKey === k ? 'primary' : 'ghost'}
+                  onClick={() => setSheetKey(k)}>{sch.sheets[k]?.label ?? k}</Btn>
+              ))}
+              <div style={{ flex: 1 }} />
+              <span style={{ ...mono, fontSize: 10.5, color: C.hint }}>
+                {sch.sheets[sheetKey].n_values - sch.sheets[sheetKey].defaulted.length} of{' '}
+                {sch.sheets[sheetKey].n_values} values from the engine
+                {sch.sheets[sheetKey].defaulted.length > 0
+                  ? ` · fixed practice: ${sch.sheets[sheetKey].defaulted.join(', ')}` : ''}
+              </span>
+            </div>
+            <div style={{ background: C.paper, borderRadius: 6, padding: 4, overflowX: 'auto' }}
+              dangerouslySetInnerHTML={{ __html: sch.sheets[sheetKey].svg }} />
           </div>
         ) : scene.id === 'capacitor' && capView?.available ? (
           <div style={{ marginTop: 12, borderRadius: 8, background: C.bg,

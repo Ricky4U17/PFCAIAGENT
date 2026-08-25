@@ -2456,6 +2456,38 @@ def design_state(req: _DocReportReq):
         log.exception("design state"); raise HTTPException(500, str(e))
 
 
+@app.post("/mode-b/design-state/schematic", tags=["mode-b"])
+def design_state_schematic(req: _DocReportReq):
+    """The FAN9672 application schematic as SVG, both line ranges. ADDITIVE — reads only.
+
+    ANIMATION_PLAN C-13. Rendered from the SAME generator and the SAME value context the report
+    uses, in SVG rather than raster, so the page and the document cannot show different components.
+    Drawing a second schematic for the browser would put the design's own wiring diagram in two
+    places — and the values are rasterised in the report, which is how R_RLPK sat at a defaulted
+    15 kΩ against a BOM saying 12.1 (C235).
+    """
+    from app.mode_b.schematics import build_fan9672_context, fan9672_application_schematic
+    try:
+        _ci = _control_inputs_from_step16(req.step16_params) if req.step16_params else {}
+        ctx = build_fan9672_context(_ci)
+        out = {"available": True, "reason": None, "sheets": {}}
+        for key, label in (("low", "Low line — FR mode"), ("high", "High line — HV mode")):
+            resolved: Dict[str, Any] = {}
+            svg = fan9672_application_schematic(ctx["sheets"][key], is_high=(key == "high"),
+                                                as_svg=True, _resolved=resolved)
+            out["sheets"][key] = {
+                "label": label, "svg": svg,
+                # which values came from the engine and which fell back to fixed practice — the
+                # page shows the count so a defaulted component cannot pass as a designed one
+                "defaulted": sorted(k for k, r in resolved.items() if r.get("defaulted")),
+                "n_values": len(resolved),
+            }
+        return out
+    except Exception as e:
+        log.exception("design state schematic")
+        return {"available": False, "reason": str(e), "sheets": {}}
+
+
 @app.post("/mode-b/design-state/waveforms", tags=["mode-b"])
 def design_state_waveforms(req: _DocReportReq):
     """Per-Vin half-line-cycle series for the Design Explorer. ADDITIVE — reads only.

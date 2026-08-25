@@ -10726,3 +10726,46 @@ properly.
   Chapter 5's ripple at each transition's before/after load.
 
 VERIFIED 19 waveform/capacitor/control tests + 6 read-only guards; tsc --noEmit clean.
+
+# C262 - the FAN9672 application schematic in the explorer (C-13)
+
+The last named item from the designer's original animation list. Additive: main.py +32/-0,
+schematics.py +63/-1 (the deletion is the function signature extended), ui.tsx +3/-0.
+
+## Same generator, second format
+
+`fan9672_application_schematic` gains `as_svg=True`, which saves the SAME matplotlib figure as SVG
+instead of raster. Re-drawing the schematic by hand for the browser would have put the design's own
+wiring diagram in two places, and its values are already hard to verify because the report renders
+them into a bitmap. Now the page and the document cannot show different components: one drawing,
+two outputs.
+
+`test_the_svg_path_draws_the_same_values_as_the_raster` asserts the two formats resolve identical
+values through `_resolved`, so a divergence fails the build rather than appearing on a page.
+
+## It removed a duplication rather than adding one
+
+The 25-key value mapping existed TWICE before today - inside
+`report_steps1_8._build_app_schematic_section`, and again in `tests/test_schematic_values.py`
+under a comment reading "assembled exactly as `_build_app_schematic_section` does". Two copies of a
+mapping agree until the day one is edited, and this particular mapping is the one where R_RLPK sat
+at a defaulted 15 kOhm while the BOM said 12.1 (C235).
+
+`schematics.build_fan9672_context()` is now a single builder. The report keeps its own copy for
+now, because editing a working chapter builder was not in scope - and
+`test_the_schematic_context_has_one_definition` pins the two together so a divergence fails here
+instead of on a schematic a designer might build from.
+
+Measured: 41 values per sheet, 38 from the engine, 3 falling back to fixed practice (cf, rf,
+rpin8). The page prints that count, so a defaulted component cannot pass as a designed one.
+
+## The guards caught two more of my own changes
+
+A third API function (`designStateSchematic`) failed the read-only allowlist until it was added
+deliberately with its reason. And a hard-coded `#fff` failed the token guard - the schematic is
+drawn white-page by its generator, so a surface hosting it genuinely needs white, which is now a
+`paper` token in ui.tsx rather than a literal. Neither was a false positive; both forced the
+decision to be explicit.
+
+VERIFIED 8 schematic tests, 6 read-only guards; tsc --noEmit clean; all three design-state
+endpoints registered on the restarted backend.
