@@ -529,6 +529,34 @@ def _apply_asbuilt_L(design: dict, approved_design: dict | None) -> dict:
             design["L_phi_curve"] = _curve
     except Exception:
         pass
+    # B23 (C263): inductance against INSTANTANEOUS channel current, so the loss engine can use the
+    # per-angle L the magnetics engine has always used instead of the full-load value everywhere.
+    # `L_vs_Vin_table` already samples exactly this relationship — each row is the as-built L at
+    # that operating point's crest current — so the pairs are read straight off it rather than
+    # re-deriving a bias curve that would be a second model of the same roll-off.
+    try:
+        pts = sorted(((float(r["Iavg_crest"]), float(r["L_full_nom_uH"]) * 1e-6)
+                      for r in lvt
+                      if r.get("Iavg_crest") and r.get("L_full_nom_uH")),
+                     key=lambda p: p[0])
+        # collapse duplicate currents; np.interp needs a strictly increasing x
+        xs, ys = [], []
+        for i_a, l_h in pts:
+            if not xs or i_a > xs[-1] + 1e-9:
+                xs.append(i_a); ys.append(l_h)
+        # ANCHOR THE CURVE AT ZERO BIAS. The table only samples down to the lightest operating
+        # point's crest current, and np.interp clamps below that — but DCM happens near the line
+        # ZERO CROSSINGS, where the current is smallest, so the clamped region is exactly the one
+        # that decides it. At zero DC bias k_bias -> 1 and L is the core's unbiased L0_nom, which
+        # the approved design already carries. Without this anchor the engine holds L at the
+        # lightest tabulated value and still overstates the ripple where it matters most.
+        _l0 = _num(ad.get("L0_nom_uH"))
+        if _l0 and xs and _l0 * 1e-6 > ys[0]:
+            xs.insert(0, 0.0); ys.insert(0, _l0 * 1e-6)
+        if len(xs) >= 2:
+            design["L_bias_curve"] = [xs, ys]
+    except Exception:
+        pass
     return design
 
 @app.get("/mode-b/semiconductor/manifest", tags=["mode-b"])

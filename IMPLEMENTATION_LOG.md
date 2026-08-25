@@ -10769,3 +10769,58 @@ decision to be explicit.
 
 VERIFIED 8 schematic tests, 6 read-only guards; tsc --noEmit clean; all three design-state
 endpoints registered on the restarted backend.
+
+# C263 - B23: the two engines now agree on DCM, and the recorded cause was wrong
+
+    Vac      before    after    magnetics    gap
+    200        8.7 %    0.0 %      0.0 %     exact
+    220       18.3 %    4.0 %      3.3 %     +0.7
+    230       22.0 %   11.3 %     10.0 %     +1.3
+    264       29.0 %   24.3 %     22.2 %     +2.1
+
+Gaps of up to 15 points are now at most 2.1, and every CCM point agrees exactly. The residual is
+sampling resolution - the loss engine interpolates L from ten points where the magnetics engine
+evaluates k_bias(H) continuously - not a modelling disagreement.
+
+## The cause I recorded was wrong, and both halves of it were inert
+
+B23 blamed the loss model's `L_eff` back-out and a per-channel-instantaneous versus per-phase-
+average current. Measured before touching anything: no ripple target is supplied in this
+configuration, so `L_eff == L_op` and the back-out never fires; and the two currents agree to
+within rounding. Neither stated cause was doing anything.
+
+I had written that entry from reading the two code paths rather than from measuring them, and it
+sounded right for two days.
+
+## The real cause: WHICH inductance, not which current
+
+`step7_magnetic_calc` has always used a PER-ANGLE inductance - `Lth = L0_nom * k_bias(H)` at every
+angle - so as the current falls through the line cycle the core's permeability recovers and L
+rises. The loss engine used ONE value per operating point: the full-load, worst-bias figure,
+everywhere in the cycle. That overstates the ripple exactly where the current is small, which is
+exactly where DCM is decided. So it reported more DCM than the design has.
+
+## The fix, and the anchor that made it work
+
+`Spec.L_bias_curve` - inductance against instantaneous channel current - built from the approved
+design's own `L_vs_Vin_table`, where each row already IS the as-built L at that point's crest
+current. A hand-off, not a second bias model. Absent it the engine keeps its previous behaviour
+exactly, and a stated ripple target still wins: re-biasing an inductance that was itself backed out
+of the requested ripple would be circular, and that is asserted.
+
+THE ZERO-BIAS ANCHOR IS THE HALF THAT MATTERS. `np.interp` clamps below the lowest sampled current,
+and DCM happens near the zero crossings where the current is smallest - so the clamped region is
+precisely the region that decides the answer. Anchoring the curve at `L0_nom_uH` (k_bias -> 1 at
+zero bias, 175.9 uH here against the lightest tabulated 154.3) took 220 Vac from 13.0 % to 4.0 %.
+Without the anchor the fix delivered less than half of itself, and the first measurement said so.
+
+## Chapter 7's numbers moved, as the entry warned
+
+Worst-case semiconductor loss 66.320 -> 66.114 W (-0.21 W, -0.3 %), every point falling, because
+the model had been overstating ripple where the current is low. Bounded by a test so the size and
+sign are recorded rather than rediscovered by someone comparing two report runs.
+
+VERIFIED 6 acceptance tests in tests/test_dcm_cross_engine.py: the engines stay within 3 points, no
+point disagrees about WHETHER it runs discontinuous, the curve falls with current and is anchored
+at zero, the fix moves numbers in the right direction, the loss impact stays inside its band, and a
+stated ripple target makes the bias curve stand down entirely.

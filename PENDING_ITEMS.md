@@ -705,10 +705,52 @@ says so, and that is the real gap.
 - **Done when:** every row of 7.2e states the condition its value was taken at, or says DATA MISSING,
   and the four table-sourced values keep the "no plot exists" line C231 added.
 
-### B23. Two engines report different DCM fractions for the same design  `CODE` — **scheduled: immediately after the Design Explorer**
-**Designer decision 2026-08-23:** fix this once the animation work is complete, not before. The
-explorer is unblocked in the meantime because it declares which engine's basis it shades
-(`notes.dcm_basis`, asserted by a test), so nothing on the page is ambiguous while this waits.
+### B23. Two engines reported different DCM fractions  `FIXED at C263`
+**FIXED at C263**, and the cause was not the one recorded below — see the correction.
+
+| V_AC | before | after | magnetics | gap |
+|---|---|---|---|---|
+| 200 | 8.7 % | **0.0 %** | 0.0 % | exact |
+| 220 | 18.3 % | **4.0 %** | 3.3 % | +0.7 |
+| 230 | 22.0 % | **11.3 %** | 10.0 % | +1.3 |
+| 264 | 29.0 % | **24.3 %** | 22.2 % | +2.1 |
+
+Gaps of up to 15 percentage points are now at most 2.1, and every CCM point agrees exactly. The
+residual is sampling resolution — the loss engine interpolates L from ten points while the
+magnetics engine evaluates `k_bias(H)` continuously — not a modelling disagreement.
+
+**THE RECORDED CAUSE WAS WRONG.** This entry blamed the loss model's `L_eff` back-out and a
+per-channel-instantaneous versus per-phase-average current. Measured at C263: no ripple target is
+supplied in this configuration, so `L_eff == L_op` and the back-out never fires; and the two
+currents agree to within rounding. Both stated causes were inert.
+
+**The real cause: WHICH inductance, not which current.** `step7_magnetic_calc` has always used a
+PER-ANGLE inductance — `Lth = L0_nom · k_bias(H)` at every angle, so as the current falls through
+the line cycle the core's permeability recovers and L rises. The loss engine used ONE value per
+operating point: the full-load, worst-bias figure, everywhere in the cycle. That overstates the
+ripple exactly where the current is small, which is exactly where DCM is decided.
+
+**The fix.** `Spec.L_bias_curve` — inductance against instantaneous channel current — read off the
+approved design's own `L_vs_Vin_table` (each row is the as-built L at that point's crest current),
+so it is a hand-off rather than a second bias model. When absent the engine keeps its previous
+single-L behaviour exactly, and a stated ripple target still wins (re-biasing an L that was itself
+backed out of the requested ripple would be circular; asserted).
+
+**The zero-bias anchor is not cosmetic.** `np.interp` clamps below the lowest sampled current, and
+DCM happens near the zero crossings where the current is smallest — so the clamped region is
+precisely the one that decides the answer. Anchoring at `L0_nom_uH` (k_bias → 1 at zero bias) took
+220 Vac from 13.0 % to 4.0 %. Without it the fix was less than half of one.
+
+**Chapter 7's numbers moved**, as the old entry warned they would: worst-case semiconductor loss
+66.320 → 66.114 W (−0.21 W, −0.3 %), every point falling, because the model had been overstating
+ripple where the current is low. Bounded by a test so the size and sign are recorded rather than
+rediscovered.
+
+`tests/test_dcm_cross_engine.py` holds the acceptance test: the two engines must stay within
+3 percentage points, and no point may disagree about *whether* it runs discontinuous.
+
+<details><summary>Original entry (superseded — kept for the misdiagnosis)</summary>
+
 
 **Found at C259** while exporting a per-angle DCM mask for the Design Explorer. The magnetics
 engine and the Chapter-7 loss engine both compute how much of the half cycle runs discontinuous,
@@ -745,6 +787,9 @@ in `notes.dcm_basis`, and a test asserts that declaration exists.
 - **Do NOT** simply make one call the other. The loss model's `L_eff` back-out exists so a designer
   can specify a ripple target; removing it to share the magnetics inductance would change Chapter 7
   loss numbers, which needs its own verification pass.
+
+</details>
+
 
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The

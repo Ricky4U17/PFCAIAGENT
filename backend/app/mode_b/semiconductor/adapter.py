@@ -139,6 +139,12 @@ def build_semi_cfg(design: dict, mosfet: dict, diode: dict, bridge: dict, therma
         "mosfet": mos_p, "diode": dio_p, "bridge": br_p, "thermal": th_p,
         "run": {"vac_list": vac},
     }
+    # B23 (C263): L against INSTANTANEOUS channel current, when the caller supplied it. Passed
+    # through verbatim — the pairs come off the approved design's own L_vs_Vin_table, so this is a
+    # hand-off, not a second bias model. Absent it, the engine keeps its single-L behaviour.
+    _lbc = (design or {}).get("L_bias_curve")
+    if _lbc and len(_lbc) == 2 and len(_lbc[0]) >= 2:
+        cfg["spec"]["L_bias_curve"] = [list(_lbc[0]), list(_lbc[1])]
     ref = {
         "nch": nch, "L_phi_uH": L_phi * 1e6, "vout": vout,
         "parts": {"mosfet": mos_m, "diode": dio_m, "bridge": br_m},

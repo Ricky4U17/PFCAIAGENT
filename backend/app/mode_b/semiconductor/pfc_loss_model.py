@@ -340,6 +340,14 @@ class Spec:
     L_curve: Optional[tuple] = None          # (Vac, L[H]) per-operating-point inductance: powder cores
                                              #   roll off with DC bias, so L varies with line/current.
                                              #   When given it overrides the scalar L at each Vac.
+    # (i_channel[A], L[H]) — inductance against INSTANTANEOUS channel current. A powder core's
+    # permeability recovers as the current falls through the line cycle, so L is not one number per
+    # operating point: it rises near the zero crossings. The magnetics engine has always modelled
+    # this (`Lth = L0_nom * k_bias(H)` per angle); this engine used the full-load value everywhere,
+    # which overstated the ripple where the current is small and therefore overstated DCM —
+    # 29.0 % against magnetics' 22.2 % at 264 Vac (PENDING B23, fixed C263).
+    # When absent the engine keeps the previous single-L behaviour exactly.
+    L_bias_curve: Optional[tuple] = None
 
 # ======================================================================================
 def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_trace=False):
@@ -369,7 +377,17 @@ def simulate_point(vac, sp, mos, dio, br, th, return_waveforms=False, return_tra
     if sp.pct_ripple > 0 and Ipk_ch > 0:
         di_peak_req = sp.pct_ripple*Ipk_ch
     L_eff = (Vpk*d_pk/(di_peak_req*fsw)) if di_peak_req > 0 else L_op   # back-out an effective L
-    di = vin*d/(L_eff*fsw)
+    # B23. Per-angle inductance when the as-built bias curve is supplied: L rises as the current
+    # falls, so the ripple near the zero crossings is smaller than the full-load L implies. Only
+    # applied when no explicit ripple target was requested — a designer who states a peak ripple is
+    # specifying the ripple, and backing an L out of it then re-biasing it would be circular.
+    # np.interp CLAMPS outside the sampled range, so below the lowest tabulated current L holds at
+    # its largest tabulated value rather than continuing to rise toward L0. That understates L at
+    # the very bottom of the cycle, which overstates ripple there — conservative, and the direction
+    # to be wrong in.
+    L_theta = (curve(np.abs(i_ch), *sp.L_bias_curve)
+               if (sp.L_bias_curve and di_peak_req <= 0) else L_eff)
+    di = vin*d/(L_theta*fsw)
     dcm = i_ch < (di/2.0); ccm = ~dcm
 
     ms_fet = np.zeros_like(theta); ms_dio = np.zeros_like(theta)
