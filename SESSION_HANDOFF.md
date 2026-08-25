@@ -1,11 +1,13 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`eefa08f` C261**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`46ca273` C262**, on `master`.
 
 **PFC Design Explorer (animation page) has started.** Scope and every settled constraint are in
 `specs/Improvements/ANIMATION_PLAN.md` — read it before touching that work. Phase 0 (the design
 state export) is in at C256: purely additive, `design_state.py` + `POST /mode-b/design-state`,
 with three rules enforced by tests — no recomputation, no silent defaults, source names kept.
+C262 added the FAN9672 application schematic (C-13) — same generator as the report, SVG instead of
+raster, with build_fan9672_context() as a single value builder pinned against the report copy.
 Phase 4 is in at C261: both loop Bodes (static, crossover/PM marked) and the load-step scene with
 the band measured on the cycle-average. STILL OPEN in Phase 4: the FAN9672 application schematic
 (C-13, explicitly requested), the loop block diagram, a current-loop time-domain scene, and ripple
