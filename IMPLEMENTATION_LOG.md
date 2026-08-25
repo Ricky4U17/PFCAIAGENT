@@ -10866,3 +10866,36 @@ because it only checked the note EXISTS, and nothing would have caught it. Asser
 presence do not protect content.
 
 VERIFIED 24 waveform/capacitor/control/thermal tests, 6 read-only guards; tsc --noEmit clean.
+
+# C265 - dcm_basis: fixing the staleness, not just the stale text
+
+C264 rewrote the note. This makes it unable to go stale again, which is the part that matters.
+
+## What was actually wrong
+
+`notes.dcm_basis` is a payload field the explorer can put in front of a reviewer, and it makes a
+LIVE claim: that the two engines agree within N percentage points. It was written at C259 when they
+disagreed, and C263 fixed the disagreement the same day - so the note asserted 29.0 % against a
+reality of 24.3 % for about six hours, and nothing complained.
+
+Its test kept passing the whole time because it only checked that the note EXISTED and mentioned
+Chapter 7. That is the shape worth naming: an assertion about PRESENCE does not protect CONTENT.
+
+## The fix
+
+`DCM_AGREEMENT_TOLERANCE_PCT = 3.0` is now a single constant. The note text is GENERATED from it via
+an f-string, `tests/test_dcm_cross_engine.py` imports it as the acceptance tolerance, and the
+payload also publishes `dcm_tolerance_pct` as a number so a consumer can act on it without parsing
+English.
+
+Then the guard that closes the loop: `test_the_payload_note_cannot_advertise_a_tolerance_reality_
+does_not_meet` reads the figure back OUT of the published note with a regex and measures both
+engines against it. Hand-editing the prose to claim a tighter agreement than the engines achieve now
+fails, and so does letting the engines drift past what the prose claims.
+
+VERIFIED by tightening the constant to 1.0, a figure reality (2.11) does not meet: both guards fire,
+the second with "the payload tells a reviewer the engines agree within 1.0 points, but the worst
+measured gap is 2.11. The note is making a false claim." Restored to 3.0 afterwards and confirmed.
+
+Also renamed `test_the_dcm_basis_is_declared_because_chapter_7_disagrees` - the engines no longer
+disagree, so the test's NAME had gone stale in the same way its subject had.

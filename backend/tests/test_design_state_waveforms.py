@@ -136,7 +136,7 @@ def test_dcm_appears_only_at_high_line_and_grows_with_it(built):
         f"DCM fraction should grow with line voltage; got {hi}")
 
 
-def test_the_dcm_basis_is_declared_because_chapter_7_disagrees(built):
+def test_the_dcm_basis_is_declared_and_names_the_other_engine(built):
     """C259, and the reason this is not a bug.
 
     Both engines compute a DCM fraction. Until C263 they disagreed sharply (22.2 % here against
@@ -148,7 +148,11 @@ def test_the_dcm_basis_is_declared_because_chapter_7_disagrees(built):
     """
     notes = built["w"].get("notes") or {}
     assert "dcm_basis" in notes, "the payload does not declare which engine's DCM this is"
-    assert "Chapter 7" in notes["dcm_basis"], "the basis note does not warn about the disagreement"
+    assert "Chapter 7" in notes["dcm_basis"], "the note does not name the other engine"
+    # the tolerance is published as DATA as well as prose, so a consumer can act on it without
+    # parsing English. Its truth is enforced in tests/test_dcm_cross_engine.py.
+    assert isinstance(notes.get("dcm_tolerance_pct"), (int, float)), (
+        "the agreement tolerance is not published as a number")
 
 
 # ── capacitor view (C260) ───────────────────────────────────────────────────

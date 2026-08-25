@@ -24,6 +24,13 @@ import pytest
 
 
 @pytest.fixture(scope="module")
+def built_state(sweeps):
+    """State + approved design, for callers that need to rebuild a view."""
+    import verify_combined_report as VCR
+    return {"state": VCR._std_state(), "approved": sweeps["approved"]}
+
+
+@pytest.fixture(scope="module")
 def sweeps():
     import matplotlib
     matplotlib.use("Agg")
@@ -78,15 +85,51 @@ def test_the_as_built_design_supplies_an_inductance_against_current(sweeps):
 
 
 def test_the_two_engines_now_agree_on_dcm(sweeps):
-    """The B23 acceptance test. Before: gaps up to 15 percentage points. After: within 3."""
+    """The B23 acceptance test. Before: gaps up to 15 percentage points.
+
+    The tolerance is imported, not typed: `DCM_AGREEMENT_TOLERANCE_PCT` is the same constant the
+    payload's `dcm_basis` note is generated from, so the note cannot advertise a figure the suite
+    does not enforce.
+    """
+    from app.mode_b.design_state_waveforms import DCM_AGREEMENT_TOLERANCE_PCT as TOL
     worst = 0.0
     for vac, mag_pct in sweeps["magnetics"].items():
         got = float(sweeps["with"][vac]["DCM_%"])
         worst = max(worst, abs(got - mag_pct))
-        assert abs(got - mag_pct) <= 3.0, (
+        assert abs(got - mag_pct) <= TOL, (
             f"{vac} Vac: loss engine says {got:.1f} % DCM, magnetics says {mag_pct:.1f} % — "
-            "the two engines have diverged again (PENDING B23)")
+            f"outside the {TOL:g}-point tolerance the payload advertises (PENDING B23)")
     assert worst > 0.0, "suspiciously exact agreement — check the fixture is really comparing two engines"
+
+
+def test_the_payload_note_cannot_advertise_a_tolerance_reality_does_not_meet(sweeps, built_state):
+    """THE FIX FOR THE STALENESS ITSELF.
+
+    `notes.dcm_basis` is a field the explorer can put in front of a reviewer, and it makes a live
+    claim: that the two engines agree within N points. It went stale within a day of C263 — written
+    at C259 when they disagreed, still asserting 29.0 % after the disagreement was fixed — and its
+    test kept passing because it only checked the note EXISTED.
+
+    So this reads the number OUT OF THE PUBLISHED NOTE and measures reality against it. Hand-editing
+    the prose to claim a tighter agreement than the engines actually achieve now fails here.
+    """
+    import re
+    from app.mode_b.design_state_waveforms import build_waveforms, DCM_AGREEMENT_TOLERANCE_PCT
+
+    notes = build_waveforms(built_state["state"], built_state["approved"])["notes"]
+    claimed = re.search(r"agree within ([\d.]+) percentage points", notes["dcm_basis"])
+    assert claimed, f"the note no longer states a tolerance: {notes['dcm_basis']!r}"
+    claimed_pct = float(claimed.group(1))
+    assert claimed_pct == DCM_AGREEMENT_TOLERANCE_PCT, (
+        f"the note advertises {claimed_pct} points but the constant is "
+        f"{DCM_AGREEMENT_TOLERANCE_PCT} — the text is no longer generated from it")
+    assert notes.get("dcm_tolerance_pct") == DCM_AGREEMENT_TOLERANCE_PCT
+
+    worst = max(abs(float(sweeps["with"][v]["DCM_%"]) - m)
+                for v, m in sweeps["magnetics"].items())
+    assert worst <= claimed_pct, (
+        f"the payload tells a reviewer the engines agree within {claimed_pct} points, but the "
+        f"worst measured gap is {worst:.2f}. The note is making a false claim.")
 
 
 def test_every_ccm_point_is_ccm_in_both_engines(sweeps):

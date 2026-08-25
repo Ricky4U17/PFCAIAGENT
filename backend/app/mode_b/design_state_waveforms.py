@@ -27,6 +27,14 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional
 
+# How far the magnetics engine's DCM and the Chapter-7 loss engine's DCM_% may differ before it is
+# a defect rather than sampling resolution. ONE definition, read by the note below AND by
+# tests/test_dcm_cross_engine.py — so the payload cannot claim a tolerance the suite does not
+# enforce. The note used to state this figure as typed prose and went stale within a day of C263
+# fixing the underlying disagreement, while its test kept passing because it only checked that the
+# note EXISTED. Presence assertions do not protect content.
+DCM_AGREEMENT_TOLERANCE_PCT = 3.0
+
 # The engine's own RMS→peak-to-peak factor for a triangular ripple.
 _TRI_RMS_TO_PP = 2.0 * math.sqrt(3.0)
 
@@ -349,13 +357,15 @@ def build_waveforms(state: Optional[dict],
             "dcm": "Per-angle DCM flag from the MAGNETICS engine (`Iavg < dIpp/2`, "
                    "step7_magnetic_calc), exported at C259 so a scene can shade exactly the "
                    "angles the engine flagged instead of restating the criterion here.",
-            "dcm_basis": "This is the MAGNETICS engine's DCM. Until C263 it disagreed sharply "
-                   "with Chapter 7's `DCM_%` (22.2 % here against 29.0 % at 264 Vac, 3.3 vs 18.3 "
-                   "at 220) because the loss engine used one full-load inductance across the whole "
-                   "cycle while this one uses the per-angle L. That is fixed: the two now agree "
-                   "within 3 percentage points and never disagree about WHETHER a point runs "
-                   "discontinuous. A small residual remains — this engine evaluates k_bias(H) "
-                   "continuously, the loss engine interpolates L from ten samples — so a scene "
-                   "showing both should still name which basis it is on.",
+            "dcm_basis": (
+                "This is the MAGNETICS engine's DCM. Until C263 it disagreed sharply with "
+                "Chapter 7's `DCM_%` (22.2 % here against 29.0 % at 264 Vac, 3.3 vs 18.3 at 220) "
+                "because the loss engine used one full-load inductance across the whole cycle "
+                "while this one uses the per-angle L. That is fixed: the two now agree within "
+                f"{DCM_AGREEMENT_TOLERANCE_PCT:g} percentage points and never disagree about "
+                "WHETHER a point runs discontinuous. A small residual remains — this engine "
+                "evaluates k_bias(H) continuously, the loss engine interpolates L from ten "
+                "samples — so a scene showing both should still name which basis it is on."),
+            "dcm_tolerance_pct": DCM_AGREEMENT_TOLERANCE_PCT,
         },
     }
