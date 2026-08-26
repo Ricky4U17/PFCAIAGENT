@@ -1,11 +1,15 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`3a212b9` C264**, on `master`.
+**Start here after a restart.** Last updated **2026-08-23**, head = **`e0354c6` C266**, on `master`.
 
 **PFC Design Explorer (animation page) has started.** Scope and every settled constraint are in
 `specs/Improvements/ANIMATION_PLAN.md` — read it before touching that work. Phase 0 (the design
 state export) is in at C256: purely additive, `design_state.py` + `POST /mode-b/design-state`,
 with three rules enforced by tests — no recomputation, no silent defaults, source names kept.
+**specs/Improvements/FINDINGS_LOG.md** (new at C266) collects the ten recurring defect classes
+with the instances that produced each — read it before writing a new guard. C265/C266 made every
+payload note verifiable: prose generated from data, figures published alongside, and a test that
+reads the claim back out of the text and measures reality against it.
 C264 filled the steady-state dashboard (loss budget + Tj vs limits, same sweep as the Results tab)
 and the Ch1-10 summary blocks. Eight scenes live; see ANIMATION_PLAN for the remaining items.
 C263 CLOSED PENDING B23: the loss engine now uses a per-angle inductance (Spec.L_bias_curve,
