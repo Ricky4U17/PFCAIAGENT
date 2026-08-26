@@ -1,17 +1,80 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-23**, head = **`e0354c6` C266**, on `master`.
+**Start here after a restart.** Last updated **2026-08-26**, head = **`e0354c6` C266**, on `master`.
+Suite: **741 passed, 3 skipped** (~18 min). Frontend `tsc --noEmit`: clean.
 
-**PFC Design Explorer (animation page) has started.** Scope and every settled constraint are in
-`specs/Improvements/ANIMATION_PLAN.md` — read it before touching that work. Phase 0 (the design
-state export) is in at C256: purely additive, `design_state.py` + `POST /mode-b/design-state`,
-with three rules enforced by tests — no recomputation, no silent defaults, source names kept.
-**specs/Improvements/FINDINGS_LOG.md** (new at C266) collects the ten recurring defect classes
-with the instances that produced each — read it before writing a new guard. C265/C266 made every
-payload note verifiable: prose generated from data, figures published alongside, and a test that
-reads the claim back out of the text and measures reality against it.
-C264 filled the steady-state dashboard (loss budget + Tj vs limits, same sweep as the Results tab)
-and the Ch1-10 summary blocks. Eight scenes live; see ANIMATION_PLAN for the remaining items.
+## WAITING ON THE DESIGNER — pick these up first
+
+1. **Animation review.** The designer is walking the eight Design Explorer scenes and will come
+   back with findings. Nothing to do until they do.
+2. **DCM verification in the report.** They want to confirm Chapter 7's DCM column after C263.
+   Expected now: **0.0 / 4.0 / 11.3 / 24.3 %** at 200/220/230/264 Vac, against 8.7 / 18.3 / 22.0 /
+   29.0 % before. The explorer's line scene shades the *magnetics* basis (0 / 3.3 / 10.0 / 22.2 %),
+   which is inside the 3-point tolerance the payload advertises and the suite enforces — a small
+   difference there is sampling resolution, not a defect.
+3. **Chapter 7 loss is ~0.2 W lower** than reports generated before C263 (worst case 66.11 W
+   against 66.32 W). That is the DCM fix, not a regression. Expect it when diffing old reports.
+
+## Restarting the servers — use `Start-Process`, not a background shell
+
+Background shells get reaped, and uvicorn dies with its shell while Vite survives as a detached
+child — which produced a frontend serving pages against a dead API twice. Start the backend
+detached:
+
+```powershell
+Start-Process -FilePath "backend\venv\Scripts\python.exe" `
+  -ArgumentList "-m","uvicorn","app.main:app","--port","8000" `
+  -WorkingDirectory "backend" -WindowStyle Hidden -PassThru
+```
+
+Frontend: `npm run dev` in `frontend/` (port 5173).
+
+**Always verify by BEHAVIOUR, not by port.** An orphaned worker answered on 8000 after a
+"restart" once and cost the designer a report run. Check a value that changed, e.g. that
+`/mode-b/design-state/waveforms` returns a `dcm` key, or that Ch7's `P_D_cond` at 90 Vac reads
+7.1957 rather than 7.1758.
+
+## The Design Explorer (animation page) — C256 → C266
+
+GUI-only, read-only, additive, gated on all ten chapters. Scope and every settled constraint:
+**`specs/Improvements/ANIMATION_PLAN.md`** — read it before touching this work.
+
+| C | What |
+|---|---|
+| C256 | **Phase 0** — `design_state.py` + `POST /mode-b/design-state`. Pure projection: three rules enforced by tests (no recomputation, no silent defaults, source names kept) |
+| C257 | **Phase 1** — the page, the C-12 gate, four scene time-bases, six read-only guards |
+| C258/C259 | **Phase 2** — power-stage scenes on real engine arrays; per-angle DCM mask exported from the magnetics engine |
+| C260 | **Phase 3** — magnetics (B vs B_sat at core temperature) and capacitor scenes |
+| C261 | **Phase 4** — both loop Bodes (static) and the load-step scene |
+| C262 | **FAN9672 schematic** (C-13) — same generator as the report, SVG instead of raster |
+| C263 | **PENDING B23 closed** — the two engines now agree on DCM |
+| C264 | steady-state dashboard + Ch1–10 summary blocks |
+| C265/C266 | every payload note made verifiable; **`specs/Improvements/FINDINGS_LOG.md`** created |
+
+**Eight scenes live**: switching · line cycle · magnetics · capacitor · control loops · controller
+schematic · load step · steady state (+ chapter summary).
+
+**Three endpoints**, all read-only: `/mode-b/design-state`, `/design-state/waveforms` (also carries
+`capacitor`, `control`, `thermal`), `/design-state/schematic`.
+
+### Still open on the explorer
+
+| Item | Note |
+|---|---|
+| Input-ripple interleaving cancellation | needs its own data, not a second trace on an existing canvas |
+| Bus-ripple scene at 2·f_line | same |
+| Capacitor lifetime headroom | Ch5 computes it outside `bank_loss_table` |
+| Loop block diagram | values exported (`loops.*.comp`), diagram not drawn |
+| Current-loop time-domain scene | **blocked** — engine returns no current-loop step response; needs new computation, not new rendering |
+| Ripple scaling with load | needs Ch5 ripple at each transition's before/after load |
+| Phase 5 polish | presentation mode, local IBM Plex woff2, text equivalents for animated values |
+
+## Read `FINDINGS_LOG.md` before writing a guard
+
+Ten recurring defect classes with the instances that produced each. The one that has cost most:
+**a check that verifies PRESENCE does not protect CONTENT** — it caught `dcm_basis` claiming a
+disagreement six hours after it was fixed, and it caught the guard written against it, which
+scanned one note block while calling itself "every note".
 C263 CLOSED PENDING B23: the loss engine now uses a per-angle inductance (Spec.L_bias_curve,
 anchored at zero bias) so its DCM agrees with the magnetics engine within 3 points. Chapter 7 loss
 moved -0.21 W worst case. The cause recorded in B23 was wrong and both halves were inert — read the
