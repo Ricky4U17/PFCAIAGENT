@@ -10899,3 +10899,45 @@ measured gap is 2.11. The note is making a false claim." Restored to 3.0 afterwa
 
 Also renamed `test_the_dcm_basis_is_declared_because_chapter_7_disagrees` - the engines no longer
 disagree, so the test's NAME had gone stale in the same way its subject had.
+
+# C266 - every payload note made verifiable, and a findings log
+
+The designer asked for the remaining notes to get the treatment dcm_basis got at C265, plus a
+standing log of the findings.
+
+## The audit
+
+Two notes cited hard numbers. `dcm_basis` cites 22.2 / 29.0 / 3.3 / 18.3 but frames them as HISTORY
+("until C263 it disagreed") - history cannot rot, so those are fine. `dIpp_crest_vs_max` cited
+"1.77 A vs 8.38 A at 264 Vac" as a fact about the CURRENT design, which would be wrong the moment
+the inductor changed, on a note the page displays. Same defect class, one day later.
+
+Now generated from the design in hand: the module finds the operating point where crest and
+cycle-maximum diverge most and quotes THAT, publishing `dIpp_crest_vs_max_example` as data
+alongside. Same numbers today (1.77 / 8.38 / 4.7x at 264 Vac) - derived rather than remembered.
+
+## The general guard, and how it failed first
+
+`tests/test_payload_notes_are_true.py` states the rule mechanically: a note may state history
+freely, but may not state a fact about the current design as typed prose unless the figure is
+published as data in the same block.
+
+THE FIRST VERSION OF THAT GUARD COMMITTED THE EXACT FAILURE IT POLICES. It was called "every note a
+payload publishes" and scanned only `payload["notes"]` - the capacitor, thermal and control blocks
+each carry their own `notes` and none were covered. The probe (typing "ESR is 46.7 mOhm" into the
+capacitor note) passed cleanly. Widened to every block via `_all_note_blocks`, which also asserts it
+found at least three, so a future block cannot be silently missed. Re-probed: caught, naming
+`capacitor.notes.esr: 46.7`.
+
+Writing a presence-only check while writing the guard against presence-only checks is worth
+recording plainly.
+
+## specs/Improvements/FINDINGS_LOG.md
+
+Ten recurring defect classes, each with the instances that produced it and what would have caught
+it - presence-vs-content, stale lists, single-fixture artefact checks, duplicated mappings,
+docstrings asserting invariants, diagnoses written from code rather than measurement, absence
+reading as zero, stale checks crying wolf, the shell/numpy traps, and the crest-vs-max /
+per-phase-vs-system family. Ordered by recurrence.
+
+VERIFIED 4 note tests pass; probe caught after widening.

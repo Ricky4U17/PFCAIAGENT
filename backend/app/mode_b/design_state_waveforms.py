@@ -339,6 +339,19 @@ def build_waveforms(state: Optional[dict],
         out["summary"] = _summary(out)
         series[str(vin)] = out
 
+    # the operating point where the crest and the cycle maximum diverge most — the example the
+    # note quotes, taken from THIS design rather than remembered from a previous one
+    _worst = {"vac": 0.0, "crest": 0.0, "max": 0.0, "ratio": 1.0}
+    for vin, sr in series.items():
+        sm = sr.get("summary") or {}
+        c, m = sm.get("dIpp_at_crest_A"), sm.get("dIpp_cycle_max_A")
+        if not c or not m:
+            continue
+        r = m / c if c > 0 else 1.0
+        if r > _worst["ratio"]:
+            _worst = {"vac": float(vin), "crest": round(c, 4), "max": round(m, 4),
+                      "ratio": round(r, 3)}
+
     return {
         "available": bool(series),
         "reason": None if series else "no usable series",
@@ -350,10 +363,17 @@ def build_waveforms(state: Optional[dict],
             "dIpp": "peak-to-peak inductor ripple, = 2*sqrt(3) * Ihf (the engine stores the "
                     "triangular RMS). Inverted server-side so no physics constant lives in the "
                     "browser.",
-            "dIpp_crest_vs_max": "points[].dIL_pp_A is the ripple AT THE LINE CREST. The cycle "
-                    "maximum is a different and often much larger number at high line (1.77 A vs "
-                    "8.38 A at 264 Vac on the reference design). Both are in `summary`; label "
-                    "whichever you draw.",
+            # GENERATED, not typed. This note used to cite "1.77 A vs 8.38 A at 264 Vac" as a
+            # statement about the CURRENT design — figures that would be wrong the moment the
+            # inductor changed, on a note the page can display. Same defect class as dcm_basis
+            # (C265). The example is now taken from the design in hand, and published as data.
+            "dIpp_crest_vs_max": (
+                "points[].dIL_pp_A is the ripple AT THE LINE CREST. The cycle maximum is a "
+                "different and often much larger number at high line — on this design "
+                f"{_worst['crest']:.2f} A at the crest against {_worst['max']:.2f} A "
+                f"worst-in-cycle at {_worst['vac']:.0f} Vac, a factor of {_worst['ratio']:.1f}. "
+                "Both are in `summary`; label whichever you draw."),
+            "dIpp_crest_vs_max_example": _worst,
             "dcm": "Per-angle DCM flag from the MAGNETICS engine (`Iavg < dIpp/2`, "
                    "step7_magnetic_calc), exported at C259 so a scene can shade exactly the "
                    "angles the engine flagged instead of restating the criterion here.",
