@@ -57,15 +57,37 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
   useEffect(() => {
     controlComponents(inputs).then(d => {
       setData(d)
-      if (!s) {
-        const cap = (k: string) => d.selectable.find(x => x.key === k)?.default_pf ?? 0
-        setS({
+      const cap = (k: string) => d.selectable.find(x => x.key === k)?.default_pf ?? 0
+      setS(prev => {
+        if (!prev) return {
           rcs_mohm: d.rcs.recommended_mohm,
           c_gc_pf: cap('c_gc'), c_rlpk_pf: cap('c_rlpk'), c_ilimit_pf: cap('c_ilimit'),
           c_ilimit2_pf: cap('c_ilimit2'), c_vir_pf: cap('c_vir'), c_ls_pf: cap('c_ls'),
           r_ls_kohm: d.r_ls.default_kohm,
-        })
-      }
+        }
+        // C269. A REHYDRATED SELECTION THAT IS NOT AN OFFERED OPTION RENDERS AS THE FIRST ONE.
+        // `s2sel` is restored from persisted step16_params, and defaults used to apply only when
+        // there was no stored selection at all. So a stored value that was stale, zero or absent
+        // stayed in state while the <select> - having no matching <option> - displayed its first
+        // entry, 100 pF. The designer saw 100 pF on C_ILIMIT2 and picking 100 nF by hand "fixed"
+        // the pole, which is the signature of a display/state disagreement rather than a bad
+        // calculation. C242 was the same failure through a different door.
+        //
+        // This matters after C268: R_ILIMIT2 moved 4.87k -> 3.65k, so EVERY selection persisted
+        // before that is now attached to a different resistor and its pole has moved.
+        const next = { ...prev } as ComponentSelections & Record<string, number>
+        for (const [field, key] of CAP_FIELDS) {
+          const meta = d.selectable.find(x => x.key === key)
+          if (!meta) continue
+          const v = prev[field]
+          if (!Number.isFinite(v) || v <= 0 || !meta.options_pf.includes(v)) next[field] = meta.default_pf
+        }
+        if (!Number.isFinite(prev.r_ls_kohm) || !d.r_ls.options_kohm.includes(prev.r_ls_kohm))
+          next.r_ls_kohm = d.r_ls.default_kohm
+        if (!Number.isFinite(prev.rcs_mohm) || !d.rcs.options_mohm.includes(prev.rcs_mohm))
+          next.rcs_mohm = d.rcs.recommended_mohm
+        return next
+      })
     }).catch(e => setErr((e as Error).message))
   }, [inputs])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -158,6 +180,10 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
                       </td>
                       <td style={{ ...cell, color: C.muted }}>
                         pole {fmtHz(poleHz(rOhm, cur))} ({meta.role})
+                        {/* C269: show the engine's own value, so a selection that has drifted from
+                            it is visible instead of silently standing in for it. */}
+                        {cur !== meta.default_pf && <span style={{ color: C.amber }}>
+                          {' '}· calc {capLabel(meta.default_pf)}</span>}
                       </td>
                     </tr>
                   )

@@ -11003,3 +11003,140 @@ Also tracked `FAN967X BOOST PFC DESIGN TOOL.XLSX`: nothing reads it, but its fou
 `specs/Controller/FAN9672 Reference Documents/` are tracked and it is reference material.
 
 VERIFIED 25 passed; all four failure modes fire; negative control passes.
+
+---
+
+# C268 - the FAN9672 oscillator equation was fabricated (designer finding, Chapter 6 p.111)
+
+The designer read Section 6.4 against the datasheet and reported the equation was wrong. It was.
+
+    report / GUI / engine     f_SW = 1.2e9 / (R_RI + 3430)      -> 13.7 kOhm for 70 kHz
+    FAN9672-D eq. 3, p.14     f_OSC = 8e8 / R_RI                -> 11.5 kOhm for 70 kHz
+
+## Three independent datasheet checks, all of which the old form failed
+
+  * electrical table p.6: R_RI = 25 kOhm -> 30-34 kHz (typ 32). eq. 3 gives 32.0; old gives 42.2
+  * electrical table p.6: R_RI = 12.5 kOhm -> 58-66 kHz (typ 62). eq. 3 gives 64.0; old gives 75.3
+  * AN4165-D p.6 worked example: f_SW = 40 kHz at R_RI = 20 kOhm. eq. 3 gives 40.0; old gives 51.2
+
+Note 4 (p.10) bounds the RI resistor at 53.3 k - 10.7 kOhm; eq. 3 maps 10.7 kOhm to 74.8 kHz,
+matching the part's 75 kHz ceiling. The old form maps it to 84.9 kHz, past what the part can do.
+
+A text search of all four reference PDFs we hold - FAN9672-D, AN4165-D, AN5257, AND9925-D - finds
+neither `3430` nor `1.2e9`. The equation is not a mis-transcription of anything in the repo.
+
+## What it would have cost
+
+Fitting the specified 13.7 kOhm runs the part at 58.4 kHz - 16.6 % below the 70 kHz that Chapters
+4-7 are designed at. `fsw_at_selected` is display-only (a table caption and one GUI role string);
+every downstream calculation uses the target f_SW. So the paper design was self-consistent at
+70 kHz and only the BOM resistor was wrong, which is precisely why nothing caught it: no internal
+consistency check could see it, because internally it was consistent.
+
+## The trap in fixing it
+
+R_RI also sets I_ILIMIT = 1.2*1.0208/R_RI and I_ILIMIT2 = 1.2*1.03125/R_RI (AN4165-D eq. 35/36 -
+those were correct), so both clamp resistors scale with it. But the clamp THRESHOLD depends on the
+RATIO R_ILIMIT/R_RI, so the old pair was internally consistent at 1.81x, inside the 1.2-2.0x
+window. Correcting R_RI alone would have pushed the realised clamp to 2.16x - out of the window,
+and silently, since both numbers would still look plausible. They move together because both are
+computed from `rri` in the same function.
+
+    R_ILIMIT   17.8 kOhm -> 14.7 kOhm      C_ILIMIT   18 nF -> 22 nF
+    R_ILIMIT2  4.87 kOhm -> 4.12 kOhm      C_ILIMIT2  75 nF -> 91 nF   (designer's own design)
+
+## Sites
+
+Thirteen, across three files. The GUI carried the formula at NINE call sites; those collapse to one
+pair of helpers (`rriFromFsw`/`fswFromRri`) rather than nine corrected copies - the duplicated-
+mapping class from FINDINGS_LOG, which is how a single wrong constant reached nine places.
+`schematics.py` also had a 13700.0 FALLBACK default, which only rendered when `rri` was absent -
+exactly when a stale default is least likely to be noticed. Now 11500.0, matching the
+`appendices.py` default that was already correct.
+
+## The DECISION line, and why the existing guard could not see it
+
+Section 6.4's DECISION annotation read "Use R_RI = 13.7 kOhm (1%)" as a literal. It agreed with the
+table above it only while f_SW happened to be 70 kHz - the exact defect the C238 comment eight
+lines earlier warns about, one annotation further down. It is now computed.
+
+`test_ch6_no_stale_values.py` exists to catch precisely this and did not, for two reasons worth
+recording:
+
+  1. `_capture` patched `eq_box` and `body` but NOT `annotation`. A capture that covers three of
+     four text sinks silently exempts the fourth, and the hardcoded line lived in the fourth.
+  2. The R_RI test anchored on "3430" and the 17.143 k intermediate - artefacts OF THE WRONG
+     FORMULA. It asked only whether the number moved when f_SW changed, never whether it was
+     right. A tracking test written against a wrong equation pins the wrong equation in place.
+
+Both fixed: the capture covers `annotation`, the equation test now checks the value as well as the
+tracking, and a new `test_the_r_ri_decision_line_is_not_hardcoded` builds at 70 and 60 kHz.
+
+## Still open
+
+Nothing rejects a target f_SW in the 40-55 kHz gap the part cannot run, or outside 18-75 kHz. The
+prose now states both bands; no code enforces them. Logged as a PENDING item, not fixed here.
+
+VERIFIED both guards fail on a reintroduced regression (engine formula + re-hardcoded DECISION,
+files restored byte-for-byte) and pass after; GUI JS parses clean; helper reproduces the AN4165
+example exactly at 20 kOhm -> 40.00 kHz; engine gives 11.5 kOhm -> 69.57 kHz with clamp 1.80x.
+
+---
+
+# C269 - two designer findings on the Control Design screens
+
+## 1. C_ILIMIT2 offered 100 pF. The calculation was never wrong.
+
+The engine and the API both return 91 nF, pole 479 Hz, against C_ILIMIT's 482 Hz - the same pin
+filter setting, as they should be. 100 pF is the FIRST entry in `options_pf`, and that is the tell:
+a browser renders a `<select>` whose `value` matches no `<option>` by displaying the first one,
+while React state still holds the unmatched value. Screen and state disagreed. That is why picking
+100 nF by hand "fixed" the pole - the designer was not correcting a number, they were giving the
+select a value it could match.
+
+WHERE THE UNMATCHED VALUE CAME FROM. `s2sel` is rehydrated from persisted `step16_params.s2`, and
+`ComponentsSelect` applied engine defaults only `if (!s)` - that is, only when there was no stored
+selection AT ALL. A stored value that was stale, zero or absent survived unchecked and was never
+reconciled against what the engine now offers.
+
+C268 made this urgent rather than theoretical: R_ILIMIT2 moved 4.87k -> 3.65k, so EVERY selection
+persisted before it is attached to a different resistor and its pole has moved.
+
+Fixed by reconciling on rehydrate: any cap whose stored value is not an offered option (or is
+non-finite or <= 0) falls back to the engine default, and the same for R_LS and R_CS. Each row now
+shows `. calc <value>` in amber when the selection differs from the engine's, so a deliberate
+override stays visible instead of silently standing in for a computed value.
+
+This is C242 through a different door. C242 was an E6 options subset that left four selects with no
+matching option; the fix widened the option grid. The same class came back through PERSISTENCE
+instead of through the grid, which is why the guard asserts the INVARIANT - every `default_pf` must
+be one of its own `options_pf` - rather than the one value that was wrong.
+
+## 2. R_ILIMIT and R_ILIMIT2 were shown nowhere
+
+Both were computed, handed to the frontend as `r_assoc_ohm` for the two filter caps, drawn on the
+schematic and printed in the report - and listed on no screen. The designer could not see two of the
+resistors they were specifying. Both scale with R_RI, so both moved at C268 and nothing said so.
+
+Added to the `fixed` list with their realised ratios (clamp 1.80x crest command, peak limit 1.50x
+I_L). Screen 3 renders `fixed` + the Screen-2 selections, so one backend change covers both screens.
+
+## 3. Found while adding them: one decimal hid an E96 digit
+
+`ohm()` printed the E96 3.65 kOhm R_ILIMIT2 as "3.6 kOhm" - a different, real, orderable part.
+Build from that display and you fit the wrong resistor. Sub-10k values now carry two decimals; 10k
+and above are already exact at one decimal on the E96 grid. R_LPK also corrects, 4.7 -> 4.70 kOhm.
+
+## Guard
+
+`tests/test_screen2_contract.py`. The invariant (every default is an offered option), a negative
+control that fails if every default collapses to the first option, C_ILIMIT2's pole against
+C_ILIMIT's, the presence of the resistors, and the E96 third digit.
+
+NOT COVERED BY TEST: the frontend reconciliation itself is TypeScript and there is no JS test
+harness in this repo. It is covered by `tsc --noEmit` (clean) and by the backend invariant above,
+but the reconcile branch has not been executed by a test. Worth stating plainly rather than
+implying the whole finding is guarded.
+
+VERIFIED all three defects fire when reintroduced (rows removed -> 3 failures; one-decimal
+formatter -> 1; off-grid default -> 1), main.py restored byte-for-byte; targeted group 52 passed.

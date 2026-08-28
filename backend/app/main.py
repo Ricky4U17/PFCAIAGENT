@@ -388,7 +388,16 @@ def control_components(req: _ComponentsReq):
         s6 = d["step6"]; s8 = d["step8"]; b = compute_step9_bibo(inp)
 
         def ohm(x):
-            return f"{x/1e6:.2f} MΩ" if x >= 1e6 else (f"{x/1e3:.1f} kΩ" if x >= 1e3 else f"{x:.1f} Ω")
+            # C269: one decimal turned the E96 3.65 kOhm R_ILIMIT2 into "3.6 kOhm" - a different,
+            # real, orderable part. Sub-10k values carry two decimals so an E96 third digit
+            # survives; 10k and above are already exact at one decimal on the E96 grid.
+            if x >= 1e6:
+                return f"{x/1e6:.2f} MΩ"
+            if x >= 1e4:
+                return f"{x/1e3:.1f} kΩ"
+            if x >= 1e3:
+                return f"{x/1e3:.2f} kΩ"
+            return f"{x:.1f} Ω"
         R_LPK = 4.7e3   # LPK series resistor (fixed)
         fixed = [
             {"name": "Oscillator resistor", "symbol": "R_RI", "value": ohm(s4["rri_selected"]),
@@ -408,6 +417,18 @@ def control_components(req: _ComponentsReq):
             {"name": "BIBO C2", "symbol": "CB2", "value": f"{b['cb2']*1e9:.0f} nF", "role": "filter pole 2"},
             {"name": "Gain-control resistor", "symbol": "R_GC", "value": ohm(s8["r_gc_sel"]), "role": "LPT gain align"},
             {"name": "LPK series resistor", "symbol": "R_LPK", "value": ohm(R_LPK), "role": "LPK series (fixed)"},
+            # C269: R_ILIMIT and R_ILIMIT2 were computed, sent as `r_assoc_ohm` for the two filter
+            # caps, drawn on the schematic and printed in the report - but never SHOWN on Screen 2,
+            # so the designer could not see the two current-limit resistors they are specifying.
+            # Both scale with R_RI, so they moved at C268 and there was no screen that said so.
+            {"name": "Current-command clamp", "symbol": "R_ILIMIT",
+             "value": ohm(s8["r_ilimit_sel"]),
+             "role": f"clamp ≈ {s8['ilimit_clamp_ratio']:.2f}× crest cmd"
+                     if s8.get("ilimit_clamp_ratio") else "command clamp (Section 6.8.4)"},
+            {"name": "Cycle-by-cycle peak limit", "symbol": "R_ILIMIT2",
+             "value": ohm(s8["r_ilimit2_sel"]),
+             "role": f"limit ≈ {s8['ilimit2_ratio']:.2f}× peak I_L"
+                     if s8.get("ilimit2_ratio") else "peak limit (Section 6.8.5)"},
         ]
         # Valid R_CS window = intersection of BOTH calculation methods (same as the studio tool):
         #   Method 1 (AN4165 Eq.31)  — V_RM headroom upper limit at both lines

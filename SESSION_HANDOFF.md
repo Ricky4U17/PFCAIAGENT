@@ -16,6 +16,21 @@ since C266). Frontend `tsc --noEmit`: clean.
    difference there is sampling resolution, not a defect.
 3. **Chapter 7 loss is ~0.2 W lower** than reports generated before C263 (worst case 66.11 W
    against 66.32 W). That is the DCM fix, not a regression. Expect it when diffing old reports.
+4. **Chapter 6 R_RI changed at C268** — the designer found the oscillator equation was wrong
+   (§6.4, report p.111). It was `1.2e9/(R_RI+3430)`, a form in no datasheet we hold; FAN9672-D
+   eq. 3 is `8e8/R_RI`. **R_RI 13.7 k → 11.5 kΩ**, and with it **R_ILIMIT 17.8 k → 14.7 kΩ** and
+   **R_ILIMIT2 4.87 k → 4.12 kΩ** (§6.8.4/6.8.5), plus their pin caps. Expect all five to move when
+   diffing against an older report; the clamp ratio stays at ~1.8×. The old 13.7 kΩ would have run
+   the part at 58.4 kHz, 16.6 % below the 70 kHz the rest of the design assumes. **The GUI needs a
+   hard refresh** (Ctrl-F5) — `control_design.html` is served from `public/`, so a cached copy
+   keeps showing the old value.
+5. **Screen 2/3 fixed at C269**, from two more designer findings. **C_ILIMIT2 showed 100 pF** — the
+   engine always said 91 nF; 100 pF is the first option in the list, and an unmatched `<select>`
+   displays its first entry. The unmatched value came from a persisted `s2sel` that C268
+   invalidated. Selections are now reconciled on rehydrate. **R_ILIMIT / R_ILIMIT2 are now shown**
+   (they appeared on no screen at all), and sub-10 kΩ values print two decimals so the E96
+   3.65 kΩ no longer reads as "3.6 kΩ". If a stored design still shows an odd cap value, it is a
+   pre-C269 selection being corrected on load — expected, not a regression.
 
 ## Restarting the servers — use `Start-Process`, not a background shell
 

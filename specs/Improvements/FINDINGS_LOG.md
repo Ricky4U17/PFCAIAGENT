@@ -30,6 +30,38 @@ number back **out of the published text** and measure reality against it.
 
 ---
 
+## 1b. A test that asks "did it MOVE?" never asks "is it RIGHT?"
+
+C268. Section 6.4 printed a fabricated oscillator equation — `f_SW = 1.2e9/(R_RI + 3430)`, a form
+present in none of the four reference PDFs in the repo — and specified 13.7 kΩ for a 70 kHz design.
+That resistor runs the part at 58.4 kHz. It survived because:
+
+- **The guard was anchored on the wrong formula's own artefacts.** `test_the_r_ri_worked_equation_
+  tracks_the_switching_frequency` searched for `"3430"` and the `17.143 k` intermediate. It built
+  twice, at 70 and 60 kHz, and correctly proved the number was live rather than hardcoded — which
+  is all it was ever asked. A tracking test written against a wrong equation **pins the wrong
+  equation in place**, and reads as a passing check on that section forever.
+- **Internal consistency cannot see it.** `fsw_at_selected` is display-only; every downstream
+  chapter used the *target* f_SW. The design was perfectly self-consistent at 70 kHz, and only the
+  BOM resistor was wrong. No cross-check inside the repo could have caught it.
+- **The capture covered three of four text sinks.** `_capture` patched `eq_box` and `body` but not
+  `annotation` — and the hardcoded `"Use R_RI = 13.7 kΩ"` DECISION line lived in `annotation`. A
+  harness that covers most sinks silently exempts the rest, and the exempt one is invisible.
+
+**What works:** check the equation against the *source*, not against itself. The datasheet gave two
+electrical-table test cases (25 kΩ → 32 kHz, 12.5 kΩ → 62 kHz) and AN4165-D a worked example
+(40 kHz at 20 kΩ). The correct form reproduces all three exactly; the fabricated one missed all
+three and mapped the datasheet's own 10.7 kΩ minimum past the part's 75 kHz ceiling. Any of these
+would have caught it on day one. When a value comes from a vendor document, the test anchor belongs
+in that document.
+
+**Corollary — scaling pairs must move together.** R_RI also sets `I_ILIMIT`, and the clamp
+threshold depends on the RATIO `R_ILIMIT/R_RI`. The wrong pair was internally consistent at 1.81×;
+correcting R_RI alone would have pushed the realised clamp to 2.16×, outside its window, silently,
+with both numbers still looking plausible.
+
+---
+
 ## 2. A list of sites goes stale; a count does not
 
 | Instance | Named | Actual |
@@ -67,6 +99,34 @@ positives; the source scan reaches the conditional branches. Neither alone is su
 **What works:** one definition with a test pinning any surviving copy to it
 (`test_the_schematic_context_has_one_definition`). Where the duplication cannot be removed yet,
 the test is what makes leaving it safe.
+
+---
+
+## 4b. A persisted choice outlives the calculation that justified it
+
+C269. Screen 2 offered **100 pF** for C_ILIMIT2 where the engine said 91 nF — and the engine had
+been right the whole time. 100 pF is the FIRST entry in the options list, which is the signature:
+
+> **A `<select>` whose `value` matches no `<option>` displays its first option**, while state still
+> holds the unmatched value. The screen and the state disagree, and neither is flagged.
+
+That is why picking a valid value by hand appeared to "fix the calculation" — it did not fix a
+number, it gave the widget something it could match. **Treat "the displayed value is suspiciously
+the first option in the list" as a matching failure, never as a bad calculation.**
+
+The unmatched value arrived through **persistence**: selections rehydrate from stored params, and
+defaults were applied only when there was no stored selection *at all*, so a stale, zero or absent
+stored value survived unchecked. C268 had just moved R_ILIMIT2 (4.87 k → 3.65 k), which invalidated
+every previously stored companion capacitor — the stored value was fine when written and wrong
+afterwards, and nothing re-examined it.
+
+This is C242's defect through a new door. C242 was an E6 options subset that left four selects
+unmatched; the fix widened the grid. The class returned through persistence instead. **So guard the
+invariant, not the value that was wrong:** every default must be one of its own offered options,
+plus a negative control that fails if all defaults collapse to the first option.
+
+**The general question:** when an upstream number changes, what stored downstream choices does it
+invalidate — and does anything recheck them, or do they just persist looking plausible?
 
 ---
 

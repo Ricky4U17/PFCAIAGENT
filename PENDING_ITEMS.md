@@ -814,6 +814,21 @@ in `notes.dcm_basis`, and a test asserts that declaration exists.
 </details>
 
 
+### B24. No guard on the FAN9672 legal switching-frequency bands  `CODE`
+Found while fixing the oscillator equation at C268; **flagged, not fixed** — the designer asked for
+the thirteen equation sites and the hardcoded DECISION line, and this is a separate behaviour.
+
+The part programs f_OSC in **two** bands, 18–40 kHz and 55–75 kHz, and the datasheet (p.14) states
+plainly that "setting frequency between 40 kHz and 55 kHz is not allowed in FAN9672". Note 4 (p.10)
+bounds the RI resistor at 53.3 k–10.7 kΩ. Nothing in the engine, the GUI or the report rejects a
+target f_SW in the forbidden gap or outside 18–75 kHz: the arithmetic is happy to return an R_RI
+for 47 kHz, and every downstream chapter would then be designed at a frequency the controller
+cannot produce. Section 6.4's prose now names both bands (C268), but prose is not a gate.
+
+Worth pairing with a check that the SELECTED E96 value keeps the achieved frequency inside the
+band — snapping to the nearest standard value can walk a legal target across a boundary, which is
+most likely near 40 and 55 kHz where the design would look fine and the part would not run.
+
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
 Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
