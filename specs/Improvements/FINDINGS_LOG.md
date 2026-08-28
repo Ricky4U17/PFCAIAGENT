@@ -128,6 +128,56 @@ plus a negative control that fails if all defaults collapse to the first option.
 **The general question:** when an upstream number changes, what stored downstream choices does it
 invalidate — and does anything recheck them, or do they just persist looking plausible?
 
+**C270 follow-up — the C269 fix above did not work, and the reason is instructive.** It tested
+MEMBERSHIP: reset anything that is not an offered option. But 100 pF *is* an offered option — the
+first one — so the stale value passed and survived. The invariant I asserted was **true**, and it
+still did not cover the case, because the failure was not the one the invariant described. A
+capacitor sits at a pole the engine chose, so the right test is physical: a stored value more than
+a **decade** from the engine's is debris, not a preference. **Being right about an invariant is not
+the same as having chosen the invariant that matches the defect.**
+
+---
+
+## 4c. The quantity that is DERIVED tracks the design; the one that is PASSED goes stale
+
+C270. Screen 2 computed the ILIMIT thresholds from the reference-design peak currents (16.76 /
+17.51 A) while the report used the designer's real ones (24.37 / 22.80 A), because
+`_control_corner_currents` was called on the report path and not on the GUI path. R_ILIMIT was
+**correct** and R_ILIMIT2 **wrong** in the same table — because R_ILIMIT's crest command is derived
+from power, which was passed, while the peaks arrive as direct inputs and silently kept their
+defaults. One right number beside one wrong one is what made the screen credible.
+
+**The tell was internal physics, needing no reference value at all:** the engine reported a
+per-phase *peak* of 17.51 A beside a command *crest* of 18.29 A. The peak carries half the ripple
+on top of the crest and cannot be the smaller of the two. That inequality is now a test — no
+fixture, no vendor document, no golden number, and it fails the instant a default is used against a
+real design.
+
+**Ask of any defaulted input:** if this silently kept its default, would anything downstream
+contradict it? Prefer the contradiction that is internal — those guards never go stale.
+
+**C270 round 2 — a parity test that controls its own inputs tests nothing.** Fixing the *call* was
+not enough: Screen 2 still said 4.12 kΩ against the report's 3.83 kΩ, because the two paths were
+handed **different data**. The parity test I had just written ran both paths with *identical*
+inputs and asserted they agreed — and they always did. It could never have failed on the actual
+defect.
+
+> If a parity test constructs the inputs for both sides, it is comparing two calls to the same
+> function. Real parity means each side fetching its inputs the way it does in production.
+
+Replaced with a **wiring** test: change a field, and the answer must move. A field that is accepted
+and ignored is the same defect one layer down.
+
+**And a two-variable interaction beat single-variable testing.** I reported that `vin_min` alone
+explained the gap — from a one-variable sweep. It did not: raising `vin_min` *also* makes the engine
+re-pick R_CS (12 → 13 mΩ), and the two effects cancel back to the original answer. Only holding
+R_CS *and* passing the line limit reproduces the report. **When two inputs both feed the result,
+sweeping one at a time can show "no effect" for something that matters.**
+
+Note also that this predated C268/C269 and became visible only when C269 first put R_ILIMIT2 on a
+screen. **Displaying a computed value is itself a test**: numbers nobody looks at are where wrong
+ones live.
+
 ---
 
 ## 5. A docstring asserting an invariant is where nobody looks

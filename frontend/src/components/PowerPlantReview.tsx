@@ -15,6 +15,12 @@ export interface PlantParams {
   vout_V: number; fsw_kHz: number; nch: number
   lphi_uH: number; rl_mOhm: number; co_uF: number; rc_mOhm: number
   pout_lo_W: number; pout_hi_W: number; eta_lo: number; eta_hi: number
+  // C270: the four fields the REPORT feeds `_control_corner_currents` and the Control Design
+  // screens did not. Without them the screens derive the per-phase corner currents from a flat
+  // L and default 90/264 V limits, so Screen 2 and the report disagreed on R_ILIMIT2 (4.12 kΩ
+  // against 3.83 kΩ). Optional so older callers keep working; the backend already defaults them.
+  vin_min_V?: number; vin_max_V?: number; r_input?: number
+  l_curve?: [number, number][]        // [[Vin_rms, L_full_nom_uH], …] — the as-built table
 }
 
 interface Props {

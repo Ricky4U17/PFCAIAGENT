@@ -135,6 +135,18 @@ export const ControlDesign: React.FC<Props> = ({
     eta_lo:    0.945,
     eta_hi:    0.965,
     nch:       Number((confirmedState as any)?.selected_channels ?? 2),
+    // C270. The report enriches its control inputs with the line limits, the input-ripple ratio
+    // and the AS-BUILT L curve before deriving the per-phase corner currents; the Control Design
+    // screens sent none of them, so they derived those currents from a flat L and the default
+    // 90/264 V limits. Screen 2 then showed R_ILIMIT2 = 4.12 kΩ where the report printed 3.83 kΩ
+    // — the same class of split as the original 2.94 kΩ, one layer further in.
+    // Same sources the report reads: intake application + the approved inductor's L_vs_Vin_table.
+    vin_min_V: Number(app.vin_rms_min ?? 90),
+    vin_max_V: Number(app.vin_rms_max ?? 264),
+    r_input:   Number(tsi.default_crest_ripple_ratio ?? 0.20),
+    l_curve:   (((approvedInductorDesign as any)?.L_vs_Vin_table ?? []) as any[])
+                 .filter(r => r?.L_full_nom_uH)
+                 .map(r => [Number(r.Vin_rms), Number(r.L_full_nom_uH)] as [number, number]),
   }
 
   // ── Inject via postMessage once iframe loads and setPythonValues is ready ──

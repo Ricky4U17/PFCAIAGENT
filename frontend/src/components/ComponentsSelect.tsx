@@ -44,15 +44,30 @@ interface Props {
 }
 
 export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onConfirm }) => {
+  const [data, setData] = useState<ControlComponents | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [s, setS] = useState<ComponentSelections | null>(initial ?? null)
+
+  // R_ILIMIT and R_ILIMIT2 are proportional to R_CS, so they have to be computed against the shunt
+  // the designer has SELECTED, not one the engine re-picks for itself. Keyed on the primitive so a
+  // new `s` object identity does not refetch; the R_CS band and option list do not depend on the
+  // value passed, so this cannot oscillate (verified at C270).
+  const rcsSel = s?.rcs_mohm
   const inputs = useMemo(() => ({
     vout: params.vout_V, fsw: params.fsw_kHz * 1000, lphi_uH: params.lphi_uH,
     cout_uF: params.co_uF, nch: params.nch, pout_lo: params.pout_lo_W, pout_hi: params.pout_hi_W,
     r_l: params.rl_mOhm / 1000, r_c: params.rc_mOhm / 1000,
-  }), [params])
-
-  const [data, setData] = useState<ControlComponents | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [s, setS] = useState<ComponentSelections | null>(initial ?? null)
+    // C270: the corner-current derivation needs these to match the report. Omitted keys fall back
+    // to the backend's defaults, which is exactly how the two paths drifted apart. With R_CS = 12
+    // and the real lower line limit the report gets R_ILIMIT2 = 3.83 kΩ; with neither, this screen
+    // got 4.12 kΩ — computed at a 13 mΩ shunt it had picked itself, while recommending 12 mΩ
+    // in the row directly above.
+    ...(params.vin_min_V ? { vin_min: params.vin_min_V } : {}),
+    ...(params.vin_max_V ? { vin_max: params.vin_max_V } : {}),
+    ...(params.r_input   ? { r_input: params.r_input }   : {}),
+    ...(params.l_curve && params.l_curve.length ? { l_curve: params.l_curve } : {}),
+    ...(rcsSel ? { rcs: rcsSel / 1000 } : {}),
+  }), [params, rcsSel])
 
   useEffect(() => {
     controlComponents(inputs).then(d => {
@@ -75,12 +90,25 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
         //
         // This matters after C268: R_ILIMIT2 moved 4.87k -> 3.65k, so EVERY selection persisted
         // before that is now attached to a different resistor and its pole has moved.
+        // C270: the C269 version of this only rejected values that were not OFFERED, and 100 pF
+        // IS an offered option - it is the first one - so the stale value survived reconciliation
+        // and the designer still saw 100 pF on C_ILIMIT2. Membership was the wrong test.
+        //
+        // A pin-filter capacitor sits at a pole the engine chose; both it and the default share the
+        // same associated resistor, so the pole ratio is just default/stored. More than a DECADE
+        // away is not a designer preference, it is debris from an earlier bug or a value stranded
+        // by an upstream change. Inside a decade a deliberate override survives, and the amber
+        // "calc" note next to it makes the difference visible.
+        const STALE_DECADES = 10
         const next = { ...prev } as ComponentSelections & Record<string, number>
         for (const [field, key] of CAP_FIELDS) {
           const meta = d.selectable.find(x => x.key === key)
           if (!meta) continue
           const v = prev[field]
-          if (!Number.isFinite(v) || v <= 0 || !meta.options_pf.includes(v)) next[field] = meta.default_pf
+          const offGrid = !Number.isFinite(v) || v <= 0 || !meta.options_pf.includes(v)
+          const ratio = meta.default_pf > 0 && v > 0 ? meta.default_pf / v : 1
+          const stale = ratio > STALE_DECADES || ratio < 1 / STALE_DECADES
+          if (offGrid || stale) next[field] = meta.default_pf
         }
         if (!Number.isFinite(prev.r_ls_kohm) || !d.r_ls.options_kohm.includes(prev.r_ls_kohm))
           next.r_ls_kohm = d.r_ls.default_kohm

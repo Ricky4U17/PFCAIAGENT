@@ -11140,3 +11140,133 @@ implying the whole finding is guarded.
 
 VERIFIED all three defects fire when reintroduced (rows removed -> 3 failures; one-decimal
 formatter -> 1; off-grid default -> 1), main.py restored byte-for-byte; targeted group 52 passed.
+
+---
+
+# C270 - Screen 2/3 designed against reference-design currents, not the designer's
+
+Three more findings from the designer's report run. Two were defects; the third was not what it
+looked like.
+
+## 1. R_ILIMIT2 read 2.94 kOhm on screen and 4.08 kOhm in the report
+
+`_control_corner_currents` derives the per-phase RMS and peak inductor currents at the band-worst
+corners from the shared design-ops engine. The COMBINED REPORT path called it. `/control/components`
+and `/control/coefficients` did not, so Screen 2 and Screen 3 computed the ILIMIT thresholds and the
+R_CS band from the 16.76 / 17.51 A reference-design defaults while the report used the designer's
+real 24.37 / 22.80 A.
+
+R_ILIMIT escaped the bug: its crest command derives from pout/eta/nch/vin, all of which WERE passed.
+Only the quantities that arrive as direct inputs - the peaks - went stale. That is why one resistor
+was right and its neighbour was not, which is what made the report credible enough to trust.
+
+THE TELL WAS PHYSICS, AND IT WAS INTERNAL. The engine reported a per-phase PEAK of 17.51 A beside a
+command CREST of 18.29 A. The peak carries half the ripple on top of the crest, so it cannot be the
+smaller of the two. That inequality is now a test - it needs no reference value, no fixture and no
+vendor document, and it fails the moment a default peak is used against a real command.
+
+This predates C268/C269. It became VISIBLE only because C269 put R_ILIMIT2 on a screen for the
+first time; before that the wrong number existed but was never displayed anywhere a designer looked.
+
+Fixed by merging the same corner currents in both endpoints. R_ILIMIT2 2.94 -> 4.12 kOhm (raw
+4076.8), R_ILIMIT unchanged at 14.7 kOhm, R_CS band unchanged at 11.54-12.36 mOhm, C_ILIMIT2
+default now 75 nF - which is what the report has always printed. Endpoint cost 0.10 s.
+
+OPEN, FOR THE DESIGNER: the engine snaps to nearest-in-log, giving 4.12 kOhm; the designer computed
+4.02 kOhm. These are adjacent E96 steps either side of 4076.8, 1.4 % apart. For a PROTECTION
+threshold, rounding down is the conservative direction. Not changed unilaterally - it is a design
+policy question, and it would move every protection resistor.
+
+## 2. C_ILIMIT2 still showed 100 pF - the C269 fix was insufficient
+
+C269 reconciled a rehydrated selection by testing MEMBERSHIP: reset anything that is not an offered
+option. But 100 pF IS an offered option - it is the FIRST one - so the stale value passed the test
+and survived. Membership was the wrong question.
+
+A pin-filter capacitor sits at a pole the engine chose, and the stored value and the default share
+the same associated resistor, so the pole ratio is simply default/stored. More than a DECADE apart
+is not a designer preference; it is debris from an earlier bug or a value stranded by an upstream
+change. Inside a decade a deliberate override survives, with the amber "calc" note showing it.
+
+Worth stating plainly: the C269 entry described this as fixed. It was not. The guard I wrote at
+C269 asserted an invariant that was TRUE and still did not cover the case, because the failure was
+not the one the invariant described.
+
+## 3. "Did fixing R_RI change the current loop?" - no
+
+Traced the whole chain rather than reasoning about it:
+
+    TiUnc = plantI(L, Vout, Co, r_L, r_C) x Hcs(rf, cf) x R_CS / V_ramp
+
+V_ramp is a fixed constant, rf/cf are designer DOM fields, and the optimizer searches
+f_ci in [100*f_cv, min(f_SW/6, 0.9*f_RHP)] against the TARGET f_SW, which C268 did not change. The
+ACHIEVED f_SW (`fswAct`) is display-only - it appears in tables, the decision line and the bench
+check, and in nothing that computes. R_RI appears nowhere in the current loop.
+
+What DOES scale those components is R_CS: R_IC ∝ 1/R_CS, so C1 and C2 move inversely. The valid
+band for this design is 11.54-12.36 mOhm, so 12 mOhm is the only option; a session that ran at
+15 mOhm would give a 25 % larger R_IC and 20 % smaller caps at the same f_ci. C269's reconcile
+resets a stored R_CS that is no longer offered, so it could have moved the designer from 15 to
+12 mOhm SILENTLY. Asked the designer to compare R_CS between runs rather than guessing - a reset
+that changes the loop design must be visible, and that change is not made until the cause is
+confirmed.
+
+VERIFIED parity guard fires on the reintroduced regression with the exact 2.94-vs-4.12 message,
+main.py restored byte-for-byte; the peak-vs-crest invariant passes; targeted group 41 passed;
+tsc --noEmit clean; endpoints 0.10 s / 0.01 s.
+
+## C270, round 2 - the parity fix was incomplete, and my own parity test could not see it
+
+The designer re-ran the report: Screen 2 said R_ILIMIT2 = 4.12 kOhm, the report said 3.83 kOhm.
+Fixing the corner-current CALL was not enough, because the two paths still fed it DIFFERENT INPUTS.
+
+Reproduced exactly:
+
+    Screen 2 (before)   R_CS 13 mOhm (engine's own pick)   il_pk 24.37 A   -> 4.12 kOhm
+    Report              R_CS 12 mOhm (designer selection)  il_pk 22.80 A   -> 3.83 kOhm
+
+TWO fields were missing, not one:
+
+  * the LOWER LINE LIMIT. The report enriches with the designer's `vin_rms_min`; the screen
+    defaulted to 90 V. At 90 V the LOW-line corner peak (24.37 A) wins the `max()`; at the real
+    limit it falls below the HIGH-line peak (22.80 A) and that wins instead. Also missing:
+    `vin_max`, `r_input`, and the as-built `l_curve` (verified honoured - doubling L moves the peak
+    24.37 -> 21.34 A).
+  * the SELECTED R_CS. R_ILIMIT and R_ILIMIT2 are both proportional to R_CS. Screen 2 passed none,
+    so the engine re-picked its own - it chose 13 mOhm while the screen RECOMMENDED 12 mOhm in the
+    row directly above. The two ILIMIT resistors were sized for a shunt the designer was not being
+    offered. Now keyed on the current selection; verified the R_CS band and option list do not
+    depend on the value passed, so the refetch cannot oscillate.
+
+A WRONG TURN WORTH RECORDING. I first reported that `vin_min` alone explained the gap, from a
+single-variable test. It does not: raising `vin_min` ALSO makes the engine re-pick R_CS (12 -> 13),
+and the two effects cancel back to 4.12 kOhm. Only holding R_CS at the selected 12 mOhm AND passing
+the line limit reproduces 3.83 kOhm. Stated before testing the combination - the same "measure it"
+rule this log keeps recording, broken again on a two-variable interaction.
+
+WHY THE C270 PARITY TEST PASSED THROUGH ALL OF THIS. It ran both paths with IDENTICAL inputs and
+asserted they agreed. They always did. The failure was never that the same data gave two answers -
+it was that the two paths were handed DIFFERENT data. A parity test that controls the inputs it is
+meant to be comparing tests nothing. Replaced with a wiring test: change a field, and the answer
+must move. A field that is accepted and ignored is the same defect one layer down.
+
+C_ILIMIT2 = 82 nF was NOT a defect. It is the correct partner to R_ILIMIT2 = 3.83 kOhm at the
+500 Hz pin pole (1/(2*pi*3830*500) = 83.1 nF -> E24 82 nF); 75 nF is what pairs with 4.12 kOhm. It
+was tracking its resistor correctly the whole time.
+
+## The current-loop symptom: second hypothesis dead
+
+The designer confirmed R_CS was 12 mOhm in BOTH runs, so the silent-reconcile theory in PENDING B26
+is wrong. Two hypotheses have now failed on this symptom (R_RI, then R_CS). Established: R_RI is
+absent from the loop, R_CS did not move. Remaining candidates are the other plant terms - Lphi,
+C_out, r_L, r_C - or rf/cf, or the optimizer bounds. Asked for the before/after R_IC, C1, C2, f_ci
+and Lphi rather than offering a third guess.
+
+Noted while there, and not touched: `ControlDesign` takes `lphi_uH` from `confirmed_L_uH_sel`, while
+the REPORT designs Chapter 6 at the MINIMUM AS-BUILT Lphi from `L_vs_Vin_table`. Different
+quantities, and R_IC scales with Lphi, so the GUI and the report can design different loops. It
+predates C268-C270 so it cannot explain a change between two runs, but it is the first thing to
+resolve. B26 updated.
+
+VERIFIED 14 Screen-2 tests pass; tsc --noEmit clean; the wiring test fails when either field is
+dropped; R_CS band/options confirmed independent of the passed R_CS.

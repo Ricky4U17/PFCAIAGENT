@@ -82,6 +82,92 @@ def test_the_screens_show_the_resistors_the_designer_is_specifying(screen2, symb
     assert symbol in syms, f"{symbol} is not shown on Screen 2/3; present: {syms}"
 
 
+def test_the_peak_current_is_not_below_the_command_crest_it_tracks():
+    """C270. THE INVARIANT THAT EXPOSED THE PARITY BUG, AND IT IS PURE PHYSICS.
+
+    The per-phase PEAK inductor current carries half the ripple on top of the crest of the current
+    COMMAND, so it can never be the smaller of the two. Screen 2 reported peak 17.51 A against a
+    command crest of 18.29 A - impossible, and the tell that `iphi_pk_hi` was still the
+    reference-design default while the command had tracked the designer's real power.
+
+    `_control_corner_currents` derives both from the shared design-ops engine. The report called it;
+    /control/components did not, so the GUI and the report disagreed on R_ILIMIT2 (2.94 kOhm on
+    screen, 4.08 kOhm in the document). It went unnoticed because R_ILIMIT2 was on no screen until
+    C269 put it there.
+    """
+    from app.main import _control_corner_currents
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    inp = dict(INPUTS, cout_uF=2200.0, pout_lo=2200.0, pout_hi=4000.0, r_l=0.05, r_c=0.02)
+    cc = _control_corner_currents(inp)
+    assert cc, "the corner-current derivation returned nothing; the guard below would be vacuous"
+    s8 = compute_steps_1_8({**inp, **cc})["step8"]
+    assert s8["il_pk"] >= s8["crest_cmd"], (
+        f"per-phase peak {s8['il_pk']:.2f} A is BELOW the command crest {s8['crest_cmd']:.2f} A — "
+        "the peak includes half the ripple on top of the crest, so this means a default peak is "
+        "being used against a real command")
+
+
+def test_screen2_and_the_report_agree_on_the_ilimit_resistors():
+    """The parity itself: both paths must merge the same corner currents."""
+    from app.main import _ComponentsReq, _control_corner_currents, control_components
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    inp = dict(INPUTS, cout_uF=2200.0, pout_lo=2200.0, pout_hi=4000.0, r_l=0.05, r_c=0.02)
+    report_s8 = compute_steps_1_8({**inp, **_control_corner_currents(inp)})["step8"]
+    gui = control_components(_ComponentsReq(inputs=inp))
+    gui_r2 = next(f for f in gui["fixed"] if f["symbol"] == "R_ILIMIT2")["value"]
+    want = report_s8["r_ilimit2_sel"]
+    assert f"{want/1e3:.2f}" in gui_r2 or f"{want/1e3:.1f}" in gui_r2, (
+        f"Screen 2 shows R_ILIMIT2 = {gui_r2} but the report path computes "
+        f"{want/1e3:.2f} kΩ — the two are using different currents again")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("rcs", 0.012),
+    ("l_curve", [[90.0, 203.2], [264.0, 203.2]]),
+])
+def test_the_screen_honours_the_fields_the_report_enriches_with(field, value):
+    """C270 round 2. Fixing the corner-current call was not enough: the two paths still fed it
+    DIFFERENT INPUTS.
+
+    The report enriches with vin_min / vin_max / r_input and the AS-BUILT L curve; the screens sent
+    none of them, so the derivation ran on a flat L and the default 90 V lower limit. With
+    vin_min = 90 the LOW-line peak (24.37 A) wins and R_ILIMIT2 comes out 4.12 kOhm; with the
+    designer's actual limit the low-line peak falls below the high-line one (22.80 A) and it comes
+    out 3.83 kOhm - which is exactly what their report printed while the screen said 4.12 kOhm.
+
+    THE C270 PARITY TEST DID NOT CATCH THIS. It ran both paths with IDENTICAL inputs, so it could
+    only ever prove they agree given the same data - which was never the failure. The failure was
+    that they were handed different data. So this asserts the fields are WIRED: change one, and the
+    answer must move. A field that is accepted and ignored is the same defect one layer down.
+    """
+    from app.main import _ComponentsReq, control_components
+
+    base = dict(INPUTS, cout_uF=2200.0, pout_lo=2200.0, pout_hi=4000.0, r_l=0.05, r_c=0.02,
+                vin_min=100.0)
+    r2 = lambda inp: next(f for f in control_components(_ComponentsReq(inputs=inp))["fixed"]
+                          if f["symbol"] == "R_ILIMIT2")["value"]
+    assert r2(base) != r2(dict(base, **{field: value})), (
+        f"{field} made no difference to R_ILIMIT2 — the screens send it but the endpoint is "
+        "ignoring it, so Screen 2 and the report will drift apart again")
+
+
+def test_the_ilimit_rows_use_the_rcs_the_screen_recommends():
+    """C270 round 2. Without a passed R_CS the engine re-picks its own — it chose 13 mOhm while the
+    screen recommended 12 mOhm in the row directly above, so the two ILIMIT resistors were sized
+    for a shunt the designer was not being offered."""
+    from app.main import _ComponentsReq, control_components
+    from app.mode_b.step16_steps1_8 import compute_steps_1_8
+
+    inp = dict(INPUTS, cout_uF=2200.0, pout_lo=2200.0, pout_hi=4000.0, r_l=0.05, r_c=0.02,
+               vin_min=100.0)
+    d = control_components(_ComponentsReq(inputs=inp))
+    rec = d["rcs"]["recommended_mohm"]
+    used = compute_steps_1_8({**inp, "rcs": rec / 1000.0})["step8"]["rcs_sel"] * 1e3
+    assert abs(used - rec) < 1e-6, f"recommended {rec} mΩ but the engine sized ILIMIT at {used} mΩ"
+
+
 def test_a_sub_10k_resistor_keeps_its_e96_third_digit(screen2):
     """C269: one decimal printed the E96 3.65 kOhm R_ILIMIT2 as "3.6 kOhm" - a different, real,
     orderable part. Build from that display and you fit the wrong resistor."""

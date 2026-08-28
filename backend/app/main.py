@@ -384,6 +384,22 @@ def control_components(req: _ComponentsReq):
         from app.mode_b.step16_steps1_8 import compute_steps_1_8
         from app.mode_b.step16_step9_bibo import compute_step9_bibo
         inp = req.inputs or None
+        # C270. The GUI computed the ILIMIT thresholds and the R_CS band from the reference-design
+        # peak currents (16.76 / 17.51 A) because nothing here supplied the designer's own. The
+        # REPORT calls `_control_corner_currents` and gets 24.37 / 22.80 A, so Screen 2/3 and the
+        # report disagreed on R_ILIMIT2 - 2.94 kOhm on screen against 4.08 kOhm in the document.
+        # It stayed invisible until C269 put R_ILIMIT2 on screen for the first time.
+        #
+        # The tell was internal: the engine reported a per-phase PEAK (17.51 A) BELOW the crest of
+        # the current COMMAND it had just derived (18.29 A). The peak carries half the ripple on top
+        # of the command crest, so it cannot be the smaller of the two - the peak was a leftover
+        # default while the command tracked the real design.
+        #
+        # Guarded exactly like the report path: returns {} on any failure, so the engine keeps its
+        # defaults rather than the screen going blank.
+        if inp:
+            inp = dict(inp)
+            inp.update(_control_corner_currents(inp))
         d = compute_steps_1_8(inp); c = d["const"]; s4 = d["step4"]; s5 = d["step5"]
         s6 = d["step6"]; s8 = d["step8"]; b = compute_step9_bibo(inp)
 
@@ -511,7 +527,14 @@ def control_coefficients(req: _ComponentsReq):
     Returns the controller constants & design targets (report Step 2 table)."""
     try:
         from app.mode_b.step16_steps1_8 import compute_steps_1_8
-        d = compute_steps_1_8(req.inputs or None)
+        # C270: same corner-current merge as /components above - Screen 3 prints the per-phase
+        # RMS and peak currents in its coefficients table, so without this it showed the
+        # reference-design defaults beside values that had tracked the real design.
+        _inp = req.inputs or None
+        if _inp:
+            _inp = dict(_inp)
+            _inp.update(_control_corner_currents(_inp))
+        d = compute_steps_1_8(_inp)
         return {"coefficients": d["step2"]["rows"]}
     except Exception as e:
         log.exception("control coefficients"); raise HTTPException(500, str(e))

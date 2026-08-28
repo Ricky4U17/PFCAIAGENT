@@ -33,6 +33,12 @@ export const CoreReview: React.FC<Props> = ({ params, s2sel, onBack, onConfirm }
     cout_uF: params.co_uF, nch: params.nch, pout_lo: params.pout_lo_W, pout_hi: params.pout_hi_W,
     r_l: params.rl_mOhm / 1000, r_c: params.rc_mOhm / 1000,
     ...(s2sel ? { rcs: s2sel.rcs_mohm / 1000 } : {}),
+    // C270: same four fields as Screen 2 — this screen prints the corner currents in its
+    // coefficients table, so without them it showed reference-design values beside real ones.
+    ...(params.vin_min_V ? { vin_min: params.vin_min_V } : {}),
+    ...(params.vin_max_V ? { vin_max: params.vin_max_V } : {}),
+    ...(params.r_input   ? { r_input: params.r_input }   : {}),
+    ...(params.l_curve && params.l_curve.length ? { l_curve: params.l_curve } : {}),
   }), [params, s2sel])
 
   const [comp, setComp] = useState<ControlComponents | null>(null)

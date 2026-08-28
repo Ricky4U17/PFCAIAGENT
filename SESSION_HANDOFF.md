@@ -22,7 +22,17 @@ Suite: **782 passed, 3 skipped** — full run, green, at C269. Frontend `tsc --n
    the part at 58.4 kHz, 16.6 % below the 70 kHz the rest of the design assumes. **The GUI needs a
    hard refresh** (Ctrl-F5) — `control_design.html` is served from `public/`, so a cached copy
    keeps showing the old value.
-5. **Screen 2/3 fixed at C269**, from two more designer findings. **C_ILIMIT2 showed 100 pF** — the
+6. **TWO OPEN QUESTIONS FOR THE DESIGNER (C270)** — both need their answer, not a guess:
+   - **Did R_CS change between your two Control Design runs?** They reported the current-loop
+     components differing at the same f_ci and asked whether the R_RI fix caused it. It did not —
+     R_RI appears nowhere in the loop (`TiUnc = plantI(L,Vout,Co,r_L,r_C) × Hcs(rf,cf) × R_CS/
+     V_ramp`; achieved f_SW is display-only). But `R_IC ∝ 1/R_CS`, the valid band here is
+     11.54–12.36 mΩ so 12 mΩ is the only option, and C269's reconcile silently resets a stored
+     15 mΩ → 12 mΩ, which alone gives a 25 % larger R_IC. See PENDING B26 — do not implement the
+     "announce the reset" change until they confirm.
+   - **Should protection resistors snap DOWN instead of nearest?** R_ILIMIT2 raw is 4076.8 Ω;
+     the engine picks E96 4.12 kΩ, they computed 4.02 kΩ (adjacent steps). PENDING B25.
+7. **Screen 2/3 fixed at C269**, from two more designer findings. **C_ILIMIT2 showed 100 pF** — the
    engine always said 91 nF; 100 pF is the first option in the list, and an unmatched `<select>`
    displays its first entry. The unmatched value came from a persisted `s2sel` that C268
    invalidated. Selections are now reconciled on rehydrate. **R_ILIMIT / R_ILIMIT2 are now shown**

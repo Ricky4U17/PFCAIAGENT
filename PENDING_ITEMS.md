@@ -829,6 +829,56 @@ Worth pairing with a check that the SELECTED E96 value keeps the achieved freque
 band — snapping to the nearest standard value can walk a legal target across a boundary, which is
 most likely near 40 and 55 kHz where the design would look fine and the part would not run.
 
+### B25. Protection resistors snap nearest-in-log, not conservatively  `DECISION`
+Raised at C270. R_ILIMIT2's raw value is 4076.8 Ω; `_nearest_e96` picks **4.12 kΩ** (log-nearest),
+the designer computed **4.02 kΩ** — adjacent E96 steps, 1.4 % apart, either side of the raw value.
+
+For an ordinary component nearest-in-log is right. For a **protection threshold** the two directions
+are not equivalent: R_ILIMIT/R_ILIMIT2 scale the trip level, so rounding **down** trips slightly
+earlier (more margin against the part) and rounding **up** allows a slightly higher peak before the
+limit acts. A designer may reasonably want protection resistors to snap down as policy.
+
+**Not changed unilaterally** — it would move every protection resistor in Chapter 6, and it is a
+design-policy call rather than a defect. Needs the designer's decision.
+
+### B26. Current-loop components changed at the same crossover — CAUSE STILL UNKNOWN  `CODE`
+**The R_CS hypothesis below is WRONG and is kept only as a record of a ruled-out cause.** The
+designer confirmed R_CS was **12 mΩ in both runs**, so a silent reconcile did not move it and the
+loop plant did not change that way. Two hypotheses have now failed on this symptom (R_RI, then
+R_CS); do not offer a third without measuring.
+
+**What is established.** R_RI is not in the current loop: `TiUnc = plantI(L, Vout, Co, r_L, r_C) ×
+Hcs(rf, cf) × R_CS/V_ramp`, `V_ramp` is a constant, `rf`/`cf` are designer DOM fields, the optimizer
+searches against the TARGET f_SW, and the achieved f_SW is display-only. R_CS is unchanged. So the
+remaining candidates are the other plant terms — **Lφ, C_out, r_L, r_C** — or `rf`/`cf`, or the
+optimizer's own search bounds.
+
+**Lφ is the one to check first.** `ControlDesign` builds `params.lphi_uH` from
+`tsi.confirmed_L_uH_sel ?? tsi.confirmed_L_uH ?? L_target_uH ?? 235`, whereas the REPORT designs
+Chapter 6 at the **minimum as-built** Lφ from `L_vs_Vin_table`. Those are different quantities, and
+`R_IC ∝ 1/|T_u|` scales with Lφ. This was not touched by C268–C270, so it does not explain a change
+*between two runs* on its own — but it does mean the GUI and report can design different loops, and
+it should be resolved before chasing anything subtler.
+
+**What to ask for:** the before/after R_IC, C1, C2 and f_ci, plus Lφ shown on Screen 1. Without
+those this is guesswork, and guesswork has already been wrong twice here.
+
+*Original (ruled out):* C269 made Screen 2 reconcile a rehydrated
+selection against the currently-offered options, which is right when the stored value is invalid —
+but it happens **silently**, and one of those values is R_CS.
+
+R_CS is not cosmetic: `R_IC ∝ 1/R_CS` in the current loop, so C1/C2 move inversely. For this design
+the valid band is 11.54–12.36 mΩ, i.e. **12 mΩ is the only option** — a stored 15 mΩ is reset to 12,
+giving a 25 % larger R_IC and 20 % smaller caps *at the same crossover*. The designer reported
+exactly that symptom ("same f_ci, different current-loop components") and asked whether the R_RI fix
+caused it. It did not — R_RI appears nowhere in the loop (verified: `TiUnc = plantI(L, Vout, Co,
+r_L, r_C) × Hcs(rf, cf) × R_CS/V_ramp`; the achieved f_SW is display-only).
+
+**Action once confirmed:** a reconcile that changes R_CS (or R_LS) must announce itself — the caps
+already show an amber `calc` note, and a reset that alters the loop deserves at least as much. Do
+not implement before the designer confirms R_CS actually changed between their two runs; the cause
+is a hypothesis, and it is the kind that has been wrong before (see B23).
+
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
 Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
