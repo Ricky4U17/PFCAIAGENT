@@ -125,7 +125,17 @@ guard fires, either fix the subject or fix the guard the same day.
 ## 9. Shell and numpy traps that have each cost real time
 
 - **Backticks in a bash heredoc are command substitution.** Ate field names out of three docs and
-  a commit message. Use the Edit tool or a Python file for anything containing backticks.
+  a commit message — and then, at C267, ate every backticked identifier out of the changelog entry
+  that was *documenting this list*, leaving prose full of holes and a cheerful "logged" on stdout.
+  Five occurrences. Use the Edit tool or a Python file written via Write for anything containing
+  backticks; never pass prose through a shell string. Note the failure is SILENT in the exit code:
+  the script reported success because the substitutions merely produced empty strings.
+- **Probe Vite on `localhost:5173`, never `127.0.0.1:5173`.** Vite binds IPv6 loopback (`::1`)
+  only, so a `127.0.0.1` curl returns connection-refused against a perfectly healthy dev server.
+  Cost one restart hunt at C267 — and a false "the frontend is down" is worse than no check, since
+  the reflex it triggers is to restart something that was working. Uvicorn binds `127.0.0.1`, so
+  the backend is reachable either way. `Get-NetTCPConnection` shows the true binding. A behaviour
+  check aimed at the wrong address is not a behaviour check.
 - **`\n` in a heredoc** produced unterminated string literals repeatedly. Use `chr(10)` or Edit.
 - **`arr or []` on numpy output** raises *"truth value of an array is ambiguous"*. Never use `or`
   as a None-guard on engine output.
