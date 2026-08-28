@@ -1,7 +1,9 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-26**, head = **`e0354c6` C266**, on `master`.
-Suite: **741 passed, 3 skipped** (~18 min). Frontend `tsc --noEmit`: clean.
+**Start here after a restart.** Last updated **2026-08-27**, head = **`0709203` C267**, on `master`.
+Suite: **769 collected** — 741 passed / 3 skipped at C266, plus C267's 25 runtime-data-file checks
+(C267 is test-only and docs; the guards it touches pass, the full 3 h suite has not been re-run
+since C266). Frontend `tsc --noEmit`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
 
