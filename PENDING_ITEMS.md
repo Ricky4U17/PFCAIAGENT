@@ -129,10 +129,33 @@ docstrings) — nothing opens them, nothing broke. The genuinely exposed categor
 1. ~~**Commit the untracked workbooks**~~ **DONE at C253.** There were TWO, not one: `ferroxcube_cores_database (1).xlsx` AND `Power_Relays_Database.xlsx` (loaded by `inputprotection/database.py`). Both are now tracked, so every workbook in that folder is recoverable. Original text: it is currently UNTRACKED, so
    deleting it is PERMANENT. Every other workbook in that folder is tracked and recoverable. This is
    the only unrecoverable exposure; highest value, smallest effort.
-2. **Add a startup/test check** asserting the runtime-loaded workbooks exist. A folder cannot give
+2. ~~**Add a startup/test check** asserting the runtime-loaded workbooks exist.~~ **DONE at C267**
+   — `backend/tests/test_runtime_data_files.py`, 25 checks. Original text: A folder cannot give
    this: it turns a silent breakage into an immediate failure, and would have caught the deletion on
    day one instead of it sitting unnoticed. (The accident was a DETECTION failure, not a protection
    failure — git already protected the files.)
+
+   Built to check THREE properties per family, because each fails on its own: **resolves** (a source
+   exists), **loads** (it yields a real header and a data row — a zero-byte file passes
+   `os.path.exists` and still breaks the page), **tracked** (git can recover a deletion). Families
+   are discovered from the module's own `*_src_path` resolvers and `_SRC` dict, so a sixth workbook
+   is covered without editing the test; `test_the_enumeration_found_something` fails if a rename
+   ever empties the scan. MOV and GDT are classified OPTIONAL — `load_mov`/`load_gdt` return `[]`
+   and fall back to the built-in catalog — so they must load and be tracked *if present* but are
+   not required to exist.
+
+   **Two things found while building it.** (a) The first draft reimplemented the path lookup and was
+   wrong within minutes — the fuse family searches `specs/Improvements/FUSE`, which the
+   reimplementation did not know about, and the fuse sheet has TITLE rows above its header so the
+   generic `_rows` read the title as a one-column header. It now calls `*_src_path()` and the
+   family's own reader; a check that reimplements what it checks verifies something else.
+   (b) `MOV_Combined_Database.xlsx` and `GDT_Combined_Database.xlsx` under `specs/Improvements/MOV/`
+   are UNTRACKED — but **not an exposure**: the resolver prefers the `inputprotection/data/` copies
+   and those are tracked. Left alone deliberately; tracking a second copy of a tracked file is the
+   C244 duplicate-asset trap.
+
+   All four failure modes were verified to fire (deleted / zero-byte / misplaced header / untracked,
+   the last against a real untracked workbook) with a healthy family as the negative control.
 3. **Create `specs/Reference/`** for the PROVENANCE documents only. **Leave `specs/Database/` where
    it is** — moving it means editing the hard-coded `_SPEC` path in `inputprotection/database.py`
    and re-testing every selector. Two folders with distinct jobs: `Database/` = the code reads this,

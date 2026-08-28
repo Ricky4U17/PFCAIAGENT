@@ -10941,3 +10941,65 @@ reading as zero, stale checks crying wolf, the shell/numpy traps, and the crest-
 per-phase-vs-system family. Ordered by recurrence.
 
 VERIFIED 4 note tests pass; probe caught after widening.
+
+---
+
+# C267 - the runtime workbooks now fail loudly when they go missing (closes PENDING A10.2)
+
+A10 was opened by an accidental deletion of `specs/` files that nobody noticed for a whole session.
+The reason it stayed invisible is that the loaders only run when a designer opens the relevant page:
+everything imports, the suite is green, and the NTC / fuse / MOV / GDT / semiconductor selectors
+come up EMPTY with no error raised anywhere. A10 action 1 (track the workbooks) was closed at C253.
+Action 2 - detection - was still open.
+
+`backend/tests/test_runtime_data_files.py`, 25 checks over 9 workbook families.
+
+## Three properties, because each fails on its own
+
+  * **resolves** - production's own resolver finds a file
+  * **loads** - it yields a real header and a data row. Presence is not content: a zero-byte or
+    half-synced file passes `os.path.exists` and still breaks the page.
+  * **tracked** - git holds it, so a deletion is recoverable instead of permanent
+
+## The list is enumerated, not written down
+
+Families are discovered from the module's own `*_src_path` resolvers and the semiconductor `_SRC`
+dict. Add a sixth workbook family and it is covered without touching the test. Every hand-written
+list in this repo has gone stale - A10.1 said ONE untracked workbook and there were two, the
+download guard named seven sites and there were eight, the iframe guard named two and there were
+three - so `test_the_enumeration_found_something` asserts the scan is non-empty and still names the
+four families it expects. Rename the resolvers and that fails rather than silently covering nothing.
+
+MOV and GDT are OPTIONAL: `load_mov`/`load_gdt` return `[]` when their resolver finds nothing and
+the engine falls back to the built-in `MOV_CATALOG`. They must load and be tracked if present, but
+are not required to exist.
+
+## The first draft reimplemented the lookup and was wrong within minutes
+
+It walked `_DATA` then `_SPEC` and used the generic `_rows` for everything. Both halves were wrong:
+the fuse family resolves through `_FUSE_SPEC` (`specs/Improvements/FUSE`), a directory the
+reimplementation had never heard of, and the fuse sheet carries TITLE rows above the real header, so
+`_rows` read "Fuse Database" as a one-column header. That is why `_fuse_rows` exists, and the module
+comment says so. It now calls `*_src_path()` and pairs each family with its own reader.
+
+A check that reimplements what it is checking verifies a different thing than production does. This
+is the same class as C244 (the edit landing in the copy nobody serves) pointed at test code.
+
+## MOV/GDT untracked under specs/ - looked like a finding, is not
+
+`MOV_Combined_Database.xlsx` and `GDT_Combined_Database.xlsx` under `specs/Improvements/MOV/` are
+untracked, which reads as the exact A10 exposure. It is not: the resolver PREFERS
+`inputprotection/data/`, and both copies there are tracked. Left deliberately - tracking a second
+copy of an already-tracked file is the C244 duplicate-asset trap, where the edit goes to the copy
+nobody loads. Nearly recorded as a finding by stopping one step early.
+
+## Verified by reintroducing every failure
+
+Deleted workbook, zero-byte workbook, header in the wrong place, and untracked file - the last
+against a real specimen, the FAN967X design-tool workbook the designer had just dropped in - each
+fires its own assertion, with a healthy ICL family as the negative control passing all three.
+
+Also tracked `FAN967X BOOST PFC DESIGN TOOL.XLSX`: nothing reads it, but its four siblings in
+`specs/Controller/FAN9672 Reference Documents/` are tracked and it is reference material.
+
+VERIFIED 25 passed; all four failure modes fire; negative control passes.

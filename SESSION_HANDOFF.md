@@ -34,6 +34,22 @@ Frontend: `npm run dev` in `frontend/` (port 5173).
 `/mode-b/design-state/waveforms` returns a `dcm` key, or that Ch7's `P_D_cond` at 90 Vac reads
 7.1957 rather than 7.1758.
 
+**Probe Vite on `localhost:5173`, never `127.0.0.1:5173`.** Vite binds IPv6 loopback (`::1`) only,
+so a `127.0.0.1` curl returns connection-refused against a perfectly healthy dev server — that
+false alarm has already triggered one unnecessary restart hunt. `Get-NetTCPConnection` shows the
+real binding: `LocalAddress ::1, LocalPort 5173`. Uvicorn binds `127.0.0.1`, so either address
+works for the backend. A behaviour check aimed at the wrong address is not a behaviour check —
+confirm the title too:
+
+```bash
+curl -s http://localhost:5173/ | grep -o "<title>[^<]*</title>"   # -> PFC AI — Mode A Hardened v1
+curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+     -d "{}" http://127.0.0.1:8000/mode-b/design-state                # -> 422, never 200
+```
+
+That 422 is itself a health check: `{}` is not an approval, so a 200 here means the no-silent-
+defaults rule has been broken.
+
 ## The Design Explorer (animation page) — C256 → C266
 
 GUI-only, read-only, additive, gated on all ten chapters. Scope and every settled constraint:
