@@ -177,14 +177,29 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         vlpk_rows.append([f"{vac} Vac / HV", f"{iac*1e6:.3f}", f"{vl:.4f}", st])
     out["step3_2"] = {"rows": vlpk_rows}
 
-    # ── Step 4 — oscillator R_RI, COMPUTED from f_SW (FAN9672-D, 50–75 kHz range) ─
-    # FAN9672-D oscillator: the RI pin sources 1.2 V/R_RI; the per-phase switching
-    # frequency follows  f_SW = 1.2e9 / (R_RI + 3430)  ⇒  R_RI = 1.2e9/f_SW − 3430.
-    # At 70 kHz this gives 13.71 kΩ → nearest E96 13.7 kΩ (f_SW = 70.05 kHz).
+    # ── Step 4 — oscillator R_RI, COMPUTED from f_SW (FAN9672-D: 18–40 or 55–75 kHz) ─
+    # FAN9672-D eq. 3 (datasheet p.14):  f_OSC = 8e8 / R_RI  ⇒  R_RI = 8e8 / f_SW.
+    # The RI pin sources 1.2 V/R_RI — that part was always right, and AN4165-D eq. 35/36
+    # mirror it into I_ILIMIT / I_ILIMIT2 further down this function.
+    #
+    # C268. This used to be  f_SW = 1.2e9 / (R_RI + 3430), a form that appears in NO reference
+    # document in this repo — not the datasheet, not AN4165-D, AN5257 or AND9925-D. It put
+    # 13.7 kΩ on the BOM for a 70 kHz design, and that resistor actually runs the part at
+    # 58.4 kHz: 16.6 % below the frequency Chapters 4–7 are all designed at. Eq. 3 reproduces
+    # both datasheet test cases (25 kΩ → 32 kHz typ, 12.5 kΩ → 62 kHz typ) and the AN4165-D
+    # worked example (40 kHz at 20 kΩ) exactly; the old form missed all three, and mapped the
+    # datasheet's own 10.7 kΩ minimum to 84.9 kHz — past the part's 75 kHz ceiling.
+    #
+    # R_RI also scales I_ILIMIT/I_ILIMIT2, so R_ILIMIT and R_ILIMIT2 move with it. The clamp
+    # THRESHOLD depends on the ratio R_ILIMIT/R_RI, so changing R_RI alone would silently push
+    # the command clamp from 1.81x to 2.16x, outside the 1.2–2.0x window. They must move
+    # together, which they do because both are computed from `rri` below.
+    #
+    # At 70 kHz: 11.43 kΩ → nearest E96 11.5 kΩ (f_SW = 69.57 kHz).
     def _rri_from_fsw(fsw):
-        return 1.2e9 / fsw - 3430.0
+        return 8.0e8 / fsw
     def _fsw_from_rri(rri):
-        return 1.2e9 / (rri + 3430.0)
+        return 8.0e8 / rri
     rri_calc = _rri_from_fsw(p["fsw"])
     rri_sel = _nearest_e96(rri_calc)
     fsw_sel = _fsw_from_rri(rri_sel)

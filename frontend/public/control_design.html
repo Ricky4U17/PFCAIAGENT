@@ -451,6 +451,11 @@ const E24=[1.0,1.1,1.2,1.3,1.5,1.6,1.8,2.0,2.2,2.4,2.7,3.0,3.3,3.6,3.9,4.3,4.7,5
 const E12=[1.0,1.2,1.5,1.8,2.2,2.7,3.3,3.9,4.7,5.6,6.8,8.2];
 const SERIES={E96,E24,E12};
 const SHUNTS=[8,10,12,13,15,16,18,20,22,25,30];
+/* FAN9672-D eq. 3 (datasheet p.14): f_OSC = 8e8/R_RI. ONE definition, used at every site.
+   C268 replaced a fabricated form that was copied to nine call sites and appears in no
+   datasheet or app note we hold. It specified 13.7k for a 70 kHz design, and that resistor
+   actually runs the part at 58.4 kHz. Full account: IMPLEMENTATION_LOG C268. */
+const rriFromFsw=fsw=>8e8/fsw, fswFromRri=rri=>8e8/rri;
 const $=id=>document.getElementById(id);
 
 /* ============ complex helpers ============ */
@@ -1040,7 +1045,7 @@ function renderAux(p){
   const kClamp=+$('ilClamp').value, k2=+$('il2K').value;
   const ilFp=+$('ilFp').value*1e3, gcFp=+$('gcFp').value*1e3, lsFp=+$('lsFp').value*1e3;
   const rcs=state.rcsSel*1e-3;
-  const rriStd=nearestStd(1.2e9/p.fsw-3430,'E96');
+  const rriStd=nearestStd(rriFromFsw(p.fsw),'E96');
   const pill=(ok,t)=>`<span class="pill ${ok?'ok':'bad'}">${t}</span>`;
   // --- Soft start (Eq. 64) ---
   // C_SS: only t_SS is user-adjustable; the standard cap is suggested (read-only), not selectable.
@@ -1107,7 +1112,7 @@ function renderAux(p){
 function renderSchematic(p,dci,dcv,aux){
   const fo=fmtOhm,fc2=fmtCap;
   const rfb1Calc=p.rfb2*(p.vout/FIXED.VREF-1), rfbEach=nearestStd(rfb1Calc/3,'E96');
-  const rri=nearestStd(1.2e9/p.fsw-3430,'E96');
+  const rri=nearestStd(rriFromFsw(p.fsw),'E96');
   const rcs=state.rcsSel;
   const s=[];
   const W=(x1,y1,x2,y2)=>s.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8fa3c8" stroke-width="1.3"/>`);
@@ -1584,7 +1589,7 @@ const PRESET_FCV={base:17,A:12,B:20,C:25};
 function renderCore(p,rcsInfo,dci,dcv,aux){
   const vacMax=state.mode==='low'?132:264;
   // RRI (Step 4)
-  const rriCalc=1.2e9/p.fsw-3430;
+  const rriCalc=rriFromFsw(p.fsw);
   // FB divider (Step 5)
   const ratio=p.vout/FIXED.VREF-1, rfb1Calc=p.rfb2*ratio;
   const rfbEach=nearestStd(rfb1Calc/3,'E96'), rfb1Std=3*rfbEach;
@@ -1607,7 +1612,7 @@ function renderCore(p,rcsInfo,dci,dcv,aux){
   const compCur=state.cType==='T1'?`C_IC=${fmtCap(dci.std.CIC)}`:`R_IC=${fmtOhm(dci.std.RIC)}, C_IC1=${fmtCap(dci.std.C1)}, C_IC2=${fmtCap(dci.std.C2)}`;
   const compVol=dcv.err?'—':(state.vType==='type2'?`R2=${fmtOhm(dcv.std.R2)}, C1=${fmtCap(dcv.std.C1)}, C3=${fmtCap(dcv.std.C3)}`
     :`R2=${fmtOhm(dcv.std.R2)}, R3=${fmtOhm(dcv.std.R3)}, C1=${fmtCap(dcv.std.C1)}, C2=${fmtCap(dcv.std.C2)}, C3=${fmtCap(dcv.std.C3)}`);
-  const rriStd=nearestStd(rriCalc,'E96'), fswAct=1.2e9/(rriStd+3430);
+  const rriStd=nearestStd(rriCalc,'E96'), fswAct=fswFromRri(rriStd);
   const rows=[
     ['Component','Calculated','Selected','Check','Function'],
     ['R_RI',fmtOhm(rriCalc),fmtOhm(rriStd),'fSW ≈ '+fmtHz(fswAct)+' — verify on scope','Oscillator frequency'],
@@ -1759,7 +1764,7 @@ async function generateReport(){
   const ratio=(p.r1fb+p.r4fb)/p.r4fb;
   const rfb1Calc=p.rfb2*(p.vout/FIXED.VREF-1), rfbEach=nearestStd(rfb1Calc/3,'E96'), rfb1Std=3*rfbEach;
   const voutAct=FIXED.VREF*(1+rfb1Std/p.rfb2);
-  const rriCalc=1.2e9/p.fsw-3430, rriStd=nearestStd(rriCalc,'E96'), fswAct=1.2e9/(rriStd+3430);
+  const rriCalc=rriFromFsw(p.fsw), rriStd=nearestStd(rriCalc,'E96'), fswAct=fswFromRri(rriStd);
   const rcs=state.rcsSel*1e-3, den=8*p.krlpk*p.krlpk*p.rrlpk*p.rrlpk;
   const g=rcsInfo.g, ops=opPts(p,'all');
   const pl=op=>plantI(p,op.vac,op.pout,1000);
@@ -1947,12 +1952,12 @@ async function generateReport(){
   H1('Step 4 — Oscillator Resistor for Selected f_SW');
   H2('4.1 Oscillator Equation and R_RI Calculation');
   CON('R_RI programs the per-phase switching frequency; it also sets the mirrored pin currents used by ILIMIT and ILIMIT2 (Step 8.4), so it must be selected before the current limits.');
-  F('R_RI = 1.2×10⁹ / f_SW − 3430  =  1.2×10⁹ / '+fmt(p.fsw,0)+' − 3430  =  '+fo(rriCalc));
+  F('R_RI = 8×10⁸ / f_SW  =  8×10⁸ / '+fmt(p.fsw,0)+'  =  '+fo(rriCalc));
   H2('4.2 Standard Value Selection');
   TBL([['Candidate (E96)','Resulting f_SW','Deviation from target'],
-    [fo(nearestList(rriCalc,'E96',3)[0]),fmtHz(1.2e9/(nearestList(rriCalc,'E96',3)[0]+3430)),fmt(100*(1.2e9/(nearestList(rriCalc,'E96',3)[0]+3430)/p.fsw-1),2)+' %'],
+    [fo(nearestList(rriCalc,'E96',3)[0]),fmtHz(fswFromRri(nearestList(rriCalc,'E96',3)[0])),fmt(100*(fswFromRri(nearestList(rriCalc,'E96',3)[0])/p.fsw-1),2)+' %'],
     ['<b>'+fo(rriStd)+' (selected)</b>','<b>'+fmtHz(fswAct)+'</b>','<b>'+fmt(100*(fswAct/p.fsw-1),2)+' %</b>'],
-    [fo(nearestList(rriCalc,'E96',3)[2]),fmtHz(1.2e9/(nearestList(rriCalc,'E96',3)[2]+3430)),fmt(100*(1.2e9/(nearestList(rriCalc,'E96',3)[2]+3430)/p.fsw-1),2)+' %']]);
+    [fo(nearestList(rriCalc,'E96',3)[2]),fmtHz(fswFromRri(nearestList(rriCalc,'E96',3)[2])),fmt(100*(fswFromRri(nearestList(rriCalc,'E96',3)[2])/p.fsw-1),2)+' %']]);
   DEC('R_RI = '+fo(rriStd)+' → f_SW ≈ '+fmtHz(fswAct)+'. Verify the actual frequency on the bench; the oscillator equation has part-to-part spread.');
   // ================= STEP 5 =================
   H1('Step 5 — Output Sensing and PVO');
@@ -2268,7 +2273,7 @@ async function generateReport(){
     ['[5]','FAN9672-CL-001 Rev 2.0 — prior revision of this document']]);
   H1('Appendix E — Equation Quick-Reference Card');
   TBL([['Quantity','Equation','This design'],
-    ['R_RI','1.2×10⁹/f_SW − 3430',fo(rriStd)],
+    ['R_RI','8×10⁸ / f_SW  (FAN9672-D eq. 3)',fo(rriStd)],
     ['R_FB1','R_FB2·(V_OUT/2.5 − 1)','3 × '+fo(rfbEach)],
     ['I_AC,pk','√2·V_AC,max/R_IAC ≤ 65 µA',fmt(Math.SQRT2*132/6e6*1e6,1)+' µA'],
     ['R_CS (M1)','V²_IN,min·G_max·R_M/(R_IAC·P_ch)',fmt(g.rcsAN*1e3,2)+' mΩ'],

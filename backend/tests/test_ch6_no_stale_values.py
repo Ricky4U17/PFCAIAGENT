@@ -30,21 +30,27 @@ import pytest
 
 
 def _capture(fsw):
-    """Strings passed to eq_box / body while Chapter 6 builds at this switching frequency."""
+    """Strings passed to eq_box / body / annotation while Chapter 6 builds at this f_SW.
+
+    `annotation` was added at C268: the DECISION lines render through it, and one of them
+    ("Use R_RI = 13.7 kOhm") was a hardcoded literal that this file existed to catch and could
+    not see. A capture that covers three of the four text sinks silently exempts the fourth.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import app.mode_b.report_steps1_8 as R
 
     seen = []
-    orig_eq, orig_body = R.eq_box, R.body
+    orig_eq, orig_body, orig_ann = R.eq_box, R.body, R.annotation
     R.eq_box = lambda story, eqs, **kw: seen.append(("eq", list(eqs)))
     R.body = lambda story, txt, *a, **k: seen.append(("body", txt))
+    R.annotation = lambda story, kind, txt, *a, **k: seen.append(("body", txt))
     try:
         R.build_control_report({"fsw": fsw})
     except Exception:
         pass          # the PDF build may bail after the story; the captured strings are the point
     finally:
-        R.eq_box, R.body = orig_eq, orig_body
+        R.eq_box, R.body, R.annotation = orig_eq, orig_body, orig_ann
     return [s for kind, v in seen for s in (v if kind == "eq" else [v]) if isinstance(s, str)]
 
 
@@ -65,14 +71,37 @@ def _one(strings, must_contain):
 
 
 def test_the_r_ri_worked_equation_tracks_the_switching_frequency(at70, at60):
-    """6.4.1. The line under a caption that says "not hardcoded" was hardcoded."""
-    e70 = _one(at70, ("3430", "calculated"))
-    e60 = _one(at60, ("3430", "calculated"))
+    """6.4.1. The line under a caption that says "not hardcoded" was hardcoded.
+
+    C268 also changed WHICH equation belongs here. This used to anchor on "3430", from
+    f_SW = 1.2e9/(R_RI + 3430) - a form that appears in no datasheet or app note in this repo.
+    The correct one is FAN9672-D eq. 3, f_OSC = 8e8/R_RI. Anchoring a "does it track?" test on
+    the artefacts of a formula is what let a wrong formula stay green: the test only ever asked
+    whether the number moved, never whether it was right. So this now checks both.
+    """
+    e70 = _one(at70, ("times10^{8}", "calculated"))
+    e60 = _one(at60, ("times10^{8}", "calculated"))
     assert r"70\,000" in e70, f"70 kHz build does not show its own frequency: {e70}"
     assert r"60\,000" in e60, f"60 kHz build still shows a stale frequency: {e60}"
-    # the intermediate 1.2e9/f_sw must move too - it was frozen at 17.143 k
-    assert "17.143" in e70 and "20.000" in e60, (
-        f"the 1.2e9/f_sw intermediate is not tracking:\n  70k: {e70}\n  60k: {e60}")
+    # the computed R_RI must move with f_SW: 8e8/70k = 11.43 k, 8e8/60k = 13.33 k
+    assert "11.43" in e70 and "13.33" in e60, (
+        f"the computed R_RI is not tracking f_SW:\n  70k: {e70}\n  60k: {e60}")
+    # and the discredited form must not come back anywhere in the chapter
+    stale = [s for s in at70 if "3430" in s]
+    assert not stale, f"the pre-C268 oscillator equation is back: {stale[:2]}"
+
+
+def test_the_r_ri_decision_line_is_not_hardcoded(at70, at60):
+    """6.4 DECISION. It read "Use R_RI = 13.7 kOhm" as a literal (C268).
+
+    It agreed with the table above it only while f_SW happened to be 70 kHz - the exact defect
+    the C238 comment one annotation earlier warns about. At 60 kHz it contradicted its own table.
+    """
+    d70 = _one(at70, ("Use R", "oscilloscope"))
+    d60 = _one(at60, ("Use R", "oscilloscope"))
+    assert "11.5" in d70, f"70 kHz decision does not name the selected R_RI: {d70}"
+    assert "13.3" in d60, f"60 kHz decision still shows a stale R_RI: {d60}"
+    assert "13.7" not in d70, f"the hardcoded 13.7 kOhm is back: {d70}"
 
 
 def test_the_gain_modulator_denominator_uses_the_engine_constants(at70):

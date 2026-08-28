@@ -169,17 +169,21 @@ def build_steps_1_8(story, data: dict):
         "Both loop crossover frequencies (f<sub>ci</sub>, f<sub>cv</sub>) are design choices entered "
         "in the GUI — they are inputs to the loop design, not fixed constants.", C6)
     body(story, "The FAN9672-D oscillator (the RI pin sources 1.2 V/R<sub>RI</sub>) sets the "
-                "per-phase frequency in its 50–75 kHz range. R<sub>RI</sub> is computed from the "
-                "target f<sub>SW</sub> — not hardcoded:", C6)
+                "per-phase frequency. The part offers two programmable bands — 18–40 kHz and "
+                "55–75 kHz — and the 40–55 kHz gap between them is not a legal setting. "
+                "R<sub>RI</sub> is computed from the target f<sub>SW</sub> — not hardcoded:", C6)
     # The prose directly above states R_RI is "computed from the target f_SW - not hardcoded", and
     # this worked line used to hardcode 70,000 and the 17.143 k intermediate while printing a LIVE
     # answer. Change f_sw and the equation contradicted its own caption (C238).
+    #
+    # C268: the equation itself was wrong - 1.2e9/(R_RI + 3430), which is in no datasheet or app
+    # note we hold. FAN9672-D eq. 3 (p.14) is f_OSC = 8e8/R_RI. See step16_steps1_8.py for the
+    # three independent datasheet checks that settle it.
     _fsw641 = float((data.get("inputs") or {}).get("fsw", 70000) or 70000)
-    eq_box(story, [r"f_{SW}=\dfrac{1.2\times10^{9}}{R_{RI}+3430}\ \mathrm{Hz}\quad(R_{RI}\ \mathrm{in}\ \Omega)",
-                   r"R_{RI}=\dfrac{1.2\times10^{9}}{f_{SW}}-3430",
-                   r"R_{RI}=\dfrac{1.2\times10^{9}}{%s}-3430=%.3f\,\mathrm{k}-3.43\,\mathrm{k}=%.2f\ \mathrm{k\Omega}\ \ (\mathrm{calculated})"
-                   % (f"{_fsw641:,.0f}".replace(",", r"\,"), 1.2e9 / _fsw641 / 1e3,
-                      s4["rri_calc"] / 1e3)],
+    eq_box(story, [r"f_{OSC}=\dfrac{8\times10^{8}}{R_{RI}}\ \mathrm{Hz}\quad(R_{RI}\ \mathrm{in}\ \Omega)\qquad\mathrm{(FAN9672\text{-}D\ eq.\ 3)}",
+                   r"R_{RI}=\dfrac{8\times10^{8}}{f_{SW}}",
+                   r"R_{RI}=\dfrac{8\times10^{8}}{%s}=%.2f\ \mathrm{k\Omega}\ \ (\mathrm{calculated})"
+                   % (f"{_fsw641:,.0f}".replace(",", r"\,"), s4["rri_calc"] / 1e3)],
            heading="Oscillator resistor", number="6.4.1", ch=C6)
     sub_h(story, "6.4.2", "Standard Value Selection", C6)
     data_table(story, "6.4.1", "R_RI Standard-Value Candidates (computed)",
@@ -187,9 +191,16 @@ def build_steps_1_8(story, data: dict):
         % (s4["rri_calc"], s4["rri_selected"]/1e3, s4["fsw_at_selected"]/1e3),
         ["R_RI Value", "Resulting f_SW", f"Deviation from {data.get('inputs',{}).get('fsw',70000)/1000:.0f} kHz", "Recommendation"],
         s4["rows"], col_widths=[CW*0.18, CW*0.22, CW*0.28, CW*0.32], ch=C6)
+    # C268: this line hardcoded "13.7 kΩ" and agreed with the table above it only while f_SW
+    # happened to be 70 kHz - the same defect the C238 comment above warns about, one annotation
+    # further down. It now reads the selected value like every other number on this page.
     annotation(story, "DECISION",
-        "Use R<sub>RI</sub> = 13.7 kΩ (1%). Verify the exact switching frequency on an oscilloscope "
-        "at nominal V<sub>DD</sub> during bring-up.", C6)
+        "Use R<sub>RI</sub> = %.1f k&#8486; (1%%) — the nearest E96 value to the computed "
+        "%.0f &#8486;, which gives f<sub>SW</sub> = %.2f kHz (%+.2f%% from the %.0f kHz target). "
+        "Verify the exact switching frequency on an oscilloscope at nominal V<sub>DD</sub> during "
+        "bring-up."
+        % (s4["rri_selected"] / 1e3, s4["rri_calc"], s4["fsw_at_selected"] / 1e3,
+           100.0 * (s4["fsw_at_selected"] / _fsw641 - 1.0), _fsw641 / 1e3), C6)
 
     # ═══════════════ Step 5 ═══════════════
     s5 = data["step5"]

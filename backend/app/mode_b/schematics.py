@@ -369,7 +369,10 @@ def fan9672_application_schematic(v, is_high=False, max_frac=1.0, _resolved=None
     y = rowY(1); W(505, y, 468, y); W(468, y, 468, y+8); GND(468, y+10); T(452, y-4, "0 V — disabled", "t", "end")
     y = rowY(2); rcGndH(462, y, fo(g("r_ilimit_sel")), "R_ILIMIT", fc(g("cil", 18e-9)), "C_ILIMIT"); W(462, y, 505, y)
     y = rowY(3); rcGndH(312, y, fo(g("r_gc_sel")), "R_GC", fc(g("c_gc")), "C_GC"); W(312, y, 505, y)
-    y = rowY(4); NODE(468, y); W(468, y, 505, y); RH(430, y, fo(g("rri", 13700.0)), "R_RI"); W(396, y, 382, y); GND(382, y+2)
+    # C268: the R_RI fallback was 13700.0, from the discredited oscillator equation. The live
+    # value is passed in and wins, so this only showed when `rri` was absent - which is exactly
+    # when a stale default is least likely to be noticed. 11.5 k is 8e8/70 kHz per FAN9672-D eq. 3.
+    y = rowY(4); NODE(468, y); W(468, y, 505, y); RH(430, y, fo(g("rri", 11500.0)), "R_RI"); W(396, y, 382, y); GND(382, y+2)
     y = rowY(5); rcGndH(462, y, fo(g("rrlpk", 15e3)), "R_RLPK", fc(g("crlpk", 1e-9)), "C_RLPK"); W(462, y, 505, y)
     y = rowY(6); rcGndH(312, y, fo(g("r_ilimit2_sel")), "R_ILIMIT2", fc(g("cil2", 75e-9)), "C_ILIMIT2"); W(312, y, 505, y)
     y = rowY(7); W(476, y, 505, y); RH(442, y, fo(g("rpin8", 1e3)), "R_pin8"); NODE(404, y)
