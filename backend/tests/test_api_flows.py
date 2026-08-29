@@ -278,3 +278,146 @@ class TestTheLibraryLifecycle:
                         json={"part_number": part}).status_code == 200
         lib = api.get("/mode-b/semiconductor/datasheet/library").json()
         assert not any(p["part_number"] == part for p in lib["parts"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# B19 — the RASTER path, driven end to end in the order the Curves tab calls it.
+#
+# THIS CLASS IS THE POINT OF B19'S SECOND HALF. C276 built the tracer and proved it against the
+# part's own table, and it was still unreachable from the screen. C215, C224 and C225 EACH shipped
+# curve work that passed every unit test and was dead in the GUI, because no test ran the endpoints
+# in sequence — and this file exists because of that. So the raster path gets its sequence test in
+# the same commit as its wiring, not afterwards.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+_TOSHIBA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "specs", "Review", "PFC Boost Diode",
+    "TRS12E65H_datasheet_en_20230411.pdf")
+
+# What a designer reads off Fig. 9.1 and types in.
+_TOSHIBA_AXES = {"x_min": 0.0, "x_max": 2.0, "y_min": 0.0, "y_max": 12.0,
+                 "x_title": "Forward voltage V_F (V)", "y_title": "Forward current I_F (A)"}
+
+
+@pytest.fixture(scope="module")
+def toshiba():
+    if not os.path.exists(_TOSHIBA):
+        pytest.skip("TRS12E65H datasheet not available")
+    with open(_TOSHIBA, "rb") as f:
+        return f.read()
+
+
+def _upload_diode(api, pdf, part="APITEST-RASTER"):
+    r = api.post("/mode-b/semiconductor/datasheet/upload",
+                 files={"file": ("ds.pdf", io.BytesIO(pdf), "application/pdf")},
+                 data={"kind": "diode", "device_class": "sic_schottky", "part_number": part})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _raster_candidates(api, pdf):
+    r = api.post("/mode-b/semiconductor/datasheet/raster-figures",
+                 files={"file": ("ds.pdf", io.BytesIO(pdf), "application/pdf")})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _raster_digitise(api, pdf, cand, part, key="V_F_vs_IF", **over):
+    data = {"page": cand["page"], "xref": cand["xref"], "key": key,
+            "part_number": part, **_TOSHIBA_AXES}
+    data.update(over)
+    r = api.post("/mode-b/semiconductor/datasheet/raster-digitise",
+                 files={"file": ("ds.pdf", io.BytesIO(pdf), "application/pdf")},
+                 data={k: str(v) for k, v in data.items()})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+class TestTheRasterCurvesTabSequence:
+    """Upload -> list bitmaps -> read the axes off the picture -> digitise -> accept -> it is in
+    the profile. Every step is the real endpoint, in the order the screen calls them."""
+
+    def test_the_vector_endpoint_still_offers_nothing_for_this_file(self, api, toshiba):
+        """The premise. If `/figures` ever starts proposing here, the raster path is redundant and
+        this whole flow should be reconsidered rather than left running beside it."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        assert _proposals(api, toshiba, part) == {}
+
+    def test_the_bitmap_figures_are_listed_with_their_captions(self, api, toshiba):
+        """The designer picks from this list, so it has to say which figure each row is. The
+        captions are text even on a page whose figures are bitmaps."""
+        out = _raster_candidates(api, toshiba)
+        assert out["ok"] and len(out["candidates"]) >= 8
+        caps = " | ".join(c["caption"] for c in out["candidates"])
+        assert "Fig. 9.1" in caps and "IF - VF" in caps
+
+    def test_digitising_returns_a_proposal_in_the_ORDINARY_shape(self, api, toshiba):
+        """It must be indistinguishable from a vector proposal to the tab that renders it, or the
+        Curves UI would need a second code path — and a second path is where the two drift."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        cand = next(c for c in _raster_candidates(api, toshiba)["candidates"]
+                    if "9.1" in c["caption"])
+        out = _raster_digitise(api, toshiba, cand, part)
+        assert out["ok"], out.get("reason")
+        p = out["proposal"]
+        for field in ("key", "page", "frame", "caption", "axes", "x_range", "y_range",
+                      "n_curves", "curves", "cross_check", "per_temperature", "swapped"):
+            assert field in p, f"a vector proposal carries {field!r} and this one does not"
+        assert p["source"] == "raster" and p["calibration_source"] == "designer"
+        assert p["n_curves"] >= 4
+
+    def test_the_proposal_carries_the_table_cross_check(self, api, toshiba):
+        """The evidence, and the only gate on this path — there is no residual to report because
+        the axes were typed in, not fitted."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        cand = next(c for c in _raster_candidates(api, toshiba)["candidates"]
+                    if "9.1" in c["caption"])
+        p = _raster_digitise(api, toshiba, cand, part)["proposal"]
+        cc = p["cross_check"]
+        assert cc["checked"], f"nothing checked it against the table: {cc}"
+        assert cc["agrees"], f"the traced curve disagrees with the tabulated V_F: {cc}"
+
+    def test_a_wrong_axis_range_is_refused_by_the_cross_check(self, api, toshiba):
+        """The same figure against 0..10 A instead of 0..12 A traces perfectly well and is WRONG.
+        Nothing about the picture says so; only the table does."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        cand = next(c for c in _raster_candidates(api, toshiba)["candidates"]
+                    if "9.1" in c["caption"])
+        p = _raster_digitise(api, toshiba, cand, part, y_max=10.0)["proposal"]
+        assert p["n_curves"] >= 1, "the trace itself should still succeed"
+        assert not p["cross_check"]["agrees"], (
+            "a figure digitised against a wrong axis range still satisfied the table anchor")
+
+    def test_an_accepted_raster_curve_reaches_the_profile(self, api, toshiba):
+        """THE WHOLE SEQUENCE. The curve goes through the SAME figure-confirm the vector path
+        uses, lands under the same canonical key, and is stamped `digitised` like any other shape
+        read off a picture."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        cand = next(c for c in _raster_candidates(api, toshiba)["candidates"]
+                    if "9.1" in c["caption"])
+        p = _raster_digitise(api, toshiba, cand, part)["proposal"]
+        res = _accept(api, part, p)
+        assert res["ok"] and res["key"] == "V_F_vs_IF" and res["n_points"] > 50
+
+        from app.mode_b.semiconductor import parts_store as PS
+        prof = PS.load_profile(part, kind="confirmed")
+        entry = next(e for pm in prof["parameters"] if pm["key"] == "V_F_vs_IF"
+                     for e in pm["entries"] if e.get("provenance") == "digitised")
+        assert entry["source"]["page"] == 4
+        assert len(entry["typ"][0]) == res["n_points"]
+
+    def test_the_accepted_curve_is_the_forward_characteristic_the_right_way_round(self, api, toshiba):
+        """`V_F_vs_IF` is swapped on the way out, so the stored x is CURRENT and y is VOLTAGE. Get
+        this backwards and the engine reads a 12 V forward drop — the C215 transposed-axis bug,
+        which was worth -692 W before it was caught."""
+        part = _upload_diode(api, toshiba)["part_number"]
+        cand = next(c for c in _raster_candidates(api, toshiba)["candidates"]
+                    if "9.1" in c["caption"])
+        p = _raster_digitise(api, toshiba, cand, part)["proposal"]
+        _accept(api, part, p)
+        from app.mode_b.semiconductor import parts_store as PS
+        prof = PS.load_profile(part, kind="confirmed")
+        xs, ys = next(e["typ"] for pm in prof["parameters"] if pm["key"] == "V_F_vs_IF"
+                      for e in pm["entries"] if e.get("provenance") == "digitised")
+        assert max(xs) > 5.0, "x should be forward CURRENT, running to ~12 A"
+        assert 0.2 <= max(ys) <= 8.0, f"y should be a forward VOLTAGE, got up to {max(ys)}"

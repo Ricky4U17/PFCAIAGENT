@@ -674,6 +674,11 @@ export interface DsFigureProposal {
   per_temperature: boolean; swapped: boolean
   n_curves: number
   curves: DsCurve[]
+  /** 'raster' when the figure was a bitmap traced against designer-supplied axes (B19). Absent on
+   *  the vector path. `residual` is 0 for these — the axes were typed in, not fitted, so there is
+   *  nothing to take a residual of and the cross-check is the only evidence. */
+  source?: string
+  calibration_source?: string
   /** `curve_index` is WHICH trace matched the tabulated point. On a figure whose traces are
    *  different quantities rather than one quantity at several conditions — C_iss / C_oss / C_rss
    *  share a plot — that index is the only thing on the page that says which trace is the one the
@@ -691,6 +696,40 @@ export const datasheetFigures = (file: File, partNumber?: string) => {
     .then(async r => { if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
                        return r.json() as Promise<{ ok: boolean; proposals: DsFigureProposal[]
                                                     figures_seen: number; reason?: string }> })
+}
+/** A bitmap figure the vector digitiser cannot read (B19). Some vendors publish their curves as
+ *  images with no vector paths, and on such a page even the tick labels are pixels — so the axis
+ *  ranges are typed in by the designer, and the evidence is the cross-check against the part's own
+ *  table, never a calibration residual (there is nothing to fit). */
+export interface DsRasterCandidate {
+  page: number; page_index: number; xref: number
+  width: number; height: number
+  rect: number[]
+  frame_area_pct: number
+  caption: string
+}
+export const datasheetRasterFigures = (file: File) => {
+  const fd = new FormData(); fd.append('file', file)
+  return fetch(`${BASE}/mode-b/semiconductor/datasheet/raster-figures`,
+               { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+                       return r.json() as Promise<{ ok: boolean; reason?: string
+                                                    candidates: DsRasterCandidate[] }> })
+}
+/** Trace one bitmap figure against ranges the designer read off the printed plot. Returns an
+ *  ORDINARY DsFigureProposal, so the Curves tab renders it and `acceptCurve` confirms it by the
+ *  same road a vector curve takes. */
+export const datasheetRasterDigitise = (
+  file: File, b: { page: number; xref: number; key: string; part_number?: string
+                   x_min: number; x_max: number; y_min: number; y_max: number
+                   x_log?: boolean; y_log?: boolean; x_title?: string; y_title?: string }) => {
+  const fd = new FormData(); fd.append('file', file)
+  Object.entries(b).forEach(([k, v]) => { if (v !== undefined && v !== '') fd.append(k, String(v)) })
+  return fetch(`${BASE}/mode-b/semiconductor/datasheet/raster-digitise`,
+               { method: 'POST', body: fd })
+    .then(async r => { if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+                       return r.json() as Promise<{ ok: boolean; reason?: string
+                                                    proposal: DsFigureProposal | null }> })
 }
 export const datasheetFigureImage = (file: File, page: number, frame: number[]) => {
   const fd = new FormData(); fd.append('file', file); fd.append('page', String(page))

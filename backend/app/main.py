@@ -811,6 +811,49 @@ async def datasheet_figure_image(file: UploadFile = File(...), page: int = Form(
         log.exception("figure image"); raise HTTPException(500, str(e))
 
 
+@app.post("/mode-b/semiconductor/datasheet/raster-figures", tags=["mode-b"])
+async def datasheet_raster_figures(file: UploadFile = File(...)):
+    """The BITMAP figures in a datasheet (B19).
+
+    Some vendors publish their curves as images with no vector paths — the Toshiba TRS12E65H is
+    the file that forced this — and on such a page even the tick labels are pixels. `/figures`
+    reads nothing from them, correctly. This lists what is there so the designer can pick one,
+    read its axes off the printed plot, and have it traced."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    try:
+        return flow.raster_figure_candidates(await file.read())
+    except Exception as e:
+        log.exception("raster figures"); raise HTTPException(500, str(e))
+
+
+@app.post("/mode-b/semiconductor/datasheet/raster-digitise", tags=["mode-b"])
+async def datasheet_raster_digitise(
+        file: UploadFile = File(...), page: int = Form(...), xref: int = Form(...),
+        key: str = Form(...), part_number: str = Form(None),
+        x_min: float = Form(...), x_max: float = Form(...),
+        y_min: float = Form(...), y_max: float = Form(...),
+        x_log: bool = Form(False), y_log: bool = Form(False),
+        x_title: str = Form(""), y_title: str = Form("")):
+    """Trace one bitmap figure against the axis ranges the designer read off it (B19).
+
+    THE AXES ARE REQUIRED AND THAT IS THE DESIGN. On these figures the tick labels are pixels, so
+    there is nothing to fit and no residual to take. OCR would be a system dependency that fails
+    exactly as C224 warned — an axis misread that fits perfectly. The designer reads four numbers
+    off the plot and the tracer does the rest; the evidence is the cross-check against the part's
+    own table, which is returned with the proposal and is the thing to judge it by."""
+    from app.mode_b.semiconductor import datasheet_flow as flow
+    from app.mode_b.semiconductor import parts_store as ps
+    try:
+        data = await file.read()
+        profile = (ps.load_profile(part_number, kind="confirmed")
+                   or ps.load_profile(part_number, kind="extracted")) if part_number else None
+        axes = {"x": {"min": x_min, "max": x_max, "log": bool(x_log), "title": x_title},
+                "y": {"min": y_min, "max": y_max, "log": bool(y_log), "title": y_title}}
+        return flow.raster_proposal(data, page, xref, key, axes, profile)
+    except Exception as e:
+        log.exception("raster digitise"); raise HTTPException(500, str(e))
+
+
 @app.post("/mode-b/semiconductor/datasheet/figure-confirm", tags=["mode-b"])
 def datasheet_figure_confirm(req: _DsFigConfirmReq):
     """Record a curve the designer accepted. Stamped `digitised`: a shape read off a picture is

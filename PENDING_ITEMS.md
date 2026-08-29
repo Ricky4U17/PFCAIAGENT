@@ -967,51 +967,80 @@ the GUI already read it.
 Guard: `tests/test_no_passing_cores_is_reported.py`, verified to FAIL against the pre-C273
 `status: "ok"` by injecting it.
 
-### B19. M7 — a RASTER curve tracer (the last M7 gap)  `TRACER DONE at C276 — not yet wired to the GUI`
-**The tracer is built and proven against the part's own table.**
-`app/mode_b/semiconductor/raster_curve.py`, guarded by `tests/test_raster_curve.py` (9 tests).
+### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CLOSED at C277`
+**The last M7 gap is closed.** The tracer (C276) is now reachable from the Curves tab and a
+confirmed raster curve reaches the engine by the same road a vector one does.
 
-Measured on Fig. 9.1 (I_F – V_F) of the Toshiba TRS12E65H, four curves separated:
+**C276 — the tracer.** `raster_curve.py`. On Fig. 9.1 of the Toshiba TRS12E65H it separates four
+curves and agrees with the part's own table to **0.25 %** (1.203 V against a tabulated 1.2 V at
+12 A, 25 °C) and **0.5 %** (1.353 V against 1.36 V at 150 °C). Two anchors on two DIFFERENT
+curves, which no single scale error can satisfy at once; a test asserts they are not the same
+curve, so a loose tolerance cannot pass by matching one curve to both.
 
-| track | V_F at 12 A | the table says | error |
-|---|---|---|---|
-| 0 | 1.203 V | **1.2 V** (typ, 25 °C) | **0.25 %** |
-| 1 | 1.255 V | — (100 °C, untabulated) | — |
-| 2 | 1.353 V | **1.36 V** (typ, 150 °C) | **0.5 %** |
-| 3 | 1.415 V | — (175 °C, untabulated) | — |
+The axis ranges come from the designer because on these pages the tick labels are pixels — OCR
+would be a system dependency failing exactly as C224 warned, and gridline counting cannot tell
+0..2 from 0..20. **Without axes it refuses**, so `curve_extract` reading nothing from this file
+remains the default and the original refusal test keeps its meaning.
 
-**Two anchors, on two DIFFERENT curves, is what makes this evidence.** One anchor can be hit by a
-wrong scale that happens to land; a scale error cannot put curve 0 on 1.2 V and curve 2 on 1.36 V
-at the same time. A test asserts the two are not the same curve, so a loose tolerance cannot pass
-it by matching one curve to both.
+**C277 — the wiring.** Two endpoints (`/datasheet/raster-figures` lists the bitmaps with their
+captions, `/datasheet/raster-digitise` traces one against typed-in axes), the Curves-tab panel that
+appears only when a datasheet has such figures, and a proposal returned in the **ordinary
+`DsFigureProposal` shape** — so the existing accept UI renders it and the existing
+`figure-confirm` stores it. A parallel confirm path was avoided deliberately: a second place to
+accept a curve is where the two drift apart.
 
-**The axis ranges come from the designer, and that is the design, not a shortcut.** Page 4 of this
-datasheet carries 40 words of text and all of them are figure captions — the tick labels are
-pixels. OCR would mean a tesseract system dependency for one file and fails exactly the way C224
-warned (an axis misread that fits perfectly); gridline counting cannot tell 0..2 from 0..20. So the
-designer supplies the ranges and the tracer does the rest, which is the "assisted pixel digitising"
-the bring-your-own-part plan specified. **Without axes it refuses**, so `curve_extract` reading
-nothing from this file — the correct pre-B19 behaviour — is still what happens by default, and
-both that and the refusal test are asserted.
+Guarded by `TestTheRasterCurvesTabSequence` in `tests/test_api_flows.py`, which drives the real
+endpoints in the order the screen calls them — upload → list → digitise → accept → read it back
+out of the profile. **That sequence test is the point.** C215, C224 and C225 each shipped curve
+work that passed every unit test and was dead in the GUI, which is why that file exists; the raster
+path got its sequence test in the same commit as its wiring.
 
-**How the gate was shown to discriminate:** digitising the same figure against a plausible-but-
-wrong y-axis (0..10 A instead of 0..12 A) yields curves that look entirely reasonable — smooth,
-monotonic, well separated — and the tabulated anchor refuses every one of them. That test is the
-reason to believe the passing case.
+**Two real defects surfaced by writing that flow**, neither introduced by it:
+  * **the curves came out x-DESCENDING.** `CX.value_at` tests `x < xs[0] or x > xs[-1]` and so
+    returns None for a descending curve — the figure reported "no digitised curve covers x = 1.2"
+    while holding a curve passing exactly through it. Curve dicts in that module are implicitly
+    x-ascending; raster curves now arrive that way.
+  * **a temperature stated as `Ta` was read as 25 °C** — see **B29**, which is the part of this
+    that is NOT fixed.
 
-**WHAT IS LEFT, and it is the reason this is not marked CLOSED:** nothing calls it yet. The
-Curves sub-tab, `confirm_figure` and the upload flow still only know the vector path, so a designer
-cannot reach this from the screen. **C215, C224 and C225 each shipped curve work that passed every
-test and was dead in the GUI**, and `tests/test_api_flows.py` exists because of it. Wiring is its
-own step: an endpoint that lists a page's bitmaps, an axis-entry control, and the traced proposal
-joining the same confirm queue as a vector curve.
+### B29. A measurement's temperature may be stated as T_j, T_c or T_amb — 13 sites read only T_j  `CODE`
+Found at C277 by the B19 end-to-end flow, which is the only reason it surfaced: the Toshiba
+TRS12E65H states its hot forward drop as **Ta = 150**, and it is the first datasheet on file to do
+so.
 
-- **Done when:** the tracer is reachable from the Curves tab and a confirmed raster curve reaches
-  the engine, driven end-to-end in `test_api_flows.py` in the order the GUI calls it.
-- **Do not** relax the vector path's calibration gates to make raster figures "sort of" read. C224
-  showed why: two axis defects there fit a straight line with residual exactly zero, so the
-  residual is not evidence — only the tabulated point is. The tracer follows that: it has no
-  residual gate at all, only the table.
+`V_F = 1.36 V at 12 A, 150 °C` extracts correctly and stores correctly as
+`{"I_F": 12.0, "T_amb": 150.0}`. Then `_vf_points` asked for `conditions["T_j"]`, got nothing, and
+filed a 150 °C measurement as a 25 °C one. **Two consequences, and the one that surfaced it was
+the milder:** the figure cross-check anchored the 25 °C curve on a 150 °C value and refused a
+correctly digitised curve — while `_vf_curve_from(_vf_points(profile, hot=False))`, which builds
+the ENGINE's room-temperature forward-drop curve, was mixing the hot point into the cold curve, and
+the hot curve got nothing at all.
+
+**FIXED AT C277 IN THE TWO V_F SITES ONLY**, through a shared `measurement_temperature(conditions)`
+that prefers `T_j` and falls back to `T_c` then `T_amb`. Reading 150 as 25 is an error of 125
+degrees; reading an ambient as a junction is an error of a few.
+
+**THE FAMILY IS NOT FIXED. `datasheet_flow.py` has 13 further sites** that read `T_j` out of a
+conditions dict and will misread any part stating its temperature another way — reverse leakage
+(`I_rev`, `irev_br`), the hot-entry pickers, `idss`, and the digitised-curve temperature reads
+among them. They were left alone deliberately: each has its own semantics (some genuinely want a
+junction temperature for a thermal model, not "whatever the vendor published"), so a blanket
+substitution would be a change of meaning at every site, not a fix.
+
+**A COUNT, NOT A LIST.** C2 and C3 each grew a site nobody re-counted, so the number is the thing
+to re-derive:
+
+```bash
+grep -c 'get("T_j")' backend/app/mode_b/semiconductor/datasheet_flow.py     # 14 at C277
+```
+
+One of those 14 is `measurement_temperature`'s own preferred read. If the count rises, a new site
+has joined the family.
+
+- **Done when:** every site that means "the temperature this measurement was taken at" goes through
+  `measurement_temperature`, and every site that genuinely requires a junction temperature says so
+  and is left reading `T_j`. Needs a datasheet stating T_c to test the middle branch — none on
+  file does.
 
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.

@@ -254,6 +254,60 @@ def figure_images(pdf_bytes: bytes, page_no: int) -> list[dict]:
     return out
 
 
+def candidate_figures(pdf_bytes: bytes) -> list[dict]:
+    """Every bitmap in the document that looks like a plot, for the designer to choose from.
+
+    "Looks like a plot" is only: a frame was found, and it covers a decent share of the image. That
+    is a deliberately weak filter. A package outline drawing also has long straight lines and may
+    well pass — which is fine, because the designer is choosing from a rendered picture and the
+    axis ranges have to be typed in anyway. A filter tuned to be clever here would hide the one
+    figure somebody actually wanted, and the cost of an extra row in a list is nothing.
+
+    Pages carrying vector figures are NOT excluded either: a datasheet can mix the two, and
+    `curve_extract` already reports what it can read from a page. The two paths offer their own
+    figures and the designer picks; nothing here decides on their behalf.
+    """
+    import fitz
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    out = []
+    for pi in range(doc.page_count):
+        for img in figure_images(pdf_bytes, pi):
+            # Skip the tiny page furniture — logos and rule marks cannot be plots at this size.
+            if img["width"] < 200 or img["height"] < 200:
+                continue
+            frame = find_frame(img["gray"])
+            if frame is None:
+                continue
+            area = (frame["width_px"] * frame["height_px"]) / float(img["width"] * img["height"])
+            if area < 0.25:
+                continue
+            out.append({"page": pi + 1, "page_index": pi, "xref": img["xref"],
+                        "width": img["width"], "height": img["height"],
+                        "rect": img["rect"], "frame_area_pct": round(100.0 * area, 1),
+                        "caption": _caption_near(doc[pi], img["rect"])})
+    return out
+
+
+def _caption_near(page, rect: list) -> str:
+    """The figure caption, from the page's text layer.
+
+    The captions ARE text even on a page whose figures are bitmaps — on the Toshiba file they are
+    the only text there is. So the designer sees "Fig. 9.1 IF - VF" beside the picture and knows
+    which axes to type, which is what makes the axis entry a five-second job rather than a puzzle.
+    """
+    try:
+        import fitz
+        x0, y0, x1, y1 = rect
+        # A caption sits just under its figure. 42 pt covers the one- and two-line forms.
+        band = fitz.Rect(x0 - 6, y1, x1 + 6, y1 + 42)
+        txt = " ".join(w[4] for w in page.get_text("words")
+                       if fitz.Rect(w[:4]).intersects(band))
+        return " ".join(txt.split())[:120]
+    except Exception:
+        return ""
+
+
 def digitise_raster(pdf_bytes: bytes, page_no: int, xref: int,
                     axes: Optional[dict] = None,
                     anchors: Optional[list[dict]] = None) -> dict:
@@ -286,6 +340,17 @@ def digitise_raster(pdf_bytes: bytes, page_no: int, xref: int,
         if anchors:
             entry["cross_check"] = cross_check(vals, anchors)
         curves.append(entry)
+    # The caption is text even here — on this datasheet it is the ONLY text on the page — so the
+    # proposal can cite the figure it came off exactly as a vector proposal does.
+    caption = ""
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        caption = _caption_near(doc[page_no], imgs[0]["rect"])
+    except Exception:
+        caption = ""
+
     return {"ok": True, "source": "raster", "page": page_no + 1, "xref": xref,
-            "frame": frame, "calibration": {"ok": True, "source": "designer", "axes": axes},
+            "frame": frame, "caption": caption,
+            "calibration": {"ok": True, "source": "designer", "axes": axes},
             "curves": curves}

@@ -13,9 +13,10 @@ import { C, Btn, Card, SecHead } from './ui'
 import type { CapacitorResult } from './Step15Capacitor'
 import { plausibilityCheck, datasheetRequirements, datasheetUpload, datasheetConfirm,
          datasheetFigures, datasheetFigureImage, datasheetFigureConfirm,
+         datasheetRasterFigures, datasheetRasterDigitise,
          datasheetPublish, datasheetDiscard, semiconductorReport } from '../api/client'
 import type { PlausResult, DsRequirement, DsReviewRow, DsUpload, DsConfirm,
-              DsFigureProposal, DsCurve } from '../api/client'
+              DsFigureProposal, DsCurve, DsRasterCandidate } from '../api/client'
 import { semiconductorCalculate, semiconductorFigures, docGenerateReport,
          semiconductorDbOptions, semiconductorDbRank, semiconductorExtract,
          type SemiCalcResult, type SemiReqBody, type DbRankResult } from '../api/client'
@@ -404,6 +405,12 @@ export const SemiconductorSelection: React.FC<Props> = ({
   // agent proposes; the designer confirms AGAINST THE PLOT, which is why each row shows the figure.
   const [dsPdf, setDsPdf] = useState<Partial<Record<DsKind, File>>>({})
   const [curveFigs, setCurveFigs] = useState<Partial<Record<DsKind, DsFigureProposal[]>>>({})
+  // B19. The bitmap figures found in the datasheet, and the axis ranges the designer reads off
+  // each one. Keyed `page:xref` because that pair is what identifies an image on a page.
+  const [rasterCands, setRasterCands] = useState<Partial<Record<DsKind, DsRasterCandidate[]>>>({})
+  const [rasterAxes, setRasterAxes] = useState<Record<string, {
+    key?: string; x_min?: string; x_max?: string; y_min?: string; y_max?: string
+    x_log?: boolean; y_log?: boolean; x_title?: string; y_title?: string }>>({})
   const [figImg, setFigImg] = useState<Record<string, string>>({})
   const [curveBusy, setCurveBusy] = useState(false)
   const [figDone, setFigDone] = useState<Record<string, string>>({})
@@ -537,6 +544,49 @@ export const SemiconductorSelection: React.FC<Props> = ({
         if (figImg[id]) continue
         try {
           const blob = await datasheetFigureImage(file, p.page, p.frame)
+          setFigImg(m => ({ ...m, [id]: URL.createObjectURL(blob) }))
+        } catch { /* the proposal still stands without its picture */ }
+      }
+      // B19. Ask for the bitmap figures in the same pass. On a vector datasheet this comes back
+      // empty and nothing changes on screen; on a raster one it is the only way to get a curve at
+      // all, and a designer who had to know to press a second button would never find it.
+      try {
+        const rc = await datasheetRasterFigures(file)
+        setRasterCands(s2 => ({ ...s2, [kind]: rc.candidates ?? [] }))
+      } catch { /* the vector proposals still stand */ }
+    } catch (e) { setErr((e as Error).message) } finally { setCurveBusy(false) }
+  }
+
+  // ── B19: bitmap figures ─────────────────────────────────────────────────────────────────────
+  // Some vendors publish their curves as images with no vector paths, so `datasheetFigures` reads
+  // nothing from them — correctly. On such a page even the tick labels are pixels, which is why
+  // the axis ranges are typed in here rather than guessed: OCR would be a system dependency that
+  // fails exactly the way a misread axis does, silently and plausibly. What checks the result is
+  // the cross-check against the part's own tabulated point, shown with the proposal like any other.
+  const digitiseRaster = async (kind: DsKind, cand: DsRasterCandidate) => {
+    const file = dsPdf[kind]; const part = dsUp[kind]?.part_number
+    const ax = rasterAxes[`${cand.page}:${cand.xref}`]
+    if (!file || !ax?.key) return
+    setCurveBusy(true); setErr(null)
+    try {
+      const r = await datasheetRasterDigitise(file, {
+        // `?? undefined`, not `?? ''`: without a part number the backend digitises the figure but
+        // has no profile to cross-check it against, and an empty string would be sent as one.
+        page: cand.page, xref: cand.xref, key: ax.key, part_number: part ?? undefined,
+        x_min: Number(ax.x_min), x_max: Number(ax.x_max),
+        y_min: Number(ax.y_min), y_max: Number(ax.y_max),
+        x_log: !!ax.x_log, y_log: !!ax.y_log,
+        x_title: ax.x_title ?? '', y_title: ax.y_title ?? '',
+      })
+      if (!r.ok || !r.proposal) { setErr(r.reason ?? 'the figure could not be traced'); return }
+      // It joins the SAME list the vector proposals are in, so the accept UI below renders it and
+      // `acceptCurve` confirms it unchanged. A separate list would have meant a separate accept
+      // path, and a second path is where two things drift apart.
+      setCurveFigs(s2 => ({ ...s2, [kind]: [...(s2[kind] ?? []), r.proposal!] }))
+      const id = `${r.proposal.page}:${r.proposal.frame.join(',')}`
+      if (!figImg[id]) {
+        try {
+          const blob = await datasheetFigureImage(file, r.proposal.page, r.proposal.frame)
           setFigImg(m => ({ ...m, [id]: URL.createObjectURL(blob) }))
         } catch { /* the proposal still stands without its picture */ }
       }
@@ -1153,6 +1203,84 @@ export const SemiconductorSelection: React.FC<Props> = ({
               Upload the datasheet first.</span>}
           </div>
 
+          {/* ── B19: bitmap figures ─────────────────────────────────────────────
+              Only appears when the datasheet HAS images the vector reader cannot use. The axis
+              ranges are typed in because on these pages the tick labels are pixels — there is
+              nothing to fit and so no residual to report. What says it was read correctly is the
+              cross-check against the part's own table, which appears with the proposal below. */}
+          {(rasterCands[kind] ?? []).length > 0 && (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12,
+              marginBottom: 14, background: C.bg2 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>
+                🖼 Bitmap figures — {(rasterCands[kind] ?? []).length} found</div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 5, lineHeight: 1.65 }}>
+                These are printed as images, so the digitiser cannot read their axes — on such a
+                page even the tick labels are pixels. Read the four axis limits off the plot and
+                the curves will be traced against them. <b>The check is the datasheet's own
+                table</b>: if the traced curve does not pass through a value the table states, the
+                proposal says so and should not be accepted.
+              </div>
+              {(rasterCands[kind] ?? []).map(cand => {
+                const rk = `${cand.page}:${cand.xref}`
+                const ax = rasterAxes[rk] ?? {}
+                const set = (f: string, v: string | boolean) =>
+                  setRasterAxes(m => ({ ...m, [rk]: { ...(m[rk] ?? {}), [f]: v } }))
+                const ready = ax.key && ax.x_min !== undefined && ax.x_max !== undefined
+                  && ax.y_min !== undefined && ax.y_max !== undefined
+                  && [ax.x_min, ax.x_max, ax.y_min, ax.y_max].every(v => v !== '' && !isNaN(Number(v)))
+                return (
+                  <div key={rk} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 9,
+                    marginTop: 9, display: 'flex', gap: 12, flexWrap: 'wrap',
+                    alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 300 }}>
+                      <div style={{ fontSize: 11.5, color: C.text, fontWeight: 600 }}>
+                        {cand.caption || `page ${cand.page}, image ${cand.xref}`}</div>
+                      <div style={{ fontSize: 10, color: C.hint, marginTop: 2 }}>
+                        page {cand.page} · {cand.width}×{cand.height} px</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+                        <select value={ax.key ?? ''} onChange={e => set('key', e.target.value)}
+                          style={{ fontSize: 11, padding: '3px 6px', background: C.bg3,
+                            color: C.text, border: `1px solid ${C.border}`, borderRadius: 4 }}>
+                          <option value="">— what does this figure show? —</option>
+                          <option value="V_F_vs_IF">V_F vs I_F (forward characteristic)</option>
+                          <option value="I_rev_vs_VR">I_R vs V_R (reverse leakage)</option>
+                          <option value="C_j_vs_VR">C_j vs V_R (junction capacitance)</option>
+                          <option value="Q_c_vs_VR">Q_c vs V_R (capacitive charge)</option>
+                          <option value="I_F_AV_vs_Tc">I_F(AV) vs T_case (derating)</option>
+                        </select>
+                        {([['x_min', 'x min'], ['x_max', 'x max'],
+                           ['y_min', 'y min'], ['y_max', 'y max']] as [string, string][])
+                          .map(([f, lab]) => (
+                            <input key={f} placeholder={lab}
+                              value={(ax as Record<string, string>)[f] ?? ''}
+                              onChange={e => set(f, e.target.value)}
+                              style={{ width: 62, fontSize: 11, padding: '3px 6px',
+                                background: C.bg3, color: C.text, borderRadius: 4,
+                                border: `1px solid ${C.border}` }} />
+                          ))}
+                        <label style={{ fontSize: 10.5, color: C.muted, display: 'flex',
+                          alignItems: 'center', gap: 3 }}>
+                          <input type="checkbox" checked={!!ax.x_log}
+                            onChange={e => set('x_log', e.target.checked)} />log x</label>
+                        <label style={{ fontSize: 10.5, color: C.muted, display: 'flex',
+                          alignItems: 'center', gap: 3 }}>
+                          <input type="checkbox" checked={!!ax.y_log}
+                            onChange={e => set('y_log', e.target.checked)} />log y</label>
+                      </div>
+                      <div style={{ marginTop: 7 }}>
+                        <Btn disabled={curveBusy || !ready}
+                          onClick={() => digitiseRaster(kind, cand)}>
+                          {curveBusy ? '⏳ tracing…' : '✏️ Trace this figure'}</Btn>
+                        {!ready && <span style={{ fontSize: 10, color: C.hint, marginLeft: 8 }}>
+                          Pick the quantity and give all four axis limits.</span>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
           {(curveFigs[kind] ?? []).map((p, pi) => {
             const id = `${p.page}:${p.frame.join(',')}`
             const cc = p.cross_check
@@ -1169,8 +1297,15 @@ export const SemiconductorSelection: React.FC<Props> = ({
                       → <b>{p.key}</b><br />
                       x: {p.axes.x} <i>({p.x_scale}, {p.x_range[0]}…{p.x_range[1]})</i><br />
                       y: {p.axes.y} <i>({p.y_scale}, {p.y_range[0]}…{p.y_range[1]})</i><br />
-                      {p.n_curves} curve{p.n_curves > 1 ? 's' : ''} · calibration residual{' '}
-                      {(p.residual * 100).toFixed(2)}%
+                      {p.n_curves} curve{p.n_curves > 1 ? 's' : ''} ·{' '}
+                      {p.source === 'raster'
+                        /* B19: the axes were typed in, not fitted, so there is no residual to
+                           report. Printing 0.00% here would look like a perfect calibration when
+                           it actually means "nothing was measured" — the exact shape of the C224
+                           defect, where a residual of zero came from an axis read wrongly. */
+                        ? <>axes read off the plot by the designer — <b>no fitted calibration</b>,
+                            so the table cross-check below is the only evidence</>
+                        : <>calibration residual {(p.residual * 100).toFixed(2)}%</>}
                       {p.swapped && <> · axes transposed to {p.key}'s own order</>}
                     </div>
                     <div style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.6,

@@ -463,6 +463,100 @@ def figure_proposals(pdf_bytes: bytes, profile: Optional[dict] = None) -> dict:
     return {"ok": True, "proposals": out, "figures_seen": len(res["figures"])}
 
 
+def raster_figure_candidates(pdf_bytes: bytes) -> dict:
+    """The bitmap figures in a datasheet, for the designer to choose one to digitise (B19)."""
+    from app.mode_b.semiconductor import raster_curve as RC
+    try:
+        return {"ok": True, "candidates": RC.candidate_figures(pdf_bytes)}
+    except Exception as e:
+        return {"ok": False, "reason": f"the images could not be read: {e}", "candidates": []}
+
+
+def raster_proposal(pdf_bytes: bytes, page: int, xref: int, key: str, axes: dict,
+                    profile: Optional[dict] = None) -> dict:
+    """One bitmap figure, traced against DESIGNER-SUPPLIED axes, as an ordinary proposal (B19).
+
+    THE RETURN SHAPE IS `figure_proposals`', deliberately and exactly. The Curves tab already
+    renders proposals, `acceptCurve` already posts them to `figure-confirm`, and `confirm_figure`
+    already renders the source figure from `(page, frame)` — so a raster curve joins the same
+    queue as a vector one and reaches the engine by the same road. A parallel confirm path would
+    have been a second place for a curve to be accepted, and C238's lesson is that the second
+    place is where the two drift apart.
+
+    `frame` here is the image's rect ON THE PAGE, not the plot box inside the bitmap. That is what
+    the picture endpoints want: `figure-image` renders a page region and `confirm_figure` stores
+    the render, so both get the whole printed figure — axes, labels and caption included — which
+    is what the designer confirmed against and what the report has to be able to show.
+
+    The calibration is the designer's, so there is no residual to report. `residual` is 0.0 and
+    `calibration_source` says where the axes came from; the evidence that matters is the
+    cross-check, run through the SAME `_figure_cross_check` the vector path uses.
+    """
+    from app.mode_b.semiconductor import raster_curve as RC
+
+    target = next((t for t in _FIGURE_TARGETS if t[0] == key), None)
+    if target is None:
+        return {"ok": False, "reason": f"unknown figure key {key!r}", "proposal": None}
+    _, _wx, _wy, per_temp, swap = target
+
+    try:
+        res = RC.digitise_raster(pdf_bytes, int(page) - 1, int(xref), axes=axes)
+    except Exception as e:
+        return {"ok": False, "reason": f"the figure could not be traced: {e}", "proposal": None}
+    if not res.get("ok"):
+        return {"ok": False, "reason": res.get("reason", "the figure could not be traced"),
+                "proposal": None}
+    if not res["curves"]:
+        return {"ok": False, "reason": ("no curve was separated from this figure - check the axis "
+                                        "ranges, or that this bitmap is a plot"), "proposal": None}
+
+    # RC returns points as [[x, y], ...] in the FIGURE's own orientation; the rest of this module
+    # speaks {"x": [...], "y": [...]}.
+    # X ASCENDING, and this is load-bearing rather than tidy. `CX.value_at` — which every
+    # cross-check goes through — tests `x < xs[0] or x > xs[-1]` and so silently returns None for
+    # a descending curve. The tracer walks the plot TOP-DOWN, which on this figure means V_F comes
+    # out descending, and the whole figure then reported "no digitised curve covers x = 1.2" while
+    # holding a curve that passes exactly through it. A curve dict in this module is implicitly
+    # x-ascending (`_swap_axes` re-sorts for the same reason); raster curves have to arrive that
+    # way too.
+    fig_curves = []
+    for c in res["curves"]:
+        pts = sorted((round(p[0], 6), round(p[1], 6)) for p in c["points"])
+        xs = [a for a, _ in pts]
+        ys = [b for _, b in pts]
+        fig_curves.append({"x": xs, "y": ys,
+                           "x_span": [min(xs), max(xs)], "y_span": [min(ys), max(ys)],
+                           # Vector curves carry the stroke colour that distinguishes traces on a
+                           # printed plot; a traced bitmap has none, and `cross_check` reads the
+                           # key unconditionally. Present and null, not absent.
+                           "color": None,
+                           "n": len(xs), "span_pct": c["span_pct"]})
+
+    # The cross-check runs on the figure's own orientation, which is how the table states it.
+    cc = _figure_cross_check(key, fig_curves, profile)
+    curves = [_swap_axes(c) for c in fig_curves] if swap else fig_curves
+
+    rect = next((i["rect"] for i in RC.figure_images(pdf_bytes, int(page) - 1)
+                 if i["xref"] == int(xref)), [0, 0, 0, 0])
+    prop = {
+        "key": key, "page": int(page), "frame": rect,
+        "caption": res.get("caption") or "",
+        "axes": {"x": axes["x"].get("title", ""), "y": axes["y"].get("title", "")},
+        "x_scale": "log" if axes["x"].get("log") else "linear",
+        "y_scale": "log" if axes["y"].get("log") else "linear",
+        "x_range": [axes["x"]["min"], axes["x"]["max"]],
+        "y_range": [axes["y"]["min"], axes["y"]["max"]],
+        "residual": 0.0,
+        "calibration_source": "designer",
+        "source": "raster",
+        "per_temperature": per_temp, "swapped": swap,
+        "n_curves": len(curves), "curves": curves,
+        "cross_check": cc,
+        "temperatures": [],
+    }
+    return {"ok": True, "proposal": prop}
+
+
 def _swap_axes(curve: dict) -> dict:
     """Return the curve with x and y exchanged, re-sorted on the new x."""
     pts = sorted(zip(curve["y"], curve["x"]))
@@ -670,7 +764,11 @@ def plausibility_record(profile: dict, device_class: str) -> dict:
         edited = [e for e in entries
                   if (e.get("provenance") or "extracted") in ("corrected", "manual")]
         entries = edited or entries
-        cold = [e for e in entries if ((e.get("conditions") or {}).get("T_j") or 25) < 100]
+        # C277: the temperature may be stated as T_j, T_c or T_amb — see
+        # measurement_temperature(). Reading T_j alone made the Toshiba's 150 degC forward drop
+        # look like its coldest point, so `vf` for that part was a hot value labelled cold.
+        cold = [e for e in entries
+                if (measurement_temperature(e.get("conditions")) or 25) < 100]
         if key == "V_F_vs_IF":
             # a forward-drop CURVE has no single value; the catalogue's `vf` is the drop at the
             # rated current, so take the coldest, highest-current published point
@@ -1488,6 +1586,37 @@ def _carry_meta(profile: dict, blk: dict, prov: dict, keys) -> None:
             prov[key] = "extracted"
 
 
+def measurement_temperature(conditions: Optional[dict]) -> Optional[float]:
+    """The temperature a tabulated measurement was taken at, whichever way the vendor states it.
+
+    C277, found by the B19 end-to-end flow. `_vf_points` read `T_j` alone, and the Toshiba
+    TRS12E65H states its hot forward drop as **Ta = 150** — so `V_F = 1.36 V at 12 A, 150 degC`
+    was extracted correctly, stored correctly as `{"I_F": 12.0, "T_amb": 150.0}`, and then read as
+    a 25 degC point because nothing looked at `T_amb`. Two consequences, and the second is worse
+    than the one that surfaced it:
+
+      * the figure cross-check anchored the 25 degC curve on a 150 degC value, so a CORRECTLY
+        digitised curve was refused (that is how this was found);
+      * `_vf_curve_from(_vf_points(profile, hot=False))` builds the engine's room-temperature
+        forward-drop curve, so the hot point was being mixed into the cold curve while the hot
+        curve got nothing at all.
+
+    T_j is preferred where it is stated because it is what the loss model actually wants; T_c and
+    T_amb are accepted as what the vendor published when there is nothing better. That is a
+    deliberate approximation and it is the RIGHT one here: reading 150 as 25 is an error of 125
+    degrees, and reading an ambient as a junction is an error of a few.
+    """
+    c = conditions or {}
+    for k in ("T_j", "T_c", "T_amb"):
+        v = c.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _vf_points(profile: dict, hot: bool) -> list[tuple]:
     """(I_F, V_F) pairs at 25 degC, or at ONE hot measurement temperature.
 
@@ -1504,7 +1633,7 @@ def _vf_points(profile: dict, hot: bool) -> list[tuple]:
         i, v = c.get("I_F"), (e.get("typ") or e.get("max"))
         if i is None or v is None:
             continue
-        tj = c.get("T_j")
+        tj = measurement_temperature(c)
         if (tj is not None and float(tj) >= 100.0) == hot:
             pts.append((float(i), float(v), float(tj) if tj is not None else None))
     if hot and pts:

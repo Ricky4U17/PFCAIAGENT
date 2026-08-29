@@ -11540,3 +11540,69 @@ rewritten "done when" covering the wiring, rather than marked closed on a green 
 
 VERIFIED 9 raster tests pass; the wrong-axis probe refuses all curves; vector path unchanged
 (test_curve_extract + test_diode_real_datasheets, 58 passed).
+
+---
+
+# C277 - the raster tracer reaches the engine from the screen (CLOSES PENDING B19)
+
+Designer: "now do the wiring." C276 built the tracer and proved it against the part's own table,
+and it was unreachable from the GUI. C215, C224 and C225 EACH shipped curve work in exactly that
+state, which is why tests/test_api_flows.py exists - so the sequence test landed in this commit
+alongside the wiring, not after it.
+
+## Shape first: it had to be an ORDINARY proposal
+
+`raster_proposal` returns the same dict `figure_proposals` does. The Curves tab already renders
+proposals and `acceptCurve` already posts them to figure-confirm, so a raster curve joins the same
+queue and reaches the engine by the same road. A parallel confirm path would have been a second
+place for a curve to be accepted, and C238's lesson is that the second place is where two things
+drift apart.
+
+`frame` is the image's rect ON THE PAGE, not the plot box inside the bitmap. That is what the
+picture endpoints want: figure-image renders a page region and confirm_figure stores that render,
+so both get the whole printed figure - axes, labels and caption - which is what the designer
+confirmed against.
+
+`residual` is 0.0 and the tab does NOT print it. Showing "calibration residual 0.00%" for a
+designer-supplied axis would be a number that looks like evidence and is not one - the exact shape
+of the C224 defect, where a residual of zero came from an axis read wrongly. It prints "axes read
+off the plot by the designer - no fitted calibration" instead.
+
+## TWO REAL DEFECTS, both found by writing the end-to-end flow, neither introduced by it
+
+1. THE CURVES CAME OUT X-DESCENDING. The tracer walks top-down, so V_F descends. `CX.value_at`
+   tests `x < xs[0] or x > xs[-1]` and silently returns None for a descending curve, so the whole
+   figure reported "no digitised curve covers x = 1.2" while holding a curve passing exactly
+   through 1.2. Curve dicts in that module are implicitly x-ascending - `_swap_axes` re-sorts for
+   the same reason - and nothing said so. Raster curves now arrive sorted.
+
+2. A TEMPERATURE STATED AS `Ta` WAS READ AS 25 C. This one matters beyond the figure path. The
+   Toshiba states its hot forward drop as Ta = 150; it extracts correctly and stores correctly as
+   {"I_F": 12.0, "T_amb": 150.0}, and `_vf_points` asked for conditions["T_j"], got nothing, and
+   filed a 150 C measurement as a 25 C one. The cross-check refusing a correct curve was the MILD
+   consequence. `_vf_curve_from(_vf_points(profile, hot=False))` builds the engine's
+   room-temperature forward-drop curve, so the hot point was being mixed into the cold curve while
+   the hot curve got nothing at all.
+
+   Fixed through a shared `measurement_temperature()` at the two V_F sites. Reading 150 as 25 is an
+   error of 125 degrees; reading an ambient as a junction is an error of a few.
+
+   THE FAMILY IS NOT FIXED AND IS NOT PRETENDED TO BE. 13 further sites read T_j out of a
+   conditions dict. They were left alone because each has its own semantics - some genuinely want a
+   junction temperature for a thermal model, not "whatever the vendor published" - so a blanket
+   substitution would change meaning at every site rather than fix anything. Logged as B29 with a
+   COUNT rather than a list, because C2 and C3 each grew a site nobody re-counted:
+
+       grep -c 'get("T_j")' backend/app/mode_b/semiconductor/datasheet_flow.py    # 14 at C277
+
+## The sequence test
+
+TestTheRasterCurvesTabSequence drives the real endpoints in screen order: upload -> list bitmaps ->
+digitise against typed axes -> accept -> read the curve back out of the confirmed profile. It also
+asserts the stored curve is the right way ROUND (x is current, y is voltage), because V_F_vs_IF is
+swapped on the way out and the C215 transposed-axis bug was worth -692 W before it was caught.
+
+And it asserts the wrong-axis case end to end: the same figure against 0..10 A instead of 0..12 A
+traces perfectly well, looks entirely reasonable, and is refused by the table cross-check.
+
+VERIFIED 7 API-flow tests pass; tsc --noEmit clean; vite build clean.
