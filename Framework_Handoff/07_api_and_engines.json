@@ -1,0 +1,876 @@
+{
+  "$comment": "Machine-readable summary of the PFC AI Design Agent. Generated from the codebase at commit 64fcfb4. Companion to 04_TECHNICAL_BRIEF.md.",
+  "project": "PFC AI Design Agent",
+  "commit": "64fcfb4",
+  "runtime_path": {
+    "description": "The production path. React GUI calls FastAPI endpoints directly, one stage at a time, with the designer as orchestrator. No autonomous planner. No LLM output reaches any number in the report.",
+    "frontend": "React 18 + TypeScript (Vite)",
+    "api": "FastAPI + Pydantic v2",
+    "computation": "NumPy / SciPy, deterministic",
+    "reporting": "ReportLab + matplotlib + SchemDraw",
+    "state_contract": "backend/app/design_state.py :: DesignState (Pydantic, extra=allow)"
+  },
+  "orchestration": {
+    "framework": "LangGraph 0.2",
+    "module": "backend/app/workflow/graph.py",
+    "status": "blueprint_test_only",
+    "note": "38 nodes with real human-in-the-loop wait states. build_graph() is invoked from the test suite only; the shipping GUI does not execute the graph.",
+    "node_count": 38,
+    "nodes": [
+      "altium_export",
+      "awaiting_controller_approval",
+      "awaiting_mode_b_approval",
+      "awaiting_topology_approval",
+      "awaiting_topology_specific_inputs",
+      "bidirectional_thermal",
+      "cad_thermal_integration_advisory",
+      "closed_loop_simulation_advisory",
+      "control_loops",
+      "controller_selection",
+      "controller_selection_hitl",
+      "design_graphs",
+      "duty_and_ripple",
+      "eff",
+      "emi_filter",
+      "finalize",
+      "firmware_generation_advisory",
+      "guardrail_v2_advisory",
+      "inductor_sizing",
+      "input_processing",
+      "intake_node",
+      "layout_parasitics_advisory",
+      "magnetic_design",
+      "magnetic_design_v2_advisory",
+      "magnetic_fea_advisory",
+      "mode_b_hitl",
+      "pcb_floorplanning_advisory",
+      "protection_compliance",
+      "reliability_mtbf_advisory",
+      "simulation_export",
+      "state_space_analysis",
+      "supply_chain_advisory",
+      "topology_hitl",
+      "topology_selection",
+      "topology_specific_intake",
+      "vendor_scout",
+      "waveform_reconstruction",
+      "worst_case_angle"
+    ],
+    "hitl_wait_states": [
+      "awaiting_topology_approval",
+      "awaiting_controller_approval",
+      "awaiting_mode_b_approval",
+      "awaiting_topology_specific_inputs"
+    ],
+    "agent_module_count": 23,
+    "node_count_note": "Four human-in-the-loop wait nodes are registered via module constants (WAIT_TOPOLOGY etc.) rather than string literals; they are included here."
+  },
+  "endpoints": {
+    "count": 63,
+    "items": [
+      {
+        "method": "POST",
+        "path": "/controller-db/query",
+        "tag": "controller-db",
+        "handler": "controller_db_query",
+        "group": "infrastructure"
+      },
+      {
+        "method": "GET",
+        "path": "/controller-db/sources",
+        "tag": "controller-db",
+        "handler": "controller_db_sources",
+        "group": "infrastructure"
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "tag": null,
+        "handler": "health",
+        "group": "infrastructure"
+      },
+      {
+        "method": "POST",
+        "path": "/magnetics/add-custom",
+        "tag": "magnetics-db",
+        "handler": "magnetics_add_custom",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/magnetics/commit-pending",
+        "tag": "magnetics-db",
+        "handler": "magnetics_commit_pending",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/magnetics/extract-pdf",
+        "tag": "magnetics-db",
+        "handler": "magnetics_extract_pdf",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/magnetics/list",
+        "tag": "magnetics-db",
+        "handler": "magnetics_list",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/magnetics/rank",
+        "tag": "magnetics-db",
+        "handler": "magnetics_rank",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/magnetics/reload",
+        "tag": "magnetics-db",
+        "handler": "magnetics_reload",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/magnetics/status",
+        "tag": "magnetics-db",
+        "handler": "magnetics_status",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/magnetics/template/{material_type}",
+        "tag": "magnetics-db",
+        "handler": "magnetics_template",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/magnetics/validate",
+        "tag": "magnetics-db",
+        "handler": "magnetics_validate",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-a/approve-channels",
+        "tag": "mode-a",
+        "handler": "approve_channels",
+        "group": "mode_a_specification"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-a/approve-controller",
+        "tag": "mode-a",
+        "handler": "approve_controller",
+        "group": "mode_a_specification"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-a/approve-topology",
+        "tag": "mode-a",
+        "handler": "approve_topology",
+        "group": "mode_a_specification"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-a/start",
+        "tag": "mode-a",
+        "handler": "start",
+        "group": "mode_a_specification"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-a/submit-mini-intake",
+        "tag": "mode-a",
+        "handler": "submit_mini",
+        "group": "mode_a_specification"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/control-report",
+        "tag": "mode-b",
+        "handler": "control_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/control-report/defaults",
+        "tag": "mode-b",
+        "handler": "control_report_defaults",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/control/coefficients",
+        "tag": "mode-b",
+        "handler": "control_coefficients",
+        "group": "mode_b_control"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/control/components",
+        "tag": "mode-b",
+        "handler": "control_components",
+        "group": "mode_b_control"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/control/power-plant",
+        "tag": "mode-b",
+        "handler": "control_power_plant",
+        "group": "mode_b_control"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/documentation/generate-report",
+        "tag": "documentation",
+        "handler": "doc_generate_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/documentation/report-status",
+        "tag": "documentation",
+        "handler": "doc_report_status",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/generate-full-report",
+        "tag": "mode-b",
+        "handler": "generate_full_report_endpoint",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/generate-report",
+        "tag": "mode-b",
+        "handler": "gen_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-filter/design",
+        "tag": "mode-b",
+        "handler": "input_filter_design",
+        "group": "mode_b_emi_filter"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/input-filter/options",
+        "tag": "mode-b",
+        "handler": "input_filter_options",
+        "group": "mode_b_emi_filter"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-filter/report",
+        "tag": "mode-b",
+        "handler": "input_filter_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-filter/schematic",
+        "tag": "mode-b",
+        "handler": "input_filter_schematic",
+        "group": "mode_b_emi_filter"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-protection/fuse/calculate",
+        "tag": "mode-b",
+        "handler": "input_protection_fuse",
+        "group": "mode_b_input_protection"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-protection/gdt/calculate",
+        "tag": "mode-b",
+        "handler": "input_protection_gdt",
+        "group": "mode_b_input_protection"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/input-protection/inrush-schematic",
+        "tag": "mode-b",
+        "handler": "inrush_schematic_svg",
+        "group": "mode_b_input_protection"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-protection/mov/calculate",
+        "tag": "mode-b",
+        "handler": "input_protection_mov",
+        "group": "mode_b_input_protection"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-protection/ntc/calculate",
+        "tag": "mode-b",
+        "handler": "input_protection_ntc",
+        "group": "mode_b_input_protection"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/input-protection/report",
+        "tag": "mode-b",
+        "handler": "input_protection_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/semiconductor/calculate",
+        "tag": "mode-b",
+        "handler": "semiconductor_calculate",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/semiconductor/database/{kind}/options",
+        "tag": "mode-b",
+        "handler": "semiconductor_db_options",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/semiconductor/database/{kind}/rank",
+        "tag": "mode-b",
+        "handler": "semiconductor_db_rank",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/semiconductor/figures",
+        "tag": "mode-b",
+        "handler": "semiconductor_figures",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/semiconductor/library",
+        "tag": "mode-b",
+        "handler": "semiconductor_library",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/semiconductor/manifest",
+        "tag": "mode-b",
+        "handler": "semiconductor_manifest",
+        "group": "mode_b_semiconductor"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/cap-lifetime",
+        "tag": "mode-b",
+        "handler": "step15_cap_lifetime",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/cap-temp-sweep",
+        "tag": "mode-b",
+        "handler": "step15_cap_temp_sweep",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/step15/cap-values",
+        "tag": "mode-b",
+        "handler": "step15_cap_values",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/capacitor-calc",
+        "tag": "mode-b",
+        "handler": "step15_capacitor_calc",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/capacitor-design",
+        "tag": "mode-b",
+        "handler": "step15_capacitor_design",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/generate-report",
+        "tag": "mode-b",
+        "handler": "step15_generate_report",
+        "group": "mode_b_reporting"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/hvcap-cap-table",
+        "tag": "mode-b",
+        "handler": "step15_hvcap_cap_table",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/hvcap-filter-caps",
+        "tag": "mode-b",
+        "handler": "step15_hvcap_filter_caps",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/step15/hvcap-filter-options",
+        "tag": "mode-b",
+        "handler": "step15_hvcap_filter_options",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/step15/series-options",
+        "tag": "mode-b",
+        "handler": "step15_series_options",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step15/verify-configuration",
+        "tag": "mode-b",
+        "handler": "step15_verify_configuration",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step6-magnetic-design",
+        "tag": "mode-b",
+        "handler": "step6",
+        "group": "mode_b_other"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/grade-options",
+        "tag": "mode-b",
+        "handler": "step7_grade_options",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/step7/material-comparison",
+        "tag": "mode-b",
+        "handler": "step7_material_comparison",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/powder-ranking",
+        "tag": "mode-b",
+        "handler": "step7_powder_ranking",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/run-sizing",
+        "tag": "mode-b",
+        "handler": "step7_run_sizing",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/simulate",
+        "tag": "mode-b",
+        "handler": "step7_simulate",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "GET",
+        "path": "/mode-b/step7/suppliers",
+        "tag": "mode-b",
+        "handler": "step7_suppliers",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/view-contract",
+        "tag": "mode-b",
+        "handler": "step7_view_contract",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step7/wire-options",
+        "tag": "mode-b",
+        "handler": "step7_wire_options",
+        "group": "mode_b_magnetics"
+      },
+      {
+        "method": "POST",
+        "path": "/mode-b/step8/time-domain",
+        "tag": "mode-b",
+        "handler": "step8_time_domain",
+        "group": "mode_b_magnetics"
+      }
+    ]
+  },
+  "engines": [
+    {
+      "module": "backend/app/mode_b/step7_magnetic_calc.py",
+      "domain": "magnetics",
+      "status": "production",
+      "lines": 1618,
+      "public_functions": [
+        "rho_cu",
+        "design_one_core",
+        "rank_candidates",
+        "build_view_contract"
+      ],
+      "description": "PFC inductor: per-point required inductance from ripple ratio, DC-bias-aware turns convergence, iGSE core loss (crest and cycle-averaged), copper loss with HF proximity, two-node thermal model, catalogue ranking."
+    },
+    {
+      "module": "backend/app/mode_b/step8_time_domain.py",
+      "domain": "magnetics",
+      "status": "production",
+      "lines": 326,
+      "public_functions": [
+        "compute_Bac_pk_halfcycle",
+        "compute_Bac_crest",
+        "fit_power_law",
+        "compute_Pcore_halfcycle",
+        "run_step8_full"
+      ],
+      "description": "Half-cycle waveform integration: per-angle flux, loss and current; time-domain core loss."
+    },
+    {
+      "module": "backend/app/mode_b/step15_capacitor.py",
+      "domain": "dc_bus_capacitor",
+      "status": "production",
+      "lines": 828,
+      "public_functions": [
+        "calc_operating_point",
+        "select_voltage_rating",
+        "verify_configuration",
+        "suggest_configurations",
+        "parse_custom_cap_datasheet",
+        "calculate_thermal_table",
+        "run_capacitor_design",
+        "tolerance_corner_config",
+        "cap_tolerance_from_selection",
+        "cap_tolerance_variants",
+        "bank_loss_table"
+      ],
+      "description": "Required capacitance from hold-up, per-capacitor ripple, vendor-implied ESR(T), self-heating, manufacturer lifetime model, +/-20% tolerance corners."
+    },
+    {
+      "module": "backend/app/mode_b/step16_step10_iloop.py",
+      "domain": "control",
+      "status": "production",
+      "lines": 292,
+      "public_functions": [
+        "l_interp",
+        "compute_step10_iloop"
+      ],
+      "description": "Current-loop compensator across the canonical 9-point grid."
+    },
+    {
+      "module": "backend/app/mode_b/step16_step11_vloop.py",
+      "domain": "control",
+      "status": "production",
+      "lines": 325,
+      "public_functions": [
+        "compute_step11_vloop"
+      ],
+      "description": "Voltage-loop compensator, crossover and stability margins."
+    },
+    {
+      "module": "backend/app/mode_b/step16_steps1_8.py",
+      "domain": "control",
+      "status": "production",
+      "lines": 456,
+      "public_functions": [
+        "compute_steps_1_8"
+      ],
+      "description": "Controller constants, R_CS / R_IAC selection, GMOD and protection thresholds."
+    },
+    {
+      "module": "backend/app/mode_b/semiconductor/pfc_loss_model.py",
+      "domain": "semiconductors",
+      "status": "production",
+      "lines": 605,
+      "public_functions": [
+        "curve",
+        "transient_tj",
+        "simulate_point",
+        "flatten_result",
+        "simulate_vac_sweep",
+        "show",
+        "design_from_dict",
+        "run_design"
+      ],
+      "description": "Bridge / MOSFET / boost-diode loss by mechanism plus the thermal network and Tj."
+    },
+    {
+      "module": "backend/app/mode_b/semiconductor/database.py",
+      "domain": "semiconductors",
+      "status": "production",
+      "lines": 321,
+      "public_functions": [
+        "p_volt",
+        "p_amp",
+        "p_res",
+        "p_time",
+        "p_power",
+        "p_charge",
+        "p_tjmax",
+        "p_at",
+        "p_vf",
+        "p_cap",
+        "ingest",
+        "build_all",
+        "load",
+        "options"
+      ],
+      "description": "Part filtering, datasheet-scalar to engine-block mapping, loss-ranked shortlists."
+    },
+    {
+      "module": "backend/app/mode_b/inputprotection/ntc_bypass_select.py",
+      "domain": "input_protection",
+      "status": "production",
+      "lines": 530,
+      "public_functions": [
+        "compute",
+        "worst_case_startup",
+        "screen_catalog",
+        "report"
+      ],
+      "description": "NTC inrush limiting, tolerance-aware R25 gate, bypass-relay timing."
+    },
+    {
+      "module": "backend/app/mode_b/inputprotection/mov_surge_select.py",
+      "domain": "input_protection",
+      "status": "production",
+      "lines": 717,
+      "public_functions": [
+        "validate",
+        "resolve_stress",
+        "snap_mcov",
+        "resolve_mcov",
+        "operating_point",
+        "v_line_peak",
+        "estimate_energy_8_20",
+        "size_path",
+        "energy_survival",
+        "layout_overshoot",
+        "fuse_coordination",
+        "mcov_comparison",
+        "criterion_matrix",
+        "effective_alpha"
+      ],
+      "description": "MOV surge selection and clamping verdict to IEC/EN 61000-4-5."
+    },
+    {
+      "module": "backend/app/mode_b/inputprotection/fuse_select.py",
+      "domain": "input_protection",
+      "status": "production",
+      "lines": 319,
+      "public_functions": [
+        "thermal_derating",
+        "fault_coordination",
+        "requirements",
+        "gate_summary",
+        "self_test"
+      ],
+      "description": "Six-gate line-fuse screen with I2t coordination."
+    },
+    {
+      "module": "backend/app/mode_b/inputfilter/emi_filter_design.py",
+      "domain": "emi_filter",
+      "status": "production",
+      "lines": 1334,
+      "public_functions": [
+        "conducted_limit_dbuv",
+        "validate",
+        "dm_noise_dbuv",
+        "dm_noise_op_dbuv",
+        "cm_noise_dbuv",
+        "insertion_loss_dm",
+        "insertion_loss_cm",
+        "delivered_margin",
+        "sample_spectra",
+        "per_line_verification",
+        "required_attenuation",
+        "corner_for",
+        "binding_corner",
+        "choose_stages_and_corner"
+      ],
+      "description": "Differential and common-mode filter design against the selected limit line. Contains the DCDCResult placeholder (DC/DC modelled only as a CM noise source)."
+    },
+    {
+      "module": "backend/app/magnetics/db.py",
+      "domain": "data_access",
+      "status": "production",
+      "lines": 878,
+      "public_functions": [
+        "get_db"
+      ],
+      "description": "92-material magnetics database: core loss surfaces, DC-bias curves, Bsat vs temperature."
+    },
+    {
+      "module": "backend/app/sim_agent/pfc_inductor_engine.py",
+      "domain": "verification",
+      "status": "production",
+      "lines": 674,
+      "public_functions": [
+        "schema",
+        "validate",
+        "build_inputs",
+        "skin_depth_m",
+        "H_oe",
+        "harmonic_ac_excess_factor",
+        "analyze",
+        "compute",
+        "compute_from_json"
+      ],
+      "description": "Independent inductor engine used for the report Section 4.8 cross-check."
+    },
+    {
+      "module": "backend/app/mode_b/doc_report_builder.py",
+      "domain": "reporting",
+      "status": "production",
+      "lines": 6164,
+      "public_functions": [
+        "fhz",
+        "fsig",
+        "chapter_splash",
+        "step_h",
+        "sub_h",
+        "body",
+        "bullet_list",
+        "eq_box",
+        "annotation",
+        "data_table",
+        "fig_caption",
+        "norm_status",
+        "verdict_row",
+        "build_full_report"
+      ],
+      "description": "Report chapters 1-5 plus the shared builders (tables, equation boxes, annotations, verdict rows, provenance helpers) reused by every other chapter."
+    },
+    {
+      "module": "backend/app/workflow/graph.py",
+      "domain": "orchestration",
+      "status": "blueprint_test_only",
+      "lines": 764,
+      "public_functions": [
+        "intake_node",
+        "topology_selection_node",
+        "topology_hitl_node",
+        "route_after_topology_hitl",
+        "topology_specific_intake_node",
+        "route_after_topology_specific_intake",
+        "controller_selection_node",
+        "controller_selection_hitl_node",
+        "route_after_controller_selection_hitl",
+        "wait_topology_node",
+        "wait_topology_specific_node",
+        "wait_controller_node",
+        "wait_mode_b_node",
+        "waveform_reconstruction_node"
+      ],
+      "description": "LangGraph StateGraph with 38 nodes and human-in-the-loop wait states. build_graph() is called from tests only; the GUI does not run it."
+    },
+    {
+      "module": "backend/app/exporters/simplis_exporter.py",
+      "domain": "external_simulation",
+      "status": "stub",
+      "lines": 18,
+      "public_functions": [
+        "generate_simplis_netlist"
+      ],
+      "description": "Emits a SIMPLIS netlist STARTER with a few parameters threaded from state. Not a complete netlist; no results-import path."
+    },
+    {
+      "module": "backend/app/exporters/altium_exporter.py",
+      "domain": "ecad",
+      "status": "stub",
+      "lines": 2,
+      "public_functions": [
+        "generate_altium_design_stub"
+      ],
+      "description": "Returns a hardcoded 3-component dict with placeholder values. No library mapping, no nets from real selections, no footprints."
+    }
+  ],
+  "vendor_data": {
+    "magnetics_materials": 92,
+    "magnetics_path": "backend/data/magnetic_materials/<supplier>/*.json",
+    "workbooks_path": "specs/Database/",
+    "workbooks": [
+      "ICL_Database.xlsx",
+      "bridge_rectifiers_combined_sorted.xlsx",
+      "diodes_combined_sorted.xlsx",
+      "ferroxcube_cores_database (1).xlsx",
+      "mosfets_combined_sorted.xlsx",
+      "mov_varistors_TEMPLATE.xlsx",
+      "ntc_thermistors_TEMPLATE.xlsx"
+    ],
+    "runtime_loaded": [
+      "ICL_Database.xlsx"
+    ],
+    "note": "specs/Database is resolved at runtime by backend/app/mode_b/inputprotection/database.py; deleting ICL_Database.xlsx breaks NTC and fuse selection."
+  },
+  "extension_points": [
+    {
+      "name": "dc_dc_stage",
+      "status": "not_built",
+      "existing": "DCDCResult dataclass in backend/app/mode_b/inputfilter/emi_filter_design.py",
+      "what_exists": "The DC/DC is modelled only as a common-mode noise source for the EMI filter. There is no DC/DC design engine.",
+      "suggested_shape": "A peer to step7/step15/step16 following the same stage pattern: requirement -> catalogue screen -> designer selection -> re-verify on the actual part -> its own report chapter."
+    },
+    {
+      "name": "external_simulator_export",
+      "status": "stub",
+      "existing": "backend/app/exporters/simplis_exporter.py (17 lines)",
+      "what_exists": "A netlist starter template with a few parameters threaded from state.",
+      "missing": [
+        "complete netlist generation from the real selected parts",
+        "results import / closed-loop verification path",
+        "support for simulators other than SIMPLIS"
+      ]
+    },
+    {
+      "name": "ecad_altium",
+      "status": "stub",
+      "existing": "backend/app/exporters/altium_exporter.py (2 lines)",
+      "what_exists": "Returns a hardcoded 3-component dict with 'TBD' values.",
+      "missing": [
+        "component-to-library mapping",
+        "nets from the actual selections",
+        "footprint selection",
+        "PCB constraints",
+        "BOM export"
+      ],
+      "available_input": "Every design stage already stores a complete selected-part record (manufacturer, part number, datasheet URL, ratings), which is what a real BOM and netlist export needs."
+    },
+    {
+      "name": "in_tool_verification",
+      "status": "production",
+      "existing": "backend/app/sim_agent/ + 4 embedded HTML studios",
+      "what_exists": "An independent engine re-derives the design from the same database physics; the comparison is printed in report Section 4.8. These are verification, not design, and never write back to the design."
+    }
+  ],
+  "conventions": [
+    "One engine per quantity: if two chapters print the same number they call the same function.",
+    "No hidden defaults: an absent value prints DATA MISSING, never a substituted default.",
+    "A gate may block release sign-off but must never make every part un-selectable.",
+    "Requirement -> screen -> select -> verify; never name the part before deriving the need.",
+    "Provenance is printed: supplier, catalogue revision and page, temperature basis, and which parameters the engine had to estimate.",
+    "Defaults must not silently substitute for designer input (this recurred three times)."
+  ],
+  "validation": {
+    "tests": 172,
+    "skipped": 2,
+    "report_page_range": [
+      178,
+      190
+    ],
+    "note": "The combined-report page-count assertion is the guard that catches a chapter vanishing silently; verify_combined_report.py must be run as a script, not only imported."
+  }
+}
