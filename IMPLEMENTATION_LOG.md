@@ -11461,3 +11461,82 @@ keeps its meaning - what was ASKED for - because the GUI and saved designs alrea
 
 VERIFIED 5 tests pass; the status guard verified to FAIL against the injected pre-C273 `"ok"` and
 main.py restored from backup with the injection confirmed gone; tsc --noEmit clean.
+
+---
+
+# C276 - reading a curve off a bitmap, proved with the part's own table (B19 tracer)
+
+Designer: "now let's do B19." The last M7 gap: the Toshiba TRS12E65H publishes its characteristic
+curves as 1638x1289 images with no vector paths, so curve_extract reads nothing from it.
+
+## The measurement that decided the design
+
+Page 4 of that datasheet carries FORTY WORDS of text, and all of them are figure captions. The tick
+labels are pixels. So the vector path's calibration - a fit through tick-label positions whose
+RESIDUAL is the evidence - has nothing to fit. That is the whole difference between the two
+capabilities, and it was worth establishing before writing anything.
+
+Three ways to get the axes: OCR them, infer them from gridline spacing, or ask. OCR means a
+tesseract SYSTEM dependency (not a pip install) for one file, and it fails in exactly the way C224
+warned about - an axis misread that fits perfectly and is invisible to any residual. Gridline
+counting cannot distinguish 0..2 from 0..20. So the designer supplies the ranges, which they can
+read off the plot in seconds, and the tracer does everything else. That IS the "assisted pixel
+digitising" the bring-your-own-part plan specified.
+
+WITHOUT AXES IT REFUSES, so the correct pre-B19 behaviour is still the default and
+test_a_raster_datasheet_is_refused_rather_than_guessed_at keeps its meaning. Both are asserted.
+
+## Four prototypes, three of them wrong, before any module existed
+
+Worth recording because each failure was informative and none was visible from the code:
+
+  1. Frame by projection - worked first time. Rows/cols dark across >60% of the span; the OUTERMOST
+     groups are the frame. 8 px frame strokes, 2-3 px gridlines.
+  2. Row-scan for curves - returned IDENTICAL candidates at every current. They were gridlines.
+  3. Sampling at I = 12, 10, 8, 6, 4, 2 A - every row read 100% dark, because those are exactly the
+     labelled currents and each one HAS a horizontal gridline. Sample between them.
+  4. Blanking gridline rows/cols before connected-component analysis - sliced every curve into
+     77 px chunks, one per gridline gap. The components were all 8% of plot height.
+
+What worked is EROSION: gridlines are 2-3 px and curve strokes 8-14 px, so a 7x7 erosion deletes
+the grid and keeps the curves. 135 components before, 21 after, and the curve band survives as one
+piece spanning 99.4% of the plot height. The five curves stay merged in that one component because
+they genuinely cross - so they are separated by top-down tracking, seeded at the top where the
+family fans out and followed by nearest-neighbour continuity into the crowd near the origin.
+
+Top-down is not arbitrary. At 6.4 A the five curves are one blob 45 px wide; seeding at the bottom
+would start inside it with nothing to separate. It also matches what the engine needs, since
+conduction loss is dominated by the high-current end.
+
+## The gate, and why it is two anchors and not one
+
+    track 0:  V_F = 1.203 V at 12 A   table: 1.2  V typ, 25 C    0.25 % out
+    track 1:  V_F = 1.255 V at 12 A   (100 C, untabulated)
+    track 2:  V_F = 1.353 V at 12 A   table: 1.36 V typ, 150 C   0.5 % out
+    track 3:  V_F = 1.415 V at 12 A   (175 C, untabulated)
+
+TWO ANCHORS ON TWO DIFFERENT CURVES is what makes this evidence rather than coincidence. One
+anchor can be hit by a wrong scale that happens to land; no single scale error puts curve 0 on
+1.2 V and curve 2 on 1.36 V at once. A test asserts the two matches are not the SAME curve, so a
+loose tolerance cannot pass by matching one curve to both anchors - that would be the check doing
+its own homework.
+
+There is no residual gate anywhere in this module, deliberately. B19 says it: the residual is not
+evidence, only the tabulated point is.
+
+## The test that justifies believing the passing case
+
+test_a_wrong_axis_range_is_caught_by_the_anchor digitises the same figure against 0..10 A instead
+of 0..12 A. The curves come out smooth, monotonic and well separated - they look completely
+reasonable - and the anchor refuses every one. A gate only shown to pass has not been shown to
+discriminate.
+
+## NOT CLOSED: nothing calls it yet
+
+The Curves sub-tab, confirm_figure and the upload flow know only the vector path, so a designer
+cannot reach this from the screen. C215, C224 and C225 EACH shipped curve work that passed every
+test and was dead in the GUI, which is why tests/test_api_flows.py exists. B19 is left open with a
+rewritten "done when" covering the wiring, rather than marked closed on a green unit test.
+
+VERIFIED 9 raster tests pass; the wrong-axis probe refuses all curves; vector path unchanged
+(test_curve_extract + test_diode_real_datasheets, 58 passed).

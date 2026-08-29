@@ -967,29 +967,51 @@ the GUI already read it.
 Guard: `tests/test_no_passing_cores_is_reported.py`, verified to FAIL against the pre-C273
 `status: "ok"` by injecting it.
 
-### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
-**The input file is on disk again (2026-08-29):**
-`specs/Review/PFC Boost Diode/TRS12E65H_datasheet_en_20230411.pdf`. A note in SESSION_HANDOFF had
-said this could not be started because no Toshiba datasheet remained in `specs/` (checked
-2026-08-22) — that is now stale and corrected. Verified it is the right part and genuinely raster:
-TRS12E65H, SiC Schottky, 7 pages, pages 4-7 carrying images with only 4-9 vector drawings each
-(the page frame). **Tracked at C275**, so it is in the repo and the guard test no longer skips
-silently on a clone — this is startable as it stands.
+### B19. M7 — a RASTER curve tracer (the last M7 gap)  `TRACER DONE at C276 — not yet wired to the GUI`
+**The tracer is built and proven against the part's own table.**
+`app/mode_b/semiconductor/raster_curve.py`, guarded by `tests/test_raster_curve.py` (9 tests).
 
-Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
-Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at
-all**, so there is nothing to trace. This is the "assisted pixel digitising" the bring-your-own-part
-plan specified — the agent proposes points, the designer confirms them against the plot — and it is
-a different capability from everything built so far, not a tuning problem.
+Measured on Fig. 9.1 (I_F – V_F) of the Toshiba TRS12E65H, four curves separated:
 
-Today it reads nothing rather than reading something wrong, which is the correct failure and is
-asserted by `test_a_raster_datasheet_is_refused_rather_than_guessed_at`.
+| track | V_F at 12 A | the table says | error |
+|---|---|---|---|
+| 0 | 1.203 V | **1.2 V** (typ, 25 °C) | **0.25 %** |
+| 1 | 1.255 V | — (100 °C, untabulated) | — |
+| 2 | 1.353 V | **1.36 V** (typ, 150 °C) | **0.5 %** |
+| 3 | 1.415 V | — (175 °C, untabulated) | — |
 
-- **Done when:** a raster figure yields a proposal whose cross-check against the part's own
-  tabulated point agrees, on the Toshiba file, with the same evidence gate the vector path uses.
+**Two anchors, on two DIFFERENT curves, is what makes this evidence.** One anchor can be hit by a
+wrong scale that happens to land; a scale error cannot put curve 0 on 1.2 V and curve 2 on 1.36 V
+at the same time. A test asserts the two are not the same curve, so a loose tolerance cannot pass
+it by matching one curve to both.
+
+**The axis ranges come from the designer, and that is the design, not a shortcut.** Page 4 of this
+datasheet carries 40 words of text and all of them are figure captions — the tick labels are
+pixels. OCR would mean a tesseract system dependency for one file and fails exactly the way C224
+warned (an axis misread that fits perfectly); gridline counting cannot tell 0..2 from 0..20. So the
+designer supplies the ranges and the tracer does the rest, which is the "assisted pixel digitising"
+the bring-your-own-part plan specified. **Without axes it refuses**, so `curve_extract` reading
+nothing from this file — the correct pre-B19 behaviour — is still what happens by default, and
+both that and the refusal test are asserted.
+
+**How the gate was shown to discriminate:** digitising the same figure against a plausible-but-
+wrong y-axis (0..10 A instead of 0..12 A) yields curves that look entirely reasonable — smooth,
+monotonic, well separated — and the tabulated anchor refuses every one of them. That test is the
+reason to believe the passing case.
+
+**WHAT IS LEFT, and it is the reason this is not marked CLOSED:** nothing calls it yet. The
+Curves sub-tab, `confirm_figure` and the upload flow still only know the vector path, so a designer
+cannot reach this from the screen. **C215, C224 and C225 each shipped curve work that passed every
+test and was dead in the GUI**, and `tests/test_api_flows.py` exists because of it. Wiring is its
+own step: an endpoint that lists a page's bitmaps, an axis-entry control, and the traced proposal
+joining the same confirm queue as a vector curve.
+
+- **Done when:** the tracer is reachable from the Curves tab and a confirmed raster curve reaches
+  the engine, driven end-to-end in `test_api_flows.py` in the order the GUI calls it.
 - **Do not** relax the vector path's calibration gates to make raster figures "sort of" read. C224
   showed why: two axis defects there fit a straight line with residual exactly zero, so the
-  residual is not evidence — only the tabulated point is.
+  residual is not evidence — only the tabulated point is. The tracer follows that: it has no
+  residual gate at all, only the table.
 
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
