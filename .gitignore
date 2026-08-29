@@ -21,7 +21,10 @@ backend/_*.png
 .idea/
 
 # Generated sample / verification report PDFs
+# (VERIFY_* was tracked from before this rule existed and was re-committed on every
+#  regeneration — gitignore never applies to an already-tracked file. Untracked at C274.)
 PFC_Report_VERIFY_*.pdf
+PFC_Report_REALDESIGN_*.pdf
 
 # Generated control-design chapter PDFs (regenerated from the report builders)
 PFC_Chapter6_*.pdf

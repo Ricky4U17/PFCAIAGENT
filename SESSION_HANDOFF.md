@@ -535,9 +535,14 @@ starting anything here; do not trust a summary of it, including this one.
    the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
    double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already
    supports. **The old "paralleling understates by 4 W" framing is the retracted claim.**
-3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **Cannot be started
-   today: there is no Toshiba datasheet in `specs/` any more** (checked 2026-08-22). It fails safely,
-   so take it only when a designer supplies the file.
+3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **UNBLOCKED as of
+   2026-08-29.** The 2026-08-22 note here said it could not be started because no Toshiba datasheet
+   was left in `specs/`; the file is back:
+   `specs/Review/PFC Boost Diode/TRS12E65H_datasheet_en_20230411.pdf`. Verified it is the right
+   part and genuinely raster — TRS12E65H, SiC Schottky, 7 pages, and pages 4-7 carry images with
+   only 4-9 vector drawings each (the page frame, nothing more), which is the signature B19
+   describes. **Caveat: that file is UNTRACKED**, so it exists on this machine and in no clone —
+   see the `specs/Review` question below before relying on it.
 
 **Already closed, do not re-pick** — every one of these was verified against the CODE on 2026-08-22,
 not just against its PENDING header:
