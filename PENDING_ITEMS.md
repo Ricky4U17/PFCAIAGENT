@@ -928,31 +928,44 @@ existing designs. Either way the designer should never learn about it from a bui
 Not fixed at C271 because it predates that work, changes behaviour for every wire type, and is a
 decision about how strict the endpoint should be.
 
-### B28. `run-sizing` returns 200 with an empty candidate list and no reason  `CODE`
-Found at C272 by the endpoint test added for B27, not by the change itself.
+### B28. `run-sizing` returns 200 with an empty candidate list and no reason  `CLOSED at C273`
+Found at C272 by the endpoint test added for B27, not by the change itself. Closed at C273.
 
-An explicit wire pick that no core can wind comes back **`status: "ok"`, `cores_passed: 0`,
+An explicit wire pick that no core can wind came back **`status: "ok"`, `cores_passed: 0`,
 `top_5: []`** — measured with `0.05x100` (0.196 mm² of copper) on the standard 3.6 kW design:
-424 cores evaluated, 0 passed. The GUI renders an empty table with nothing saying why.
+424 cores evaluated, 0 passed. Nothing in the response distinguished it from a successful run.
 
-**This is the correct physical answer and the wrong way to say it.** The endpoint already has a
-`status: "no_cores"` branch for "the catalog filter returned nothing", but no equivalent for
-"every core was evaluated and every one failed" — which is a different fact and the one the
-designer needs: the wire is too small for the current, not the height limit or the supplier filter.
+**Correction to this entry as first written:** it claimed the GUI "renders an empty table with
+nothing saying why". It does not — `Step7Wizard.runSizing` shows a hardcoded *"No suitable core
+found — try larger height or different material"*. That is worse than silence here, because the
+advice is wrong: the binding gate was the WIRE, and no height and no material would have helped.
+The entry was written from the API response without opening the component.
 
-Not fixed at C272 because B27 was scoped to *"used or refused, never swapped"* and this is neither
-— the wire IS honoured, exactly as asked. Sizing it and reporting nothing is a separate defect,
-and picking the status vocabulary is a decision (`no_passing_cores`? a `reason` field? the worst
-gate and its margin?).
+**The fix.** `DesignResult` now carries `fail_gates` alongside `fail_reasons` — one stable gate
+name per reason, appended through a single `res.fail(gate, reason)` method so the two cannot
+drift (nine call sites; one that forgot its gate would under-count exactly the gate nobody
+thought about). run-sizing aggregates them over the whole sweep, counting each gate **once per
+core**, and returns `status: "no_passing_cores"` with `no_pass_reason` and `fail_gate_counts`.
+The GUI prefers that reason over its hardcoded string.
 
-Related to the same shape: the response's `"wire"` field echoes `req.wire_designation` back
-verbatim rather than reporting the wire actually wound, so on the auto-pick path
-(`wire_designation: None`) it reads `null` while a real wire was chosen. Harmless now that a named
-wire cannot be substituted, but it is the C240 "echoed the choice back" shape and the reason the
-B27 tests assert on `result.wire_designation` instead.
+Measured on the `0.05x100` case:
 
-**Done when:** a run where every core fails is distinguishable from a successful one by status
-alone, and says which gate did the failing.
+> All 424 cores evaluated, none passed. Most common gate: thermal (424 of 424) — the temperature
+> rise exceeds budget — try a larger core or a larger wire. Also blocking: inductance (189),
+> fill (28), winding_fit (23).
+
+**The gate is THERMAL, and that is worth recording.** The test drafted for this asserted a
+*winding* gate — "a 0.196 mm² wire must fail on fill" — and the engine said thermal. The engine
+was right: a wire that thin fits any window trivially and then runs at J = 51 A/mm², so it cooks.
+424 of 424 is unanimous, which is what makes the diagnosis worth printing at all.
+
+Also closed here: the response's `"wire"` field echoes `req.wire_designation` back verbatim, so
+on the auto-pick path it read `null` while a real wire was chosen. `wire_used` now reports what
+was actually wound. `"wire"` keeps its meaning ("what was asked for") because saved designs and
+the GUI already read it.
+
+Guard: `tests/test_no_passing_cores_is_reported.py`, verified to FAIL against the pre-C273
+`status: "ok"` by injecting it.
 
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The

@@ -251,9 +251,26 @@ class DesignResult:
     # Pass/fail
     passed:         bool  = False
     fail_reasons:   list  = field(default_factory=list)
+    # C273 (PENDING B28). The machine-readable half of fail_reasons: one stable gate name per
+    # reason, same order, same length. run-sizing aggregates these across the whole sweep so a
+    # run where EVERY core fails can name the gate that did it instead of returning an empty
+    # candidate list. The prose in fail_reasons is for the designer and changes freely; these do
+    # not. Append through `fail()` — never to either list directly — so the two cannot drift.
+    fail_gates:     list  = field(default_factory=list)
 
     # Composite score (lower = better)
     score:          float = 999.0
+
+    def fail(self, gate: str, reason: str) -> None:
+        """Record one failed gate. The ONLY way a fail reason should be added.
+
+        Kept as a method rather than two appends at each site because this is the "fix the
+        family, not the member" shape: nine call sites, and one that forgot its gate would leave
+        the aggregate silently under-counting exactly the gate nobody thought about.
+        `test_fail_gates_track_reasons` asserts the two lists stay in step.
+        """
+        self.fail_reasons.append(reason)
+        self.fail_gates.append(gate)
 
 
 # ── v10 helper functions ──────────────────────────────────────────────────
@@ -681,7 +698,7 @@ def design_one_core(
         res.lg_mm = lg_mm
 
     if N <= 0:
-        res.fail_reasons.append("Could not converge on valid N.")
+        res.fail("turns", "Could not converge on valid N.")
         return res
 
     res.N           = N
@@ -1064,7 +1081,7 @@ def design_one_core(
         else:
             res.creepage_ok = creepage >= 6.0
             if not res.creepage_ok:
-                res.fail_reasons.append(
+                res.fail("creepage",
                     f"Creepage {creepage:.0f}mm < 6mm (IEC 60601-1 Medical). "
                     "Use extended-flange bobbin.")
 
@@ -1075,21 +1092,21 @@ def design_one_core(
         ku_lim = min(FFcu_limit + 0.05, 0.50)
 
     if FFcu > FFcu_limit:
-        res.fail_reasons.append(
+        res.fail("fill",
             f"FFcu={FFcu:.3f} ({FFcu*100:.1f}%) exceeds bare-copper fill limit {FFcu_limit:.2f}.")
     if res.Ku > ku_lim:
-        res.fail_reasons.append(
+        res.fail("winding_fit",
             f"Ku={res.Ku:.3f} ({res.Ku*100:.1f}% insulated) exceeds winding fit limit {ku_lim:.2f}.")
     if res.sat_margin_pct < 15.0:
-        res.fail_reasons.append(f"Saturation margin {res.sat_margin_pct:.1f}% < 15%.")
+        res.fail("saturation", f"Saturation margin {res.sat_margin_pct:.1f}% < 15%.")
     # v10 inner-bore saturation check (radial crowding): fails if inner bore saturates
     if _is_toroid and res.Bmax_inner_FL_T >= res.Bsat_at_Tcore:
-        res.fail_reasons.append(
+        res.fail("saturation_inner",
             f"Inner-bore flux saturates: Bmax_inner={res.Bmax_inner_FL_T:.3f}T "
             f">= Bsat={res.Bsat_at_Tcore:.3f}T "
             f"(crowd×{res.crowd_axial:.2f} at rin={res.ID_mm/2:.1f}mm).")
     if res.dT_rise_C > dT_budget_C:
-        res.fail_reasons.append(f"ΔT={res.dT_rise_C:.1f}°C > budget {dT_budget_C:.0f}°C.")
+        res.fail("thermal", f"ΔT={res.dT_rise_C:.1f}°C > budget {dT_budget_C:.0f}°C.")
     if res.L_vs_Vin_table:
         _req_rows = [r for r in res.L_vs_Vin_table if r.get("L_req_uH") is not None]
         if _req_rows:
@@ -1099,7 +1116,7 @@ def design_one_core(
             _viol = [r for r in _req_rows if not r.get("meets_req")]
             if _viol:
                 _v0 = min(_viol, key=lambda r: r["L_full_nom_uH"] - r["L_req_uH"])
-                res.fail_reasons.append(
+                res.fail("inductance",
                     f"L_full,nom={_v0['L_full_nom_uH']:.1f}µH < required "
                     f"{_v0['L_req_uH']:.1f}µH at {_v0['Vin_rms']:.0f}Vac "
                     f"({len(_viol)}/{len(_req_rows)} points below requirement).")
@@ -1107,7 +1124,7 @@ def design_one_core(
             # legacy payloads without a requirement curve: 95% retention floor
             Lfull_min = min(r["L_full_min_uH"] for r in res.L_vs_Vin_table)
             if Lfull_min < L_target_H * 1e6 * 0.95:
-                res.fail_reasons.append(
+                res.fail("inductance",
                     f"L_full,min={Lfull_min:.1f}µH < 95% of L_target at some op-point.")
 
     res.passed = len(res.fail_reasons) == 0

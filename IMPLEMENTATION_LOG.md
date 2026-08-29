@@ -11406,3 +11406,58 @@ wound with the largest wire in the list, and looked like a BETTER result than th
 
 VERIFIED full suite 802 passed / 3 skipped (19m30s) at the pre-addendum tree - the C270 baseline of
 787 plus the 15 wire tests; both wire files 23 passed after the addendum; tsc --noEmit clean.
+
+---
+
+# C273 - a sweep where every core fails no longer reports itself as "ok" (closes PENDING B28)
+
+Designer: "fix B28 too."
+
+An explicit wire pick that no core can wind came back `status: "ok"`, `cores_passed: 0`,
+`top_5: []` - indistinguishable from a successful run by status alone.
+
+## The GUI part of this was worse than the empty table I logged
+
+B28 said the GUI "renders an empty table with nothing saying why". It does not. `runSizing` shows
+a hardcoded "No suitable core found - try larger height or different material", and THAT IS THE
+DEFECT: the advice is confidently wrong whenever the binding gate is the wire. I wrote the entry
+from the API response without opening the component. Corrected in PENDING.
+
+## fail_gates, and why it is a method and not two appends
+
+`DesignResult` carries `fail_gates` alongside `fail_reasons`: one stable gate name per reason, same
+order, same length. The prose is for the designer and changes freely; the gate names do not, so the
+aggregate is not a regex over English.
+
+Both lists are written through `res.fail(gate, reason)` and nothing else. Nine call sites, and this
+is the "fix the family, not the member" shape - one site that forgot its gate would leave the
+aggregate silently under-counting exactly the gate nobody thought about. A test asserts the source
+contains exactly ONE `fail_reasons.append` (the one inside `fail()`), so a tenth check cannot be
+added the old way without failing.
+
+run-sizing counts each gate ONCE PER CORE - a core failing fill twice is still one core blocked by
+fill, and double-counting would elect the noisiest gate rather than the commonest.
+
+## The measured case, and the assumption it corrected
+
+    All 424 cores evaluated, none passed. Most common gate: thermal (424 of 424) - the temperature
+    rise exceeds budget - try a larger core or a larger wire. Also blocking: inductance (189),
+    fill (28), winding_fit (23).
+
+THE GATE IS THERMAL. The test I wrote first asserted a WINDING gate - "a 0.196 mm2 wire must fail
+on fill" - and the engine said thermal. The engine was right and I was wrong: a wire that thin fits
+any window trivially, and at ~10 A it runs J = 51 A/mm2 and cooks. The unanimity (424 of 424) is
+what makes the line worth printing; a split vote would be a weaker claim.
+
+Same shape as the C272 addendum: both times the endpoint told me something about the physics that
+my assumption had got backwards, and both times the fix was to re-point the test at what the engine
+actually does rather than loosen it.
+
+## Also closed here
+
+`"wire"` in the response echoes `req.wire_designation` back verbatim, so on the auto-pick path it
+read `null` while a real wire was chosen. `wire_used` now reports what was actually wound. `"wire"`
+keeps its meaning - what was ASKED for - because the GUI and saved designs already read it.
+
+VERIFIED 5 tests pass; the status guard verified to FAIL against the injected pre-C273 `"ok"` and
+main.py restored from backup with the injection confirmed gone; tsc --noEmit clean.

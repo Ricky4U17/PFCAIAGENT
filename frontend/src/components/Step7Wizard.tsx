@@ -310,7 +310,15 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
       const best = passing.length ? passing[0] : candidates[0]
       const top = best?.result ?? null
       if (top) { top.label = best?.label ?? ''; top.rank = best?.rank ?? 1 }
-      if (!top) { setErr(['No suitable core found — try larger height or different material']); setLoad(false); return }
+      if (!top) {
+        // C273 (PENDING B28). This used to be a hardcoded "try larger height or different
+        // material" for every empty result. That advice is WRONG whenever the binding gate is the
+        // wire: 0.05x100 fails all 424 cores on winding fill, and no height or material helps.
+        // The backend now counts the gate that actually blocked the sweep — prefer its reason and
+        // keep the old string only for the case where it says nothing.
+        setErr([d.no_pass_reason || 'No suitable core found — try larger height or different material'])
+        setLoad(false); return
+      }
       setAllCandidates(candidates)
       enrichResult(top, 0, nPar, winding)   // enrich best candidate
       setSub('result'); setLoad(false)

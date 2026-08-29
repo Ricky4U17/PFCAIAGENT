@@ -219,6 +219,38 @@ must.
 
 ---
 
+## 4e. A status that cannot say "nothing worked"
+
+C273. `/step7/run-sizing` returned `status: "ok"` with `cores_passed: 0` and an empty `top_5` when
+every core in the sweep failed. There was a `no_cores` status for "the catalog filter matched
+nothing", but none for "424 cores were evaluated and all 424 failed" — a different fact, and the
+one the designer needs.
+
+Downstream, the GUI filled the gap with a **hardcoded** *"try larger height or different
+material"*. That is the part worth remembering: **an empty result invites a guess, and a guess
+frozen into a string is indistinguishable from a diagnosis.** The advice was confidently wrong
+whenever the binding gate was the wire.
+
+> **If a call can return nothing, it needs a way to say why it returned nothing** — in the
+> response, not in the caller's imagination.
+
+Two details that made the fix hold:
+
+* **The reason must be machine-readable at the source.** `fail_reasons` is prose for the designer
+  and changes freely, so aggregating it would mean a regex over English. `DesignResult` grew
+  `fail_gates` — one stable gate name per reason — written through a single `res.fail(gate,
+  reason)` method, with a test asserting the module contains exactly one `fail_reasons.append`.
+  Nine call sites: the family, not the member.
+* **Count each gate once per core.** Double-counting elects the noisiest gate over the commonest.
+
+**And the diagnosis corrected me, twice in two commits.** The test drafted here asserted that a
+0.196 mm² wire fails on *fill*; the engine said *thermal*, unanimously (424 of 424). The engine was
+right — a wire that thin fits any window and then runs at J = 51 A/mm². The C272 addendum went the
+same way. When a new diagnostic disagrees with the assumption that motivated it, re-point the test
+at what the engine does rather than loosening the assertion.
+
+---
+
 ## 5. A docstring asserting an invariant is where nobody looks
 
 > *"This is the same builder the combined report calls, so the two cannot disagree — it is the same

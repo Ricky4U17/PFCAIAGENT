@@ -1851,6 +1851,48 @@ def step7_run_sizing(req: _SizingReq):
                                optimization_goal=getattr(req, 'optimization_goal', 'best_performance'))
         passed = sum(1 for r in all_results if r.passed)
 
+        # C273 (PENDING B28). "Every core was evaluated and every one failed" is a DIFFERENT fact
+        # from "the catalog filter returned nothing" (handled above as `no_cores`) and from a
+        # successful run — and it was indistinguishable from success by status alone: the response
+        # read `status: "ok"` with an empty top_5, so the GUI fell through to a hardcoded "try
+        # larger height or different material". That advice is wrong whenever the binding gate is
+        # the WIRE: 0.05x100 carries 0.196 mm², fails all 424 cores on fill, and no amount of
+        # height helps. Report which gate did the failing, counted over the whole sweep.
+        _gate_help = {
+            "fill":             "the wire is too large for the core window — choose a smaller wire, "
+                                "add parallel strands, or raise the fill limit",
+            "winding_fit":      "the winding does not fit the bore — try a smaller wire or a larger core",
+            "saturation":       "the core saturates — try a larger core, more stacks, or a lower permeability",
+            "saturation_inner": "the inner bore saturates — try a larger ID or more stacks",
+            "thermal":          "the temperature rise exceeds budget — try a larger core or a larger wire",
+            "inductance":       "the inductance falls below requirement under DC bias — try more turns, "
+                                "a larger core, or a higher permeability",
+            "creepage":         "the bobbin creepage is below the Medical limit — use an extended-flange bobbin",
+            "turns":            "no valid turn count converged for this core and wire",
+        }
+        no_pass_reason = ""
+        gate_counts: dict = {}
+        if not top5 and all_results:
+            for r in all_results:
+                # Count each gate ONCE per core: a core failing on fill twice is still one core
+                # blocked by fill, and double-counting would pick the noisiest gate over the
+                # commonest one.
+                for g in dict.fromkeys(r.fail_gates):
+                    gate_counts[g] = gate_counts.get(g, 0) + 1
+            if gate_counts:
+                _ranked = sorted(gate_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+                _top_gate, _n = _ranked[0]
+                no_pass_reason = (
+                    f"All {len(all_results)} cores evaluated, none passed. "
+                    f"Most common gate: {_top_gate} ({_n} of {len(all_results)}) — "
+                    f"{_gate_help.get(_top_gate, 'see fail_reasons on any candidate')}.")
+                if len(_ranked) > 1:
+                    no_pass_reason += (" Also blocking: "
+                        + ", ".join(f"{g} ({c})" for g, c in _ranked[1:4]) + ".")
+            else:
+                no_pass_reason = (f"All {len(all_results)} cores evaluated, none passed, and none "
+                                  f"recorded a gate — this is a defect, not a design limit.")
+
         def _serialize(r: DesignResult) -> dict:
             d = {}
             for f in r.__dataclass_fields__:
@@ -1860,12 +1902,20 @@ def step7_run_sizing(req: _SizingReq):
             return d
 
         return {
-            "status":        "ok",
+            # C273: a run where nothing passed is no longer reported as "ok".
+            "status":        "ok" if top5 else ("no_passing_cores" if all_results else "no_cores"),
             "step":          7,
             "material_key":  mat_key,
             "wire":          req.wire_designation,
+            # C273: `wire` above echoes the REQUEST back verbatim, so on the auto-pick path
+            # (wire_designation=None) it reads null while a real wire was chosen. Report what was
+            # actually wound as well — kept as a separate key because `wire` is what the GUI and
+            # saved designs already read, and its meaning is "what was asked for".
+            "wire_used":     wire.get("designation", ""),
             "cores_evaluated": len(all_results),
             "cores_passed":  passed,
+            "no_pass_reason": no_pass_reason,
+            "fail_gate_counts": gate_counts,
             "top_5": [
                 {"label": t["label"], "rank": t.get("rank", i+1), "result": _serialize(t["result"])}
                 for i, t in enumerate(top5)
