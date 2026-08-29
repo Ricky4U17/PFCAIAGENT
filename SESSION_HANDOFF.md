@@ -1,7 +1,7 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`7aab7fd` C273**, on `master`.
-Suite: **815 passed, 3 skipped** — full run, green, measured 21m24s. Frontend `tsc --noEmit`: clean.
+**Start here after a restart.** Last updated **2026-08-29**, head = **`17dc041` C276**, on `master`.
+Suite: **824 passed, 3 skipped** — full run, green, measured 25m43s. Frontend `tsc --noEmit`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
 
@@ -535,8 +535,17 @@ starting anything here; do not trust a summary of it, including this one.
    the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
    double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already
    supports. **The old "paralleling understates by 4 W" framing is the retracted claim.**
-3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **UNBLOCKED as of
-   2026-08-29.** The 2026-08-22 note here said it could not be started because no Toshiba datasheet
+3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **THE TRACER IS BUILT
+   (C276) and is the obvious next piece to finish.** `raster_curve.py` separates four curves off
+   Fig. 9.1 of the Toshiba bitmap and agrees with the part's own table to 0.25 % (25 °C) and 0.5 %
+   (150 °C) — two anchors on two different curves, which no single scale error can satisfy at
+   once. The axis ranges come from the designer because that datasheet's tick labels are pixels;
+   without them it refuses, so the old behaviour is still the default.
+   **WHAT IS LEFT IS THE WIRING** — nothing calls it. The Curves sub-tab, `confirm_figure` and the
+   upload flow know only the vector path, so a designer cannot reach it from the screen. C215/C224/
+   C225 each shipped curve work that passed every test and was dead in the GUI; drive the new flow
+   end-to-end in `test_api_flows.py` in the order the GUI calls it. Original note follows.
+   *(was: UNBLOCKED as of 2026-08-29.)* The 2026-08-22 note here said it could not be started because no Toshiba datasheet
    was left in `specs/`; the file is back:
    `specs/Review/PFC Boost Diode/TRS12E65H_datasheet_en_20230411.pdf`. Verified it is the right
    part and genuinely raster — TRS12E65H, SiC Schottky, 7 pages, and pages 4-7 carry images with
