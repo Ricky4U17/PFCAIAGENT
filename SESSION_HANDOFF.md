@@ -1,7 +1,7 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`8fd62c2` C271+C272**, on `master`.
-Suite: **802 passed, 3 skipped** — full run, green, measured 19m30s. Frontend `tsc --noEmit`: clean.
+**Start here after a restart.** Last updated **2026-08-29**, head = **`7aab7fd` C273**, on `master`.
+Suite: **815 passed, 3 skipped** — full run, green, measured 21m24s. Frontend `tsc --noEmit`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
 
@@ -14,10 +14,12 @@ Suite: **802 passed, 3 skipped** — full run, green, measured 19m30s. Frontend 
    wire in the list. A picker-only wire (visible, below the sweep's filter) is still honoured.
    **Expect two visible changes:** fewer wire rows, and a real error where a stale saved
    designation used to "work". Needs a hard refresh (Ctrl-F5) like C268.
-   **One thing to tell the designer:** picking a wire too small for the current — `0.05x100`, say —
-   now returns an EMPTY candidate table with no message. 424 cores evaluated, 0 passed, because
-   0.196 mm² cannot carry 10 A. Correct answer, no explanation. That is **PENDING B28**, logged
-   and deliberately not fixed under B27's scope.
+   **B28 is now fixed too (C273).** Picking a wire too small for the current — `0.05x100`, say —
+   used to return an empty table under a hardcoded *"try larger height or different material"*,
+   which is the wrong advice when the wire is what is binding. The sweep now names the gate:
+   *"All 424 cores evaluated, none passed. Most common gate: thermal (424 of 424) — the
+   temperature rise exceeds budget — try a larger core or a larger wire. Also blocking:
+   inductance (189), fill (28), winding_fit (23)."* Status is `no_passing_cores`, never `ok`.
 
 
 1. **Animation review.** The designer is walking the eight Design Explorer scenes and will come
