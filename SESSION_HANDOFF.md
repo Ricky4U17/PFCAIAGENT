@@ -1,7 +1,8 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`17dc041` C276**, on `master`.
-Suite: **824 passed, 3 skipped** — full run, green, measured 25m43s. Frontend `tsc --noEmit`: clean.
+**Start here after a restart.** Last updated **2026-08-29**, head = **`642c299` C277**, on `master`.
+Suite: **831 passed, 3 skipped** — full run, green, measured 20m13s. Frontend `tsc --noEmit` and
+`vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
 
@@ -535,23 +536,17 @@ starting anything here; do not trust a summary of it, including this one.
    the curve value and the model adds `rd·i` on top — deriving `rd` from the same curve slope would
    double-count. What remains is `vf_curve_hot`, the second hot V–I curve the engine already
    supports. **The old "paralleling understates by 4 W" framing is the retracted claim.**
-3. **`PENDING_ITEMS.md` B19** — the raster curve tracer, the last M7 gap. **THE TRACER IS BUILT
-   (C276) and is the obvious next piece to finish.** `raster_curve.py` separates four curves off
-   Fig. 9.1 of the Toshiba bitmap and agrees with the part's own table to 0.25 % (25 °C) and 0.5 %
-   (150 °C) — two anchors on two different curves, which no single scale error can satisfy at
-   once. The axis ranges come from the designer because that datasheet's tick labels are pixels;
-   without them it refuses, so the old behaviour is still the default.
-   **WHAT IS LEFT IS THE WIRING** — nothing calls it. The Curves sub-tab, `confirm_figure` and the
-   upload flow know only the vector path, so a designer cannot reach it from the screen. C215/C224/
-   C225 each shipped curve work that passed every test and was dead in the GUI; drive the new flow
-   end-to-end in `test_api_flows.py` in the order the GUI calls it. Original note follows.
-   *(was: UNBLOCKED as of 2026-08-29.)* The 2026-08-22 note here said it could not be started because no Toshiba datasheet
-   was left in `specs/`; the file is back:
-   `specs/Review/PFC Boost Diode/TRS12E65H_datasheet_en_20230411.pdf`. Verified it is the right
-   part and genuinely raster — TRS12E65H, SiC Schottky, 7 pages, and pages 4-7 carry images with
-   only 4-9 vector drawings each (the page frame, nothing more), which is the signature B19
-   describes. **Tracked at C275** along with the five other datasheets the suite reads, so this is
-   startable as it stands.
+3. ~~**`PENDING_ITEMS.md` B19**~~ — **CLOSED at C276+C277. The last M7 gap is done.** The raster
+   tracer reads Fig. 9.1 off the Toshiba bitmap, agrees with the part's own table to 0.25 % (25 °C)
+   and 0.5 % (150 °C) — two anchors on two different curves — and is reachable from the Curves
+   tab, with `TestTheRasterCurvesTabSequence` driving the real endpoints in screen order. The axis
+   ranges are typed in by the designer because on those pages the tick labels are pixels; without
+   them it refuses, so the old behaviour is still the default.
+   **It surfaced a defect that is NOT fully fixed — see `PENDING_ITEMS.md` B29:** a measurement
+   whose temperature is stated as `Ta` (or `Tc`) was read as 25 °C. Fixed at the two V_F sites,
+   where it had been mixing a 150 °C point into the engine's room-temperature forward-drop curve;
+   **13 further sites in `datasheet_flow.py` still read `T_j` alone** and were left deliberately,
+   because each has its own semantics.
 
 **Already closed, do not re-pick** — every one of these was verified against the CODE on 2026-08-22,
 not just against its PENDING header:
