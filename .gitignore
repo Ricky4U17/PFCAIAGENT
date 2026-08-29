@@ -25,6 +25,9 @@ backend/_*.png
 #  regeneration — gitignore never applies to an already-tracked file. Untracked at C274.)
 PFC_Report_VERIFY_*.pdf
 PFC_Report_REALDESIGN_*.pdf
+# GUI-exported reports (session-id filenames). Two of these under specs/Review were 26 MB
+# of the 33 MB that made specs/ look too big to track — build output, not source material.
+PFC_Report_pfc-*.pdf
 
 # Generated control-design chapter PDFs (regenerated from the report builders)
 PFC_Chapter6_*.pdf

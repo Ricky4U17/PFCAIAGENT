@@ -973,8 +973,8 @@ Guard: `tests/test_no_passing_cores_is_reported.py`, verified to FAIL against th
 said this could not be started because no Toshiba datasheet remained in `specs/` (checked
 2026-08-22) — that is now stale and corrected. Verified it is the right part and genuinely raster:
 TRS12E65H, SiC Schottky, 7 pages, pages 4-7 carrying images with only 4-9 vector drawings each
-(the page frame). **It is UNTRACKED**, so it exists here and in no clone; if this work is picked
-up, track it first or the guard test will keep skipping silently for everyone else.
+(the page frame). **Tracked at C275**, so it is in the repo and the guard test no longer skips
+silently on a clone — this is startable as it stands.
 
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The
 Toshiba TRS12E65H is the one it cannot: its curves are **1638x1289 bitmaps with no vector paths at

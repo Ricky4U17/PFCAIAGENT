@@ -541,8 +541,8 @@ starting anything here; do not trust a summary of it, including this one.
    `specs/Review/PFC Boost Diode/TRS12E65H_datasheet_en_20230411.pdf`. Verified it is the right
    part and genuinely raster — TRS12E65H, SiC Schottky, 7 pages, and pages 4-7 carry images with
    only 4-9 vector drawings each (the page frame, nothing more), which is the signature B19
-   describes. **Caveat: that file is UNTRACKED**, so it exists on this machine and in no clone —
-   see the `specs/Review` question below before relying on it.
+   describes. **Tracked at C275** along with the five other datasheets the suite reads, so this is
+   startable as it stands.
 
 **Already closed, do not re-pick** — every one of these was verified against the CODE on 2026-08-22,
 not just against its PENDING header:
