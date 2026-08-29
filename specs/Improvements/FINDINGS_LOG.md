@@ -180,6 +180,45 @@ ones live.
 
 ---
 
+## 4d. "Not found" that returns something else instead
+
+C271. `/step7/run-sizing` resolves the chosen wire by designation, and on no match it does not
+raise — it takes `wire_opts[0]`, the largest wire in the list:
+
+```python
+wire = next((w for w in wire_opts if w["designation"] == req.wire_designation), None)
+if wire is None and wire_opts:
+    wire = wire_opts[0]        # no error, no warning
+```
+
+This turned a routine data cleanup into a trap. Collapsing the duplicate vendor rows (TRW
+`0.1x200`, Rupalit `VS0.1x200`, Pack `200x0.1` are one wire) would have stranded any design saved
+against a vendor code — and instead of failing, the sizing run would have **quietly rewound it onto
+a different wire**. The fix keeps every vendor name resolvable, and the test aims at the
+substitution rather than at the lookup.
+
+**Before removing or renaming any catalog entry, find out what happens to a saved reference to it.**
+If the answer is a fallback rather than an error, the cleanup is a silent data change.
+
+**C272 closed it — and the fix was not the one-liner it looked like.** Deleting the fallback would
+have broken two legitimate callers sharing that branch: `wire_designation: None` (the documented
+auto-pick), and any wire the *picker* offers but the *sweep* filters out — the picker lists the
+catalog at `min_cu_fraction=0` while the sweep filters at 0.10, so four wires at 20 A are visible,
+clickable, and absent from the sweep. A blunt raise would have 400'd on a legitimate pick, which is
+just a different way of not doing what was asked.
+
+> **Before removing a fallback, enumerate who is relying on it.** A fallback that is wrong for one
+> caller is often load-bearing for another, and "make it strict" usually means *three* behaviours,
+> not two.
+
+Related, from the same finding: **the obvious dedupe key is usually wrong.** Cu area and OD look
+like they identify a wire; `0.1x800` and `0.2x200` share *both* (3.33 mm, 6.2832 mm²) and are
+different wires. The real key was (strands, strand diameter, OD) — the last term only there to keep
+dual-bundle constructions apart. Assert the things that must *not* merge, not just the ones that
+must.
+
+---
+
 ## 5. A docstring asserting an invariant is where nobody looks
 
 > *"This is the same builder the combined report calls, so the two cannot disagree — it is the same

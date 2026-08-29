@@ -874,6 +874,12 @@ class TestStep7Step8Wiring:
         resp = client.post("/mode-b/step7/run-sizing", json={
             "state": confirmed_state,
             "material_key": "edge_60",
+            # C272: `wire_type` was omitted, so this defaulted to "magnet" (solid-enamel) while
+            # naming a LITZ designation. The endpoint found no match and silently substituted
+            # MEW-AWG14 — so this test passed for a design wound with a completely different
+            # conductor than the one it names. B27 turned that substitution into a 400, which is
+            # how the mismatch surfaced. The designation is litz, so say so.
+            "wire_type": "litz",
             "wire_designation": "0.1x400",  # 0.1x400 has 3.14mm² Cu, sufficient for 10A
             "max_height_mm": 44.45,
             "max_stacks": 3,

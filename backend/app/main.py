@@ -1723,11 +1723,68 @@ def step7_run_sizing(req: _SizingReq):
         wire_opts   = _mag_db().get_wire_options(
             _wtype, Irms_cond, fsw_Hz, 100.0, _j_query,
             n_options=50, min_cu_fraction=0.10)
-        wire = next((w for w in wire_opts if w.get("designation","") == req.wire_designation), None)
-        if wire is None and wire_opts:
-            wire = wire_opts[0]   # best available if designation not matched
+        # C271: match the primary designation OR any vendor-equivalent one. The catalog lists the
+        # same physical wire under each vendor's part code (TRW `0.1x200`, Rupalit `VS0.1x200`,
+        # Pack `200x0.1`), and those rows are now collapsed into one option — so a design saved
+        # against a vendor code must still resolve here. It matters because of the fallback on the
+        # next line: an unmatched designation does NOT error, it silently substitutes the FIRST
+        # wire in the list (the largest), so a stranded name would quietly change the winding
+        # rather than complain.
+        def _matches(w) -> bool:
+            want = req.wire_designation
+            return want in ([w.get("designation", "")] + list(w.get("equivalent_designations") or []))
+
+        _want = (req.wire_designation or "").strip()
+        if not _want:
+            # `wire_designation: None` means "no designer pick — size against the best available".
+            # Documented on the request model as "None = agent sweeps all AWG"; this branch is the
+            # auto-pick, NOT a fallback, and must stay.
+            wire = wire_opts[0] if wire_opts else None
+        else:
+            wire = next((w for w in wire_opts if _matches(w)), None)
+            if wire is None:
+                # The picker (`/step7/wire-options`) lists the catalog with min_cu_fraction=0 —
+                # "show all wires so designer can choose from full table" — while the sweep above
+                # filters at 0.10 and queries at J_max rather than J_target. So a wire can be
+                # visible and clickable and still be absent here: at 20 A per conductor four of
+                # them are (0.05x100, 0.05x200, 0.071x100, 0.1x50). An EXPLICIT designer choice is
+                # not the sweep's to veto, so re-resolve it against the unfiltered catalog. The
+                # under-sizing is not hidden — the wire carries current_ok=False and the GUI
+                # already flags it.
+                wire = next((w for w in _mag_db().get_wire_options(
+                    _wtype, Irms_cond, fsw_Hz, 100.0, _j_query,
+                    n_options=200, min_cu_fraction=0.0) if _matches(w)), None)
         if wire is None:
-            raise HTTPException(400, f"No {_wtype} wire found for designation {req.wire_designation!r}")
+            # C272 (PENDING B27). A named-but-unmatched wire used to fall through to wire_opts[0] —
+            # the LARGEST wire in the list — with no error and nothing on screen. The design was
+            # then sized, wound, costed and reported against a conductor the designer never chose.
+            # "I cannot find what you asked for" must not resolve to "here is something else".
+            _avail = []
+            for w in wire_opts[:12]:
+                names = [w.get("designation", "")] + list(w.get("equivalent_designations") or [])
+                _avail.append("/".join(dict.fromkeys(n for n in names if n)))
+            # Name the likeliest cause first. `wire_type` defaults to "magnet", so a caller that
+            # sends a litz designation and omits it searches the wrong catalog entirely — which is
+            # exactly how a regression test spent an unknown length of time asserting a design
+            # wound with MEW-AWG14 while naming 0.1x400 (C272).
+            _other = ""
+            for _alt in ("litz", "tiw", "solid", "magnet"):
+                if _alt == _wtype:
+                    continue
+                try:
+                    if any(_matches(w) for w in _mag_db().get_wire_options(
+                            _alt, Irms_cond, fsw_Hz, 100.0, _j_query,
+                            n_options=200, min_cu_fraction=0.0)):
+                        _other = (f" It IS a {_alt!r} wire — this request asked for "
+                                  f"wire_type={_wtype!r}.")
+                        break
+                except Exception:
+                    pass
+            raise HTTPException(400, (
+                f"No {_wtype} wire matches designation {req.wire_designation!r} at "
+                f"{fsw_Hz/1e3:.0f} kHz for {Irms_cond:.2f} A per conductor.{_other} "
+                + (f"Available: {', '.join(_avail)}" if _avail
+                   else "No wire of this type passes the skin-depth and current filters.")))
         # Apply n_parallel: multiply Cu area and divide R to get bifilar/trifilar totals
         wire = dict(wire)
         if n_par > 1:

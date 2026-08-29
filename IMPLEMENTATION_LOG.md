@@ -11270,3 +11270,139 @@ resolve. B26 updated.
 
 VERIFIED 14 Screen-2 tests pass; tsc --noEmit clean; the wiring test fails when either field is
 dropped; R_CS band/options confirmed independent of the passed R_CS.
+
+---
+
+# C271 - one row per wire, with the vendor names kept visible (designer finding)
+
+The designer, on Magnetics -> Wire: "0.1 x 200 wire shown as VS0.1 X 200".
+
+`VS` IS NOT A FORMATTING BUG. It is Rupalit's real product code (RUPALIT Classic VS), carried
+verbatim from `backend/data/wire/litz_catalog.csv`. Nothing was mangling the designation, and
+normalising it away would have thrown out which product the row actually is.
+
+THE REAL DEFECT WAS DUPLICATION. The catalog lists the same physical wire once per vendor. 200
+strands of 0.1 mm appears three times - TRW `0.1x200`, Rupalit `VS0.1x200`, Pack `200x0.1` -
+identical in OD (1.66), Cu area (1.5708), resistance (0.01095) and both frequency limits. Six
+groups are affected. Three rows, nothing saying they are one wire, and because they rank
+identically on J they competed against each other for candidate slots. 36 rows -> 30.
+
+The designer chose: collapse equivalents, keep vendor names visible. Each row now carries
+`equivalents` [{series, designation}], `equivalent_designations` and `equivalent_count`; the table
+prints "also: Rupalit VS0.1x400, Pack 400x0.1" under the primary, with the full list on hover.
+
+## The key is (strands, strand diameter, OD) and every part of that earns its place
+
+  * NOT Cu area, and NOT OD alone. `0.1x800` and `0.2x200` share OD 3.33 mm AND Cu 6.2832 mm2 and
+    are NOT the same wire: 800 strands of 0.1 against 200 of 0.2, different strand diameter and so
+    different skin behaviour. A dedupe keyed on the obvious field would have merged two real
+    choices into one and silently removed an option.
+  * OD is IN the key so the dual-bundle constructions survive. `2x(0.1x100)` is also 200 strands of
+    0.1 mm, but wound as two bundles ("1.18 per bundle") - a different winding job with a different
+    build height. Its OD field differs, so it stays its own row.
+
+Both are asserted, because both are the mistake a reasonable person makes here.
+
+## The part that would have failed silently
+
+`/mode-b/step7/run-sizing` resolves the selected wire by designation:
+
+    wire = next((w for w in wire_opts if w["designation"] == req.wire_designation), None)
+    if wire is None and wire_opts:
+        wire = wire_opts[0]        # <- no error. The LARGEST wire in the list.
+
+So collapsing the vendor rows away without making their names resolvable would not have raised
+anything - a design saved against `VS0.1x200` would have been quietly rewound onto whatever sorted
+first. The lookup now matches the primary designation OR any equivalent, and there is a test aimed
+at exactly that substitution.
+
+Worth recording that the fallback itself is the hazard: it converts "I cannot find what you asked
+for" into "here is something else", which is the absence-reads-as-a-value class from FINDINGS_LOG.
+Not changed here - it predates this work and changing it is a separate decision - but it is why
+this change needed the resolution test before it was safe to make.
+
+VERIFIED 8 tests pass; both plausible mistakes probed and caught (no collapse -> 5 failures;
+keyed on Cu area -> 3 failures, catching the 0.1x800 / 0.2x200 merge), db.py restored byte-for-byte;
+live endpoint returns 30 rows with no standalone VS entry; tsc --noEmit clean.
+
+---
+
+# C272 - a named wire is used or refused, never quietly swapped (closes PENDING B27)
+
+Designer: "fix B27, make it raise instead of substituting."
+
+`/mode-b/step7/run-sizing` resolved the chosen wire by designation and, on no match, took
+`wire_opts[0]` - the LARGEST wire in the list - with no error and nothing on screen. The design was
+then sized, wound, costed and reported against a conductor the designer never picked.
+
+## Why this was not a one-line deletion
+
+THREE behaviours share that code path, and two of them are legitimate.
+
+  1. `wire_designation: None` means "no designer pick - size against the best available". It is
+     documented on the request model as "None = agent sweeps all AWG" and it reaches the same
+     branch the bad fallback used. Deleting the fallback outright would have broken the sweep.
+
+  2. A designation the SWEEP filtered out is still a real choice. The picker
+     (`/step7/wire-options`) lists the catalog with `min_cu_fraction=0` - "show all wires so
+     designer can choose from full table" - while run-sizing filters at 0.10 and queries at `J_max`
+     rather than `J_target`. Measured: at 20 A per conductor FOUR wires are visible and clickable
+     yet absent from the sweep list (0.05x100, 0.05x200, 0.071x100, 0.1x50). A blunt raise would
+     have 400'd on a legitimate pick - a different way of not doing what was asked. Those are now
+     re-resolved against the unfiltered catalog. The under-sizing is not hidden: the wire carries
+     `current_ok=False` and the GUI already flags it.
+
+  3. A designation that is in no catalog at all now raises 400, and the message names what IS
+     available rather than just refusing.
+
+## Verified against the real endpoint, not a re-implementation
+
+    None (auto-pick)               -> 200  0.1x800
+    empty string (auto-pick)       -> 200  0.1x800
+    a real wire            0.1x200 -> 200  0.1x200
+    a vendor equivalent  VS0.1x200 -> 200  0.1x200      (C271 equivalents survive the stricter path)
+    a picker-only wire   0.05x100  -> 200  0.05x100     (honoured, not refused)
+    does not exist        0.1x999  -> 400  "No litz wire matches designation '0.1x999' at ..."
+    nonsense           NOT-A-WIRE  -> 400
+
+`tests/test_wire_designation_is_honoured.py` also asserts the picker/sweep divergence still EXISTS.
+If those two lists ever converge, the unfiltered re-resolve becomes dead code - and the test says so
+instead of standing there guarding nothing, which is the presence-vs-content failure this log keeps
+recording.
+
+## Process note
+
+The full-suite run in flight when this change landed was killed and restarted. It had begun before
+the edit, so it was exercising a mix of old and new code - a green result from it would have meant
+nothing. Same reason the wire-path group was killed earlier: it was running CONCURRENTLY with a full
+suite, and two pytest processes sharing temp files and generated PDFs can corrupt each other.
+
+VERIFIED 15 wire tests pass; all seven endpoint cases behave; tsc --noEmit clean.
+
+## C272 addendum - the endpoint cases are guarded now, and one of them was a finding
+
+The seven endpoint cases above were checked BY HAND and then nothing guarded them: every test in
+`test_wire_designation_is_honoured.py` resolved wires against the DB the way run-sizing does, which
+is a RE-IMPLEMENTATION. So the 400 - the whole point of B27 - had no test on the real route at all.
+That is the exact shape FINDINGS_LOG records from the first draft of `test_inductor_loss_budget.py`:
+a test asserting against its own copy of the logic, passing while the shipped path stays broken.
+
+Seven tests now drive `/mode-b/step7/run-sizing` itself. They assert on
+`top_5[0].result.wire_designation` - the wire the engine ACTUALLY WOUND - and deliberately not on
+the response's `wire` field, which echoes `req.wire_designation` straight back and would have read
+correct all the way through the substitution bug.
+
+WRITING THEM FOUND B28. `0.05x100` is a legitimate picker-only pick, so behaviour 2 honours it -
+and it returns `status: "ok"` with `cores_passed: 0` and an EMPTY `top_5`. 424 cores evaluated, none
+wound: the wire carries 0.196 mm2 against ~10 A. The physics is right and the report of it is not,
+because "every core failed" is indistinguishable from success by status alone. Logged as B28, not
+fixed here - B27 was scoped to "used or refused, never swapped" and this is neither.
+
+Worth keeping: the first version of that test asserted `_wound(resp) == "0.05x100"` and failed with
+an IndexError on an empty list. A wire that fails every core has NO candidate to read a designation
+off, so the assertion with teeth is the one now in the file - whatever comes back must be wound with
+the wire that was asked for. The old fallback would have returned a full set of candidates here,
+wound with the largest wire in the list, and looked like a BETTER result than the correct one.
+
+VERIFIED full suite 802 passed / 3 skipped (19m30s) at the pre-addendum tree - the C270 baseline of
+787 plus the 15 wire tests; both wire files 23 passed after the addendum; tsc --noEmit clean.

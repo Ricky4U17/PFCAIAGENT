@@ -829,7 +829,12 @@ Worth pairing with a check that the SELECTED E96 value keeps the achieved freque
 band — snapping to the nearest standard value can walk a legal target across a boundary, which is
 most likely near 40 and 55 kHz where the design would look fine and the part would not run.
 
-### B25. Protection resistors snap nearest-in-log, not conservatively  `DECISION`
+### B25. Protection resistors snap nearest-in-log, not conservatively  `DECISION` — *designer accepted 4.12 kΩ*
+**Designer verified the report on 2026-08-27 and accepted the values as they stand:** R_ILIMIT
+14.7 kΩ, R_ILIMIT2 4.12 kΩ, C_ILIMIT 22 nF, C_ILIMIT2 75 nF. So nearest-in-log rounding is accepted
+in practice and this is no longer blocking anything. Kept open only as a policy question — if
+protection resistors should ever snap DOWN as a rule, this is the entry to act on. Close it if the
+designer confirms they do not want the change.
 Raised at C270. R_ILIMIT2's raw value is 4076.8 Ω; `_nearest_e96` picks **4.12 kΩ** (log-nearest),
 the designer computed **4.02 kΩ** — adjacent E96 steps, 1.4 % apart, either side of the raw value.
 
@@ -878,6 +883,76 @@ r_L, r_C) × Hcs(rf, cf) × R_CS/V_ramp`; the achieved f_SW is display-only).
 already show an amber `calc` note, and a reset that alters the loop deserves at least as much. Do
 not implement before the designer confirms R_CS actually changed between their two runs; the cause
 is a hypothesis, and it is the kind that has been wrong before (see B23).
+
+### B27. `run-sizing` substitutes a different wire when a designation does not match  `CLOSED at C272`
+**Closed on the designer's instruction — "make it raise instead of substituting."** A named wire is
+now either used or refused, never quietly swapped. Three behaviours, verified against the real
+endpoint:
+
+| request | behaviour |
+|---|---|
+| `None` / empty | auto-pick the best available (**unchanged** — this is the documented "agent sweeps all AWG" path, and it ran through the same fallback) |
+| a name the sweep filtered out | **honoured** — re-resolved against the unfiltered catalog |
+| a name in no catalog | **400**, naming what is available |
+
+**The middle row is why this was not a one-line change.** The picker lists the catalog with
+`min_cu_fraction=0` ("show all wires so designer can choose from full table") while the sweep
+filters at 0.10 and queries at `J_max`. At 20 A per conductor four wires are visible and clickable
+yet absent from the sweep list (`0.05x100`, `0.05x200`, `0.071x100`, `0.1x50`). A blunt raise would
+have 400'd on a legitimate pick — a different way of not doing what the designer asked. An explicit
+choice is not the sweep's to veto; the under-sizing still shows through `current_ok=False`.
+
+Guard: `tests/test_wire_designation_is_honoured.py`, including a test that the picker/sweep
+divergence still exists — if the two lists ever agree, the unfiltered re-resolve becomes dead code
+and the test says so rather than silently guarding nothing.
+
+*Original entry:* Found at C271 while collapsing the vendor-equivalent litz rows. `/mode-b/step7/run-sizing` resolves
+the selected wire by designation and, on no match, does **not** raise — it takes `wire_opts[0]`, the
+largest wire in the list:
+
+```python
+wire = next((w for w in wire_opts if w["designation"] == req.wire_designation), None)
+if wire is None and wire_opts:
+    wire = wire_opts[0]        # no error, no warning
+```
+
+So any request naming a wire the catalog no longer offers is silently rewound onto a different one.
+C271 made the vendor codes resolvable so the collapse could not trigger this, and added a test for
+the substitution — but the fallback itself is untouched and still live for every other cause of a
+miss (a renamed entry, a filtered-out wire, a typo from an older saved design).
+
+**Options:** raise a 400 like the `wire is None` branch two lines below already does; or keep the
+fallback but return a flag the GUI can surface ("requested X, using Y"). The second is safer for
+existing designs. Either way the designer should never learn about it from a build.
+
+Not fixed at C271 because it predates that work, changes behaviour for every wire type, and is a
+decision about how strict the endpoint should be.
+
+### B28. `run-sizing` returns 200 with an empty candidate list and no reason  `CODE`
+Found at C272 by the endpoint test added for B27, not by the change itself.
+
+An explicit wire pick that no core can wind comes back **`status: "ok"`, `cores_passed: 0`,
+`top_5: []`** — measured with `0.05x100` (0.196 mm² of copper) on the standard 3.6 kW design:
+424 cores evaluated, 0 passed. The GUI renders an empty table with nothing saying why.
+
+**This is the correct physical answer and the wrong way to say it.** The endpoint already has a
+`status: "no_cores"` branch for "the catalog filter returned nothing", but no equivalent for
+"every core was evaluated and every one failed" — which is a different fact and the one the
+designer needs: the wire is too small for the current, not the height limit or the supplier filter.
+
+Not fixed at C272 because B27 was scoped to *"used or refused, never swapped"* and this is neither
+— the wire IS honoured, exactly as asked. Sizing it and reporting nothing is a separate defect,
+and picking the status vocabulary is a decision (`no_passing_cores`? a `reason` field? the worst
+gate and its margin?).
+
+Related to the same shape: the response's `"wire"` field echoes `req.wire_designation` back
+verbatim rather than reporting the wire actually wound, so on the auto-pick path
+(`wire_designation: None`) it reads `null` while a real wire was chosen. Harmless now that a named
+wire cannot be substituted, but it is the C240 "echoed the choice back" shape and the reason the
+B27 tests assert on `result.wire_designation` instead.
+
+**Done when:** a run where every core fails is distinguishable from a successful one by status
+alone, and says which gate did the failing.
 
 ### B19. M7 — a RASTER curve tracer (the last M7 gap)  `CODE`
 Of the datasheets on file the digitiser now reads Vishay x2, Diodes Inc and Infineon (C224). The

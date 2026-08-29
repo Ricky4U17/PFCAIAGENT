@@ -692,6 +692,19 @@ export const Step7Wizard: React.FC<Props> = ({ confirmedState, onBack, onRestart
                           {nPar>1&&<span style={{fontSize:9,color:C.teal,marginLeft:4}}>×{nPar}</span>}
 
                           {w.current_ok===false&&<span style={{fontSize:9,color:C.red,marginLeft:4}}>⚠curr</span>}
+                          {/* C271: the same wire is sold under each vendor's own part code — TRW
+                              0.1x200, Rupalit VS0.1x200, Pack 200x0.1 are one wire. They used to
+                              be three identical rows with nothing saying so. Collapsed to one,
+                              with the orderable names kept visible rather than normalised away
+                              ("VS" is Rupalit's real product code, not a typo). */}
+                          {w.equivalent_count>1&&(
+                            <div style={{fontSize:9,color:C.hint,marginTop:2,fontFamily:'inherit'}}
+                              title={'The same wire, orderable as any of these:\n'+
+                                (w.equivalents||[]).map((e:any)=>`  ${e.series}  ${e.designation}`).join('\n')}>
+                              also {(w.equivalents||[]).slice(1)
+                                .map((e:any)=>`${e.series} ${e.designation}`).join(' · ')}
+                            </div>
+                          )}
                         </td>
                         <td style={{padding:'7px 8px',fontFamily:'IBM Plex Mono,monospace'}}>{(w.strand_dia_mm ?? w.diameter_mm ?? w.dia_mm ?? '—') + (w.strand_dia_mm||w.diameter_mm||w.dia_mm ? 'mm' : '')}</td>
                         <td style={{padding:'7px 8px',fontFamily:'IBM Plex Mono,monospace'}}>

@@ -530,6 +530,8 @@ class MagneticsDB:
                         "J_at_Irms": round(IL_rms / Cu, 2) if Cu > 0 else 0,
                     })
 
+        results = self._collapse_vendor_equivalents(results)
+
         # Sort: feasible first, then by J ascending (lowest J = least stressed = largest wire)
         results.sort(key=lambda r: (
             0 if r.get("current_ok") and r.get("skin_ok") else
@@ -537,6 +539,50 @@ class MagneticsDB:
             float(r.get("J_at_Irms", 999))
         ))
         return results[:n_options]
+
+    @staticmethod
+    def _collapse_vendor_equivalents(rows: list[dict]) -> list[dict]:
+        """One row per distinct wire; the vendors that sell it travel with it.
+
+        C271, designer finding. The litz catalog lists the same physical wire under each vendor's
+        own part naming — 200 strands of 0.1 mm appears as TRW `0.1x200`, Rupalit `VS0.1x200` and
+        Pack `200x0.1`, identical in OD, Cu area, resistance and frequency limits. The selection
+        table showed all three as separate rows with nothing saying they are the same wire, and
+        because they rank identically they competed against each other for candidate slots. (The
+        `VS` prefix is NOT a formatting bug: it is Rupalit's real product code, which is why the
+        vendor names are kept rather than normalised away.)
+
+        THE KEY IS (strands, strand diameter, OD) AND THAT MATTERS:
+          * NOT Cu area or OD alone — `0.1x800` and `0.2x200` share OD 3.33 mm and Cu 6.2832 mm²
+            but are different wires (800 strands of 0.1 against 200 of 0.2), with different strand
+            diameters and therefore different skin behaviour. Collapsing those would be wrong.
+          * OD is part of the key so the dual-bundle constructions stay separate: `2x(0.1x100)` has
+            the same 200 strands of 0.1 mm but is wound as two bundles ("1.18 per bundle"), which
+            is a different winding job with a different build.
+
+        First occurrence in catalog order wins the primary designation, so the plain `0.1x200`
+        form leads and the vendor codes follow. `equivalent_designations` exists so a design saved
+        against any vendor's name still resolves — without it, collapsing would strand a stored
+        `VS0.1x200` and `/step7/run-sizing` would silently fall back to a DIFFERENT wire.
+        """
+        out: list[dict] = []
+        index: dict[tuple, dict] = {}
+        for r in rows:
+            key = (r.get("type"), r.get("strands"),
+                   r.get("strand_dia_mm", r.get("diameter_mm")), r.get("OD_mm"))
+            primary = index.get(key)
+            if primary is None:
+                r = dict(r)
+                r["equivalents"] = [{"series": r.get("series"), "designation": r.get("designation")}]
+                index[key] = r
+                out.append(r)
+            else:
+                primary["equivalents"].append(
+                    {"series": r.get("series"), "designation": r.get("designation")})
+        for r in out:
+            r["equivalent_designations"] = [e["designation"] for e in r["equivalents"]]
+            r["equivalent_count"] = len(r["equivalents"])
+        return out
 
     # ── Loss / material property queries ─────────────────────────────────────
 
