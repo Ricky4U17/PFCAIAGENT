@@ -11606,3 +11606,63 @@ And it asserts the wrong-axis case end to end: the same figure against 0..10 A i
 traces perfectly well, looks entirely reasonable, and is refused by the table cross-check.
 
 VERIFIED 7 API-flow tests pass; tsc --noEmit clean; vite build clean.
+
+---
+
+# C278 - a measurement's temperature is whatever the vendor stated it at (CLOSES PENDING B29)
+
+Designer: "now do B29." C277 fixed the two V_F sites; this is the rest of the family.
+
+## The split, because "convert everything" would have been wrong
+
+Two kinds of site read a temperature out of a conditions dict and they want different things.
+
+VENDOR-STATED conditions mean "the temperature this measurement was taken at", and the vendor
+chooses how to say it. Six sites, all converted: idss (MOSFET leakage vs temperature), _hot_entry
+(the hot R_DS(on)), irev and irev_br (diode and bridge reverse leakage), _qrr_tempco, and tj_test
+(the switching-energy test point the analytic model is re-run at).
+
+Worth noting on idss: dropping a point for want of the expected key is NOT neutral there. The
+builder needs two points, so one unread condition leaves the leakage curve unbuilt and the
+blocking-loss term back at the zero its own comment complains about.
+
+OUR OWN conditions on a digitised curve are a different thing. `confirm_figure` writes them from
+the Curves tab, which offers a single T_j field, so T_j is the only key that can be there. Four
+sites, left alone - and each now carries a `T_j DELIBERATELY` comment, because a bare get("T_j") is
+indistinguishable from the defect it survived and the next person running the grep would "fix"
+four sites that were already right. A test asserts all four still say so.
+
+A THIRD CASE NEEDED ITS OWN TREATMENT. The Q_rr note PRINTS the condition. Rendering an ambient as
+"T_j" is a false statement about the measurement, and it reads exactly like a true one - a reviewer
+cannot catch it. `measurement_temperature_named()` returns the value AND the key, so the note says
+"T_amb = 150 degC" when that is what the datasheet said.
+
+## The first regression test I wrote would have shipped permanently skipped
+
+It called datasheet_extract.extract() directly and skipped when the result came back empty. That
+result IS empty for this file - the vendor templates are applied by the UPLOAD path, not by
+extract() - so the test would have been green, skipping, and covering nothing: the exact silent-
+coverage failure this log keeps recording, in the regression test for the entry about it. It drives
+the real upload endpoint now, and 14 tests run with no skips.
+
+Its premise is asserted separately: the Toshiba's V_F entries must still state T_amb and NOT T_j.
+If the extractor ever starts writing T_j there, this file stops exercising the defect and the
+regression test would pass for the wrong reason.
+
+## The count is the guard
+
+    grep -c 'get("T_j")' backend/app/mode_b/semiconductor/datasheet_flow.py    # 5 at C278
+
+Four deliberate reads plus measurement_temperature's own preferred read. A written-down list of
+offending sites goes stale exactly when it matters - C2 and C3 each grew a site nobody re-counted -
+so the test counts rather than enumerates, and says what to do in both directions if the number
+moves.
+
+## Still untested
+
+The T_c middle branch has no real file behind it: nothing on disk states a condition that way, so
+it is covered by unit tests only. Recorded in B29 rather than left implicit.
+
+VERIFIED 14 tests pass with no skips; the guard verified to FAIL against injected pre-C277
+behaviour (5 failures including the real-part regression) and datasheet_flow.py restored from
+backup with the injection confirmed gone.

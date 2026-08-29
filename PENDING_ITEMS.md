@@ -1003,44 +1003,51 @@ path got its sequence test in the same commit as its wiring.
   * **a temperature stated as `Ta` was read as 25 °C** — see **B29**, which is the part of this
     that is NOT fixed.
 
-### B29. A measurement's temperature may be stated as T_j, T_c or T_amb — 13 sites read only T_j  `CODE`
-Found at C277 by the B19 end-to-end flow, which is the only reason it surfaced: the Toshiba
-TRS12E65H states its hot forward drop as **Ta = 150**, and it is the first datasheet on file to do
-so.
+### B29. A measurement's temperature may be stated as T_j, T_c or T_amb  `CLOSED at C278`
+Found at C277 by the B19 end-to-end flow — the Toshiba TRS12E65H is the first datasheet on file to
+state a hot condition as **Ta = 150**. It extracts and stores correctly as
+`{"I_F": 12.0, "T_amb": 150.0}`, and every consumer asked for `conditions["T_j"]`, got nothing, and
+filed a 150 °C measurement as a 25 °C one. C277 fixed the two V_F sites; C278 did the family.
 
-`V_F = 1.36 V at 12 A, 150 °C` extracts correctly and stores correctly as
-`{"I_F": 12.0, "T_amb": 150.0}`. Then `_vf_points` asked for `conditions["T_j"]`, got nothing, and
-filed a 150 °C measurement as a 25 °C one. **Two consequences, and the one that surfaced it was
-the milder:** the figure cross-check anchored the 25 °C curve on a 150 °C value and refused a
-correctly digitised curve — while `_vf_curve_from(_vf_points(profile, hot=False))`, which builds
-the ENGINE's room-temperature forward-drop curve, was mixing the hot point into the cold curve, and
-the hot curve got nothing at all.
+**Converted to `measurement_temperature()` — vendor-stated conditions, where the vendor chooses
+how to say it:**
 
-**FIXED AT C277 IN THE TWO V_F SITES ONLY**, through a shared `measurement_temperature(conditions)`
-that prefers `T_j` and falls back to `T_c` then `T_amb`. Reading 150 as 25 is an error of 125
-degrees; reading an ambient as a junction is an error of a few.
+| site | what it feeds |
+|---|---|
+| `idss` (`I_DSS_vs_Tj`) | MOSFET leakage vs temperature — **fewer than two points leaves the curve unbuilt and the blocking-loss term back at zero**, so dropping a point for want of a key is not neutral |
+| `_hot_entry` | the hot R_DS(on) entry |
+| `irev`, `irev_br` | diode and bridge reverse leakage vs temperature |
+| `_qrr_tempco` | Q_rr's temperature coefficient |
+| `tj_test` | the switching-energy test point the analytic model is re-run at |
 
-**THE FAMILY IS NOT FIXED. `datasheet_flow.py` has 13 further sites** that read `T_j` out of a
-conditions dict and will misread any part stating its temperature another way — reverse leakage
-(`I_rev`, `irev_br`), the hot-entry pickers, `idss`, and the digitised-curve temperature reads
-among them. They were left alone deliberately: each has its own semantics (some genuinely want a
-junction temperature for a thermal model, not "whatever the vendor published"), so a blanket
-substitution would be a change of meaning at every site, not a fix.
+**Left reading `T_j`, deliberately — 4 sites**, the digitised-curve conditions on the diode and
+bridge paths (`dig_vf`, `dig_hot`, twice each). Those conditions are **ours, not the vendor's**:
+`confirm_figure` writes them from the Curves tab, which offers a single T_j field, so no other key
+can be there. Each carries a `T_j DELIBERATELY` comment, and a test asserts all four still do —
+a bare `get("T_j")` is indistinguishable from the defect it survived.
 
-**A COUNT, NOT A LIST.** C2 and C3 each grew a site nobody re-counted, so the number is the thing
-to re-derive:
+**A third case needed its own treatment.** The Q_rr note *prints* the condition, and rendering an
+ambient as "T_j" is a false statement about the measurement that reads exactly like a true one. It
+goes through `measurement_temperature_named()`, which returns the value **and the key**, so the
+note says `T_amb = 150 degC` when that is what the datasheet said.
 
-```bash
-grep -c 'get("T_j")' backend/app/mode_b/semiconductor/datasheet_flow.py     # 14 at C277
-```
+Guard: `tests/test_measurement_temperature.py` (14 tests), including the real-part regression —
+the Toshiba's cold set must hold 1.0 and 1.2 V and **not** 1.36 V. Verified to FAIL against the
+injected pre-C277 behaviour (5 tests fail, the real-part one among them), then restored.
 
-One of those 14 is `measurement_temperature`'s own preferred read. If the count rises, a new site
-has joined the family.
+**Two things worth keeping from how this was built:**
+* **The count is the guard, not a list.** `grep -c 'get("T_j")' datasheet_flow.py` is **5** at C278
+  — the 4 deliberate reads plus `measurement_temperature`'s own preferred read. If it rises, a new
+  site has joined the family. C2 and C3 each grew a site nobody re-counted; a list goes stale
+  exactly when it matters.
+* **The first draft of the regression test skipped.** It called `datasheet_extract.extract()`
+  directly, which returns no parameters for this file because the vendor templates are applied by
+  the *upload* path — so it would have shipped permanently green and covering nothing. It drives
+  the real upload endpoint instead.
 
-- **Done when:** every site that means "the temperature this measurement was taken at" goes through
-  `measurement_temperature`, and every site that genuinely requires a junction temperature says so
-  and is left reading `T_j`. Needs a datasheet stating T_c to test the middle branch — none on
-  file does.
+**Still untested: the `T_c` middle branch against a real file.** No datasheet on file states a
+condition that way, so it is covered only by unit tests. Not a gap worth holding the entry open
+for — but if a part ever arrives stating `Tc`, that is the one to check.
 
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.

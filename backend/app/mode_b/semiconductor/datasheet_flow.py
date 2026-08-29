@@ -1178,10 +1178,14 @@ def _mosfet_block(profile: dict, device_class: str, design: dict, cls: dict,
     # LEAKAGE (plan 5.5). The blocking-loss term has been zero because nothing ever populated the
     # curve — a placeholder, not a measurement. Two published I_DSS points, at 25 degC and at
     # T_j,max, give the engine a real curve to interpolate over.
-    idss = [(float((e.get("conditions") or {}).get("T_j")),
+    # C278: the temperature may be stated as T_j, T_c or T_amb. Dropping a point for want of the
+    # expected key is not neutral here - fewer than two points leaves the leakage curve unbuilt and
+    # the blocking-loss term back at the zero this comment complains about.
+    idss = [(float(measurement_temperature(e.get("conditions"))),
              float(e.get("typ") or e.get("max")))
             for e in _entries_of(profile, "I_DSS_vs_Tj")
-            if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
+            if measurement_temperature(e.get("conditions")) is not None
+            and (e.get("typ") or e.get("max"))]
     if len(idss) >= 2:
         idss.sort()
         put("I_DSS_vs_Tj", [[t for t, _ in idss], [v for _, v in idss]])
@@ -1404,9 +1408,9 @@ def _entries_of(profile: dict, key: str) -> list[dict]:
 def _hot_entry(profile: dict, vgs: float) -> Optional[dict]:
     best = None
     for e in _entries_of(profile, "R_DS_on"):
-        tj = (e.get("conditions") or {}).get("T_j")
+        tj = measurement_temperature(e.get("conditions"))      # C278: T_j, T_c or T_amb
         if tj and tj > 100 and (not vgs or (e.get("conditions") or {}).get("V_GS") in (None, vgs)):
-            if best is None or tj > (best.get("conditions") or {}).get("T_j", 0):
+            if best is None or tj > (measurement_temperature(best.get("conditions")) or 0):
                 best = e
     return best
 
@@ -1606,15 +1610,28 @@ def measurement_temperature(conditions: Optional[dict]) -> Optional[float]:
     deliberate approximation and it is the RIGHT one here: reading 150 as 25 is an error of 125
     degrees, and reading an ambient as a junction is an error of a few.
     """
+    v, _k = measurement_temperature_named(conditions)
+    return v
+
+
+def measurement_temperature_named(conditions: Optional[dict]) -> tuple:
+    """`(value, key)` — the temperature AND which one the vendor actually stated.
+
+    C278. Anywhere the number is only compared against a threshold, `measurement_temperature` is
+    enough. Anywhere it is PRINTED, the name has to travel with it: Section 7's Q_rr note used to
+    render "T_j = 150 degC" from whatever it found, and saying T_j when the datasheet said T_amb is
+    a false statement about the measurement — the sort a reviewer cannot catch, because it reads
+    exactly like the true one.
+    """
     c = conditions or {}
     for k in ("T_j", "T_c", "T_amb"):
         v = c.get(k)
         if v is not None:
             try:
-                return float(v)
+                return float(v), k
             except (TypeError, ValueError):
                 continue
-    return None
+    return None, None
 
 
 def _vf_points(profile: dict, hot: bool) -> list[tuple]:
@@ -1737,6 +1754,10 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict,
         dig_vf = None
     if dig_vf:
         put("V_F_vs_IF", [list(dig_vf["x"]), list(dig_vf["y"])], "digitised")
+        # T_j DELIBERATELY, not measurement_temperature() (C278). These conditions are
+        # OURS, not the vendor's: `confirm_figure` writes them from the Curves tab, which
+        # offers a single T_j field. There is no other key to fall back to, and accepting
+        # one would mean this path had started reading something it never writes.
         tj = (dig_vf.get("conditions") or {}).get("T_j")
         if tj:
             put("V_F_tref", float(tj))
@@ -1784,6 +1805,10 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict,
             f"temperature — or neither.")})
     if dig_hot:
         put("V_F_vs_IF_hot", [list(dig_hot["x"]), list(dig_hot["y"])], "digitised")
+        # T_j DELIBERATELY, not measurement_temperature() (C278). These conditions are
+        # OURS, not the vendor's: `confirm_figure` writes them from the Curves tab, which
+        # offers a single T_j field. There is no other key to fall back to, and accepting
+        # one would mean this path had started reading something it never writes.
         tj = (dig_hot.get("conditions") or {}).get("T_j")
         put("V_F_thot", float(tj) if tj else 125.0)
     else:
@@ -1866,10 +1891,12 @@ def _diode_block(profile: dict, device_class: str, design: dict, cls: dict,
     if ent:
         put("E_fr", ent.get("typ") or ent.get("max"))
 
-    irev = [(float((e.get("conditions") or {}).get("T_j")), float(e.get("typ") or e.get("max")),
+    irev = [(float(measurement_temperature(e.get("conditions"))),   # C278
+             float(e.get("typ") or e.get("max")),
              (e.get("conditions") or {}).get("V_R"))
             for e in _entries_of(profile, "I_rev_vs_Tj")
-            if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
+            if measurement_temperature(e.get("conditions")) is not None
+            and (e.get("typ") or e.get("max"))]
     if len(irev) >= 2:
         irev.sort()
         put("I_rev_vs_Tj", [[t for t, _, _ in irev], [v for _, v, _ in irev]])
@@ -1953,6 +1980,10 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict,
 
     if dig_vf:
         put("V_F_vs_IF", [list(dig_vf["x"]), list(dig_vf["y"])], "digitised")
+        # T_j DELIBERATELY, not measurement_temperature() (C278). These conditions are
+        # OURS, not the vendor's: `confirm_figure` writes them from the Curves tab, which
+        # offers a single T_j field. There is no other key to fall back to, and accepting
+        # one would mean this path had started reading something it never writes.
         tj = (dig_vf.get("conditions") or {}).get("T_j")
         if tj:
             put("V_F_tref", float(tj))
@@ -1970,6 +2001,10 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict,
     dig_hot = _digitised(profile, "V_F_vs_IF_hot")
     if dig_hot:
         put("V_F_vs_IF_hot", [list(dig_hot["x"]), list(dig_hot["y"])], "digitised")
+        # T_j DELIBERATELY, not measurement_temperature() (C278). These conditions are
+        # OURS, not the vendor's: `confirm_figure` writes them from the Curves tab, which
+        # offers a single T_j field. There is no other key to fall back to, and accepting
+        # one would mean this path had started reading something it never writes.
         tj = (dig_hot.get("conditions") or {}).get("T_j")
         put("V_F_thot", float(tj) if tj else 125.0)
     else:
@@ -2018,10 +2053,12 @@ def _bridge_block(profile: dict, device_class: str, design: dict, cls: dict,
     #
     # Two points minimum, because a single I_R is a number, not a curve, and leakage roughly
     # decades with temperature — interpolating from one point would invent the slope.
-    irev_br = [(float((e.get("conditions") or {}).get("T_j")), float(e.get("typ") or e.get("max")),
+    irev_br = [(float(measurement_temperature(e.get("conditions"))),   # C278
+                float(e.get("typ") or e.get("max")),
                 (e.get("conditions") or {}).get("V_R"))
                for e in _entries_of(profile, "I_rev_vs_Tj")
-               if (e.get("conditions") or {}).get("T_j") and (e.get("typ") or e.get("max"))]
+               if measurement_temperature(e.get("conditions")) is not None
+               and (e.get("typ") or e.get("max"))]
     if len(irev_br) >= 2:
         irev_br.sort()
         put("I_rev_vs_Tj", [[t for t, _, _ in irev_br], [v for _, v, _ in irev_br]])
@@ -2187,7 +2224,7 @@ def _qrr_tempco(profile: dict) -> Optional[float]:
     """Fit Q_rr's temperature coefficient when the datasheet states it at two temperatures."""
     pts = []
     for e in _entries_of(profile, "Q_rr"):
-        tj = (e.get("conditions") or {}).get("T_j")
+        tj = measurement_temperature(e.get("conditions"))      # C278
         q = e.get("typ") or e.get("max")
         if tj and q:
             pts.append((float(tj), float(q)))
@@ -2232,8 +2269,12 @@ def _diode_checks(profile: dict, design: dict, blk: dict, tech: dict) -> list[di
                 bits.append(f"I_F = {float(c['I_F']):g} A")
             if c.get("diF_dt"):
                 bits.append(f"di/dt = {float(c['diF_dt']):g} A/us")
-            if c.get("T_j"):
-                bits.append(f"T_j = {float(c['T_j']):g} degC")
+            # C278: print the temperature under the name the DATASHEET used. Rendering an
+            # ambient as "T_j" is a false statement about the measurement, and it reads exactly
+            # like a true one.
+            _t, _tk = measurement_temperature_named(c)
+            if _t is not None:
+                bits.append(f"{_tk} = {_t:g} degC")
             how = ("is published at" if basis.get("provenance") == "extracted"
                    else "is referenced to")
             out.append({"key": "Q_rr", "severity": "note", "message": (
@@ -2519,7 +2560,7 @@ def switching_anchor(profile: dict, block: dict, design: dict) -> dict:
     v_test = float(cond.get("V_DS") or 400.0)
     i_test = float(cond.get("I_D") or 0.0)
     rg_test = float(cond.get("R_g") or 0.0)
-    tj_test = float(cond.get("T_j") or 25.0)
+    tj_test = float(measurement_temperature(cond) or 25.0)     # C278
     if not (e_on_ds and e_off_ds and i_test):
         return {"ok": False, "reason": "the published switching energies carry no usable test point"}
 
