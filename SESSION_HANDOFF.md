@@ -1,9 +1,24 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-27**, head = **`ccc10de` C270**, on `master`.
-Suite: **787 passed, 3 skipped** — full run, green, at C270. Frontend `tsc --noEmit`: clean.
+**Start here after a restart.** Last updated **2026-08-29**, head = **`8fd62c2` C271+C272**, on `master`.
+Suite: **802 passed, 3 skipped** — full run, green, measured 19m30s. Frontend `tsc --noEmit`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
+
+0. **C271+C272 landed (`8fd62c2`) — two findings on Magnetics → Wire.** The wire table now shows
+   **one row per wire** with the vendor names under it ("also: Rupalit VS0.1x400, Pack 400x0.1").
+   36 rows → 30. `VS` was never a formatting bug — it is Rupalit's real product code; the defect
+   was that the catalog lists the same physical wire once per vendor and the copies competed for
+   candidate slots. **A named wire is now used or refused, never swapped**: a designation in no
+   catalog gets a 400 naming what is available, instead of silently sizing against the largest
+   wire in the list. A picker-only wire (visible, below the sweep's filter) is still honoured.
+   **Expect two visible changes:** fewer wire rows, and a real error where a stale saved
+   designation used to "work". Needs a hard refresh (Ctrl-F5) like C268.
+   **One thing to tell the designer:** picking a wire too small for the current — `0.05x100`, say —
+   now returns an EMPTY candidate table with no message. 424 cores evaluated, 0 passed, because
+   0.196 mm² cannot carry 10 A. Correct answer, no explanation. That is **PENDING B28**, logged
+   and deliberately not fixed under B27's scope.
+
 
 1. **Animation review.** The designer is walking the eight Design Explorer scenes and will come
    back with findings. Nothing to do until they do.
