@@ -1,7 +1,7 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`642c299` C277**, on `master`.
-Suite: **831 passed, 3 skipped** — full run, green, measured 20m13s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-29**, head = **`db717da` C278**, on `master`.
+Suite: **845 passed, 3 skipped** — full run, green, measured 19m59s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
@@ -542,11 +542,13 @@ starting anything here; do not trust a summary of it, including this one.
    tab, with `TestTheRasterCurvesTabSequence` driving the real endpoints in screen order. The axis
    ranges are typed in by the designer because on those pages the tick labels are pixels; without
    them it refuses, so the old behaviour is still the default.
-   **It surfaced a defect that is NOT fully fixed — see `PENDING_ITEMS.md` B29:** a measurement
-   whose temperature is stated as `Ta` (or `Tc`) was read as 25 °C. Fixed at the two V_F sites,
-   where it had been mixing a 150 °C point into the engine's room-temperature forward-drop curve;
-   **13 further sites in `datasheet_flow.py` still read `T_j` alone** and were left deliberately,
-   because each has its own semantics.
+   **The defect it surfaced is now closed too (B29 / C278):** a measurement whose temperature is
+   stated as `Ta` (or `Tc`) was read as 25 °C, which had been mixing a 150 °C point into the
+   engine's room-temperature forward-drop curve. Six vendor-condition sites go through
+   `measurement_temperature()`; **four digitised-curve sites still read `T_j` on purpose** (those
+   conditions are ours, written from the Curves tab's single field) and say so in a comment. The
+   guard is a COUNT — `grep -c 'get("T_j")' datasheet_flow.py` is 5; if it rises, a new site has
+   joined the family. The `T_c` branch has no real file behind it and is unit-tested only.
 
 **Already closed, do not re-pick** — every one of these was verified against the CODE on 2026-08-22,
 not just against its PENDING header:
