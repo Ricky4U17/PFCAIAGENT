@@ -1,7 +1,7 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`d7c5cc5` C279**, on `master`.
-Suite: **856 passed, 3 skipped** — full run, green, measured 20m37s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-29**, head = **`b7821e6` C280**, on `master`.
+Suite: **857 passed, 3 skipped** — full run, green, measured 20m08s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
@@ -20,6 +20,14 @@ Suite: **856 passed, 3 skipped** — full run, green, measured 20m37s. Frontend 
    report says the limit set the value — a design with a smaller R_CS has more headroom and will
    not clamp. The 47 kΩ override was left alone; it was never a rounding (the nearest option to
    35.846 kΩ is 36 kΩ), and the corrected basis moves the calculation toward it.
+   **Two questions for the designer, logged as `PENDING_ITEMS.md` B30:** should Section 6.6's
+   R_CS selection carry an R_LS-headroom check (five of nine points imply an R_LS outside the
+   12–87 kΩ band at the reference shunt), and is the **median** the right central estimator?
+   AN4165-D assumes a constant inductance because it is written for a linear inductor, so the rule
+   for a powder core is a choice — a current-weighted mean or the inductance at the actual mains
+   are equally arguable. **The explorer now shows the swing** (C280): the magnetics scene reads
+   L on both bases with the crest roll-off, so the 5:1 in-cycle range is visible rather than
+   implied.
 
 
 0. **C271+C272 landed (`8fd62c2`) — two findings on Magnetics → Wire.** The wire table now shows
