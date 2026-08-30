@@ -485,9 +485,19 @@ export const SemiconductorSelection: React.FC<Props> = ({
       const r = await datasheetUpload(kind, file, variant,
                                       deviceClass ?? dsDesign[kind]?.device_class)
       setDsUp(s2 => ({ ...s2, [kind]: r }))
-      setDsPdf(s2 => ({ ...s2, [kind]: file }))       // the Curves tab reads the plots from it
-      if (r.ok) setDsTab(s2 => ({ ...s2, [kind]: 'curves' }))
-      else setErr(r.reason || 'the datasheet could not be read')
+      if (r.ok) {
+        setDsPdf(s2 => ({ ...s2, [kind]: file }))     // the Curves tab reads the plots from it
+        setDsTab(s2 => ({ ...s2, [kind]: 'curves' }))
+      } else {
+        // C282: A REFUSED DATASHEET MUST NOT BECOME THE WORKING PDF. This used to store the file
+        // unconditionally, so a document the backend had just refused was still what the Curves
+        // tab read its plots from — the refusal was on screen while the wrong part was live
+        // underneath it. Clear it, and stay on the upload tab so the correct file can go straight
+        // in: the point of refusing is to ask for the right datasheet, not to dead-end.
+        setDsPdf(s2 => { const n = { ...s2 }; delete n[kind]; return n })
+        setDsTab(s2 => ({ ...s2, [kind]: 'upload' }))
+        setErr(r.reason || 'the datasheet could not be read')
+      }
     } catch (e) { setErr((e as Error).message) }
     finally { setDsBusy(s2 => ({ ...s2, [kind]: false })) }
   }
@@ -972,6 +982,22 @@ export const SemiconductorSelection: React.FC<Props> = ({
               {up.tables_kept} tables ({up.tables_rejected} figure regions rejected)
               {up.stored && !up.stored.changed &&
                 <span style={{ color: C.muted }}> · identical to the copy already on file</span>}
+            </div>)}
+          {/* C282: a datasheet that could NOT be checked against its tab says so. Only a
+              contradiction is refused (the backend returns ok=false and stores nothing); silence
+              is accepted, because a scanned datasheet has no text to search and refusing there
+              would block a real part for want of a phrase. Saying nothing at all would leave the
+              designer unable to tell "checked and correct" from "never checked". */}
+          {up && up.ok && up.identity?.verdict === 'no_evidence' && (
+            <div style={{ marginTop: 10, padding: '8px 11px', borderRadius: 8,
+              border: `1px solid ${C.amber}`, background: 'rgba(245,158,11,.08)',
+              fontSize: 11, color: C.amber, lineHeight: 1.6 }}>
+              ⚠ This datasheet does not name its device type, so it could not be checked against
+              the {kind} slot. Confirm it is the right part before relying on the result.
+            </div>)}
+          {up && up.ok && up.identity?.verdict === 'confirms' && (
+            <div style={{ marginTop: 6, fontSize: 10.5, color: C.muted }}>
+              ✓ the document identifies itself as a {kind}
             </div>)}
           {up && (up.variants?.length ?? 0) > 1 && (
             <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: C.bg3,

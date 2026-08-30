@@ -11862,3 +11862,81 @@ basis).
 VERIFIED full suite 858 passed / 3 skipped (20m11s) = 857 + 1 new; both equations captured from the
 build and checked (eq_box renders to an image, so the strings are inspected, not the PDF text); the
 bench PITFALL read back from the built PDF.
+
+---
+
+# C282 - a datasheet must describe the component the designer said it does (designer finding)
+
+The designer: "in semiconductor loss calculations I accidently uploaded diode datasheet in
+bridgerectifier and engine accepted it and start calculating the value. This is factually
+problematic."
+
+It was. `upload()` took the device class from whichever tab was clicked and compared it against
+nothing - its own comment said so: "the class comes from the tab the designer uploaded under, not
+from a field they fill in".
+
+## Two measurements decided the design, and both are now asserted
+
+THE EXTRACTOR DOES NOT CARE WHAT CLASS IT IS TOLD. The same diode PDF extracted under
+`sic_schottky`, `bridge_rectifier` and `sic_mosfet` returns a BYTE-IDENTICAL set of 12 parameters.
+So the mis-upload did not merely go unchecked - it produced a complete, plausible profile that
+nothing downstream could distinguish from a real one.
+
+A DIODE AND A BRIDGE SHARE ALMOST EVERY PARAMETER: C_j, I2t, I_FSM, I_F_AV, I_rev_vs_Tj, R_th_jc,
+T_stg. That is physically correct, because a bridge rectifier IS four diodes. A fingerprint over
+canonical keys is therefore strong for MOSFET-vs-rest and near-useless for exactly the two kinds
+that were confused. The document's own words have to carry it.
+
+Both are tests now. If either stops being true the gate's premise has changed, and it says so
+rather than resting on something stale.
+
+## Phrases, never bare tokens
+
+`DiodesAmericas@vishay` appears in the contact boilerplate of the Vishay BRIDGE datasheet. Matching
+the word "diode" would classify a bridge as a diode - a keyword check would have been worse than no
+check at all. Every pattern is a device phrase ("schottky diode", "bridge rectifier"), which the
+boilerplate cannot reach, and there is a test on that specific string.
+
+## The first pass scored 5/7 and both misses were MINE
+
+The pattern required "schottky BARRIER diode" while VS-4C16EP07L-M3 says "650 V Gen 4 Power Silicon
+Carbide Schottky Diode, 16 A" - and the designer pointed at that line and at LVE5060E's "Low VF
+Single-Phase Single In-Line Bridge Rectifiers". The evidence was on page 1 of both files all along.
+Recorded in the module docstring because the failure mode here is a pattern that is too narrow, and
+it looks exactly like a datasheet that says nothing. With the phrases corrected: 7 of 7, zero false
+positives.
+
+## Three verdicts, because two would force a refusal on silence
+
+    confirms     - the declared kind is named. Proceed, with a quiet note.
+    no_evidence  - nothing decisive found. Proceed, with an amber warning that it could NOT be
+                   checked. A scanned datasheet has no text layer, and refusing there would block a
+                   real part for want of a phrase - the shape of B27.
+    contradicts  - the declared kind named NOWHERE while another kind is named. Refused.
+
+CONTRADICTION IS DEFINED NARROWLY on purpose. A document naming two kinds - a MOSFET datasheet
+discussing its body diode, a co-packaged MOSFET+SiC part - passes as long as the declared kind is
+among them. Tested against a constructed two-kind document rather than skipped: no vendor file on
+disk exercises it, and the false-refusal path is the one that most needs covering.
+
+## The refusal asks for the right file rather than dead-ending
+
+Designer's instruction: "where wrong datasheets is uploaded, it refuses to accept. But also ask to
+upload correct datasheet." The message names what the document says, what was expected, quotes the
+phrase, and asks for the right file - or points at the tab this one belongs in.
+
+"Nothing has been stored" is ASSERTED, not claimed: the check runs before extraction and before any
+write, and a test walks the parts root after a refusal requiring zero files.
+
+GUI BUG FOUND WHILE WIRING IT: `setDsPdf` stored the uploaded file UNCONDITIONALLY, so a datasheet
+the backend had just refused still became the working PDF the Curves tab read its plots from - the
+refusal on screen with the wrong part live underneath it. The refusal path now clears it and stays
+on the Upload tab so the correct file goes straight in.
+
+## Still open
+
+Parts uploaded BEFORE this gate are unchecked, including the mis-filed one that started this. Worth
+running the classifier over the stored profiles once and reporting mismatches.
+
+VERIFIED full suite 877 passed / 3 skipped (24m09s) = 858 + 19 new; all six upload combinations
+behave (3 refused, 3 accepted); tsc --noEmit and vite build clean.

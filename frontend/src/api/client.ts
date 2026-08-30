@@ -610,6 +610,13 @@ export interface DsPlausibility {
   record: Record<string, number>
 }
 export interface DsUpload {
+  /** C282: what the DOCUMENT says it is, against the tab it was uploaded under.
+   *  `contradicts` is refused by the backend (ok=false) and nothing is stored; `no_evidence`
+   *  means it could not be checked — a scanned datasheet, or unusual wording — and is accepted
+   *  with a note rather than blocked. */
+  identity?: { verdict: 'confirms' | 'no_evidence' | 'contradicts'
+               kinds?: string[]; hits?: Record<string, string[]>; message?: string }
+
   ok: boolean; reason?: string; part_number: string | null; device_class?: string
   plausibility?: DsPlausibility
   rows: DsReviewRow[]

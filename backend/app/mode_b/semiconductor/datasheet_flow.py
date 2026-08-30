@@ -35,6 +35,7 @@ from typing import Any, Optional
 from app.mode_b.semiconductor import datasheet_extract as DX
 from app.mode_b.semiconductor import manifest as M
 from app.mode_b.semiconductor import parts_store as PS
+from app.mode_b.semiconductor import device_identity as DI
 from app.mode_b.semiconductor import registry as R
 
 # Margins on the blocking rating. Design choices with a stated default, not physics — surfaced so
@@ -172,6 +173,22 @@ def upload(pdf_bytes: bytes, kind: str, device_class: str, filename: str = "data
     # Uploaded without one, the banded rows all survive and `variant_required` asks for it, rather
     # than a band being silently chosen: the reference silicon file would otherwise report 0.975 V
     # for a part whose forward drop is 1.700 V.
+    # C282: DOES THIS DOCUMENT DESCRIBE THE COMPONENT THE TAB SAYS IT DOES? Checked BEFORE
+    # extraction and before anything is written, because a refusal that has already stored the
+    # PDF and a draft profile is not a refusal. The designer uploaded a diode datasheet into the
+    # bridge slot and the engine extracted it, stored it and calculated a bridge loss from it -
+    # the whole flow took the device class from whichever tab was clicked and compared it against
+    # nothing.
+    #
+    # Only a CONTRADICTION refuses (the declared kind named nowhere while another kind is named).
+    # Silence does not: a scanned datasheet has no text to search, and refusing there would block
+    # a real part for want of a phrase.
+    identity = DI.check_declared(pdf_bytes, kind)
+    if DI.is_refused(identity):
+        return {"ok": False, "reason": identity["message"], "identity": identity,
+                "triage": {}, "profile": {}, "rows": [], "part_number": None,
+                "variants": [], "variant_required": False}
+
     res = DX.extract(pdf_bytes, device_class, variant=(part_number or None))
     profile = res["profile"]
 
@@ -198,6 +215,7 @@ def upload(pdf_bytes: bytes, kind: str, device_class: str, filename: str = "data
 
     return {
         "ok": True, "part_number": mpn, "device_class": device_class,
+        "identity": identity,
         "profile": profile, "stored": stored, "written": written,
         "triage": res["triage"],
         "rows": review_rows(profile, device_class),
