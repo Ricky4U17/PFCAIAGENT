@@ -11666,3 +11666,94 @@ it is covered by unit tests only. Recorded in B29 rather than left implicit.
 VERIFIED 14 tests pass with no skips; the guard verified to FAIL against injected pre-C277
 behaviour (5 failures including the real-part regression) and datasheet_flow.py restored from
 backup with the injection confirmed gone.
+
+---
+
+# C279 - R_LS emulates an inductance, and it is not the loop's (designer finding, Ch6 p.127)
+
+The designer, on Section 6.8.2: "the calculation shows 35.846 k while the value selected is 47 k.
+First we need to understand which value of inductance to consider."
+
+## What the documents actually say
+
+AND9925-D p.4 is the definitive description and it is more specific than our concept block was. The
+CS resistor sits at the SOURCE of the power switches, so the controller sees inductor current only
+during t_ON; average-current CCM control needs the whole waveform, so the linear-predict (LPT)
+block synthesizes the t_OFF part by discharging a capacitor from the last peak of V_CS. Two slopes
+must agree - the real (V_OUT-V_IN)*R_CS/L and the synthesized (V_FBPFC-V_GC)/(1.5n*R_LS) - and:
+
+    "R_LS is adjusted to make the slope of the synthesized waveform matched with pseudo sensed
+     inductor current waveform ... mimicking behavior of the actual inductance applied in the
+     boost converter."
+
+So R_LS is an EMULATOR COEFFICIENT, not a margin. Its only job is to be accurate. AN4165-D eq. 39
+and AND9925-D eq. 6 are algebraically identical and our implementation matches both.
+
+WORTH RECORDING: AN4165-D's worked example prints R_LS = 23.8 k, but with its own printed inputs
+(100 uH, 15 mOhm, ratio 157.117) the arithmetic gives 28.3 k - and the text then says "28.4 k
+used". The "used" value follows the correct arithmetic, so the printed 23.8 k is a misprint in the
+app note. Do not calibrate against that intermediate.
+
+## The measurement that decided it
+
+Chapter 6 fed R_LS `lphi_uH`, the MINIMUM as-built inductance across the nine operating points. The
+report justified it as the loop's worst case - "lowest inductance gives the highest plant gain and
+therefore the highest crossover". That is correct for the COMPENSATION and a category error for an
+emulator: a worst case is meaningful for a stability margin, and an emulator is either accurate or
+it is not. Feeding it the extreme of the range makes it the worst estimator in the set.
+
+The spread is the whole story, and it was invisible because nothing put it on the page:
+
+    Vac    L cycle-avg    L crest    crest drop
+     90        264.1        109.0      -59 %
+    180        252.4        101.2      -60 %      <- lowest cycle-average
+    230        312.9        146.4      -53 %      <- median, the new basis
+    132        360.7        194.5      -46 %
+
+504 uH at zero bias down to 101 uH at the 180 Vac crest - about 5:1 within ONE line cycle. Five of
+the nine points imply an R_LS outside the 12-87 kOhm limit, so those inductances cannot be emulated
+at all at the selected R_CS. AN4165's "inductance of 100 uH is selected" is exact for a linear
+gapped ferrite and under-determines the answer for a powder core.
+
+A FIRST MEASUREMENT OF THE CREST COLUMN WAS WRONG and is recorded so the mistake is not repeated:
+it passed a hardcoded 'edge_60' to get_k_bias while the sizing sweep had selected a different
+permeability, and read the drop as 37-48 % instead of 46-60 %. Use the core's OWN material key.
+
+## The change
+
+TWO INDUCTANCES, TWO JOBS. `lphi_uH` stays the minimum and still feeds the loop - Section 6.10.14's
+verification DEPENDS on it being the minimum ("at every other point the as-built L is larger, so
+the compensator is verified at all nine points by construction"), so moving that field would have
+silently broken that section's argument. R_LS takes the MEDIAN of the per-point full-load
+inductances. A test asserts the two stay different on purpose.
+
+The 12-87 kOhm band governs the SELECTION: the median implies 88.3 k on the reference design, so it
+clamps to 87 k and the report says the limit set the value, not the calculation. The decision line
+also states what the selected resistor ACTUALLY emulates (308.2 uH against the 312.9 asked for),
+which is the figure that makes a clamp or a designer override self-explaining instead of two
+unreconciled numbers on a page - the C233/C234 shape.
+
+## R_LS had THREE derivations
+
+The Python engine, `ComponentsSelect.tsx`, and `control_design.html`, which is a separate JS engine
+in an iframe (the C243 finding). That is the "same quantity computed in two places" trap with an
+extra copy, and it is exactly how a 35.846 k calculation and a 47 k selection could sit beside each
+other unexplained. The engine is now the single source: Screen 2 shows the emulated inductance and
+its basis, the JS tool is fed `l_ls_uH` rather than deriving from the loop's minimum, and
+`test_rls_one_value.py` asserts the Screen-2 payload matches the engine field for field. The
+React screen's live R_CS rescale is legitimate (R_LS proportional to 1/R_CS) and is checked against
+an actual engine run at the other shunt - a rescale that drifts is the same defect in a new hat.
+
+C_LS follows R_LS, as asked: it is derived from its own resistor and the LS pole, and a test halves
+the emulated inductance and asserts R_LS halves, C_LS rises and the pole stays put.
+
+## Note on the 47 kOhm
+
+Not touched, and not a rounding: the dropdown offers 36 k as the nearest option to 35.846 k, so
+47 k was a designer override worth 1.31x the computed value. With the corrected basis the
+CALCULATION moves toward it rather than away, and whatever is selected now prints the inductance it
+emulates beside it.
+
+VERIFIED full suite 856 passed / 3 skipped (20m37s) = 845 + 11 new; Section 6.8.2 built and read
+back from the PDF; test_report_numbering passes with the new Table 6.8.2; tsc --noEmit and vite
+build clean.

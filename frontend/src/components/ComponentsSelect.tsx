@@ -16,6 +16,10 @@ export interface ComponentSelections {
   c_gc_pf: number; c_rlpk_pf: number; c_ilimit_pf: number
   c_ilimit2_pf: number; c_vir_pf: number; c_ls_pf: number
   r_ls_kohm: number
+  /** C279: the inductance R_LS is sized to emulate — NOT the loop's minimum Lφ. Carried on the
+   *  selection so the embedded design tool can show the same "calc" figure as the report instead
+   *  of deriving its own from the loop's inductance. Engine-supplied; the screen never sets it. */
+  l_ls_uH?: number
 }
 
 const cell: React.CSSProperties = { padding: '5px 10px', fontSize: 12, borderBottom: `1px solid ${C.border}`,
@@ -79,6 +83,7 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
           c_gc_pf: cap('c_gc'), c_rlpk_pf: cap('c_rlpk'), c_ilimit_pf: cap('c_ilimit'),
           c_ilimit2_pf: cap('c_ilimit2'), c_vir_pf: cap('c_vir'), c_ls_pf: cap('c_ls'),
           r_ls_kohm: d.r_ls.default_kohm,
+          l_ls_uH: d.r_ls.l_ls_uH,
         }
         // C269. A REHYDRATED SELECTION THAT IS NOT AN OFFERED OPTION RENDERS AS THE FIRST ONE.
         // `s2sel` is restored from persisted step16_params, and defaults used to apply only when
@@ -100,11 +105,15 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
         // by an upstream change. Inside a decade a deliberate override survives, and the amber
         // "calc" note next to it makes the difference visible.
         const STALE_DECADES = 10
+        // The cast covers the CAP_FIELDS indexing below, which only ever touches the
+        // numeric capacitor fields. `l_ls_uH` is optional (C279) so it must not widen this
+        // to `number | undefined` — it is assigned by name, never through the index.
         const next = { ...prev } as ComponentSelections & Record<string, number>
+        const prevNum = prev as unknown as Record<string, number>
         for (const [field, key] of CAP_FIELDS) {
           const meta = d.selectable.find(x => x.key === key)
           if (!meta) continue
-          const v = prev[field]
+          const v = prevNum[field]
           const offGrid = !Number.isFinite(v) || v <= 0 || !meta.options_pf.includes(v)
           const ratio = meta.default_pf > 0 && v > 0 ? meta.default_pf / v : 1
           const stale = ratio > STALE_DECADES || ratio < 1 / STALE_DECADES
@@ -114,6 +123,12 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
           next.r_ls_kohm = d.r_ls.default_kohm
         if (!Number.isFinite(prev.rcs_mohm) || !d.rcs.options_mohm.includes(prev.rcs_mohm))
           next.rcs_mohm = d.rcs.recommended_mohm
+        // C279: l_ls_uH is ENGINE-SUPPLIED, never a designer choice, so it is overwritten
+        // unconditionally rather than reconciled. A stored copy is a snapshot of whatever the
+        // inductor design was when the selection was saved, and the approved inductor can change
+        // underneath it — the same staleness C269/C270 chased through the capacitors, except here
+        // there is no reason to keep the old value at all.
+        next.l_ls_uH = d.r_ls.l_ls_uH as number
         return next
       })
     }).catch(e => setErr((e as Error).message))
@@ -194,7 +209,9 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
               <tbody>
                 {CAP_FIELDS.map(([field, key]) => {
                   const meta = data.selectable.find(x => x.key === key)!
-                  const cur = s[field]
+                  // `as number`: CAP_FIELDS names only the numeric capacitor fields, but the
+                  // union now includes the optional l_ls_uH (C279), which is never indexed here.
+                  const cur = s[field] as number
                   // C_LS sits across R_LS, so its pole tracks the selected R_LS
                   const rOhm = key === 'c_ls' ? s.r_ls_kohm * 1000 : meta.r_assoc_ohm
                   return (
@@ -224,7 +241,24 @@ export const ComponentsSelect: React.FC<Props> = ({ params, initial, onBack, onC
                       {data.r_ls.options_kohm.map(v => <option key={v} value={v}>{v} kΩ</option>)}
                     </select>
                   </td>
-                  <td style={{ ...cell, color: C.muted }}>calc {rlsCalcK(s.rcs_mohm).toFixed(1)} kΩ (tracks R_CS) · {data.r_ls.role}</td>
+                  <td style={{ ...cell, color: C.muted }}>
+                    calc {rlsCalcK(s.rcs_mohm).toFixed(1)} kΩ (tracks R_CS) · {data.r_ls.role}
+                    {/* C279: R_LS is an EMULATOR coefficient - it stands for an inductance, and
+                        the screen used to show only two resistances with nothing saying which
+                        inductance either one meant. That is how a 35.8 kΩ calculation and a 47 kΩ
+                        selection sat side by side unexplained. The emulated value is derived as a
+                        RATIO of two engine-supplied numbers (L_eff/L_asked = R_sel/R_calc, exact
+                        at any R_CS), so this screen never re-derives the physics itself. */}
+                    {data.r_ls.l_ls_uH ? (
+                      <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.55 }}>
+                        emulates <b>{(data.r_ls.l_ls_uH * (s.r_ls_kohm / (rlsCalcK(s.rcs_mohm) || 1))).toFixed(1)} µH</b>
+                        {' '}· design basis {data.r_ls.l_ls_uH.toFixed(1)} µH
+                        {data.r_ls.l_ls_basis ? ` (${data.r_ls.l_ls_basis})` : ''}
+                        {data.r_ls.clamped && <span style={{ color: C.amber }}>
+                          {' '}· calc outside {data.r_ls.band_kohm?.[0]}–{data.r_ls.band_kohm?.[1]} kΩ, set by the limit</span>}
+                      </div>
+                    ) : null}
+                  </td>
                 </tr>
               </tbody>
             </table>

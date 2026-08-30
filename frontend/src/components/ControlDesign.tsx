@@ -169,6 +169,10 @@ export const ControlDesign: React.FC<Props> = ({
           c_vir_pf:     s2sel?.c_vir_pf,
           c_ls_pf:      s2sel?.c_ls_pf,
           r_ls_kohm:    s2sel?.r_ls_kohm,
+          // C279: the inductance R_LS is sized to emulate. The tool derived its own R_LS
+          // 'calc' from the loop's MINIMUM inductance, so it disagreed with the report the
+          // moment the two bases diverged.
+          l_ls_uH:      s2sel?.l_ls_uH,
           // Step-5 output divider — the tool's r1fb/r4fb are readonly and claim to come from
           // Step 5, but nothing was sending them (C243).
           rfb1_Mohm:    divider ? divider.rfb1_ohm / 1e6 : undefined,

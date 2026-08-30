@@ -1098,7 +1098,13 @@ function renderAux(p){
     bomRowT('aux_RPIN8','R_pin8 (series, LPK)',4.75e3,p.serR,rpin8,'—')+
     bomRowT('aux_CLPK','C_LPK',1e-9,p.serC,clpk,'pole '+fmtHz(1/(2*Math.PI*rpin8*clpk)))+
     bomRowT('aux_CRLPK','C_RLPK',1e-9,p.serC,crlpk,'pole '+fmtHz(1/(2*Math.PI*p.rrlpk*crlpk)));
-  const rlsCalc=p.lphi/(1.5e-9*rcs*ratio), rls=bomGet('aux_RLS',rlsCalc,p.serR);
+  // C279: R_LS emulates an inductance, and it is NOT the loop's. p.lphi is the MINIMUM
+  // as-built inductance - right for the compensator (highest plant gain) and wrong for an
+  // emulator, which wants a central value. Python computes that basis and sends it as
+  // window.L_LS_UH; without it this tool would show a different 'calc' figure from the
+  // report for the same design, which is the three-derivations problem C243 found here.
+  const lLS=(window.L_LS_UH>0? window.L_LS_UH*1e-6 : p.lphi);
+  const rlsCalc=lLS/(1.5e-9*rcs*ratio), rls=bomGet('aux_RLS',rlsCalc,p.serR);
   const rlsOK=rls>=12e3&&rls<=87e3;
   const clsCalc=1/(2*Math.PI*rls*lsFp), cls=bomGet('aux_CLS',clsCalc,p.serC);
   $('auxBomLS').innerHTML=AUXHEAD+
@@ -2573,6 +2579,9 @@ window.setPythonValues = function(p){
   // Step-5 output divider. r1fb / r4fb are readonly here and titled "fixed by Step 5" - but
   // nothing wrote Step 5's values into them, so this tool designed against its own hardcoded
   // 3.63 M / 23.2 k. The divider ratio also sets R_GC, so the error did not stay local (C243).
+  // C279: the LS emulator's design inductance, so this tool's R_LS 'calc' column agrees
+  // with the report instead of deriving its own from the loop's minimum inductance.
+  if(p.l_ls_uH != null){ const v=+p.l_ls_uH; if(v>0) window.L_LS_UH=v; }
   if(p.rfb1_Mohm != null) $('r1fb').value = p.rfb1_Mohm;
   if(p.rfb2_kohm != null){ $('r4fb').value = p.rfb2_kohm; const e2=$('rfb2'); if(e2) e2.value = p.rfb2_kohm; }
   const _sel={aux_CGC:p.c_gc_pf, aux_CRLPK:p.c_rlpk_pf, aux_CIL:p.c_ilimit_pf,

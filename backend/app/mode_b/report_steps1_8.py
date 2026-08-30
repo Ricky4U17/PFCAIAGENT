@@ -657,28 +657,7 @@ def _build_step8(story, data):
     body(story, "Decision: R<sub>GC</sub> = %.1f kΩ (nearest E96; ±5%% requirement). "
                 "C<sub>GC</sub> = %.0f pF → pin-filter pole %.3f kHz."
                 % (s8["r_gc_sel"]/1e3, s8["c_gc"]*1e12, s8["f_gc"]/1e3), C6)
-    sub_h(story, "6.8.2", "R_LS — Current Predict (AN4165-D Eq. 39)", C6)
-    annotation(story, "CONCEPT",
-        "The LS pin sets the emulated inductance the LPT predictor uses to anticipate inductor "
-        "current within a switching cycle. It scales with the real inductance, inversely with "
-        "R<sub>CS</sub>, and with the divider ratio; AN4165-D bounds it to 12–87 kΩ.", C6)
-    body(story,
-        "<b>Which L<sub>&#966;</sub> is used here.</b> The whole of Chapter 6 is designed at the "
-        "<b>minimum as-built full-load inductance</b> across the nine operating points &#8212; "
-        f"L<sub>&#966;</sub> = {p['lphi_uH']:.4g} &#181;H, read from the approved inductor's per-point "
-        "curve (Chapter 4, Table 4.1), not a rounded or nameplate value. The minimum is the worst case "
-        "for the loop: the lowest inductance gives the highest plant gain and therefore the highest "
-        "crossover, so a design that is stable there is stable at every other point. Section 6.10.14 "
-        "verifies that explicitly at all nine points.", C6)
-    eq_box(story, [r"R_{LS}=\dfrac{L_\phi}{1.5\times10^{-9}\,R_{CS}\,\mathrm{ratio}}"
-                   r"=\dfrac{%.4g\,\mu H}{1.5\times10^{-9}\times%g\,\mathrm{m\Omega}\times%.2f}=%.3f\ \mathrm{k\Omega}"
-                   % (p["lphi_uH"], s6["rcs_sel"]*1e3, s8["ratio"], s8["r_ls"]/1e3)], ch=C6)
-    body(story, "Decision: R<sub>LS</sub> = %.1f kΩ (E96) — inside 12–87 kΩ (PASS). C<sub>LS</sub> "
-                "= %.0f pF → pin-filter pole %.3f kHz."
-                % (s8["r_ls_sel"]/1e3, s8["c_ls"]*1e12, s8["f_ls"]/1e3), C6)
-    annotation(story, "PITFALL",
-        "Eq. 39 uses the per-phase inductance and the selected R<sub>CS</sub> — changing the shunt "
-        "in Section 6.6 moves R<sub>LS</sub> proportionally. Update them together.", C6)
+    _build_rls_section(story, s6, s8, p)
     sub_h(story, "6.8.3", "Soft Start — C_SS (AN4165-D Eq. 64)", C6)
     # I_SS / t_SS / V_SS were retyped into the equation, and the SELECTED C_SS ("390 nF") into the
     # decision line - while the engine held it in a LOCAL variable, `css_sel`, that nothing could
@@ -755,6 +734,135 @@ def _build_step8(story, data):
 
 _TITLE = "Control Scheme"
 
+
+
+def _build_rls_section(story, s6: dict, s8: dict, p: dict):
+    """Section 6.8.2 — R_LS, the linear-predict emulator (C279).
+
+    This section used to be four lines: a one-sentence concept, the equation at the minimum
+    as-built inductance, and a decision. It could not explain its own numbers, because the thing
+    that makes R_LS hard is invisible unless the per-point inductance is on the page — a powder
+    core's L moves by more than 2:1 across the operating points and by ~5:1 inside a single line
+    cycle, and the LS pin has to stand for all of it with one resistor.
+    """
+    sub_h(story, "6.8.2", "R_LS — Current Predict (AN4165-D Eq. 39)", C6)
+
+    # ── what the pin does, in the datasheet's own terms ───────────────────────────────────────
+    annotation(story, "CONCEPT",
+        "<b>Why the pin exists.</b> The current-sense resistor sits at the <b>source of the power "
+        "switches</b>, so the controller sees inductor current only while the switch is ON. "
+        "Average-current CCM control needs the whole waveform, so the linear-predict (LPT) block "
+        "synthesises the OFF-time portion by discharging a capacitor from the last peak of "
+        "V<sub>CS</sub>. Two slopes have to agree — the real one the inductor would produce, "
+        "(V<sub>OUT</sub> − V<sub>IN</sub>)·R<sub>CS</sub> / L, and the synthesised one, "
+        "(V<sub>FBPFC</sub> − V<sub>GC</sub>) / (1.5n·R<sub>LS</sub>). AND9925-D states the job of "
+        "this resistor directly: <i>“R<sub>LS</sub> is adjusted to make the slope of the "
+        "synthesised waveform matched with pseudo sensed inductor current waveform … mimicking "
+        "behavior of the actual inductance applied in the boost converter.”</i> "
+        "R<sub>LS</sub> is therefore an <b>emulator coefficient, not a margin</b>: its only job is "
+        "to be accurate. AN4165-D bounds it to 12–87 kΩ.", C6)
+
+    pts = s8.get("ls_points") or []
+
+    # ── the evidence: what "the" inductance actually is ───────────────────────────────────────
+    if pts:
+        body(story,
+            "<b>There is no single inductance to emulate.</b> The approved inductor is a powder "
+            "core, so its permeability rolls off with DC bias and its inductance is a function of "
+            "operating point <i>and</i> of position within the line cycle. AN4165-D's worked "
+            "example says only “inductance of 100 µH is selected”, which is exact for a linear "
+            "(gapped ferrite) inductor and under-determines the answer here. The table below is "
+            "the approved inductor's own curve (Chapter 4, Table 4.1) on both bases: the "
+            "cycle-average value each operating point runs at, and the value at the line crest "
+            "where the bias is deepest.", C6)
+        rows = []
+        for r in pts:
+            mark = "  ←" if r.get("is_basis") else ""
+            rows.append([
+                f"{r['Vin_rms']:.0f}",
+                f"{r['L_avg_uH']:.1f}",
+                f"{r['L_crest_uH']:.1f}",
+                f"{100.0 * (1.0 - r['L_crest_uH'] / r['L_avg_uH']):.0f}%"
+                if r['L_avg_uH'] else "—",
+                f"{r['r_ls_ohm']/1e3:.1f}{mark}",
+                "✓" if r["in_band"] else "outside 12–87 kΩ",
+            ])
+        _n_out = sum(1 for r in pts if not r["in_band"])
+        data_table(story, "6.8.2",
+            "As-Built Inductance and the R_LS It Implies — All Operating Points",
+            "Per-point inductance of the approved inductor on two bases. <b>L<sub>φ</sub> "
+            "(cycle-average)</b> is at half the line-peak current, the basis Equation 39 is "
+            "written on and the one the rest of Chapter 6 uses. <b>L<sub>φ</sub> (crest)</b> is at "
+            "the full line-peak current. The R<sub>LS</sub> column is Equation 39 evaluated at "
+            "that point's cycle-average inductance, with the selected R<sub>CS</sub> = "
+            f"{s6['rcs_sel']*1e3:g} mΩ and divider ratio {s8['ratio']:.2f}. The arrow marks the "
+            "point whose inductance was chosen as the design basis.",
+            ["V<sub>in</sub> (Vac)", "L<sub>φ</sub> cycle-avg (µH)", "L<sub>φ</sub> crest (µH)",
+             "crest drop", "R<sub>LS</sub> (kΩ)", "Within 12–87 kΩ?"],
+            rows, [58, 82, 78, 52, 66, 88], ch=C6)
+        _lo = min(r["L_crest_uH"] for r in pts)
+        _hi = max(r["L_avg_uH"] for r in pts)
+        body(story,
+            f"<b>Read the spread, not the average.</b> Across these points the cycle-average "
+            f"inductance varies {min(r['L_avg_uH'] for r in pts):.0f}–{_hi:.0f} µH, and at the "
+            f"crest it falls as low as {_lo:.0f} µH — so within one line cycle the inductance the "
+            f"LPT block has to track swings from its zero-bias value down to about {_lo:.0f} µH. "
+            f"No single resistor is exact at every instant; the design question is only which "
+            f"inductance it should be exact at."
+            + (f" Note also that {_n_out} of the {len(pts)} points imply an R<sub>LS</sub> outside "
+               f"the 12–87 kΩ limit, so those inductances cannot be emulated at all at the "
+               f"selected R<sub>CS</sub>." if _n_out else ""), C6)
+
+    # ── the rule, and why it is not the loop's inductance ──────────────────────────────────────
+    body(story,
+        "<b>Which inductance this design uses, and why it is not the one the loop uses.</b> The "
+        "current-loop compensation is designed at the <b>minimum</b> as-built inductance "
+        f"(L<sub>φ</sub> = {p['lphi_uH']:.4g} µH): the lowest inductance gives the highest plant "
+        "gain and the highest crossover, so a compensator stable there is stable at every other "
+        "point, and Section 6.10.14 verifies exactly that. <b>That argument does not transfer to "
+        "an emulator.</b> A worst case is meaningful for a stability margin; an emulator is either "
+        "accurate or it is not, and feeding it the extreme of the range makes it the worst "
+        "estimator in the set rather than the safest one. R<sub>LS</sub> is therefore sized at a "
+        f"<b>central</b> value — the {s8.get('l_ls_basis', 'design inductance')} — giving "
+        f"L<sub>LS</sub> = <b>{s8['l_ls_uH']:.4g} µH</b>. Two inductances, two jobs.", C6)
+    annotation(story, "NOTE",
+        "The residual error is not symmetric, and it falls where it does least harm. With a "
+        "central L the emulator over-estimates the inductance near the line crest, where the real "
+        "inductance is lowest — so the synthesised current falls more slowly than the real one and "
+        "the reconstruction reads slightly <i>high</i>, which is the conservative direction for "
+        "the ILIMIT clamp. It under-estimates near the zero crossing, where the current is small "
+        "and the absolute error with it.", C6)
+
+    eq_box(story, [r"R_{LS}=\dfrac{L_{LS}}{1.5\times10^{-9}\,R_{CS}\,\mathrm{ratio}}"
+                   r"=\dfrac{%.4g\,\mu H}{1.5\times10^{-9}\times%g\,\mathrm{m\Omega}\times%.2f}=%.3f\ \mathrm{k\Omega}"
+                   % (s8["l_ls_uH"], s6["rcs_sel"]*1e3, s8["ratio"], s8["r_ls"]/1e3)], ch=C6)
+
+    # ── the decision, and what the selected part actually emulates ─────────────────────────────
+    if s8.get("r_ls_clamped"):
+        _dec = ("Decision: R<sub>LS</sub> = <b>%.1f kΩ</b>. The calculated %.3f kΩ falls "
+                "<b>outside the 12–87 kΩ limit</b>, so the selection is set by the limit, not by "
+                "the calculation." % (s8["r_ls_sel"]/1e3, s8["r_ls"]/1e3))
+    else:
+        _dec = ("Decision: R<sub>LS</sub> = <b>%.1f kΩ</b> (nearest standard value to the %.3f kΩ "
+                "calculated)." % (s8["r_ls_sel"]/1e3, s8["r_ls"]/1e3))
+    if s8.get("r_ls_overridden"):
+        _dec += (" This is a <b>designer selection</b>, not the nearest standard value to the "
+                 "calculation.")
+    # A selected resistor is a statement about an inductance. Saying which one closes the loop
+    # between the equation and the part, and is what makes an override self-explaining.
+    _dec += (" At this resistance the LPT block emulates <b>%.1f µH</b> (Equation 39 inverted), "
+             "against the %.1f µH the design asked for — a %.1f%% difference. C<sub>LS</sub> = "
+             "%.0f pF → pin-filter pole %.3f kHz."
+             % (s8["l_ls_eff_uH"], s8["l_ls_uH"],
+                100.0 * abs(s8["l_ls_eff_uH"] - s8["l_ls_uH"]) / max(s8["l_ls_uH"], 1e-9),
+                s8["c_ls"]*1e12, s8["f_ls"]/1e3))
+    body(story, _dec, C6)
+
+    annotation(story, "PITFALL",
+        "Equation 39 uses the emulated inductance <b>and</b> the selected R<sub>CS</sub>, so "
+        "changing the shunt in Section 6.6 moves R<sub>LS</sub> proportionally — and C<sub>LS</sub> "
+        "with it, because the pin-filter capacitor is derived from its own resistor and pole. "
+        "Update them together; they are one decision, not three.", C6)
 
 def _build_asbuilt_L_section(story, inp: dict, prior: dict):
     """Per-point as-built inductance verification (designer decision 2026-07-17).

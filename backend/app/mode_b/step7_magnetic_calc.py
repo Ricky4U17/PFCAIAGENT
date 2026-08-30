@@ -1275,9 +1275,26 @@ def _build_L_vs_Vin_table(mat_key: str, core_type: str, N: int,
             Lmin = round(L0_min * k_b, 1)
             Lnom = round(L0_nom * k_b, 1)
             Lmax = round(L0_max * k_b, 1)
+            # C279: the SAME roll-off at the LINE CREST, where the bias is the full peak current
+            # rather than half of it. Not a second opinion on L - it is a different point on one
+            # curve, and the two are needed together by anything that emulates the inductor rather
+            # than averaging it (the FAN9672 LS pin, Section 6.8.2). The spread is large and easy
+            # to under-estimate: on the reference design L falls 46-60 % from the half-crest value
+            # to the crest, so the inductance swings about 5:1 over one line cycle (504 uH at zero
+            # bias to 101 uH at the 180 Vac crest). A reader shown only `L_full_nom_uH` sees none
+            # of that, and it is exactly the swing the linear-predict block has to track.
+            # Use the core's OWN material key, never a family default: a first measurement of this
+            # taken against a hardcoded 'edge_60' read the drop as 37-48 % because the sizing sweep
+            # had selected a different permeability.
+            H_Oe_crest = (N * Ipk_line / Le_s) / 79.577
+            k_b_crest  = _db().get_k_bias(mat_key, H_Oe_crest)
+            Lnom_crest = round(L0_nom * k_b_crest, 1)
         else:
             Lmin = Lnom = Lmax = round(L_target_uH, 1)
             k_b  = 1.0
+            # A gapped ferrite is linear over its working range, so crest == half-crest here. The
+            # field is still emitted so consumers never have to ask which core type they have.
+            H_Oe_crest, k_b_crest, Lnom_crest = 0.0, 1.0, Lnom
 
         # per-point required L for the designer's crest ripple ratio r, plus the
         # AS-BUILT ripple with this N's nominal inductance at this point — these
@@ -1306,6 +1323,12 @@ def _build_L_vs_Vin_table(mat_key: str, core_type: str, N: int,
             "H_Oe": round((N * Iavg / Le_s) / 79.577, 1) if core_type == "powder" else 0,
             "k_bias": round(k_b, 4),
             "L_full_min_uH": Lmin, "L_full_nom_uH": Lnom, "L_full_max_uH": Lmax,
+            # C279 — the crest-bias point of the same roll-off curve. `L_full_nom_uH` above is at
+            # HALF the line-peak current (Iavg), which is the cycle-average basis every other
+            # chapter uses; this is at the full peak.
+            "H_Oe_crest": round(H_Oe_crest, 1),
+            "k_bias_crest": round(k_b_crest, 4),
+            "L_crest_nom_uH": Lnom_crest,
             **extra,
         })
     return result

@@ -507,8 +507,17 @@ def control_components(req: _ComponentsReq):
              "r_assoc_ohm": round(s8["r_ls_sel"], 1), "role": "with R_LS", "options_pf": CAP_PF},
         ]
         rls_default = min(RLS_KOHM, key=lambda x: abs(x - s8["r_ls_sel"] / 1e3))  # nearest standard
+        # C279: the LS emulator's basis travels with the value. The GUI showed a bare calc/selected
+        # pair with nothing saying WHICH inductance the calculation used, which is precisely how a
+        # 35.8 kΩ calculation and a 47 kΩ selection could sit beside each other unexplained. Every
+        # field here comes from the engine - the screen derives none of them.
         r_ls = {"default_kohm": rls_default, "calc_kohm": round(s8["r_ls"] / 1e3, 1),
-                "options_kohm": RLS_KOHM, "role": "current-predict; valid 12–87 kΩ"}
+                "options_kohm": RLS_KOHM, "role": "current-predict; valid 12–87 kΩ",
+                "l_ls_uH": round(s8["l_ls_uH"], 1),
+                "l_ls_basis": s8.get("l_ls_basis", ""),
+                "l_ls_eff_uH": round(s8["l_ls_eff_uH"], 1),
+                "clamped": bool(s8.get("r_ls_clamped")),
+                "band_kohm": s8.get("r_ls_band", [12.0, 87.0])}
         # NUMERIC divider values for the embedded design tool. Its r1fb / r4fb fields are
         # readonly and titled "fixed by Step 5, not editable here" - but nothing ever wrote Step
         # 5's values into them, so it designed its voltage loop against its own hardcoded
@@ -3181,6 +3190,21 @@ def doc_generate_report(req: _DocReportReq):
             if _asb_curve and _asb_min_uH:
                 _ci["lphi_uH"] = _asb_min_uH
                 _ci["l_curve"] = _asb_curve
+            # C279: the per-point curve on BOTH bases, for Section 6.8.2's LS-pin table. Carried
+            # as a SEPARATE key rather than widening `l_curve`: that one is [[Vac, L_uH], …] and
+            # is read by the current loop, the voltage loop, the semiconductor adapter and
+            # Section 6.10.14, so changing its shape would touch four consumers to serve one.
+            try:
+                _lc_full = [{"Vin_rms": float(r["Vin_rms"]),
+                             "L_avg_uH": float(r["L_full_nom_uH"]),
+                             "L_crest_uH": float(r.get("L_crest_nom_uH")
+                                                 or r["L_full_nom_uH"]),
+                             "Ipk_line": float(r.get("Ipk_line") or 0.0)}
+                            for r in _lvt_full if r.get("L_full_nom_uH")]
+                if _lc_full:
+                    _ci["l_curve_full"] = _lc_full
+            except Exception:
+                pass
             # Per-phase corner currents (RMS + peak at the 90 V / 180 V band-worst points) from the
             # SAME design-ops engine every chapter uses, so Ch6's R_CS dissipation (§6.5) and the
             # ILIMIT/ILIMIT2 protection thresholds scale with the designer's power instead of the

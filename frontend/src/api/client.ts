@@ -443,7 +443,12 @@ export interface ControlComponents {
   rcs: { min_mohm: number; max_mohm: number; recommended_mohm: number; options_mohm: number[]
          m1_ll_mohm: number; m1_hl_mohm: number; m2_lo_mohm?: number; m2_hi_mohm?: number; note: string }
   selectable: SelComp[]
-  r_ls: { default_kohm: number; calc_kohm: number; options_kohm: number[]; role: string }
+  /** C279: the LS pin emulates an inductance, so its basis travels with the value —
+   *  `l_ls_uH` is what the design asked for, `l_ls_eff_uH` what the engine's selected
+   *  resistor actually emulates, and `clamped` says the 12–87 kΩ limit set the value. */
+  r_ls: { default_kohm: number; calc_kohm: number; options_kohm: number[]; role: string
+          l_ls_uH?: number; l_ls_basis?: string; l_ls_eff_uH?: number
+          clamped?: boolean; band_kohm?: number[] }
   // numeric Step-5 divider, for the embedded tool's readonly r1fb / r4fb fields
   divider?: { rfb1_ohm: number; rfb2_ohm: number; rfb1_unit_ohm: number; rfb1_count: number }
 }

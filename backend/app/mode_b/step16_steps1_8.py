@@ -399,14 +399,76 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     # ── Step 8 — GC / LS / soft-start / current limits (AN4165-D) ───────────────
     rri = out["step4"]["rri_selected"]
     r_gc = 6e6 / ratio
-    l_pfc = p["lphi_uH"] * 1e-6
+
+    # ── R_LS: the EMULATOR's inductance, which is not the loop's (C279) ────────────────────────
+    # AND9925-D is explicit about what this pin does. The CS resistor sits at the switch source,
+    # so the controller only sees inductor current during t_ON; the linear-predict (LPT) block
+    # synthesizes the t_OFF part by discharging a capacitor, and R_LS sets that slope to match the
+    # real one - "mimicking behavior of the actual inductance applied in the boost converter".
+    #
+    # SO THIS IS A FIDELITY PROBLEM, NOT A WORST-CASE ONE. `lphi_uH` is the MINIMUM as-built
+    # inductance across the nine operating points, and it is the right basis for the current-loop
+    # COMPENSATION - lowest L, highest plant gain, highest crossover, so a compensator stable
+    # there is stable everywhere (Section 6.10.14 asserts exactly that, and it depends on the
+    # minimum). An emulator has no conservative direction: it is either accurate or it is not, and
+    # feeding it the extreme of a 1.4:1 range makes it the worst estimator in the set rather than
+    # the safest. R_LS therefore takes a CENTRAL value - the median of the per-point full-load
+    # inductances - while the loop keeps the minimum. Two inductances, two jobs.
+    _lcf = p.get("l_curve_full") or []
+    _l_pts = sorted(float(r["L_avg_uH"]) for r in _lcf if r.get("L_avg_uH")) or \
+        sorted(float(l) for _v, l in (p.get("l_curve") or []) if l)
+    if _l_pts:
+        _mid = len(_l_pts) // 2
+        l_ls_uH = _l_pts[_mid] if len(_l_pts) % 2 else 0.5 * (_l_pts[_mid - 1] + _l_pts[_mid])
+        l_ls_basis = (f"median of {len(_l_pts)} per-point full-load inductances "
+                      f"({_l_pts[0]:.1f}–{_l_pts[-1]:.1f} µH)")
+    else:
+        # No as-built curve (a legacy design, or a requirement-only run). The scalar is all there
+        # is, and it is named as such rather than silently presented as a median.
+        l_ls_uH = float(p["lphi_uH"])
+        l_ls_basis = "design Lφ (no per-point as-built curve available)"
+    l_pfc = l_ls_uH * 1e-6
     r_ls = l_pfc / (1.5e-9 * rcs_sel * ratio)
-    r_gc_sel, r_ls_sel = _nearest_e96(r_gc), _nearest_e96(r_ls)
+    r_gc_sel = _nearest_e96(r_gc)
+
+    # AN4165-D and the FAN9672 datasheet both bound R_LS to 12-87 kOhm. Outside it the pin does
+    # not set a usable slope, so the band is a hard constraint on the SELECTION even when the
+    # physics asks for more - and when it binds, the report says so and states the inductance the
+    # selected resistor actually emulates rather than the one that was asked for.
+    R_LS_MIN, R_LS_MAX = 12e3, 87e3
+    r_ls_sel = min(max(_nearest_e96(r_ls), R_LS_MIN), R_LS_MAX)
+    r_ls_clamped = not (R_LS_MIN <= r_ls <= R_LS_MAX)
+
+    # The per-point evidence Section 6.8.2 tabulates. Built HERE rather than in the report so the
+    # two cannot disagree, and so the GUI can show the same rows - one engine per value.
+    # R_LS is quoted per point on the cycle-average basis, because that is the basis the equation
+    # is written on; the crest column is alongside it to show how far the real inductance moves
+    # inside one line cycle, which is the reason no single resistor is exact.
+    _ls_points = []
+    for _r in _lcf:
+        _lavg = float(_r["L_avg_uH"])
+        _rp = _lavg * 1e-6 / (1.5e-9 * rcs_sel * ratio)
+        _ls_points.append({
+            "Vin_rms": float(_r["Vin_rms"]),
+            "L_avg_uH": _lavg,
+            "L_crest_uH": float(_r.get("L_crest_uH") or _lavg),
+            "r_ls_ohm": _rp,
+            "in_band": bool(R_LS_MIN <= _rp <= R_LS_MAX),
+            "is_basis": abs(_lavg - l_ls_uH) < 1e-6,
+        })
     # Screen 2 offers R_LS as a dropdown (main.py serves `r_ls.options_kohm`), so the
     # designer's pick must win over the E96 snap - it was being discarded, exactly like the
     # four capacitors in C240 and on the same screen (C241).
+    r_ls_overridden = False
     if p.get("r_ls_sel"):
         r_ls_sel = float(p["r_ls_sel"])
+        r_ls_overridden = abs(r_ls_sel - _nearest_e96(r_ls)) > 1.0
+
+    # WHAT THE SELECTED RESISTOR ACTUALLY EMULATES. Inverting Eq. 39 on the value that will be
+    # fitted is the only figure that says what the LPT block will really do, and it is what makes
+    # a designer override self-explaining instead of an unexplained gap between two numbers on the
+    # page (the C233/C234 shape: correct numbers are not an answered question).
+    l_ls_eff_uH = r_ls_sel * 1.5e-9 * rcs_sel * ratio * 1e6
 
     def _pin_cap(override, r_assoc, f_pole):
         """C = 1/(2*pi*R*f_pole), snapped to E24. A designer override wins outright.
@@ -452,6 +514,13 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
         "c_lpk": _nearest_e24(p["c_lpk"]),
         "c_gc": c_gc, "c_ls": c_ls, "f_gc": f_gc, "f_ls": f_ls,
         "r_gc_sel": r_gc_sel, "r_ls_sel": r_ls_sel,
+        # C279 - the LS emulator's own basis, exported so the report, the Screen-2 payload and
+        # the embedded JS tool all read ONE set of numbers instead of three derivations.
+        "l_ls_uH": l_ls_uH, "l_ls_basis": l_ls_basis,
+        "l_ls_eff_uH": l_ls_eff_uH,
+        "r_ls_clamped": r_ls_clamped, "r_ls_overridden": r_ls_overridden,
+        "r_ls_band": [12.0, 87.0],
+        "ls_points": _ls_points,
         "i_ilimit": i_ilimit, "crest_ll": crest_ll, "crest_hl": crest_hl, "crest_cmd": crest_cmd,
         "crest_corner": crest_corner, "vcs_crest": vcs_crest, "r_ilimit": r_ilimit,
         "i_ilimit2": i_ilimit2, "ilpk_ll": ilpk_ll, "ilpk_hl": ilpk_hl, "il_pk": il_pk,
