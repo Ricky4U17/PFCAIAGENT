@@ -1,10 +1,26 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`db717da` C278**, on `master`.
-Suite: **845 passed, 3 skipped** — full run, green, measured 19m59s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-29**, head = **`d7c5cc5` C279**, on `master`.
+Suite: **856 passed, 3 skipped** — full run, green, measured 20m37s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
+
+0. **Section 6.8.2 / R_LS was rebuilt at C279 — expect the number to move.** The designer asked
+   why the report calculated 35.846 kΩ and selected 47 kΩ. The answer was the *inductance*:
+   R_LS was being fed the MINIMUM as-built Lφ, which is the current loop's worst case and a
+   category error for the LS pin — AND9925-D says R_LS is adjusted "mimicking behavior of the
+   actual inductance applied in the boost converter", so it is an **emulator coefficient, not a
+   margin**. It now uses the **median** of the per-point full-load inductances, while `lphi_uH`
+   stays the minimum for the loop (§6.10.14's verification depends on that).
+   **What the designer will see:** a much longer §6.8.2 with a new **Table 6.8.2** (cycle-average
+   L, crest L, crest drop, per-point R_LS, band flag), a decision line stating the inductance the
+   selected resistor actually emulates, and **R_LS and C_LS both moved**. On the reference design
+   the median implies 88.3 kΩ, just outside the 12–87 kΩ limit, so it clamps to 87 kΩ and the
+   report says the limit set the value — a design with a smaller R_CS has more headroom and will
+   not clamp. The 47 kΩ override was left alone; it was never a rounding (the nearest option to
+   35.846 kΩ is 36 kΩ), and the corrected basis moves the calculation toward it.
+
 
 0. **C271+C272 landed (`8fd62c2`) — two findings on Magnetics → Wire.** The wire table now shows
    **one row per wire** with the vendor names under it ("also: Rupalit VS0.1x400, Pack 400x0.1").
