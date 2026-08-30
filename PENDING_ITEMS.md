@@ -1049,7 +1049,7 @@ injected pre-C277 behaviour (5 tests fail, the real-part one among them), then r
 condition that way, so it is covered only by unit tests. Not a gap worth holding the entry open
 for — but if a part ever arrives stating `Tc`, that is the one to check.
 
-### B30. R_LS cannot emulate the design's own inductance at the reference R_CS  `DECISION`
+### B30. R_LS cannot emulate the design's own inductance at the reference R_CS  `DECISION` — *half answered at C281*
 Raised by C279, which rebuilt Section 6.8.2 after the designer asked why the report calculated
 35.846 kΩ and selected 47 kΩ. The basis is fixed — R_LS is an emulator coefficient and now takes
 the **median** per-point full-load inductance rather than the loop's minimum — but two things it
@@ -1063,7 +1063,10 @@ an R_LS outside the band entirely** at the reference shunt. Worth deciding wheth
 (Section 6.6) should carry an R_LS-headroom check, or whether clamping with the value stated is
 enough. Today it clamps and says so.
 
-**2. The central estimator is a choice I made, not one the datasheet states.** AN4165-D assumes a
+**2. ~~The central estimator~~ — ANSWERED at C281: the designer chose the ARITHMETIC MEAN.**
+123.19 µH on the reference design. The report now prints the summation term by term rather than
+naming a statistic, because naming one ("median of 9 … (101.6–139.3 µH)") was read as a midrange,
+(101.6+139.3)/2 = 120.45 — a different number reached from the same words. Original reasoning: AN4165-D assumes a
 constant inductance ("inductance of 100 µH is selected") because it is written for a linear
 inductor; a powder core swings ~5:1 inside one line cycle, so *something* has to stand in for it
 and the app note does not say what. The median of the per-point full-load values is defensible and
@@ -1071,8 +1074,9 @@ deterministic, and the residual error falls where it does least harm — but a c
 or the inductance at the mains the unit will actually run on, are equally arguable. **Confirm the
 rule or name a different one.**
 
-- **Done when:** the designer confirms the median rule (or replaces it), and says whether R_CS
-  selection should be made aware of the R_LS band.
+- **Done when:** ~~the designer confirms the estimator~~ (done at C281 — arithmetic mean) and
+  says whether R_CS selection should be made aware of the R_LS band. **Only the R_CS-headroom
+  half is still open.**
 - **Do not** re-point R_LS at `lphi_uH`. That is the loop's minimum-inductance basis and
   Section 6.10.14's verification depends on it; `tests/test_rls_one_value.py` asserts the two stay
   different on purpose.
