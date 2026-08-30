@@ -11804,3 +11804,61 @@ different on purpose, so a well-meaning "consistency" fix fails there with the r
 
 VERIFIED full suite 857 passed / 3 skipped (20m08s) = 856 + 1 new; tsc --noEmit and vite build
 clean.
+
+---
+
+# C281 - the LS basis is the MEAN, and the report shows the arithmetic (designer decision)
+
+The designer, reviewing the built report: "in table 6.8.2 the inductance range is from 101.6 uH to
+139.3 uH. So median should be 120.45 uH. But it says median is 127.5 uH."
+
+## Nobody was careless, and that is the point
+
+127.5 was the median - the 5th of the 9 sorted values. 120.45 is the MIDRANGE, (101.6+139.3)/2.
+Two different statistics, and the C279 basis line invited the confusion by naming one and printing
+a range beside it:
+
+    "median of 9 per-point full-load inductances (101.6-139.3 uH)"
+
+A named statistic next to a printed range genuinely reads both ways. The fix is not a better
+adjective - it is to SHOW THE ARITHMETIC, so there is nothing left to interpret:
+
+    L_LS = (1/N) * sum(L_phi,i)
+         = (101.6 + 105.2 + 112.0 + 120.8 + 127.5 + 131.0 + 134.4 + 136.9 + 139.3) / 9
+         = 123.2 uH
+
+with a line under it stating the terms are the cycle-average column of Table 6.8.2 in the table's
+own order, and that this is NOT the midrange (120.5 uH), "which is fixed by the two extreme points
+and ignores every point between them". `test_the_basis_is_the_mean_and_not_the_midrange` asserts
+the distinction with that history in its docstring.
+
+## What changed
+
+DESIGNER DECISION: the estimator is the ARITHMETIC MEAN, not the median (this was B30's open
+question). 123.19 uH on this design, so R_LS 34.770 k -> 34.8 k selected.
+
+SWITCHING TO A MEAN BROKE THE TABLE'S ARROW, and the failure was worth having. `is_basis` had
+matched the point whose L EQUALS the basis; a mean generally equals no point, so the marker matched
+nothing and the caption promised something that could not exist. It now marks the NEAREST point and
+says so: "that is where the emulator is most accurate rather than where it is exact." A test
+asserts exactly one point is flagged and that it is the nearest one.
+
+BENCH VERIFICATION added to the PITFALL block, as asked. R_LS is the one component in Chapter 6
+whose correctness cannot be settled from the datasheet alone - it stands in for an inductance that
+is not constant, so a residual error is left at every operating point but one. The note says to
+compare the true inductor current against the reconstructed signal at LOW LINE AND FULL LOAD, where
+the emulated and actual inductances diverge most; that a mismatch shows as crest distortion and an
+ILIMIT threshold off prediction; and which way to move R_LS in each case.
+
+## Confirmed for the designer: 47 kOhm is not hardcoded
+
+Asked directly, checked three ways. The only literal 47 in the R_LS path is one entry in
+`RLS_KOHM`, the dropdown's list of standard resistor values - a menu, not an assignment. With no
+override the engine computes and selects its own value (34.770 k -> 34.8 k). 47 k appears only when
+Screen 2 sends `r_ls_sel = 47000`, a persisted designer selection, which is now flagged
+`r_ls_overridden` and printed together with the inductance it implies (166.5 uH against a 123.2 uH
+basis).
+
+VERIFIED full suite 858 passed / 3 skipped (20m11s) = 857 + 1 new; both equations captured from the
+build and checked (eq_box renders to an image, so the strings are inspected, not the PDF text); the
+bench PITFALL read back from the built PDF.

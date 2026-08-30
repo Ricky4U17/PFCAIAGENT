@@ -418,13 +418,19 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
     _l_pts = sorted(float(r["L_avg_uH"]) for r in _lcf if r.get("L_avg_uH")) or \
         sorted(float(l) for _v, l in (p.get("l_curve") or []) if l)
     if _l_pts:
-        _mid = len(_l_pts) // 2
-        l_ls_uH = _l_pts[_mid] if len(_l_pts) % 2 else 0.5 * (_l_pts[_mid - 1] + _l_pts[_mid])
-        l_ls_basis = (f"median of {len(_l_pts)} per-point full-load inductances "
-                      f"({_l_pts[0]:.1f}–{_l_pts[-1]:.1f} µH)")
+        # THE MEAN OF THE PER-POINT VALUES (designer decision, C281). It was the median at C279;
+        # the designer chose the arithmetic mean, which minimises the average error across the
+        # operating points rather than landing on whichever one happens to sit in the middle.
+        #
+        # NOT THE MIDRANGE. (min+max)/2 is a different number - 120.45 uH against this set's
+        # 123.19 uH - and it is fixed entirely by the two extreme points while ignoring the other
+        # seven. The designer read the C279 basis line as a midrange, which is why the report now
+        # shows the SUMMATION rather than only naming the statistic.
+        l_ls_uH = sum(_l_pts) / len(_l_pts)
+        l_ls_basis = f"arithmetic mean of the {len(_l_pts)} per-point full-load inductances"
     else:
         # No as-built curve (a legacy design, or a requirement-only run). The scalar is all there
-        # is, and it is named as such rather than silently presented as a median.
+        # is, and it is named as such rather than silently presented as a mean.
         l_ls_uH = float(p["lphi_uH"])
         l_ls_basis = "design Lφ (no per-point as-built curve available)"
     l_pfc = l_ls_uH * 1e-6
@@ -454,8 +460,14 @@ def compute_steps_1_8(inp: dict | None = None) -> dict:
             "L_crest_uH": float(_r.get("L_crest_uH") or _lavg),
             "r_ls_ohm": _rp,
             "in_band": bool(R_LS_MIN <= _rp <= R_LS_MAX),
-            "is_basis": abs(_lavg - l_ls_uH) < 1e-6,
+            # C281: the mean generally equals NO operating point, so "is this the basis" has no
+            # answer. What a reader (and a bench engineer) can use is where the emulator is closest
+            # to the truth, so the flag marks the NEAREST point and the caption says so.
+            "is_basis": False,
         })
+    if _ls_points:
+        _near = min(_ls_points, key=lambda r: abs(r["L_avg_uH"] - l_ls_uH))
+        _near["is_basis"] = True
     # Screen 2 offers R_LS as a dropdown (main.py serves `r_ls.options_kohm`), so the
     # designer's pick must win over the E96 snap - it was being discarded, exactly like the
     # four capacitors in C240 and on the same screen (C241).

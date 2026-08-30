@@ -55,16 +55,35 @@ def test_the_emulator_and_the_loop_use_different_inductances_on_purpose(res):
     assert s8["l_ls_uH"] > l_loop, (
         "R_LS is sized at the minimum inductance again. That is the loop's basis (Section 6.10.14 "
         "depends on it); an emulator wants a central value — see C279.")
-    mids = sorted(a for _v, a, _c in CURVE)
-    assert s8["l_ls_uH"] == mids[len(mids) // 2]
+    vals = [a for _v, a, _c in CURVE]
+    assert s8["l_ls_uH"] == pytest.approx(sum(vals) / len(vals), rel=1e-12)
 
 
 def test_the_basis_is_named_in_words(res):
     """The number is useless on the page without the rule that produced it — that is how a 35.8 kΩ
     calculation and a 47 kΩ selection came to sit side by side unexplained."""
     basis = res["step8"]["l_ls_basis"]
-    assert basis and "median" in basis.lower()
-    assert "252" in basis and "360" in basis, f"the basis should state the range it spans: {basis}"
+    assert basis and "mean" in basis.lower()
+
+
+def test_the_basis_is_the_mean_and_not_the_midrange(res):
+    """C281, AND THIS IS WHY THE REPORT PRINTS THE SUMMATION.
+
+    The C279 basis line named a statistic and printed the range beside it — "median of 9 per-point
+    full-load inductances (101.6–139.3 µH)" — and the designer read it as the MIDRANGE,
+    (101.6+139.3)/2 = 120.45. That is a different number reached from the same words, and neither
+    party was careless: a named statistic next to a printed range genuinely reads both ways.
+
+    The two differ whenever the points are not symmetric about the range, which is always here: the
+    low-line and high-line full-load points sit at the bottom and the rest cluster above them.
+    """
+    s8 = res["step8"]
+    vals = [a for _v, a, _c in CURVE]
+    midrange = (min(vals) + max(vals)) / 2.0
+    assert s8["l_ls_uH"] != pytest.approx(midrange, rel=1e-6), (
+        "the basis has become the midrange — it is meant to be the arithmetic mean, and the two "
+        "are only equal on a symmetric set")
+    assert s8["l_ls_uH"] == pytest.approx(sum(vals) / len(vals), rel=1e-12)
 
 
 def test_without_an_as_built_curve_it_falls_back_and_says_so():
@@ -148,7 +167,12 @@ def test_every_operating_point_is_tabulated_with_its_own_R_LS(res):
         assert row["r_ls_ohm"] == pytest.approx(
             a * 1e-6 / (1.5e-9 * s6["rcs_sel"] * s8["ratio"]), rel=1e-9)
         assert row["in_band"] == (12e3 <= row["r_ls_ohm"] <= 87e3)
-    assert sum(1 for r in pts if r["is_basis"]) == 1, "exactly one point is the design basis"
+    # C281: the basis is a MEAN, so it equals no point in general. The flag marks the nearest one
+    # — which is what the table's arrow claims and what a bench engineer can act on.
+    flagged = [r for r in pts if r["is_basis"]]
+    assert len(flagged) == 1, "exactly one point should be flagged as nearest the design basis"
+    near = min(pts, key=lambda r: abs(r["L_avg_uH"] - res["step8"]["l_ls_uH"]))
+    assert flagged[0]["Vin_rms"] == near["Vin_rms"], "the flag is not on the nearest point"
 
 
 def test_the_crest_column_is_below_the_cycle_average_everywhere(res):

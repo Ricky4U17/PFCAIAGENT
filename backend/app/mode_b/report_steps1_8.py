@@ -795,8 +795,10 @@ def _build_rls_section(story, s6: dict, s8: dict, p: dict):
             "written on and the one the rest of Chapter 6 uses. <b>L<sub>φ</sub> (crest)</b> is at "
             "the full line-peak current. The R<sub>LS</sub> column is Equation 39 evaluated at "
             "that point's cycle-average inductance, with the selected R<sub>CS</sub> = "
-            f"{s6['rcs_sel']*1e3:g} mΩ and divider ratio {s8['ratio']:.2f}. The arrow marks the "
-            "point whose inductance was chosen as the design basis.",
+            f"{s6['rcs_sel']*1e3:g} mΩ and divider ratio {s8['ratio']:.2f}. The arrow marks the point "
+            "whose inductance is <b>closest to the design basis</b> — the basis is the mean of "
+            "the column, which in general equals no single point, so that is where the emulator "
+            "is most accurate rather than where it is exact.",
             ["V<sub>in</sub> (Vac)", "L<sub>φ</sub> cycle-avg (µH)", "L<sub>φ</sub> crest (µH)",
              "crest drop", "R<sub>LS</sub> (kΩ)", "Within 12–87 kΩ?"],
             rows, [58, 82, 78, 52, 66, 88], ch=C6)
@@ -833,6 +835,23 @@ def _build_rls_section(story, s6: dict, s8: dict, p: dict):
         "the ILIMIT clamp. It under-estimates near the zero crossing, where the current is small "
         "and the absolute error with it.", C6)
 
+    # THE SUMMATION, NOT JUST THE NAME OF THE STATISTIC. The C279 basis line said only "median of
+    # 9 per-point full-load inductances (101.6-139.3 uH)", and the designer read it as a MIDRANGE -
+    # (101.6+139.3)/2 = 120.45 - a different number reached from the same words. A named statistic
+    # printed beside a range invites exactly that reading. Showing the arithmetic removes the
+    # ambiguity: there is nothing left to interpret.
+    if pts:
+        _vals = [r["L_avg_uH"] for r in pts]
+        _shown = " + ".join("%.1f" % v for v in _vals)
+        eq_box(story, [r"L_{LS}=\dfrac{1}{N}\sum_{i=1}^{N} L_{\phi,i}"
+                       r"=\dfrac{%s}{%d}=%.4g\ \mathrm{\mu H}"
+                       % (_shown, len(_vals), s8["l_ls_uH"])], ch=C6)
+        body(story,
+             "Every term is the <b>cycle-average</b> column of Table 6.8.2, in the table's own "
+             "order. This is the arithmetic mean of the operating points \u2014 <b>not</b> the "
+             "midrange (L<sub>min</sub>+L<sub>max</sub>)/2 = %.4g \u00b5H, which is fixed by the two "
+             "extreme points and ignores every point between them." % ((min(_vals)+max(_vals))/2.0),
+             C6)
     eq_box(story, [r"R_{LS}=\dfrac{L_{LS}}{1.5\times10^{-9}\,R_{CS}\,\mathrm{ratio}}"
                    r"=\dfrac{%.4g\,\mu H}{1.5\times10^{-9}\times%g\,\mathrm{m\Omega}\times%.2f}=%.3f\ \mathrm{k\Omega}"
                    % (s8["l_ls_uH"], s6["rcs_sel"]*1e3, s8["ratio"], s8["r_ls"]/1e3)], ch=C6)
@@ -862,7 +881,18 @@ def _build_rls_section(story, s6: dict, s8: dict, p: dict):
         "Equation 39 uses the emulated inductance <b>and</b> the selected R<sub>CS</sub>, so "
         "changing the shunt in Section 6.6 moves R<sub>LS</sub> proportionally — and C<sub>LS</sub> "
         "with it, because the pin-filter capacitor is derived from its own resistor and pole. "
-        "Update them together; they are one decision, not three.", C6)
+        "Update them together; they are one decision, not three.<br/><br/>"
+        "<b>VERIFY THIS VALUE ON THE BENCH.</b> R<sub>LS</sub> is the one component in "
+        "this chapter whose correctness cannot be settled from the datasheet alone: it "
+        "stands in for an inductance that is not constant, so the calculation above picks "
+        "one representative value and a residual error is left at every other operating "
+        "point. Confirm it on the bench — compare the true inductor current, from a "
+        "current probe, against the reconstructed signal, at <b>low line and full load</b>, "
+        "where the bias is deepest and the emulated and actual inductances diverge most. A "
+        "mismatch shows as current-shaping distortion near the line crest and as an ILIMIT "
+        "threshold that does not sit where this chapter predicts. If the reconstruction "
+        "falls faster than the real current, R<sub>LS</sub> is emulating too little "
+        "inductance and should be raised; if it falls more slowly, lowered.", C6)
 
 def _build_asbuilt_L_section(story, inp: dict, prior: dict):
     """Per-point as-built inductance verification (designer decision 2026-07-17).
