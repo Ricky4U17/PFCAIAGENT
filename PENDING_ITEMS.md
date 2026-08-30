@@ -1081,6 +1081,24 @@ rule or name a different one.**
   Section 6.10.14's verification depends on it; `tests/test_rls_one_value.py` asserts the two stay
   different on purpose.
 
+### B31. Parts uploaded before the device-identity gate were never checked  `CODE`
+C282 added a gate that refuses a datasheet describing a different component from the tab it was
+uploaded under — the designer had filed a diode datasheet under Bridge rectifier and the engine
+extracted, stored and costed it. **The gate protects new uploads only.** Everything already in the
+parts store predates it, including the mis-filed part that produced the finding.
+
+`device_identity.check_declared()` takes the stored PDF and the profile's `device_class`, so the
+audit is a loop over `parts_store`, not new analysis. What needs deciding is what to DO with a hit:
+a stored profile may already be referenced by a confirmed design, so silently deleting it would
+change a design under the designer. Reporting the mismatch and letting them re-upload matches how
+C282's refusal behaves.
+
+- **Done when:** a one-shot audit reports every stored part whose datasheet contradicts its
+  recorded kind, and the GUI marks such a part as needing re-upload rather than quietly using it.
+- **Note** the audit inherits the gate's limits: `no_evidence` is not a mismatch (a scanned
+  datasheet has no text to search), so only true contradictions should be reported or the report
+  will be mostly noise.
+
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.

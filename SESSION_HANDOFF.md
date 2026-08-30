@@ -1,10 +1,21 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`4e366fe` C281**, on `master`.
-Suite: **858 passed, 3 skipped** — full run, green, measured 20m11s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-29**, head = **`bab79ab` C282**, on `master`.
+Suite: **877 passed, 3 skipped** — full run, green, measured 24m09s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
+
+0. **Datasheet uploads are now checked against the tab (C282).** The designer filed a DIODE
+   datasheet under Bridge rectifier and the engine extracted, stored and costed it — `upload()`
+   took the device class from whichever tab was clicked and compared it against nothing. A
+   contradiction (the declared kind named nowhere while another kind is named) is now **refused
+   with nothing stored**, and the message asks for the right file. Silence is NOT refused: a
+   scanned datasheet has no text layer, so it is accepted with an amber "could not be checked"
+   note. 7 of 7 real datasheets identify themselves correctly from page 1.
+   **Still open — `PENDING_ITEMS.md` B31:** parts uploaded BEFORE the gate are unchecked,
+   including the mis-filed one that started this.
+
 
 0. **Section 6.8.2 / R_LS was rebuilt at C279 — expect the number to move.** The designer asked
    why the report calculated 35.846 kΩ and selected 47 kΩ. The answer was the *inductance*:
