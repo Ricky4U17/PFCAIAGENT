@@ -144,6 +144,14 @@ def _points(approved_design: Optional[dict]) -> List[dict]:
             "Iavg_crest_A":   _num(r.get("Iavg_crest")),
             "AT":             _num(r.get("AT")),
             "H_Oe":           _num(r.get("H_Oe")),
+            # C280: the same bias curve at the LINE CREST. `L_full_nom_uH` above is at HALF the
+            # line-peak current, which is the cycle-average basis every chapter uses; this is at
+            # the full peak. Both are needed to see how far the inductance moves INSIDE one line
+            # cycle - on the reference design it falls 46-60 % between them, so a scene drawn from
+            # the cycle-average value alone shows a flat inductor that does not exist.
+            "L_crest_nom_uH": _num(r.get("L_crest_nom_uH")),
+            "H_Oe_crest":     _num(r.get("H_Oe_crest")),
+            "k_bias_crest":   _num(r.get("k_bias_crest")),
             "D_crest":        _num(lr.get("D_crest")),
             "Bac_pk_T":       _num(lr.get("Bac_pk")),
             "Irms_A":         _num(lr.get("Irms")),

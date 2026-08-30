@@ -11757,3 +11757,50 @@ emulates beside it.
 VERIFIED full suite 856 passed / 3 skipped (20m37s) = 845 + 11 new; Section 6.8.2 built and read
 back from the PDF; test_report_numbering passes with the new Table 6.8.2; tsc --noEmit and vite
 build clean.
+
+---
+
+# C280 - the inductance swing reaches the explorer, and B30 records what is still a decision
+
+Two follow-ups to C279, before the animation work.
+
+## The explorer was drawing an inductor that does not exist
+
+`points[]` carried `L_full_nom_uH` only, which is computed at HALF the line-peak current - the
+cycle-average basis every chapter uses. At the crest the bias is twice as deep and the inductance
+is 46-60 % lower on this design, so the magnetics scene showed a nearly flat L and hid the ~5:1
+swing the FAN9672 LS pin has to track. Same defect shape as C255, which is the reason points[]
+exists at all: a consumer reading it must get the bias curve, not a flat nominal.
+
+`L_crest_nom_uH`, `H_Oe_crest` and `k_bias_crest` are added to the projection - and it stays a pure
+PROJECTION, which is design_state.py's first rule: the numbers come from the magnetics engine's
+L_vs_Vin_table (C279), nothing is recomputed here. The scene now shows L on both bases, the crest
+roll-off percentage, and k_bias and H on each; the point picker reads "L 252->101 uH".
+
+THE GUARD IS A RELATIONSHIP, NOT A VALUE. Deeper bias means less inductance, so the test asserts
+L_crest < L_avg, H_crest > H_avg and k_bias_crest < k_bias at every point, plus a floor on the
+roll-off so a genuinely linear core re-points the test instead of silently passing. Written that
+way because the failure worth catching is the two columns being SWAPPED upstream, which would put
+the smaller number where the equation reads the larger one.
+
+## B30 - what C279 settled and what it did not
+
+Logged as DECISION rather than closed, because two things in it are the designer's call:
+
+  1. THE BAND BINDS ON THE REFERENCE DESIGN. The median implies 88.3 k against a 12-87 k limit, so
+     the selection clamps to 87 k and emulates 308.2 uH instead of 312.9 (1.5 %, harmless). But the
+     SHUNT decides that - R_LS ~ L/(R_CS*ratio) - and five of the nine points are outside the band
+     entirely at the reference R_CS. Should Section 6.6's R_CS selection carry an R_LS-headroom
+     check, or is clamping with the value stated enough?
+  2. THE CENTRAL ESTIMATOR IS A CHOICE, NOT A DATASHEET RULE. AN4165-D assumes a constant
+     inductance because it is written for a linear inductor. A powder core swings ~5:1 inside one
+     line cycle, so something has to stand in for it and the app note does not say what. The median
+     is defensible and deterministic; a current-weighted mean, or the inductance at the mains the
+     unit actually runs on, are equally arguable.
+
+The entry also carries a DO NOT: never re-point R_LS at `lphi_uH`. That is the loop's minimum-L
+basis and Section 6.10.14's verification depends on it; test_rls_one_value.py asserts the two stay
+different on purpose, so a well-meaning "consistency" fix fails there with the reason.
+
+VERIFIED full suite 857 passed / 3 skipped (20m08s) = 856 + 1 new; tsc --noEmit and vite build
+clean.

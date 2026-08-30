@@ -1049,6 +1049,34 @@ injected pre-C277 behaviour (5 tests fail, the real-part one among them), then r
 condition that way, so it is covered only by unit tests. Not a gap worth holding the entry open
 for — but if a part ever arrives stating `Tc`, that is the one to check.
 
+### B30. R_LS cannot emulate the design's own inductance at the reference R_CS  `DECISION`
+Raised by C279, which rebuilt Section 6.8.2 after the designer asked why the report calculated
+35.846 kΩ and selected 47 kΩ. The basis is fixed — R_LS is an emulator coefficient and now takes
+the **median** per-point full-load inductance rather than the loop's minimum — but two things it
+exposed are decisions, not calculations.
+
+**1. The band binds on the reference design.** The median implies R_LS = 88.3 kΩ against a
+12–87 kΩ limit, so the selection clamps to 87 kΩ and emulates 308.2 µH instead of the 312.9 µH
+asked for. That is a 1.5 % miss and harmless — but it is the *shunt* that decides it:
+R_LS ∝ L/(R_CS·ratio), so a smaller R_CS buys headroom. **Five of the nine operating points imply
+an R_LS outside the band entirely** at the reference shunt. Worth deciding whether R_CS selection
+(Section 6.6) should carry an R_LS-headroom check, or whether clamping with the value stated is
+enough. Today it clamps and says so.
+
+**2. The central estimator is a choice I made, not one the datasheet states.** AN4165-D assumes a
+constant inductance ("inductance of 100 µH is selected") because it is written for a linear
+inductor; a powder core swings ~5:1 inside one line cycle, so *something* has to stand in for it
+and the app note does not say what. The median of the per-point full-load values is defensible and
+deterministic, and the residual error falls where it does least harm — but a current-weighted mean,
+or the inductance at the mains the unit will actually run on, are equally arguable. **Confirm the
+rule or name a different one.**
+
+- **Done when:** the designer confirms the median rule (or replaces it), and says whether R_CS
+  selection should be made aware of the R_LS band.
+- **Do not** re-point R_LS at `lphi_uH`. That is the loop's minimum-inductance basis and
+  Section 6.10.14's verification depends on it; `tests/test_rls_one_value.py` asserts the two stay
+  different on purpose.
+
 ### C1. Control Design page redesign
 Agreed 7-screen confirm-gated flow for Chapter 6, plus S7 download/approve → semiconductors.
 Plan in `PFC_GUI_Cleanup_Plan.docx`. Discussed and agreed, **not implemented**.

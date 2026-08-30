@@ -346,7 +346,9 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
                   {p.vac_V.toFixed(0)} V<span style={{ color: C.hint }}>AC</span>
                 </div>
                 <div style={{ ...mono, fontSize: 10.5, color: C.hint, marginTop: 2 }}>
-                  L {p.L_full_nom_uH?.toFixed(0) ?? '—'} µH · ΔI {p.dIL_pp_A?.toFixed(1) ?? '—'} A
+                  L {p.L_full_nom_uH?.toFixed(0) ?? '—'}
+                  {p.L_crest_nom_uH ? `→${p.L_crest_nom_uH.toFixed(0)}` : ''} µH
+                  {' '}· ΔI {p.dIL_pp_A?.toFixed(1) ?? '—'} A
                 </div>
               </div>
             )
@@ -508,14 +510,27 @@ export const DesignExplorer: React.FC<DesignExplorerProps> = ({
           <>
             <Num label="V_AC"          value={point.vac_V}          unit="V"  dp={0} />
             <Num label="V_in,pk"       value={point.vin_pk_V}       unit="V"  dp={1} />
-            <Num label="L_φ (as built)" value={point.L_full_nom_uH} unit="µH" dp={1} />
+            {/* C280: BOTH bias points, because one of them alone shows an inductor that does
+                not exist. `L_full_nom_uH` is at HALF the line-peak current (the cycle-average
+                basis every chapter uses); at the crest the bias is twice as deep and the
+                inductance is 46-60 % lower on this design. The swing is the reason the FAN9672
+                LS pin cannot be exact everywhere (Section 6.8.2). */}
+            <Num label="L_φ (cycle-avg)" value={point.L_full_nom_uH} unit="µH" dp={1} />
+            <Num label="L_φ (at crest)"  value={point.L_crest_nom_uH} unit="µH" dp={1} />
+            {point.L_full_nom_uH && point.L_crest_nom_uH ? (
+              <Num label="crest roll-off"
+                   value={100 * (1 - point.L_crest_nom_uH / point.L_full_nom_uH)}
+                   unit="%" dp={0} />
+            ) : null}
             <Num label="L required"    value={point.L_req_uH}       unit="µH" dp={1} />
-            <Num label="k_bias"        value={point.k_bias}         dp={3} />
+            <Num label="k_bias (avg)"  value={point.k_bias}         dp={3} />
+            <Num label="k_bias (crest)" value={point.k_bias_crest}  dp={3} />
             <Num label="ΔI_L,pp"       value={point.dIL_pp_A}       unit="A"  dp={2} />
             <Num label="ΔI_in,pp"      value={point.dIin_pp_A}      unit="A"  dp={2} />
             <Num label="D at crest"    value={point.D_crest}        dp={3} />
             <Num label="I_rms"         value={point.Irms_A}         unit="A"  dp={2} />
-            <Num label="H"             value={point.H_Oe}           unit="Oe" dp={1} />
+            <Num label="H (avg)"       value={point.H_Oe}           unit="Oe" dp={1} />
+            <Num label="H (at crest)"  value={point.H_Oe_crest}     unit="Oe" dp={1} />
             <Num label="B_ac,pk"       value={point.Bac_pk_T}       unit="T"  dp={4} />
             <div style={{ height: 1, background: C.border, margin: '8px 0' }} />
             <Num label="P_core (avg)"  value={point.Pcore_avg_W}    unit="W" />

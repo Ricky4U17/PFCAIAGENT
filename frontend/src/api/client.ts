@@ -306,6 +306,10 @@ export interface DesignStateReq {
 export interface DesignStatePoint {
   vac_V: number; vin_pk_V: number | null
   L_full_nom_uH: number | null; L_req_uH: number | null; k_bias: number | null
+  /** C280: the same bias curve at the LINE CREST. `L_full_nom_uH` is at HALF the line-peak
+   *  current; these are at the full peak, where the inductance is 46-60 % lower on a
+   *  powder core. Both are needed to show the swing inside one line cycle. */
+  L_crest_nom_uH?: number | null; H_Oe_crest?: number | null; k_bias_crest?: number | null
   dIL_pp_A: number | null; dIin_pp_A: number | null; ripple_pct: number | null
   Ipk_line_A: number | null; Iavg_crest_A: number | null
   AT: number | null; H_Oe: number | null; D_crest: number | null; Bac_pk_T: number | null

@@ -144,6 +144,36 @@ def test_points_carry_the_per_point_bias_inductance_not_a_flat_nominal(std_input
     assert max(dis) - min(dis) > 0.1, f"dIL_pp is flat across the sweep: {dis}"
 
 
+def test_points_carry_the_crest_bias_point_as_well_as_the_cycle_average(std_inputs):
+    """C280 — ONE OF THESE ALONE SHOWS AN INDUCTOR THAT DOES NOT EXIST.
+
+    `L_full_nom_uH` is computed at HALF the line-peak current, which is the cycle-average basis
+    every chapter uses. At the crest the bias is twice as deep and the inductance is far lower —
+    46-60 % lower on the reference design — so a scene or a table drawn from the cycle-average
+    value alone shows a flat-ish inductor and hides the swing the FAN9672 LS pin has to track
+    (Section 6.8.2, C279).
+
+    Asserted as a RELATIONSHIP rather than against values: deeper bias means less inductance, so
+    if this ever inverts the two columns have been swapped somewhere upstream.
+    """
+    d = build_design_state(**std_inputs)
+    pts = d["points"]
+    crest = [p.get("L_crest_nom_uH") for p in pts]
+    assert all(v is not None for v in crest), "a point is missing its crest inductance"
+    for p in pts:
+        assert p["L_crest_nom_uH"] < p["L_full_nom_uH"], (
+            f"crest L is not below the cycle-average value at {p['vac_V']} Vac "
+            f"({p['L_crest_nom_uH']} vs {p['L_full_nom_uH']}) — the two bases look swapped")
+        assert p["H_Oe_crest"] > p["H_Oe"], "the crest field should be the deeper bias"
+        assert p["k_bias_crest"] < p["k_bias"], "k_bias must fall as the bias deepens"
+    # and the roll-off has to be large enough to be worth drawing at all
+    worst = max(1 - p["L_crest_nom_uH"] / p["L_full_nom_uH"] for p in pts)
+    assert worst > 0.20, (
+        f"the crest roll-off is only {worst*100:.0f}% — if the approved core has genuinely become "
+        f"this linear, re-point this test; if not, the crest column is being computed at the "
+        f"wrong bias")
+
+
 def test_points_are_sorted_and_keyed_consistently(std_inputs):
     d = build_design_state(**std_inputs)
     vacs = [p["vac_V"] for p in d["points"]]
