@@ -11940,3 +11940,72 @@ running the classifier over the stored profiles once and reporting mismatches.
 
 VERIFIED full suite 877 passed / 3 skipped (24m09s) = 858 + 19 new; all six upload combinations
 behave (3 refused, 3 accepted); tsc --noEmit and vite build clean.
+
+---
+
+# C283 - the missing surge fields could not have been read even after the data arrived (A2 / A3)
+
+The designer: "let's start with A2 and A3, the MOV and GDT data."
+
+Both are DATA gaps - MOV `Vc @ In` missing on 1140/1140, GDT impulse sparkover and follow current
+missing on 172/172 - and the values live in vendor datasheets the parametric export does not carry.
+Investigating them turned up a CODE problem underneath, which is what actually got fixed here.
+
+## Neither field could have been read even after somebody entered it
+
+MOV used `_pick(r, "vc", "imax")`, which requires BOTH substrings in the header. Measured against
+six realistic spellings, five missed - including `Vc @ In (V)`, which is the exact header PENDING
+A2's own "done when" tells you to add:
+
+    miss  Vc @ In (V)              <- what A2 asks for
+    HIT   Vc @ Imax (V)            <- the only spelling that worked
+    miss  Max Clamping Voltage @ In (V)
+    miss  Maximum Clamping Voltage
+    miss  Vc @ In
+    miss  Clamping Voltage Vc @ In (V)
+
+So the workbook edit that was supposed to close A2 would have changed nothing, and Chapter 9 would
+have gone on printing DATA MISSING with nothing to explain why. A field that cannot be read under
+the name its own entry specifies is not a wired field - it is a permanent silent gap.
+
+GDT was worse: `v_impulse_spark` and `follow_current` were HARDCODED to `None`. No column of any
+name could ever have been read.
+
+Both now go through `_num_any()`, which takes several substring rules instead of one. VERIFIED
+AGAINST THE LIVE WORKBOOKS WITH ZERO FALSE POSITIVES - the important direction, because a
+wrongly-matched column would make Criterion A PASS on a wrong number, which is strictly worse than
+the honest DATA MISSING it replaced. "impulse"+"spark" in particular cannot take the GDT workbook's
+existing `Impulse Discharge Current` column, and that collision has its own test.
+
+## The scale of the data job, measured
+
+The two entries read as 1312 separate problems. They are not - every part carries a datasheet URL
+and the parts collapse onto far fewer documents:
+
+    MOV   1140 parts -> 83 datasheets ->  7 cover 50% of reachable parts, 24 cover 80%
+    GDT    172 parts -> 86 datasheets -> 25 cover 50%, 53 cover 80%
+
+Top of the MOV list: YAGEO 14H (108 parts), YAGEO 14D (86), Littelfuse C-III/LT (81), UltraMOV (60).
+
+A2 HAS A CEILING OF 74%. 293 MOV parts - 287 of them YAGEO - carry no datasheet link at all, so
+they can never be filled from a URL no matter how many documents are read. Worth knowing before
+anyone treats "1140/1140" as the target. GDT's ceiling is 97% (5 unlinked).
+
+## A script, not a checked-in list
+
+`backend/surge_datasheet_worklist.py` derives the worklist from the workbooks on every run and
+writes the two CSVs as OUTPUT. This repo has been bitten more than once by a written-down list of
+sites going stale while a count stayed honest (C2 and C3 each grew an entry nobody re-counted), so
+the ranking is computed rather than recorded. It cannot tell you whether a URL still resolves or
+whether the document actually publishes the field - both need the document.
+
+## What was deliberately NOT done
+
+No estimated values. There is a conventional clamping ratio between V_1mA and Vc, and using it
+would make Criterion A PASS on an assumption - strictly worse than DATA MISSING, and against
+everything the datasheet-first arc (C202-C282) established about provenance. The tests assert a
+blank or "-" cell reads as MISSING and not as zero, because a clamping voltage of zero volts would
+pass every margin check ever written.
+
+VERIFIED 18 tests pass; both loaders checked against the live workbooks (0 of 1140 MOV and 0 of 172
+GDT falsely populated, existing fields unchanged); worklist regenerates.

@@ -79,6 +79,28 @@ def _pick(rec, *subs):
     return None
 
 
+def _num_any(rec, *rules):
+    """First numeric value whose header matches any rule. A rule is a tuple of substrings that must
+    ALL appear in the header (case-insensitive), the same contract as `_pick`.
+
+    C283. `_pick(r, "vc", "imax")` required BOTH "vc" and "imax", so it accepted `Vc @ Imax (V)` and
+    missed every other way a person writes that column - including `Vc @ In (V)`, which is the
+    header PENDING A2's own "done when" specifies. Five of six realistic spellings missed. A field
+    that cannot be read under the name the entry tells you to use is not a wired field; it is a
+    silent DATA-MISSING forever, and the workbook edit that was supposed to fix A2 would have
+    changed nothing at all.
+    """
+    for rule in rules:
+        subs = (rule,) if isinstance(rule, str) else rule
+        for k, v in rec.items():
+            kl = str(k).lower()
+            if all(sub.lower() in kl for sub in subs):
+                n = _num(v)
+                if n is not None:
+                    return n
+    return None
+
+
 def ingest():
     out = []
     for r in _rows(_src_path()):
@@ -362,7 +384,12 @@ def ingest_mov(path=None):
             "v1ma_min":      v1ma_min,
             "v1ma_max":      v1ma_max,
             "imax":          _num(r.get("Surge Current A Numeric")) or _num(_pick(r, "imax")),
-            "vc_imax":       _num(_pick(r, "vc", "imax")),   # absent in combined file → None (DATA MISSING)
+            # A2 / C283. The MAX CLAMPING VOLTAGE at the rated impulse current - the field Chapter 9
+            # Criterion A needs, and the one the Digi-Key parametric export does not carry. Absent
+            # -> None -> DATA MISSING, never a silent pass. The rules cover the spellings a person
+            # actually writes: `Vc @ In (V)` (what A2 asks for), `Vc @ Imax`, and the long forms.
+            "vc_imax":       _num_any(r, ("vc", "in"), ("vc", "imax"),
+                                      ("clamp", "volt"), ("clamping",)),
             "energy_2ms_J":  _num(r.get("Energy J Numeric")) or _num(_pick(r, "energy")),
             "capacitance_pf": _num(r.get("Capacitance pF Numeric")),
             "op_temp":       r.get("Operating Temperature"),
@@ -553,8 +580,13 @@ def ingest_gdt(path=None):
             "imax_impulse":   _num(r.get("Impulse Discharge Current A Numeric")) or _num(_pick(r, "impulse", "numer")),
             "poles":          _num(r.get("Number of Poles")),
             "fail_short":     r.get("Fail Short"),
-            "v_impulse_spark": None,        # NOT in export → DATA MISSING (impulse sparkover @ dv/dt)
-            "follow_current":  None,        # NOT in export → DATA MISSING (follow/hold current)
+            # A3 / C283. Both were HARDCODED to None, so adding a column to the workbook would have
+            # changed nothing - the loader never looked. They are read now and still fall back to
+            # None when absent, which is what keeps §9.8.1 and §9.8.3 honest rather than silent.
+            # "impulse"+"spark" cannot collide with the existing `Impulse Discharge Current`
+            # column, and "follow"+"current" cannot either.
+            "v_impulse_spark": _num_any(r, ("impulse", "spark"), ("dynamic", "spark")),
+            "follow_current":  _num_any(r, ("follow", "current"), ("holdover",)),
             "package":        r.get("Package / Case") or _pick(r, "package"),
             "mounting":       r.get("Mounting Type"),
             "datasheet_url":  r.get("Datasheet") or _pick(r, "datasheet"),
