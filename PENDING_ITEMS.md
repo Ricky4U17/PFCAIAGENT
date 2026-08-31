@@ -41,14 +41,43 @@ undercounted its own sites. Results:
 Counts measured on the shipped workbooks under `backend/app/mode_b/inputprotection/data/`.
 
 ### A1. NTC — no datasheet pulse-energy rating  ⭐ highest value
-`ICL_Database.xlsx` (997 parts) has **no Joule / max-switchable-capacitance column at all**. Pulse energy
-is currently *computed from disc diameter* (`database._energy_est_J`, line 48), which is why every NTC
-candidate can only ever reach `CONDITIONAL` — Tier-2 of the selection gate is an estimate, so it is a
-soft gate that never rejects a part.
+`ICL_Database.xlsx` (997 parts) has **no Joule / max-switchable-capacitance column at all**. Pulse
+energy is *computed from disc diameter* (`database._energy_est_J`).
+
+> **CORRECTED AT C284 — this entry's premise was inverted.** It said every candidate "can only ever
+> reach `CONDITIONAL`". Measured against the reference design, **all twelve reach `PASS`** — on the
+> diameter correlation. The soft gate is not refusing to pass parts; it is **passing them on an
+> estimate**, which is the worse problem, because nothing downstream could tell the two apart:
+> `energy_estimated` was **hardcoded `True`** at the one place it was set and **read nowhere**.
+> Left as written, this entry would have sent the next person hunting a gate that rejects parts
+> instead of a flag that cannot distinguish them.
+
+**FIXED AT C284 (provenance, not a new gate).** `resolve_pulse_energy()` returns the value AND its
+source — `datasheet` → `datasheet_capacitance` → `estimated` — `energy_estimated` is derived from
+that, and the candidate's reason line names which basis it passed on. The verdict logic is
+deliberately unchanged: an adequate estimate still yields PASS, because making it stricter would
+drop parts from the designer's list for want of a datasheet column (D0b, B27).
+
+**MAX SWITCHABLE CAPACITANCE IS A REAL RATING, NOT A GAP.** Vendors publish one form or the other
+and `E = ½CV²` converts exactly, so a part publishing only the capacitance was being treated as
+having no data. A capacitance *without* its stated voltage is still not convertible — guessing
+V_ref would manufacture a rating out of half a datasheet, and a test asserts that.
+
+**THE COLUMNS CAN NOW BE READ (C284) — they could not before.** `ingest()` had no lookup for a
+published energy value at all, so entering the data would have changed nothing (the same defect
+C283 found in the MOV and GDT loaders). Headers read: `Pulse energy (J)` / `Joule rating`, or
+`Max switchable C (uF)` + `Switching voltage (V)`.
+
+**THE JOB IS 192 DOCUMENTS, AND A1 HAS THE BEST LEVERAGE OF THE A-BLOCK WITH NO CEILING** — 997
+parts, **zero without a datasheet link** (A2's ceiling is 74%). **9 datasheets cover 50%**, 59 cover
+80%: YAGEO SP (139 parts), YAGEO NT (99), Cantherm MF72 (67), Vishay Ametherm SURGE-GARD (60),
+Semitec D2 (36). Run `backend/surge_datasheet_worklist.py` →
+`specs/Improvements/A1_NTC_datasheet_worklist.csv`.
 
 - **Done when:** the workbook carries a real `Pulse energy (J)` and/or `Max switchable C (µF) @ V_ref`
-  column; `ingest()` reads it; `energy_estimated` becomes `False` for those parts and they can reach a
-  true `PASS`.
+  column; `energy_source` reads `datasheet` for those parts instead of `estimated`. Guarded by
+  `tests/test_ntc_pulse_energy_provenance.py`, which asserts the catalogue is empty TODAY and fails
+  with a note to close this entry when it is not.
 - **Raised by:** `specs/NTC/NTC Improvement.docx` review point 4 ("keep estimated energy only as
   preliminary; final database should require actual datasheet Joule rating").
 - Also partial in the same file: `R_hot` missing on **112/997** (blocks the warm/hot-restart current for

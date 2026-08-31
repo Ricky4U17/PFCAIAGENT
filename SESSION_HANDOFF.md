@@ -1,10 +1,30 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-30**, head = **`fc8f141` C283**, on `master`.
-Suite: **895 passed, 3 skipped** — full run, green, measured 32m38s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-30**, head = **`643e838` C284**, on `master`.
+Suite: **910 passed, 3 skipped** — full run, green, measured 20m23s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
+
+0. **A1 / A2 / A3 are a ranked DOWNLOAD job now, and the code is ready for the answer**
+   (C283 for MOV+GDT, C284 for NTC). All three were recorded as missing datasheet columns; in every
+   case the loader **could not have read the value even after it was entered** — MOV matched a
+   header spelling nobody writes, GDT's two fields were hardcoded `None`, and the NTC had no lookup
+   at all. Fixed and guarded; zero false positives against the live workbooks.
+
+   | item | parts | datasheets | 50% | 80% | ceiling |
+   |---|---|---|---|---|---|
+   | **A1** NTC | 997 | 192 | **9** | 59 | none — every part is linked |
+   | **A2** MOV | 1140 | 83 | **7** | 24 | **74%** (293 parts unlinked) |
+   | **A3** GDT | 172 | 86 | 25 | 53 | 97% |
+
+   Run `backend/surge_datasheet_worklist.py` for the current ranking (derived, so it cannot go
+   stale); it writes the three CSVs into `specs/Improvements/`. **A1's entry text was WRONG and is
+   corrected** — it claimed candidates could only reach CONDITIONAL; they all reach **PASS on a
+   diameter correlation**, and the flag that would have said so was hardcoded and read nowhere.
+   **Nothing was estimated and nothing should be:** a guessed clamp or Joule rating makes a
+   criterion PASS on an assumption. Next step is supplying datasheets, top of the CSV first.
+
 
 0. **A2 / A3 are now a DOWNLOAD job, and the code is ready for the answer (C283).** Both were
    recorded as missing datasheet columns; investigating them found that **neither field could have
