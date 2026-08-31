@@ -59,14 +59,42 @@ soft gate that never rejects a part.
 exist. This is the field Criterion A in Chapter 9 needs, so the clamp check prints `DATA MISSING` and
 fails Criterion A rather than passing silently.
 
-- **Done when:** a `Vc @ In (V)` column exists; §9.3/§9.5 Criterion A computes instead of reporting
-  DATA MISSING.
+**THE COLUMN CAN NOW BE READ (C283) — it could not before.** `ingest_mov` matched on
+`_pick(r, "vc", "imax")`, which needs BOTH substrings, so it accepted `Vc @ Imax (V)` and **missed
+`Vc @ In (V)` — the header this entry tells you to add.** Five of six realistic spellings missed,
+so the workbook edit meant to close A2 would have changed nothing. Any of these is read now:
+`Vc @ In (V)`, `Vc @ Imax (V)`, `Max Clamping Voltage @ In (V)`, `Maximum Clamping Voltage`.
+A blank or `-` stays DATA MISSING — **never enter an estimate**, since a guessed clamp makes
+Criterion A PASS on an assumption.
+
+**THE JOB IS 83 DOCUMENTS, NOT 1140 PARTS.** Run
+`backend/surge_datasheet_worklist.py` for the current ranking (derived from the workbook, so it
+cannot go stale); it writes `specs/Improvements/A2_MOV_datasheet_worklist.csv`.
+**7 datasheets cover 50 % of the reachable parts, 24 cover 80 %** — YAGEO 14H (108 parts),
+YAGEO 14D (86), Littelfuse C-III/LT (81), UltraMOV (60).
+
+**A2 HAS A CEILING OF 74 %.** 293 parts — 287 of them YAGEO — carry **no datasheet link at all**,
+so they can never be filled from a URL. Do not treat 1140/1140 as the target.
+
+- **Done when:** the reachable parts carry a clamping voltage and §9.3/§9.5 Criterion A computes
+  instead of reporting DATA MISSING. Guarded by `tests/test_surge_data_fields_are_readable.py`,
+  which asserts the field is absent TODAY and fails with a note to close this entry when it is not.
 - Minor in the same file: energy-2ms missing 9/1140, capacitance 26/1140, V1mA 2/1140.
 
 ### A3. GDT — impulse sparkover and follow current
 `GDT_Combined_Database.xlsx` (172 parts): **both missing on 172/172** —
 - `impulse sparkover @ dV/dt` → §9.8.1 dynamic-sparkover check cannot run.
 - `follow current` → §9.8.3 follow-current / fail-short coordination cannot close.
+
+**BOTH WERE HARDCODED TO `None` IN `ingest_gdt` — fixed at C283.** No column of any name could
+have been read, so adding data to the workbook would have changed nothing. They are read now under
+`Impulse Sparkover (V)` / `Dynamic Sparkover (V)` and `Follow Current (A)` / `Holdover Current (A)`,
+and the matcher is asserted **not** to take the workbook's existing `Impulse Discharge Current`
+column — which is a current, not a voltage.
+
+**86 documents, poor leverage:** 25 cover 50 % of parts, 53 cover 80 % — roughly one datasheet per
+two parts, but small in absolute terms. Ceiling 97 % (5 parts unlinked). Ranking:
+`backend/surge_datasheet_worklist.py` → `specs/Improvements/A3_GDT_datasheet_worklist.csv`.
 
 ### A4. Fuse — melting I²t holes
 `Fuse_Database.xlsx` (115 parts): melting I²t missing on **25/115**; breaking capacity on 1/115. Those

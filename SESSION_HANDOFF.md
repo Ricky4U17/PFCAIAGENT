@@ -1,10 +1,26 @@
 # PFC AI Design Agent — Session Handoff
 
-**Start here after a restart.** Last updated **2026-08-29**, head = **`bab79ab` C282**, on `master`.
-Suite: **877 passed, 3 skipped** — full run, green, measured 24m09s. Frontend `tsc --noEmit` and
+**Start here after a restart.** Last updated **2026-08-30**, head = **`fc8f141` C283**, on `master`.
+Suite: **895 passed, 3 skipped** — full run, green, measured 32m38s. Frontend `tsc --noEmit` and
 `vite build`: clean.
 
 ## WAITING ON THE DESIGNER — pick these up first
+
+0. **A2 / A3 are now a DOWNLOAD job, and the code is ready for the answer (C283).** Both were
+   recorded as missing datasheet columns; investigating them found that **neither field could have
+   been read even after the data was entered**. MOV matched on `_pick(r, "vc", "imax")` — needing
+   BOTH substrings — so it missed `Vc @ In (V)`, the header A2 itself specifies; GDT's two fields
+   were **hardcoded to `None`**. Both read properly now, verified against the live workbooks with
+   zero false positives.
+   **The job is 83 + 86 documents, not 1312 parts.** `backend/surge_datasheet_worklist.py` ranks
+   them (derived, so it cannot go stale) — **7 MOV datasheets cover 50 % of the reachable parts,
+   24 cover 80 %**: YAGEO 14H (108), YAGEO 14D (86), Littelfuse C-III/LT (81), UltraMOV (60).
+   **A2 has a ceiling of 74 %** — 293 parts, 287 of them YAGEO, carry no datasheet link at all.
+   **Nothing was estimated and nothing should be:** a guessed clamp voltage makes Criterion A PASS
+   on an assumption, and a `-` cell read as zero would pass every margin check ever written.
+   Next step is the designer supplying datasheets (start at the top of the CSV), after which the
+   extractor from the C202–C282 arc can be pointed at them.
+
 
 0. **Datasheet uploads are now checked against the tab (C282).** The designer filed a DIODE
    datasheet under Bridge rectifier and the engine extracted, stored and costed it — `upload()`
