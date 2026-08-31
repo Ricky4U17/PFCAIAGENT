@@ -51,6 +51,37 @@ def _energy_est_J(diameter_mm):
     return round(_ENERGY_K * d * d, 1) if d else None
 
 
+def resolve_pulse_energy(rec):
+    """`(joules, source)` for an NTC's single-pulse energy capability.
+
+    C284 (PENDING A1). Three ways a value can be had, best first:
+
+      * `datasheet`            - a published Joule rating, read from the workbook.
+      * `datasheet_capacitance`- the OTHER form vendors publish, a maximum switchable capacitance
+                                 at a stated voltage. It converts exactly, E = 1/2 C V^2, so a part
+                                 that publishes only this is NOT a data gap and should never have
+                                 been treated as one.
+      * `estimated`            - the diameter correlation `_energy_est_J`. A correlation, not a
+                                 measurement.
+
+    WHY THE SOURCE HAS TO TRAVEL WITH THE NUMBER. `energy_estimated` was hardcoded True at the one
+    place it was set and read NOWHERE, so a candidate that cleared the requirement on a diameter
+    correlation was reported as PASS, indistinguishable from one that cleared it on a published
+    rating. The report labels its own row "est. from diameter", which is honest; the candidate
+    verdict did not, which is not.
+    """
+    e = _num(rec.get("energy_J"))
+    if e:
+        return e, "datasheet"
+    c_uf, v_ref = _num(rec.get("max_switch_uF")), _num(rec.get("max_switch_V"))
+    if c_uf and v_ref:
+        return round(0.5 * (c_uf * 1e-6) * v_ref * v_ref, 1), "datasheet_capacitance"
+    e_est = _num(rec.get("energy_est_J"))
+    if e_est:
+        return e_est, "estimated"
+    return None, None
+
+
 # ── Excel ingest → normalized records ─────────────────────────────────────────
 def _src_path():
     """Prefer the local copy under ./data; fall back to the specs/ workbook."""
@@ -123,7 +154,15 @@ def ingest():
             "approval":       _pick(r, "approv"),
             "datasheet_url":  _pick(r, "datasheet"),
             "url":            _pick(r, "url"),
-            "energy_est_J":   _energy_est_J(d),         # ESTIMATE from diameter
+            "energy_est_J":   _energy_est_J(d),         # ESTIMATE from diameter (correlation)
+            # A1 / C284. The PUBLISHED rating, in either form a vendor gives it. Absent today on
+            # all 997 parts - the export carries no such column - so these stay None and the
+            # estimate is used, flagged as an estimate. `ingest()` could not read them at all
+            # before, so entering the data would have changed nothing.
+            "energy_J":       _num_any(r, ("pulse", "energy"), ("energy", "j"), ("joule",)),
+            "max_switch_uF":  _num_any(r, ("max", "switch", "uf"), ("switchable", "capacit"),
+                                       ("max", "switch", "µf")),
+            "max_switch_V":   _num_any(r, ("switch", "volt"), ("switching", "v")),
         })
     return out
 
@@ -202,7 +241,7 @@ def screen_catalog(s, r, top: int = 12):
         elif r25 < r.r25_nom_required:
             ok = False; reasons.append(f"R25 {r25:g}Ω < {r.r25_nom_required:.2f}Ω nominal (-tol min misses inrush)")
         # Tier-2 SOFT gate: pulse energy is estimated from disc size -> note only, never flips the hard verdict.
-        e_est = rec.get("energy_est_J")
+        e_est, _e_src = resolve_pulse_energy(rec)   # C284: published wins over the estimate
         if e_est is None:
             reasons.append("energy not estimable (no disc diameter) - confirm on datasheet")
         elif e_est < r.e_pulse_required:
@@ -244,7 +283,7 @@ def selected_metrics(s, r, rec):
     i_inrush  = r.vin_pk_max / max(r_total, 1e-9)
     tau       = float(r25) * s.cout
     t_bypass  = s.tau_multiple * tau
-    e_est     = rec.get("energy_est_J")
+    e_est, e_src = resolve_pulse_energy(rec)          # C284
     e_margin  = (float(e_est) / r.e_cap) if (e_est and r.e_cap > 0) else None
     checks = {
         "r25_ok":    float(r25) >= r.r25_required,
@@ -284,7 +323,8 @@ def rank(s, r, top: int = 12):
     scored = []
     for rec in load():
         reasons = []
-        r25 = rec.get("r25"); e_est = rec.get("energy_est_J")
+        r25 = rec.get("r25")
+        e_est, e_src = resolve_pulse_energy(rec)      # C284
         # ---- Tier-1: hard R25 gate (tolerance-aware nominal floor) ----
         if r25 is None:
             tier1_ok = False; reasons.append("no R25 on record")
@@ -301,7 +341,14 @@ def rank(s, r, top: int = 12):
             reasons.append(f"energy ~{e_est:g} J (est.) < {r.e_pulse_required:.0f} J — verify datasheet / larger disc")
         else:
             tier2_ok = True
-            reasons.append(f"energy ~{e_est:g} J (est. from Ø; confirm on datasheet)")
+            # C284: say WHICH it is. A part clearing this on a diameter correlation and one
+            # clearing it on a published rating both read "PASS", and this line was the only
+            # thing separating them - so it names the source instead of always saying "est.".
+            reasons.append(
+                f"energy {e_est:g} J (datasheet)" if e_src == "datasheet" else
+                f"energy {e_est:g} J (from max switchable C, E=½CV²)"
+                if e_src == "datasheet_capacitance" else
+                f"energy ~{e_est:g} J (est. from Ø; confirm on datasheet)")
         imax = rec.get("imax")
         if tier1_ok and imax is not None and imax < r.i_rms_worst:
             reasons.append(f"note: I_max {imax:g}A < I_rms {r.i_rms_worst:.1f}A (OK — bypassed after precharge)")
@@ -309,7 +356,13 @@ def rank(s, r, top: int = 12):
         d = rec.get("diameter_mm") or 1e6
         scored.append(((_RANK[verdict], d, abs((r25 or 1e6) - r.r25_pick)),
                        {**rec, "verdict": verdict, "tier1_ok": tier1_ok, "tier2_ok": tier2_ok,
-                        "ok": verdict == "PASS", "energy_estimated": True, "reasons": reasons,
+                        "ok": verdict == "PASS",
+                        # C284: was HARDCODED True and read NOWHERE, so a part meeting a
+                        # diameter correlation and one meeting a published rating were both
+                        # simply "PASS". This is the difference between them.
+                        "energy_estimated": e_src not in ("datasheet", "datasheet_capacitance"),
+                        "energy_source": e_src, "energy_J_used": e_est,
+                        "reasons": reasons,
                         "energy_margin": (e_est / r.e_pulse_required) if e_est else None}))
     scored.sort(key=lambda x: x[0])
     return [rec for _, rec in scored[:top]]

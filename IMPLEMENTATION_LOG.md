@@ -12009,3 +12009,73 @@ pass every margin check ever written.
 
 VERIFIED 18 tests pass; both loaders checked against the live workbooks (0 of 1140 MOV and 0 of 172
 GDT falsely populated, existing fields unchanged); worklist regenerates.
+
+---
+
+# C284 - an NTC that meets a correlation is not one that meets a rating (PENDING A1)
+
+The designer: "move to next pending item." A1 was flagged as the highest-value entry in the A
+block, so it was next.
+
+## The entry's premise is inverted, and measuring it is what found that
+
+A1 says every NTC candidate "can only ever reach CONDITIONAL - Tier-2 of the selection gate is an
+estimate, so it is a soft gate that never rejects a part". Run against the reference design:
+
+    verdicts        : {'PASS': 12}
+    energy_source   : {'estimated': 12}
+
+All twelve reach PASS, on the diameter correlation. The soft gate is not refusing to pass parts -
+it is passing them on an estimate, which is a different and slightly worse problem, because nothing
+downstream could tell the two apart.
+
+  * `energy_estimated` was HARDCODED `True` at the single place it was set, and read NOWHERE in the
+    codebase. It looked like provenance and carried none.
+  * `ingest()` had no lookup for a published energy column at all - the same defect C283 found in
+    the MOV and GDT loaders, so entering the data would have changed nothing.
+
+The report was already honest about it ("Pulse energy (est. from Ø)", with a `~` prefix). The
+CANDIDATE LIST was not.
+
+## The fix is provenance, not a new gate
+
+`resolve_pulse_energy(rec)` returns `(joules, source)`, preferring in order:
+
+    datasheet              a published Joule rating
+    datasheet_capacitance  a published max switchable capacitance, E = 1/2 C V^2
+    estimated              the diameter correlation
+
+`energy_estimated` is derived from that source; the reason line names it. Three read sites now go
+through the resolver.
+
+MAX SWITCHABLE CAPACITANCE IS A REAL RATING, NOT A GAP. Vendors publish one form or the other and
+the conversion is exact, so a part publishing only the capacitance had a stated capability that was
+being ignored. A test asserts a capacitance WITHOUT its stated voltage is NOT convertible - taking
+a guess at V_ref would manufacture a rating out of half a datasheet.
+
+THE VERDICT LOGIC IS DELIBERATELY UNCHANGED. An adequate estimate still yields PASS, exactly as
+before. Making it stricter would remove parts from the designer's list for want of a datasheet
+column - the failure D0b and PENDING B27 both settled against. What changed is that the record now
+says which basis it passed on.
+
+## The data job
+
+A1 has the best leverage of the three A-items AND no ceiling:
+
+    NTC   997 parts -> 192 datasheets ->  9 cover 50%, 59 cover 80%   0 parts unlinked
+    MOV  1140 parts ->  83 datasheets ->  7 cover 50%, 24 cover 80%   293 unlinked (ceiling 74%)
+    GDT   172 parts ->  86 datasheets -> 25 cover 50%, 53 cover 80%   5 unlinked (ceiling 97%)
+
+Top NTC documents: YAGEO SP (139 parts), YAGEO NT (99), Cantherm MF72 (67), Vishay Ametherm
+SURGE-GARD (60), Semitec D2 (36). `surge_datasheet_worklist.py` covers all three items now.
+
+## One test caught me at the right precision
+
+`resolve_pulse_energy` rounds to 1 dp, matching `_energy_est_J` beside it, and the first draft of
+the capacitance test asserted on the unrounded product - failing on the rounding rather than on the
+physics. Compared at the precision the value is STORED at, which is the same lesson C236 recorded
+for rendered table cells.
+
+VERIFIED 15 new tests pass; 21 existing NTC/input-protection tests unchanged; the resolver verified
+to flip source and flag when a published value is present, and 0 of 997 parts falsely populated
+from the live workbook.

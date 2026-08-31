@@ -1,0 +1,193 @@
+parts_unblocked,manufacturer,series,datasheet_url,example_parts
+139,Yageo,SP,https://yageogroup.com/content/datasheet/asset/file/CPC_NTC_SP,"N10SP002L, N10SP002L-F, N10SP002M, N10SP002M-F"
+99,Yageo,NT,https://yageogroup.com/content/datasheet/asset/file/CPC_NTC_NT,"NTE05-002L, NTE05-002LF, NTE05-002M, NTE05-002MF"
+67,Cantherm,MF72,https://www.cantherm.com/wp-content/uploads/2018/08/MF72_AUG_2018.pdf,"MF72-002.5D11, MF72-002.5D13, MF72-003D11, MF72-003D13"
+60,Vishay Ametherm,SURGE-GARD™,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/536/SURGE-GARD_Series_Web.pdf,"SG110, SG302, SG355, SG420"
+36,Semitec USA Corp,D2,https://www.semitec-global.com/uploads/2022/01/P26-27-Power-thermistor.pdf,"2D2-10LC, 2D2-10LCS, 3D2-22LC, 5D2-05LC"
+35,Amphenol Advanced Sensors (Thermometrics),CL,https://www.amphenol-sensors.com/hubfs/Documents/AAS-920-325D-Thermometrics-NTC-Inrush-031814-web.pdf?option=com_edocman&task=document.download&id=90,"CL-30, CL-30A, CL-30B, CL-150"
+31,TDK,S236,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s236.pdf,"B57236S0229M000, B57236S0229M051, B57236S229M, B57236S0259M000"
+21,TDK,S237,https://www.tdk-electronics.tdk.com/inf/50/db/icl_16/S237.pdf,"B57237S0229M000, B57237S0229M051, B57237S229M54, B57237S0259M000"
+16,Bourns Inc.,BN-LG10Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG10Y.pdf,"BN-LG10Y2R0MYB, BN-LG10Y2R5MYB, BN-LG10Y3R0MYB, BN-LG10Y4R0MYB"
+16,Bourns Inc.,BN-LG13Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG13Y.pdf,"BN-LG13Y2R0MYB, BN-LG13Y2R5MYB, BN-LG13Y3R0MYB, BN-LG13Y4R0MYB"
+16,Bourns Inc.,BN-LG15Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG15Y.pdf,"BN-LG15Y2R0MYB, BN-LG15Y2R5MYB, BN-LG15Y3R0MYB, BN-LG15Y4R0MYB"
+16,Bourns Inc.,BN-LG20Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG20Y.pdf,"BN-LG20Y2R0MYB, BN-LG20Y2R2MYB, BN-LG20Y2R5MYB, BN-LG20Y3R0MYB"
+15,TDK,S234,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/6155/B57234S0yyyM000.pdf,"B57234S0229M000, B57234S0229M051, B57234S0259M000, B57234S0259M051"
+15,TDK,S153,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s153.pdf,"B57153S0479M000, B57153S0479M051, B57153S479M54, B57153S0809M000"
+14,TDK,P11,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/p11.pdf,"B57211P0259M301, B57211P0259M351, B57211P0409M301, B57211P0409M351"
+13,Bourns Inc.,BN-LG25Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG25Y.pdf,"BN-LG25Y2R0MYB, BN-LG25Y2R5MYB, BN-LG25Y3R0MYB, BN-LG25Y4R0MYB"
+13,TDK,P13,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/p13.pdf,"B57213P0259M301, B57213P0259M351, B57213P0309M301, B57213P0309M351"
+13,TDK,S238,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s238.pdf,"B57238S0259M000, B57238S259M51, B57238S0479M000, B57238S0479M051"
+12,Cantherm,MF73T-1,https://www.cantherm.com/wp-content/uploads/2017/05/cantherm_mf73t1.pdf,"MF73T-1 2/18 L3-4.1MM, MF73T-1 5/12, MF73T-1 5/14, MF73T-1 5/17"
+12,TDK,-; S235,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s235.pdf,"B57235S0259M000, B57235S0259M051, B57235S0509M000, B57235S0509M051"
+11,TDK,S364,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s364.pdf,"B57364S0209M000, B57364S0259M000, B57364S0259M051, B57364S0409M051"
+10,Bourns Inc.,BN-LG08Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG08Y.pdf,"BN-LG08Y2R5MYB, BN-LG08Y3R0MYB, BN-LG08Y4R7MYB, BN-LG08Y5R0MYB"
+7,Bourns Inc.,BN-LG05Y,http://www.bourns.com/docs/Product-Datasheets/BN-LG05Y.pdf,"BN-LG05Y3R0MYB, BN-LG05Y4R0MYB, BN-LG05Y5R0MYB, BN-LG05Y7R0MYB"
+5,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL222R515.pdf,"SL222R515, SL222R515A, SL222R515AT, SL222R515B"
+4,TDK,P27,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/p27.pdf,"B57127P0209M301, B57127P509M301, B57127P709M301, B57127P100M301"
+4,TDK,S464,https://product.tdk.com/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s464.pdf,"B57464S0209M000, B57464S0259M000, B57464S0509M000, B57464S0100M000"
+4,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2230005.pdf,"SL2230005, SL2230005A, SL2230005B, SL2230005T"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL102R005.pdf,"SL102R005, SL102R005A, SL102R005B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL222R018.pdf,"SL222R018, SL222R018A, SL222R018B"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL102R505.pdf,"SL102R505, SL102R505A, SL102R505B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL152R507.pdf,"SL152R507, SL152R507A, SL152R507B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL152R509.pdf,"SL152R509, SL152R509A, SL152R509B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL222R508.pdf,"SL222R508, SL222R508A, SL222R508B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL222R510.pdf,"SL222R510, SL222R510A, SL222R510B"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL104R004.pdf,"SL104R004, SL104R004A, SL104R004B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL224R014.pdf,"SL224R014, SL224R014A, SL224R014B"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL105R004.pdf,"SL105R004, SL105R004A, SL105R004B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL125R004.pdf,"SL125R004, SL125R004A, SL125R004B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL125R005.pdf,"SL125R005, SL125R005A, SL125R005B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL155R007.pdf,"SL155R007, SL155R007A, SL155R007B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL155R009.pdf,"SL155R009, SL155R00903A, SL155R00903B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL225R006.pdf,"SL225R006, SL225R006A, SL225R006B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL225R012.pdf,"SL225R012, SL225R012A, SL225R012AT"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL227R010.pdf,"SL227R010, SL227R010A, SL227R010B"
+3,TDK,S153,https://product.tdk.cn/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s153.pdf,"B57153S0809M054, B57153S0160M054, B57153S0200M054"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL128R003.pdf,"SL128R003, SL128R003A, SL128R003B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS2210008.pdf,"MS2210008, MS2210008A, MS2210008B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1210004.pdf,"SL1210004, SL1210004A, SL1210004B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1210005.pdf,"SL1210005, SL1210005A, SL1210005B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1210006.pdf,"SL1210006, SL1210006A, SL1210006B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2210005.pdf,"SL2210005, SL2210005A, SL2210005B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2210007.pdf,"SL2210007, SL2210007A, SL2210007B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2210009.pdf,"SL2210009, SL2210009A, SL2210009B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2214005.pdf,"SL2214005, SL2214005A, SL2214005B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2214007.pdf,"SL2214007, SL2214007A, SL2214007B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS1515004.pdf,"MS1515004, MS1515004A, MS1515004B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1215004.pdf,"SL1215004, SL1215004A, SL1215004B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS2220005.pdf,"MS2220005, MS2220005A, MS2220005B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1220003.pdf,"SL1220003, SL1220003A, SL1220003B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2220005.pdf,"SL2220005, SL2220005A, SL2220005B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2220007.pdf,"SL2220007, SL2220007A, SL2220007B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS1530004.pdf,"MS1530004, MS1530004A, MS1530004B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS2230005.pdf,"MS2230005, MS2230005A, MS2230005B"
+3,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL1830006.pdf,"SL1830006, SL1830006A, SL1830006B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS1540004.pdf,"MS1540004, MS1540004A, MS1540004B"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1040002.pdf,"SL1040002, SL1040002A, SL1040002B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1240002.pdf,"SL1240002, SL1240002A, SL1240002B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1540004.pdf,"SL1540004, SL1540004A, SL1540004B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2240005.pdf,"SL2240005, SL2240005A, SL2240005B"
+3,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS2250004.pdf,"MS2250004, MS2250004A, MS2250004B"
+3,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1050002.pdf,"SL1050002, SL1050002A, SL1050002B"
+3,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1250002.pdf,"SL1250002, SL1250002A, SL1250002B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1560002.pdf,"SL1560002, SL1560002A, SL1560002B"
+3,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1560004.pdf,"SL1560004, SL1560004A, SL1560004B"
+3,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2260003.pdf,"SL2260003, SL2260003A, SL2260003B"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS322R025.pdf,"MS322R025, MS322R025B"
+2,Vishay Ametherm,BigAMP,https://www.ametherm.com/datasheetspdf/SL322R023.pdf,"SL322R023, SL322R023B"
+2,Vishay Ametherm,BigAMP,https://www.ametherm.com/datasheetspdf/SL322R025.pdf,"SL322R025, SL322R025B"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL082R503.pdf,"SL082R503, SL082R503A"
+2,Vishay Ametherm,SL18; SL22,https://www.vishay.com/docs/24503/sl10.pdf,"SL182R508A, SL2216004A"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL054R003.pdf,"SL054R003, SL054R003A"
+2,Vishay Ametherm,BigAMP,https://www.ametherm.com/datasheetspdf/SL324R023.pdf,"SL324R023, SL324R023B"
+2,TDK,-,https://www.tdk-electronics.tdk.com/inf/50/db/icl_16/S235.pdf,"B57235S0479M000, B57235S0100M054"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS325R020.pdf,"MS325R020, MS325R020B"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL055R001.pdf,"SL055R001, SL055R001A"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL085R002.pdf,"SL085R002, SL085R002A"
+2,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL185R006.pdf,"SL185R006, SL185R006B"
+2,Vishay Ametherm,SL18,https://www.vishay.com/docs/24506/sl18.pdf,"SL185R006A, SL1810005A"
+2,Vishay Ametherm,SL22,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/5561/SL22%205R012-B_DS.pdf,"SL225R012B, SL225R012BT"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS327R015.pdf,"MS327R015, MS327R015B"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL0810001.pdf,"SL0810001, SL0810001A"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL0810002.pdf,"SL0810002, SL0810002A"
+2,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1010003.pdf,"SL1010003, SL1010003B"
+2,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1510005.pdf,"SL1510005, SL1510005B"
+2,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL1810005.pdf,"SL1810005, SL1810005B"
+2,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2210008.pdf,"SL2210008, SL2210008A"
+2,Vishay Ametherm,BigAMP,https://www.ametherm.com/datasheetspdf/SL3210015.pdf,"SL3210015, SL3210015JU"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3220008.pdf,"MS3220008, MS3220008B"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3220010.pdf,"MS3220010, MS3220010B"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL0820002.pdf,"SL0820002, SL0820002A"
+2,Vishay Ametherm,SL10,https://www.vishay.com/docs/24507/sl22.pdf,"SL1030002, SL1050001A"
+2,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2230006.pdf,"SL2230006, SL223000617"
+2,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3250006.pdf,"MS3250006, MS3250006B"
+2,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL0850001.pdf,"SL0850001, SL0850001A"
+2,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1050001.pdf,"SL1050001, SL1050001B"
+2,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2250004.pdf,"SL2250004, SL2250004B"
+2,TDK,S234,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2292/B57234S0600Myyy.pdf,"B57234S0600M000, B57234S0600M051"
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS322R025.pdf,AS322R025
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS352R035.pdf,AS352R035
+1,Vishay Ametherm,MegaSurge™,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/730/MS35_2R035_DS_RevB_2015.pdf,MS352R035
+1,TDK,S236,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2512/B57236%2C%20S%20236.pdf,B57236S0259L002
+1,Vishay Ametherm,SL08,https://www.ametherm.com/datasheetspdf/SL082R504.pdf,SL082R504
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL122R505.pdf,SL122R505
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL122R507.pdf,SL122R507
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL152R506.pdf,SL152R506
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL152R508.pdf,SL152R508
+1,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL182R508.pdf,SL182R508B
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS353R030.pdf,AS353R030
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS353R030.pdf,MS353R030
+1,Vishay Ametherm,MegaSurge™,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/1134/MS35_3R725_DS.pdf,MS353R725
+1,Vishay Ametherm,SL05,https://www.ametherm.com/datasheetspdf/SL054R002.pdf,SL054R002
+1,Vishay Ametherm,SL08,https://www.ametherm.com/datasheetspdf/SL084R003.pdf,SL084R003
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL154R008.pdf,SL154R008
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS325R020.pdf,AS325R020
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS355R025.pdf,AS355R025
+1,Vishay Ametherm,MS22,https://www.ametherm.com/datasheetspdf/MS225R015.pdf,MS225R015
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS355R025.pdf,MS355R025
+1,Vishay Ametherm,SURGE-GARD™,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2150/Lead_OG.pdf,SG57
+1,Vishay Ametherm,SL05,https://www.ametherm.com/datasheetspdf/SL055R002.pdf,SL055R002
+1,Vishay Ametherm,SL08,https://www.ametherm.com/datasheetspdf/SL085R003.pdf,SL085R003
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL105R003.pdf,SL105R003
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL125R002.pdf,SL125R002
+1,Vishay Ametherm,SL12,https://www.digikey.com/en/products/detail/vishay-ametherm/SL125R003/28716462,SL125R003
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL155R006.pdf,SL155R006
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL155R008-03.pdf,SL155R00803B
+1,Vishay Ametherm,BigAMP,https://www.ametherm.com/datasheetspdf/SL325R020.pdf,SL325R020
+1,Vishay Ametherm,BigAMP,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/7182/570_SL325R020-B.pdf,SL325R020B
+1,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL087R002.pdf,SL087R002A
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL157R004.pdf,SL157R004
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL157R005.pdf,SL157R005
+1,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL187R005.pdf,SL187R005
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL128R004.pdf,SL128R004
+1,TDK,P13,https://product.tdk.cn/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/p13.pdf,B57213P0100M351
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS3210015.pdf,AS3210015
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS3510018.pdf,AS3510018
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3210015.pdf,MS3210015B
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3510018.pdf,MS3510018
+1,Vishay Ametherm,miniAMP,https://www.ametherm.com/datasheetspdf/SL0310001.pdf,SL0310001
+1,Vishay Ametherm,SL05,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/7181/570_SL05%2010001.pdf,SL0510001
+1,Vishay Ametherm,SL05,https://www.ametherm.com/datasheetspdf/SL0510003.pdf,SL0510003
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1010002.pdf,SL1010002
+1,Vishay Ametherm,SL10,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2229/SL10_10002_Rev_Nov2004.pdf,SL1010002B
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheets/sl1010003.html,SL1010003BT
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1010004.pdf,SL1010004
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1210006-03.pdf,SL121000603
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1510006.pdf,SL1510006
+1,Vishay Ametherm,SL22,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/5561/SL22%2010008-B_DS.pdf,SL2210008B
+1,Vishay Ametherm,BigAMP,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/5335/SL32_10015-B_Rev1_4-15-18.pdf,SL3210015B
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1212004.pdf,SL1212004
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1512004.pdf,SL1512004B
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3215012.pdf,MS3215012
+1,Vishay Ametherm,MegaSurge™,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/4166/MS32_15012-B_Rev1_5-24-22.pdf,MS3215012B
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1015002.pdf,SL1015002
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1015003.pdf,SL1015003
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1215003.pdf,SL1215003
+1,TDK,S238,https://product.tdk.cn/system/files/dam/doc/product/protection/current/ntc-limiter/data_sheet/50/db/icl_16/s238.pdf,B57238S0160M051
+1,Vishay Ametherm,SL08,https://www.ametherm.com/datasheetspdf/SL0816002.pdf,SL0816002
+1,Vishay Ametherm,SL12,https://www.ametherm.com/datasheetspdf/SL1216003.pdf,SL1216003
+1,Vishay Ametherm,SL12,https://www.digikey.com/en/products/detail/vishay-ametherm/SL1216003A/28716465,SL1216003A
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1516004.pdf,SL1516004
+1,Vishay Ametherm,SL18,https://www.ametherm.com/datasheetspdf/SL1816004.pdf,SL1816004
+1,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2216004.pdf,SL2216004
+1,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2216004-B.pdf,SL2216004B
+1,Vishay Ametherm,SL22,https://www.ametherm.com/datasheets/sl2216005,SL2216005
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS3220010.pdf,AS3220010
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS3520010.pdf,AS3520010
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheetspdf/MS3520010.pdf,MS3520010
+1,Vishay Ametherm,SL03,https://www.ametherm.com/datasheetspdf/SL0320001.pdf,SL0320001
+1,Vishay Ametherm,SL10,https://www.ametherm.com/datasheetspdf/SL1020002.pdf,SL1020002
+1,Vishay Ametherm,SL22,https://www.ametherm.com/datasheetspdf/SL2220006.pdf,SL2220006
+1,Amphenol Advanced Sensors (Thermometrics),-,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/7607/PdfFile_112011.pdf,CL-210B
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1530004.pdf,SL1530004
+1,TDK,S234,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2240/B57234S0400M000.pdf,B57234S0400M000
+1,TDK,S464,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2551/B57464S0400M000.pdf,B57464S0400M000
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/5752/AS35%2040010.pdf,AS3540010
+1,Vishay Ametherm,SL08,https://www.ametherm.com/datasheetspdf/SL0840002.pdf,SL0840002
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1540002.pdf,SL1540002
+1,Vishay Ametherm,AS,//mm.digikey.com/Volume0/opasdata/d220001/medias/docus/371/AS3250006.pdf,AS3250006
+1,Vishay Ametherm,MegaSurge™,https://www.ametherm.com/datasheets/ms3250006l,MS3250006L
+1,Vishay Ametherm,SL03,https://www.ametherm.com/datasheetspdf/SL0350001.pdf,SL0350001
+1,Vishay Ametherm,SL15,https://www.ametherm.com/datasheetspdf/SL1550003.pdf,SL1550003
+1,Vishay Ametherm,SL05,https://www.ametherm.com/datasheetspdf/SL0560001.pdf,SL0560001

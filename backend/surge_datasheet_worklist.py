@@ -1,4 +1,4 @@
-"""Which datasheets would close PENDING A2 and A3, in the order worth reading them.
+"""Which datasheets would close PENDING A1, A2 and A3, in the order worth reading them.
 
     cd backend && PYTHONUTF8=1 venv/Scripts/python.exe surge_datasheet_worklist.py
 
@@ -45,7 +45,7 @@ def _worklist(rows: list[dict], missing_fields: list[str]) -> tuple[list[dict], 
     by_url: dict[str, list[dict]] = collections.defaultdict(list)
     unlinked: list[dict] = []
     for r in rows:
-        u = _clean(r.get("datasheet_url"))
+        u = _clean(r.get("datasheet_url")) or _clean(r.get("url"))
         (by_url[u] if u else unlinked).append(r)
 
     work = []
@@ -99,6 +99,9 @@ def _report(name: str, rows: list[dict], fields: list[str]) -> list[dict]:
 def main() -> int:
     os.makedirs(OUT_DIR, exist_ok=True)
     jobs = [
+        # A1 has the best leverage of the three AND no ceiling: every part carries a link.
+        ("NTC  (PENDING A1 — pulse energy / max switchable C)", DB.ingest(),
+         ["energy_J", "max_switch_uF"], "A1_NTC_datasheet_worklist.csv"),
         ("MOV  (PENDING A2 — Vc @ In)", DB.ingest_mov(), ["vc_imax"], "A2_MOV_datasheet_worklist.csv"),
         ("GDT  (PENDING A3 — impulse sparkover, follow current)", DB.ingest_gdt(),
          ["v_impulse_spark", "follow_current"], "A3_GDT_datasheet_worklist.csv"),
@@ -113,11 +116,13 @@ def main() -> int:
             w.writeheader()
             w.writerows(work)
         print(f"    written: {os.path.normpath(path)}")
-    print("\nThe fields land in the workbooks as new columns. Any of these headers is read "
-          "(C283):\n"
-          "    MOV : 'Vc @ In (V)'            GDT : 'Impulse Sparkover (V)'\n"
-          "                                         'Follow Current (A)'\n"
-          "A blank or '-' stays DATA MISSING, which is correct - never enter a guessed value.")
+    print("\nThe fields land in the workbooks as new columns. Any of these headers is read:\n"
+          "    NTC : 'Pulse energy (J)'  or  'Max switchable C (uF)' + 'Switching voltage (V)'\n"
+          "    MOV : 'Vc @ In (V)'\n"
+          "    GDT : 'Impulse Sparkover (V)'  and  'Follow Current (A)'\n"
+          "A blank or '-' stays DATA MISSING, which is correct - never enter a guessed value.\n"
+          "For the NTC either form is a REAL rating: max switchable capacitance converts exactly,\n"
+          "E = 1/2 C V^2, so a part publishing only that is not a gap (C284).")
     return 0
 
 
